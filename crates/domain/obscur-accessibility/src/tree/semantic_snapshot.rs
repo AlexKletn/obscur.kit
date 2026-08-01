@@ -1,4 +1,4 @@
-//! An immutable, versioned snapshot of the semantic tree for adapters (§7.1).
+#![doc = include_str!("semantic_snapshot.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
@@ -8,42 +8,21 @@ use crate::semantic::SemanticNode;
 
 use super::SemanticTree;
 
-/// An immutable, versioned snapshot of a [`SemanticTree`] (spec §7.1).
-///
-/// Platform adapters consume **snapshots**, not the live tree: a snapshot
-/// clones the semantic nodes into an owned map, copies the tree's parent→child
-/// links, captures the [`root`](Self::root), and stamps the tree's
-/// [`version`](Self::version) at the moment of capture. It is immutable after
-/// construction — it exposes only read accessors and no mutators.
-///
-/// Because the live tree advances its version on every mutation, a retained
-/// snapshot can be checked with [`is_stale_against`](Self::is_stale_against)
-/// against the tree's current version to decide whether it must be refreshed
-/// (spec §7.1).
+#[doc = include_str!("semantic_snapshot.doc/SemanticSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticSnapshot {
-    /// Owned copies of the semantic nodes, keyed by their retained [`NodeId`].
+    #[doc = include_str!("semantic_snapshot.doc/nodes.md")]
     nodes: BTreeMap<NodeId, SemanticNode>,
-    /// The ordered child id lists at the moment of capture, keyed by parent.
-    ///
-    /// A snapshot is what every platform adapter builds its native tree from, and
-    /// §7.1's structure lives in these links, not in the nodes: without them an
-    /// adapter can only reconstruct hierarchy from explicit
-    /// [`Owns`](crate::semantic::SemanticRelation::Owns) relations, which a
-    /// projection of a plain parent→child tree has no reason to carry — so the
-    /// whole tree arrives flattened onto its root.
+    #[doc = include_str!("semantic_snapshot.doc/children.md")]
     children: BTreeMap<NodeId, Vec<NodeId>>,
-    /// The tree root at the moment of capture, if any.
+    #[doc = include_str!("semantic_snapshot.doc/root.md")]
     root: Option<NodeId>,
-    /// The tree version at the moment of capture.
+    #[doc = include_str!("semantic_snapshot.doc/version.md")]
     version: u64,
 }
 
 impl SemanticSnapshot {
-    /// Builds a snapshot from the current state of `tree`.
-    ///
-    /// Clones every semantic node and its ordered child list, captures the root,
-    /// and records the tree's current version through its public accessors.
+    #[doc = include_str!("semantic_snapshot.doc/from_tree.md")]
     #[must_use]
     pub fn from_tree(tree: &SemanticTree) -> Self {
         let nodes: BTreeMap<NodeId, SemanticNode> =
@@ -63,63 +42,54 @@ impl SemanticSnapshot {
         }
     }
 
-    /// Returns the captured node for `id`, if it was present at capture.
+    #[doc = include_str!("semantic_snapshot.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&SemanticNode> {
         self.nodes.get(&id)
     }
 
-    /// Returns the ordered child ids captured for `id`, or an empty slice if it
-    /// had none.
-    ///
-    /// This is the captured tree's structure, and the source an adapter builds a
-    /// platform tree's hierarchy from. Ids are returned exactly as the live tree
-    /// held them, including any that name a node absent from this snapshot — a
-    /// caller that must produce a connected tree filters against
-    /// [`contains`](Self::contains).
+    #[doc = include_str!("semantic_snapshot.doc/children_2.md")]
     #[must_use]
     pub fn children(&self, id: NodeId) -> &[NodeId] {
         self.children.get(&id).map_or(&[], Vec::as_slice)
     }
 
-    /// Returns the captured tree root, if any.
+    #[doc = include_str!("semantic_snapshot.doc/root_2.md")]
     #[must_use]
     pub const fn root(&self) -> Option<NodeId> {
         self.root
     }
 
-    /// Returns the tree version captured with this snapshot.
+    #[doc = include_str!("semantic_snapshot.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> u64 {
         self.version
     }
 
-    /// Returns the number of nodes captured in this snapshot.
+    #[doc = include_str!("semantic_snapshot.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Returns whether the snapshot captured no nodes.
+    #[doc = include_str!("semantic_snapshot.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    /// Returns whether `id` was present in the tree at capture.
+    #[doc = include_str!("semantic_snapshot.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.nodes.contains_key(&id)
     }
 
-    /// Iterates over every captured `(NodeId, &SemanticNode)` in deterministic
-    /// ascending id order.
+    #[doc = include_str!("semantic_snapshot.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &SemanticNode)> {
         self.nodes.iter().map(|(id, node)| (*id, node))
     }
 
-    /// Returns whether this snapshot is stale relative to `current_version`
-    /// (i.e. the live tree has advanced past the captured version, spec §7.1).
+    #[doc = include_str!("semantic_snapshot.doc/is_stale_against.md")]
     #[must_use]
     pub const fn is_stale_against(&self, current_version: u64) -> bool {
         self.version < current_version

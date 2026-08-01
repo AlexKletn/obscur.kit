@@ -1,29 +1,16 @@
-//! Inheritance classification for CSS properties.
-//!
-//! Per the Obscur Kit 2 draft (§4.14), inheritance is decided *per property*:
-//! some properties inherit from their parent by default (e.g. `color`), while
-//! most do not (e.g. `opacity`, `background-color`). This module models that
-//! binary classification as a small, `Copy` enum so the cascade can reason
-//! about default inheritance without any string comparison.
+#![doc = include_str!("inheritance.doc/_module.md")]
 
-/// Whether a property inherits from its parent element by default.
-///
-/// This captures the property's *default* inheritance behaviour — the CSS-wide
-/// keywords `inherit`, `initial` and `unset` (modelled on
-/// [`crate::property::PropertyValue`]) can override this per declaration during
-/// the cascade, but the default recorded here is what `unset` resolves against.
+#[doc = include_str!("inheritance.doc/Inheritance.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Inheritance {
-    /// The property inherits its computed value from the parent by default
-    /// (for example `color`).
+    #[doc = include_str!("inheritance.doc/Inherited.md")]
     Inherited,
-    /// The property does not inherit by default; it resets to its initial value
-    /// on each element (for example `opacity` or `background-color`).
+    #[doc = include_str!("inheritance.doc/NotInherited.md")]
     NotInherited,
 }
 
 impl Inheritance {
-    /// Returns `true` when the property inherits from its parent by default.
+    #[doc = include_str!("inheritance.doc/is_inherited.md")]
     #[must_use]
     pub const fn is_inherited(self) -> bool {
         matches!(self, Self::Inherited)

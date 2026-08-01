@@ -1,22 +1,4 @@
-//! End-to-end verification that **authored layout CSS** reaches the layout
-//! engine and produces the expected [`LayoutBox`](obscur_kit::layout::model::LayoutBox)
-//! geometry through the *real* live pipeline (spec §4.1/§4.2/§4.6).
-//!
-//! Every test drives the genuine path — author CSS text, compile it through the
-//! real `obscur-css` frontend (`source -> parse -> compile -> matchable
-//! Stylesheet`), and render one frame on a [`UiRuntime`] via
-//! [`render_now`](UiRuntime::render_now), which runs `reconcile -> match ->
-//! cascade -> resolve (ComputedStyles) -> layout (LayoutBoxes)`. The assertions
-//! read the *actual* absolute [`LayoutBox`] coordinates the pipeline produced
-//! (`runtime.layout_boxes()`), never a hand-built `ComputedStyle`/`LayoutStyle`,
-//! so a regression in the resolver, the computed→layout bridge, or the flex/flow
-//! algorithm fails the run.
-//!
-//! The container is laid out under a fixed 300x300 viewport, so all numbers are
-//! deterministic. A flex container that authors an explicit `width`/`height` is
-//! sized to it, and its children, percentages, and `justify-content` all resolve
-//! against that authored extent (verified below); a container with no explicit
-//! size still fills the available viewport (the fill-available default).
+#![doc = include_str!("layout_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -28,18 +10,17 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under, so geometry is deterministic.
+#[doc = include_str!("layout_css.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 300.0;
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`] through
-/// the real CSS frontend (`source -> parse -> compile`).
+#[doc = include_str!("layout_css.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Tags a view node with a `class` attribute so authored selectors match it.
+#[doc = include_str!("layout_css.doc/tag.md")]
 fn tag(node: ViewNode, cls: &str) -> ViewNode {
     node.with_prop(ViewProperty::new(CLASS, ViewValue::Text(cls.into())))
 }
@@ -48,7 +29,7 @@ fn el(id: u64) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
 }
 
-/// A `.row` container holding two children classed `.a` and `.b`.
+#[doc = include_str!("layout_css.doc/two_child_view.md")]
 fn two_child_view() -> View {
     let a = tag(el(21), "a");
     let b = tag(el(22), "b");
@@ -56,8 +37,7 @@ fn two_child_view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![container]))
 }
 
-/// Renders one real frame for `css` + `view` and returns the driven runtime, so
-/// the caller can read the produced layout boxes.
+#[doc = include_str!("layout_css.doc/drive.md")]
 fn drive(css: &str, view: &View) -> UiRuntime {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     let sheet = compile(css);
@@ -67,20 +47,20 @@ fn drive(css: &str, view: &View) -> UiRuntime {
     rt
 }
 
-/// The single `.row` container [`NodeId`].
+#[doc = include_str!("layout_css.doc/container_node.md")]
 fn container_node(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
     rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
-/// The `.a` / `.b` child [`NodeId`]s of the single `.row` container, in order.
+#[doc = include_str!("layout_css.doc/children.md")]
 fn children(rt: &UiRuntime) -> (NodeId, NodeId) {
     let container = container_node(rt);
     let kids = rt.tree().get(container).unwrap().child_nodes().to_vec();
     (kids[0], kids[1])
 }
 
-/// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.
+#[doc = include_str!("layout_css.doc/geom.md")]
 fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
     let b = rt
         .layout_boxes()

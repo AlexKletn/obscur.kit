@@ -1,15 +1,4 @@
-//! **SPECIFICATION-DERIVED** localization cases for obscur.kit §7.2.
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expected value below was produced by an agent reading the specification
-//! — obscur.kit §7.2 and the CLDR data vendored under `specs/cldr/` — with **no
-//! access to this repository's source**. The cases are a statement of what the
-//! implementation owes the spec, not a record of what it currently does. A
-//! failure here is a defect report about the engine (or, occasionally, about the
-//! spec), and must not be "corrected" by editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch7_localization.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::capability::SupportLevel;
@@ -24,14 +13,7 @@ fn tag(s: &str) -> LanguageTag {
     LanguageTag::parse(s).expect("a well-formed BCP-47 tag")
 }
 
-/// §7.2: "Default implementation should be non-Anglocentric and support, at
-/// minimum:" / "- Russian plural categories;".
-///
-/// `specs/cldr/plurals.xml` line 187, verbatim:
-/// `<pluralRule count="one">v = 0 and i % 10 = 1 and i % 100 != 11 @integer 1,
-/// 21, 31, 41, 51, 61, 71, 81, 101, 1001, …</pluralRule>` and line 189
-/// `<pluralRule count="many">v = 0 and i % 10 = 0 or v = 0 and i % 10 = 5..9 or
-/// v = 0 and i % 100 = 11..14 @integer 0, 5~19, 100, 1000, …</pluralRule>`.
+#[doc = include_str!("spec_ch7_localization.doc/ru_partitions_integer_counts_into_one_few_and_many.md")]
 #[test]
 fn ru_partitions_integer_counts_into_one_few_and_many() {
     let rules = PluralRules::cardinal(&tag("ru"));
@@ -71,12 +53,7 @@ fn ru_partitions_integer_counts_into_one_few_and_many() {
     }
 }
 
-/// §7.2: "- Russian plural categories;".
-///
-/// `specs/cldr/plurals.xml` line 190, verbatim:
-/// `<pluralRule count="other">   @decimal 0.0~1.5, 10.0, 100.0, 1000.0, 10000.0,
-/// 100000.0, 1000000.0, …</pluralRule>`, read against the `v = 0` guard on every
-/// other `ru` rule.
+#[doc = include_str!("spec_ch7_localization.doc/ru_other_is_reachable_only_with_a_visible_fraction.md")]
 #[test]
 fn ru_other_is_reachable_only_with_a_visible_fraction() {
     let rules = PluralRules::cardinal(&tag("ru"));
@@ -98,9 +75,7 @@ fn ru_other_is_reachable_only_with_a_visible_fraction() {
     }
 }
 
-/// §7.2: "- numeral agreement;" — listed separately from "- Russian plural
-/// categories;", so the requirement is agreement of the surrounding message, not
-/// just category lookup.
+#[doc = include_str!("spec_ch7_localization.doc/a_ru_message_agrees_its_noun_with_the_numeral.md")]
 #[test]
 fn a_ru_message_agrees_its_noun_with_the_numeral() {
     let mut catalog = MessageCatalog::new();
@@ -157,8 +132,7 @@ fn a_ru_message_agrees_its_noun_with_the_numeral() {
     );
 }
 
-/// §7.2: "Localization abstraction includes:" / "- parameters;" together with
-/// "- gender;".
+#[doc = include_str!("spec_ch7_localization.doc/gender_selects_the_message_form.md")]
 #[test]
 fn gender_selects_the_message_form() {
     let mut catalog = MessageCatalog::new();
@@ -205,8 +179,7 @@ fn gender_selects_the_message_form() {
     );
 }
 
-/// A provider that answers only for the **exact** locale a key was registered
-/// under — the shape §7.2's fallback bullet is about.
+#[doc = include_str!("spec_ch7_localization.doc/ExactProvider.md")]
 struct ExactProvider {
     entries: Vec<(LanguageTag, MessageKey, MessagePattern)>,
 }
@@ -241,21 +214,7 @@ impl MessageProvider for ExactProvider {
     }
 }
 
-/// §7.2: "Localization abstraction includes:" / "- current locale;" /
-/// "- fallback;".
-///
-/// WEAKENED 2026-07-19: this originally also asserted that key `C`, absent from
-/// both `ru-RU` and `ru`, resolves to `"C-en"` from a DEFAULT LOCALE `en`. §7.2
-/// lists "- fallback;" as a bare bullet with no default-locale layer beneath it,
-/// the case never configured one, and `Localizer` has no API that could (no
-/// `set_default_locale`/`with_fallback_chain` — only `set_locale` and
-/// `set_provider`). The two assertions that make the case's own point — that
-/// fallback is decided PER KEY, so one format pass can draw `A` from `ru-RU` and
-/// `B` from `ru` rather than committing to a single bundle — are kept, and still
-/// fail an implementation that picks one bundle and stays in it. Candidate spec
-/// amendment: state whether the localizer has a configurable default/root locale
-/// beneath the current locale's own chain, and what a key missing from the whole
-/// chain returns (the key itself, empty, or a diagnostic).
+#[doc = include_str!("spec_ch7_localization.doc/fallback_is_resolved_per_key_not_per_bundle.md")]
 #[test]
 fn fallback_is_resolved_per_key_not_per_bundle() {
     let provider = ExactProvider::new(&[
@@ -284,12 +243,7 @@ fn fallback_is_resolved_per_key_not_per_bundle() {
     );
 }
 
-/// §7.2: "- gender;". Guards the *value* layer the message layer selects on:
-/// `specs/cldr/grammaticalFeatures.xml` line 216 gives `ru`
-/// `<grammaticalGender values="masculine feminine neuter"/>` and line 220 gives
-/// `pl` `<grammaticalGender values="animate inanimate personal feminine neuter"/>`,
-/// so a gender value is a *name*, and `personal` must be as expressible as
-/// `masculine`.
+#[doc = include_str!("spec_ch7_localization.doc/a_gender_value_space_is_open_enough_for_polish.md")]
 #[test]
 fn a_gender_value_space_is_open_enough_for_polish() {
     let mut catalog = MessageCatalog::new();

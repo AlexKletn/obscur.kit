@@ -1,4 +1,4 @@
-//! Clipboard module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod clipboard_provider;
 pub use clipboard_provider::{ClipboardProvider, MemoryClipboard};
 mod clipboard_request;

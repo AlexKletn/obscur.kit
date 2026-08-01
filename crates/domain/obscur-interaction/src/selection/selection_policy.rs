@@ -1,24 +1,10 @@
-//! The [`SelectionPolicy`] rules that govern how input mutates a
-//! [`Selection`](super::Selection) (item-selection model).
+#![doc = include_str!("selection_policy.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use super::{Selection, SelectionMode};
 
-/// The rules that translate a click or range gesture into mutations of a
-/// [`Selection`](super::Selection).
-///
-/// A policy pairs a [`SelectionMode`] with two flags:
-///
-/// - `allow_empty` — when `false`, at least one item must stay selected, so a
-///   toggle that would empty the set is suppressed.
-/// - `toggle_on_click` — when `true`, a plain click toggles (Ctrl-like) rather
-///   than replacing the selection; a modifier can request the same behaviour
-///   per-click.
-///
-/// The policy is pure: [`apply_click`](Self::apply_click) and
-/// [`apply_range`](Self::apply_range) mutate the passed-in selection and read no
-/// external state.
+#[doc = include_str!("selection_policy.doc/SelectionPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectionPolicy {
     mode: SelectionMode,
@@ -27,8 +13,7 @@ pub struct SelectionPolicy {
 }
 
 impl SelectionPolicy {
-    /// Creates a policy for `mode` with `allow_empty` on and `toggle_on_click`
-    /// off.
+    #[doc = include_str!("selection_policy.doc/new.md")]
     #[must_use]
     pub const fn new(mode: SelectionMode) -> Self {
         Self {
@@ -38,51 +23,39 @@ impl SelectionPolicy {
         }
     }
 
-    /// Returns this policy with `allow_empty` set (fluent).
+    #[doc = include_str!("selection_policy.doc/allow_empty.md")]
     #[must_use]
     pub const fn allow_empty(mut self, allow_empty: bool) -> Self {
         self.allow_empty = allow_empty;
         self
     }
 
-    /// Returns this policy with `toggle_on_click` set (fluent).
+    #[doc = include_str!("selection_policy.doc/toggle_on_click.md")]
     #[must_use]
     pub const fn toggle_on_click(mut self, toggle_on_click: bool) -> Self {
         self.toggle_on_click = toggle_on_click;
         self
     }
 
-    /// Returns the selection mode.
+    #[doc = include_str!("selection_policy.doc/mode.md")]
     #[must_use]
     pub const fn mode(&self) -> SelectionMode {
         self.mode
     }
 
-    /// Returns whether an empty selection is permitted.
+    #[doc = include_str!("selection_policy.doc/allows_empty.md")]
     #[must_use]
     pub const fn allows_empty(&self) -> bool {
         self.allow_empty
     }
 
-    /// Returns whether a plain click toggles rather than replaces.
+    #[doc = include_str!("selection_policy.doc/toggles_on_click.md")]
     #[must_use]
     pub const fn toggles_on_click(&self) -> bool {
         self.toggle_on_click
     }
 
-    /// Applies a click on `node` to `selection`.
-    ///
-    /// `toggle_modifier` is `true` when the click carried a toggle modifier
-    /// (Ctrl/Cmd). The behaviour depends on the mode:
-    ///
-    /// - [`None`](SelectionMode::None): selection is disabled, so this is a
-    ///   no-op.
-    /// - [`Single`](SelectionMode::Single): replaces the selection with `node`.
-    /// - [`Multiple`](SelectionMode::Multiple): if `toggle_modifier` or
-    ///   [`toggle_on_click`](Self::toggles_on_click) is set, toggles `node`;
-    ///   otherwise replaces the selection with `node`. When `allow_empty` is
-    ///   `false`, a toggle that would remove the only selected item is
-    ///   suppressed so at least one item stays selected.
+    #[doc = include_str!("selection_policy.doc/apply_click.md")]
     pub fn apply_click(&self, selection: &mut Selection, node: NodeId, toggle_modifier: bool) {
         match self.mode {
             SelectionMode::None => {}
@@ -101,14 +74,7 @@ impl SelectionPolicy {
         }
     }
 
-    /// Applies a range gesture over `range` to `selection`.
-    ///
-    /// - When the mode [`allows_multiple`](SelectionMode::allows_multiple),
-    ///   replaces the selection with `range`.
-    /// - For [`Single`](SelectionMode::Single), a range collapses to its last
-    ///   item (selected on its own).
-    /// - For [`None`](SelectionMode::None), selection is disabled, so this is a
-    ///   no-op.
+    #[doc = include_str!("selection_policy.doc/apply_range.md")]
     pub fn apply_range(&self, selection: &mut Selection, range: &[NodeId]) {
         if self.mode.allows_multiple() {
             selection.set_range(range);
@@ -121,8 +87,7 @@ impl SelectionPolicy {
 }
 
 impl Default for SelectionPolicy {
-    /// Defaults to [`Single`](SelectionMode::Single) with `allow_empty` on and
-    /// `toggle_on_click` off.
+    #[doc = include_str!("selection_policy.doc/default.md")]
     fn default() -> Self {
         Self::new(SelectionMode::Single)
     }

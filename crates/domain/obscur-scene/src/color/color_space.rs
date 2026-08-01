@@ -1,32 +1,18 @@
-//! The color space a [`Color`](super::Color)'s components are expressed in.
+#![doc = include_str!("color_space.doc/_module.md")]
 
-/// The color space a [`Color`](super::Color)'s components are expressed in
-/// (spec §5.7).
-///
-/// Colors are authored and exchanged in `Srgb` (the external semantics), while
-/// compositing, blending, blur and filters operate in `LinearSrgb` (the linear
-/// working space). `DisplayP3` describes wide-gamut content; on displays that
-/// cannot reproduce it, consumers fall back to a safe sRGB approximation.
-///
-/// This enum intentionally lists only the spaces needed by the current model.
-/// HDR and additional spaces (e.g. Rec. 2020, `ACEScg`) are deferred to a later
-/// step and will be added as new variants.
+#[doc = include_str!("color_space.doc/ColorSpace.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorSpace {
-    /// Standard sRGB with the usual transfer function. This is the default
-    /// external, authored semantics for colors.
+    #[doc = include_str!("color_space.doc/Srgb.md")]
     Srgb,
-    /// Linear-light sRGB primaries (no transfer function). The working space
-    /// used for compositing, blending, blur and filters.
+    #[doc = include_str!("color_space.doc/LinearSrgb.md")]
     LinearSrgb,
-    /// Display P3 wide-gamut primaries. Consumers fall back to sRGB on hardware
-    /// that cannot reproduce the wider gamut.
+    #[doc = include_str!("color_space.doc/DisplayP3.md")]
     DisplayP3,
 }
 
 impl ColorSpace {
-    /// Returns whether components are stored in linear light (no transfer
-    /// function). True only for [`ColorSpace::LinearSrgb`].
+    #[doc = include_str!("color_space.doc/is_linear.md")]
     #[must_use]
     pub const fn is_linear(self) -> bool {
         matches!(self, Self::LinearSrgb)
@@ -34,8 +20,7 @@ impl ColorSpace {
 }
 
 impl Default for ColorSpace {
-    /// The default color space is [`ColorSpace::Srgb`], the external authored
-    /// semantics.
+    #[doc = include_str!("color_space.doc/default.md")]
     fn default() -> Self {
         Self::Srgb
     }

@@ -1,5 +1,4 @@
-//! The [`HarfrustShaper`] adapter implementing [`TextShaper`] over HarfRust
-//! (spec §5.10).
+#![doc = include_str!("shaper.doc/_module.md")]
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -14,53 +13,19 @@ use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
 use crate::face_metrics::FaceMetrics;
 
-/// A real [`TextShaper`] that shapes text with the HarfRust engine (spec §5.10).
-///
-/// The shaper holds the font **bytes** it shapes with. The primary path is
-/// [`HarfrustShaper::from_bytes`]: the host wires one font and every request is
-/// shaped against it (the request's own [`FontFace`] source is ignored, since it
-/// may be a metadata-only placeholder). Alternatively [`without_font`] builds a
-/// font-less shaper that falls back to per-request
-/// [`FontSource::Memory`](obscur_text::font::FontSource::Memory) bytes carried on
-/// the request's face.
-///
-/// Shaping is infallible: an empty run, absent font, or bytes HarfRust cannot
-/// load all yield an empty [`GlyphRun`] rather than a panic, and identical
-/// requests always produce identical output.
-///
-/// # Line metrics
-///
-/// [`line_metrics`](TextShaper::line_metrics) and
-/// [`line_metrics_for`](TextShaper::line_metrics_for) are asked for a *size* and
-/// at most a [`FontId`] — never for a face — so a font-less shaper can only
-/// answer from real tables if it was handed the registry's
-/// [`FaceMetrics`] with [`with_faces`](Self::with_faces). Do wire it: without it
-/// the glyphs are real but every line box is sized from the idealized 0.8/0.2
-/// ratios. Each query that has to fall back that way is counted by
-/// [`idealized_line_metrics`](Self::idealized_line_metrics), so a host or test
-/// can see the degradation instead of silently shipping fake line boxes.
-///
-/// [`without_font`]: HarfrustShaper::without_font
+#[doc = include_str!("shaper.doc/HarfrustShaper.md")]
 #[derive(Debug, Clone, Default)]
 pub struct HarfrustShaper {
-    /// The wired host font bytes, or `None` for a font-less shaper that relies on
-    /// per-request `Memory` bytes.
+    #[doc = include_str!("shaper.doc/font_bytes.md")]
     font_bytes: Option<Arc<[u8]>>,
-    /// The registered faces' real metrics, keyed by [`FontId`]; empty until
-    /// [`with_faces`](Self::with_faces) supplies a registry's snapshot.
+    #[doc = include_str!("shaper.doc/faces.md")]
     faces: FaceMetrics,
-    /// How many line-metric queries were answered with the idealized ratios
-    /// because no real metrics were reachable for the font. Interior state: the
-    /// metrics methods take `&self`.
+    #[doc = include_str!("shaper.doc/idealized.md")]
     idealized: Cell<u32>,
 }
 
 impl HarfrustShaper {
-    /// Creates a shaper wired to a single host font from its raw `bytes`.
-    ///
-    /// Every [`shape`](TextShaper::shape) call uses this font, ignoring the
-    /// request face's own source, and its `head`/`hhea` answer
-    /// [`line_metrics`](TextShaper::line_metrics).
+    #[doc = include_str!("shaper.doc/from_bytes.md")]
     #[must_use]
     pub fn from_bytes(bytes: impl Into<Arc<[u8]>>) -> Self {
         Self {
@@ -70,14 +35,7 @@ impl HarfrustShaper {
         }
     }
 
-    /// Creates a font-less shaper that shapes only when a request's face carries
-    /// [`FontSource::Memory`](obscur_text::font::FontSource::Memory) bytes.
-    ///
-    /// Without any font, [`shape`](TextShaper::shape) returns an empty run and
-    /// [`can_shape`](TextShaper::can_shape) returns `false`. Pair it with
-    /// [`with_faces`](Self::with_faces) so the faces a
-    /// [`FontRegistry`](crate::FontRegistry) resolves also size their own line
-    /// boxes.
+    #[doc = include_str!("shaper.doc/without_font.md")]
     #[must_use]
     pub const fn without_font() -> Self {
         Self {
@@ -87,41 +45,20 @@ impl HarfrustShaper {
         }
     }
 
-    /// Returns this shaper with `faces` — a
-    /// [`FontRegistry`](crate::FontRegistry)'s
-    /// [`face_metrics`](crate::FontRegistry::face_metrics) snapshot — as the
-    /// source of per-[`FontId`] line metrics (spec §5.10).
-    ///
-    /// This is the only way a shaper can map the id in a
-    /// [`line_metrics_for`](TextShaper::line_metrics_for) query back to the face
-    /// that issued it, so a registered face's line height and baseline come from
-    /// its own `hhea` rather than the idealized ratios.
+    #[doc = include_str!("shaper.doc/with_faces.md")]
     #[must_use]
     pub fn with_faces(mut self, faces: FaceMetrics) -> Self {
         self.faces = faces;
         self
     }
 
-    /// Returns how many line-metric queries this shaper has answered with the
-    /// idealized ratios ([`LineMetrics::idealized`]) because no real metrics were
-    /// reachable for the font asked about.
-    ///
-    /// Non-zero means some line box on screen was sized by ratio, not by the
-    /// face. The fallback is by design — a shaper with neither wired bytes nor a
-    /// face table must still answer — but it is a degradation, so it is counted
-    /// rather than merely happening.
-    ///
-    /// This counter is an **affordance, not a report**: nothing in the runtime
-    /// reads it, so a host that never asks still gets ratio-sized line boxes
-    /// without being told. Assert on it in a host's own text-stack test to pin
-    /// the wiring down.
+    #[doc = include_str!("shaper.doc/idealized_line_metrics.md")]
     #[must_use]
     pub fn idealized_line_metrics(&self) -> u32 {
         self.idealized.get()
     }
 
-    /// Returns the font bytes to shape `request` with: the wired host font if
-    /// present, otherwise the request face's in-memory bytes.
+    #[doc = include_str!("shaper.doc/bytes_for.md")]
     fn bytes_for<'a>(&'a self, request: &'a ShapingRequest) -> Option<&'a [u8]> {
         match self.font_bytes.as_deref() {
             Some(bytes) => Some(bytes),
@@ -129,9 +66,7 @@ impl HarfrustShaper {
         }
     }
 
-    /// Returns the idealized metrics for `font_size`, counting the fallback so it
-    /// stays observable through
-    /// [`idealized_line_metrics`](Self::idealized_line_metrics).
+    #[doc = include_str!("shaper.doc/idealized_2.md")]
     fn idealized(&self, font_size: f32) -> LineMetrics {
         self.idealized.set(self.idealized.get().saturating_add(1));
         LineMetrics::idealized(font_size)
@@ -230,14 +165,7 @@ impl TextShaper for HarfrustShaper {
     }
 }
 
-/// Reads a font's real vertical [`LineMetrics`] from its `head` (units-per-em)
-/// and `hhea` (ascender / descender / line-gap) tables, scaled to `font_size`.
-///
-/// Metrics are stored in font design units; scaling by `font_size / upem`
-/// converts them to logical pixels. `hhea.descender` is negative below the
-/// baseline, so its magnitude is taken to match [`LineMetrics`]'s positive
-/// descent convention. Returns [`None`] when the bytes are not a loadable font,
-/// the `head`/`hhea` tables are missing, or `units_per_em` is zero.
+#[doc = include_str!("shaper.doc/line_metrics_from_bytes.md")]
 fn line_metrics_from_bytes(bytes: &[u8], font_size: f32) -> Option<LineMetrics> {
     let font = ReadFontRef::new(bytes).ok()?;
     let units_per_em = font.head().ok()?.units_per_em();
@@ -252,8 +180,7 @@ fn line_metrics_from_bytes(bytes: &[u8], font_size: f32) -> Option<LineMetrics> 
     Some(LineMetrics::new(ascent, descent, line_gap))
 }
 
-/// Maps a domain [`TextDirection`] to the HarfRust [`Direction`] for horizontal
-/// scripts.
+#[doc = include_str!("shaper.doc/map_direction.md")]
 const fn map_direction(direction: TextDirection) -> Direction {
     match direction {
         TextDirection::LeftToRight => Direction::LeftToRight,

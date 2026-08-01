@@ -1,8 +1,4 @@
-//! **SPECIFICATION-DERIVED** diagnostics and telemetry cases for obscur.kit
-//! §7.8 / §7.9.
-//!
-//! Written by an agent reading obscur.kit §7.8, §7.9, §1.6 and §3.5 with **no
-//! access to this repository's source**.
+#![doc = include_str!("spec_ch7_diagnostics.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7_support/mod.rs"]
@@ -19,9 +15,7 @@ use support::{SharedDiagnostics, SharedTelemetry, all_geom, drive, el, runtime, 
 
 const VW: f32 = 400.0;
 
-/// §7.8, verbatim: "Diagnostics are typed and structured rather than plain
-/// logs." with §1.6: "diagnostics include severity, subsystem, stable code,
-/// node/resource/window context and recovery action."
+#[doc = include_str!("spec_ch7_diagnostics.doc/the_same_fault_carries_one_stable_code_across_two_contexts.md")]
 #[test]
 fn the_same_fault_carries_one_stable_code_across_two_contexts() {
     let sink = SharedDiagnostics::new();
@@ -67,9 +61,7 @@ fn the_same_fault_carries_one_stable_code_across_two_contexts() {
     );
 }
 
-/// §7.8: "- buffered;" / "- backpressured;" with §3.4 "The synchronous frame
-/// phase must stay short and deterministic." and §3.6 priority 6 "telemetry and
-/// development diagnostics."
+#[doc = include_str!("spec_ch7_diagnostics.doc/a_stalled_subscriber_is_backpressured_not_allowed_to_stall_the_producer.md")]
 #[test]
 fn a_stalled_subscriber_is_backpressured_not_allowed_to_stall_the_producer() {
     let mut subscription = DiagnosticSubscription::new(
@@ -107,7 +99,7 @@ fn a_stalled_subscriber_is_backpressured_not_allowed_to_stall_the_producer() {
     );
 }
 
-/// §7.9, verbatim: "Budgets produce diagnostics, not crashes."
+#[doc = include_str!("spec_ch7_diagnostics.doc/a_budget_overrun_degrades_to_a_diagnostic_and_ships_correct_geometry.md")]
 #[test]
 fn a_budget_overrun_degrades_to_a_diagnostic_and_ships_correct_geometry() {
     let css = ".row { display: flex; width: 300px; height: 40px } \
@@ -149,9 +141,7 @@ fn a_budget_overrun_degrades_to_a_diagnostic_and_ships_correct_geometry() {
     );
 }
 
-/// §7.9: "Attribution:" / "- frame;" / "- invalidation cause;" with §3.5 "Frame
-/// reasons include:" / "- input;" / "- animation;" / "- resource completion;" /
-/// "- diagnostics capture;".
+#[doc = include_str!("spec_ch7_diagnostics.doc/four_frames_are_attributed_to_four_distinct_reasons.md")]
 #[test]
 fn four_frames_are_attributed_to_four_distinct_reasons() {
     let mut scheduler = FrameScheduler::new();
@@ -192,34 +182,7 @@ fn four_frames_are_attributed_to_four_distinct_reasons() {
     }
 }
 
-/// §7.9, verbatim: "Deep tracing is opt-in. Lightweight counters may remain
-/// available in production only when explicitly enabled." with "Spans and
-/// counters may cover:" / "- dispatch;" / "- layout;" / "- paint;".
-///
-/// FIXTURE REPAIRED and then WEAKENED 2026-07-19. Two separate faults.
-///
-/// (a) The body was ten bare `render_now` calls and NO INPUT AT ALL, so no
-/// dispatch span could exist under any implementation — the case demanded
-/// coverage of a phase it never caused to run, and its failure — `spans cover
-/// ["dispatch"] at minimum` — read as a missing-instrumentation bug. Real input
-/// is now dispatched before each frame after the first.
-///
-/// (b) With the fixture repaired, no dispatch span appears — and §7.9 does not
-/// require one. Its list opens "Spans and counters MAY cover:" and dispatch is
-/// one of thirteen bullets under that permission; the only normative sentences
-/// are "Deep tracing is opt-in." and "Lightweight counters may remain available
-/// in production only when explicitly enabled." So `dispatch` is dropped from
-/// the mandatory-coverage loop.
-///
-/// The opt-in sentence itself is NOT asserted here, deliberately: with no sink
-/// installed there is no collector to read, so "collected nothing" is
-/// unobservable from outside and any assertion of it would be vacuously true.
-/// Recorded rather than faked.
-///
-/// Candidate spec amendment: turn §7.9's "may cover" list into a required
-/// minimum (dispatch, layout, paint at least) if deep tracing is meant to be
-/// usable for diagnosing input latency — today an implementation may instrument
-/// nothing at all and conform.
+#[doc = include_str!("spec_ch7_diagnostics.doc/deep_tracing_when_enabled_covers_dispatch_layout_and_paint.md")]
 #[test]
 fn deep_tracing_when_enabled_covers_dispatch_layout_and_paint() {
     let telemetry = SharedTelemetry::new();

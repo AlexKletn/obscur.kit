@@ -1,52 +1,22 @@
-//! The typed payload a [`UiEvent`](super::UiEvent) carries to a handler
-//! (spec §2.3, §2.4).
+#![doc = include_str!("event_payload.doc/_module.md")]
 
 use crate::command::KeyEvent;
 use crate::pointer::PointerEvent;
 
-/// The typed input payload carried by a [`UiEvent`](super::UiEvent) (spec §2.3,
-/// §2.4).
-///
-/// §2.3 closes with a sentence that rules out the shape a payload is *usually*
-/// smuggled in with: *"Events are typed. String-based method dispatch is not
-/// used."* So the payload is an enum of the concrete device events the runtime
-/// already models — not a property bag, not a `dyn Any`, and not a name a
-/// handler looks up. A handler reads it by matching, and the compiler knows which
-/// fields exist.
-///
-/// # Why the envelope does not simply *contain* the pointer fields
-///
-/// §2.4 lists nine facts a pointer event must carry (pointer ID, device type,
-/// buttons, logical position and delta, pressure, tilt, rotation,
-/// primary-pointer status, hover capability); a keyboard event carries none of
-/// them and carries a physical/logical key pair instead. Flattening both into one
-/// struct would give every handler a set of fields that are meaningless for the
-/// event it actually received — which is the untyped shape §2.3 excludes. The
-/// variants keep "which facts exist" a property of the event's *kind*.
-///
-/// # `Empty`
-///
-/// [`Empty`](Self::Empty) is not a device: it is the honest payload for a
-/// command that no device produced — an accessibility action, a menu item, a
-/// programmatic dispatch. Such a command still propagates and still reaches
-/// handlers, so it still needs an envelope; it simply has no device state to
-/// report, and a handler that matches on the variant sees that rather than
-/// reading a zeroed position that never existed.
+#[doc = include_str!("event_payload.doc/EventPayload.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum EventPayload {
-    /// No device payload: the event was produced by something other than an
-    /// input device (a menu, assistive technology, a programmatic dispatch).
+    #[doc = include_str!("event_payload.doc/Empty.md")]
     #[default]
     Empty,
-    /// A pointer event's §2.4 payload.
+    #[doc = include_str!("event_payload.doc/Pointer.md")]
     Pointer(PointerEvent),
-    /// A keyboard key transition's payload (spec §2.6 physical key / logical
-    /// key).
+    #[doc = include_str!("event_payload.doc/Key.md")]
     Key(KeyEvent),
 }
 
 impl EventPayload {
-    /// Returns the pointer payload, or `None` for any other kind of event.
+    #[doc = include_str!("event_payload.doc/pointer.md")]
     #[must_use]
     pub const fn pointer(&self) -> Option<PointerEvent> {
         match self {
@@ -55,7 +25,7 @@ impl EventPayload {
         }
     }
 
-    /// Returns the keyboard payload, or `None` for any other kind of event.
+    #[doc = include_str!("event_payload.doc/key.md")]
     #[must_use]
     pub const fn key(&self) -> Option<KeyEvent> {
         match self {
@@ -64,7 +34,7 @@ impl EventPayload {
         }
     }
 
-    /// Returns whether this event carries no device payload.
+    #[doc = include_str!("event_payload.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)

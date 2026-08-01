@@ -1,5 +1,4 @@
-//! The [`WinitWindow`] pairing of a domain [`WindowId`] with a live winit window
-//! (spec §6.1 windowing; §6.2 dynamic properties).
+#![doc = include_str!("winit_window.doc/_module.md")]
 
 use std::sync::Arc;
 
@@ -8,78 +7,41 @@ use obscur_windowing::window::{WindowProperties, WindowState};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::window::{Fullscreen, Window as NativeWindow, WindowLevel};
 
-/// A live platform window paired with the domain [`WindowId`] it materializes
-/// (spec §6.1, §6.2).
-///
-/// The winit backend is callback-driven: real [`winit::window::Window`]s can
-/// only be created inside an
-/// [`ActiveEventLoop`](winit::event_loop::ActiveEventLoop) callback, well after
-/// `create_window` has already returned a [`WindowId`]. A `WinitWindow` is the
-/// record the event-loop handler stores once the OS window finally exists, keyed
-/// by the id the backend minted up front. The native window is held behind an
-/// [`Arc`] so a frame scheduler or renderer can share it cheaply across threads
-/// without reopening the OS handle.
+#[doc = include_str!("winit_window.doc/WinitWindow.md")]
 #[derive(Debug, Clone)]
 pub struct WinitWindow {
-    /// The domain identity this window materializes.
+    #[doc = include_str!("winit_window.doc/id.md")]
     id: WindowId,
-    /// The live platform window, shareable across threads.
+    #[doc = include_str!("winit_window.doc/window.md")]
     window: Arc<NativeWindow>,
 }
 
 impl WinitWindow {
-    /// Pairs a domain `id` with its freshly created native `window`.
+    #[doc = include_str!("winit_window.doc/new.md")]
     #[must_use]
     pub fn new(id: WindowId, window: Arc<NativeWindow>) -> Self {
         Self { id, window }
     }
 
-    /// Returns the domain identity this window materializes.
+    #[doc = include_str!("winit_window.doc/id_2.md")]
     #[must_use]
     pub const fn id(&self) -> WindowId {
         self.id
     }
 
-    /// Returns the underlying live winit window.
+    #[doc = include_str!("winit_window.doc/winit.md")]
     #[must_use]
     pub fn winit(&self) -> &NativeWindow {
         &self.window
     }
 
-    /// Returns a shared handle to the live winit window.
-    ///
-    /// [`Self::winit`] borrows, which is enough to *drive* the window but not to
-    /// *present* to it: `wgpu::Instance::create_surface` needs an owned
-    /// `impl Into<SurfaceTarget<'static>>` to build a `Surface<'static>`, and
-    /// `Arc<Window>` is the handle that satisfies it. Handing out the [`Arc`]
-    /// rather than a borrow is what lets a host build its swapchain against a
-    /// window this backend created (spec §6.1).
+    #[doc = include_str!("winit_window.doc/shared.md")]
     #[must_use]
     pub fn shared(&self) -> Arc<NativeWindow> {
         Arc::clone(&self.window)
     }
 
-    /// Reconciles the live winit window against the desired domain `props`
-    /// (spec §6.2).
-    ///
-    /// Because the domain
-    /// [`UpdateWindow`](obscur_windowing::request::UpdateWindow) delta exposes no
-    /// field-level accessors, the backend instead resolves the delta against the
-    /// [`Window`](obscur_windowing::window::Window) record it owns and hands the
-    /// *resulting* full desired properties here. Pushing the full property set is
-    /// idempotent, so applying it repeatedly is harmless.
-    ///
-    /// Every property winit can set is pushed: title, inner size, outer position
-    /// (only when an explicit one is requested — a platform-chosen `None`
-    /// position is left to the platform), resizability, server-side decorations,
-    /// always-on-top window level, and presentation state. Transparency is fixed
-    /// at creation time in winit and cannot be toggled afterwards, which is why
-    /// [`WinitWindowBackend`]'s `update_window` never lets a changed
-    /// `transparent` flag reach this far: it keeps the record on the live value
-    /// and reports the update `conditional()`, rather than accepting a flip that
-    /// would be silently dropped here.
-    ///
-    /// [`WinitWindowBackend`]: super::WinitWindowBackend
+    #[doc = include_str!("winit_window.doc/apply_properties.md")]
     pub fn apply_properties(&self, props: &WindowProperties) {
         self.window.set_title(&props.title);
         let _ = self.window.request_inner_size(LogicalSize::new(
@@ -102,14 +64,7 @@ impl WinitWindow {
         self.apply_state(props.state);
     }
 
-    /// Maps a domain [`WindowState`] onto winit's separate minimize / maximize /
-    /// fullscreen toggles.
-    ///
-    /// The domain models presentation as one mutually-exclusive state, whereas
-    /// winit exposes three independent setters; [`WindowState::Normal`] therefore
-    /// clears all three, and each other variant sets exactly its own.
-    /// [`WindowState::Fullscreen`] uses borderless fullscreen on the current
-    /// monitor, the portable form that needs no monitor/video-mode handle.
+    #[doc = include_str!("winit_window.doc/apply_state.md")]
     fn apply_state(&self, state: WindowState) {
         match state {
             WindowState::Normal => {

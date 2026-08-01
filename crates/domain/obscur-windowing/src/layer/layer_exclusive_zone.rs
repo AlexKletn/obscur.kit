@@ -1,41 +1,19 @@
-//! How much screen a layer surface reserves for itself (spec §6.5).
+#![doc = include_str!("layer_exclusive_zone.doc/_module.md")]
 
-/// The region a layer surface asks other surfaces to keep clear of.
-///
-/// This is what makes a panel *work*: a maximised window stops at the panel's
-/// edge instead of underneath it. It is modelled as three cases rather than as a
-/// signed number because the protocol's `-1` is not "minus one pixel" — it means
-/// something categorically different, and a bare `i32` invites writing `-1` by
-/// accident and getting a surface that ignores every other panel on the screen.
+#[doc = include_str!("layer_exclusive_zone.doc/LayerExclusiveZone.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerExclusiveZone {
-    /// Reserve nothing, and stay out of the way of everything that does.
-    ///
-    /// The surface is placed inside whatever area other exclusive zones have
-    /// left over — so an overlay that appears beside an existing panel does not
-    /// sit on top of it.
+    #[doc = include_str!("layer_exclusive_zone.doc/None.md")]
     #[default]
     None,
-    /// Reserve `px` logical pixels along the anchored edge.
-    ///
-    /// Only meaningful for a surface anchored to an edge; the reserved strip is
-    /// measured from that edge inward.
+    #[doc = include_str!("layer_exclusive_zone.doc/Reserve.md")]
     Reserve(u32),
-    /// Reserve nothing **and** ignore every other surface's reservation.
-    ///
-    /// The surface is placed against the raw output edge, overlapping any panel
-    /// that reserved space there. This is what a lock screen or a full-screen
-    /// overlay wants, and what almost nothing else does.
+    #[doc = include_str!("layer_exclusive_zone.doc/Ignore.md")]
     Ignore,
 }
 
 impl LayerExclusiveZone {
-    /// The protocol's signed encoding: `-1` ignore, `0` none, `n > 0` reserve.
-    ///
-    /// Saturates at [`i32::MAX`] rather than wrapping, because a reservation
-    /// wider than the screen is nonsense either way and a wrapped negative would
-    /// silently become [`Ignore`](Self::Ignore) — the one value it must never
-    /// turn into by accident.
+    #[doc = include_str!("layer_exclusive_zone.doc/to_raw.md")]
     #[must_use]
     pub const fn to_raw(self) -> i32 {
         match self {
@@ -53,7 +31,7 @@ impl LayerExclusiveZone {
         }
     }
 
-    /// Whether this zone takes space away from other surfaces.
+    #[doc = include_str!("layer_exclusive_zone.doc/reserves.md")]
     #[must_use]
     pub const fn reserves(self) -> bool {
         matches!(self, Self::Reserve(px) if px > 0)

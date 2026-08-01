@@ -1,27 +1,11 @@
-//! `Dialog`: a headless modal/modeless dialog surface (spec §2.6, §6.9).
+#![doc = include_str!("dialog.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Portal;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A headless dialog surface hosting arbitrary content (spec §2.6, §6.9).
-///
-/// `Dialog` owns its `title`, an ordered list of arbitrary content
-/// [`ViewNode`]s, whether it is currently [`open`](Self::is_open), and whether
-/// it is [`modal`](Self::is_modal). It bakes in **no** visual theme.
-///
-/// Rendering is gated on the open flag: while closed, [`view`](Self::view)
-/// returns [`View::empty`] — a dialog contributes nothing to the tree until it
-/// is opened. While open, its element is projected through a
-/// [`Portal`](obscur_primitives::Portal) to the `"dialog-root"` target so the
-/// surface escapes its ancestor's clip and z-order; the element carries the
-/// role, modal flag, and title as properties and hosts the content nodes as its
-/// children, rendered by the style layer keyed on
-/// [`COMPONENT_ID`](Self::COMPONENT_ID).
-///
-/// The state machine is a plain open/close toggle ([`open`](Self::open),
-/// [`close`](Self::close), [`toggle_open`](Self::toggle_open)).
+#[doc = include_str!("dialog.doc/Dialog.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dialog {
     title: Box<str>,
@@ -31,25 +15,20 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// Stable component id for the dialog widget (see [`Button::COMPONENT_ID`]
-    /// for the shared `0x00D0_00NN` scheme).
-    ///
-    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    #[doc = include_str!("dialog.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0006);
 
-    /// The portal target the dialog surface is projected to when open.
+    #[doc = include_str!("dialog.doc/PORTAL_TARGET.md")]
     const PORTAL_TARGET: &'static str = "dialog-root";
 
-    /// Interned name of the semantic-role property (`role`); shares the
-    /// `0x00D1_NNXX` scheme with `NN = 06` (dialog): role=`00`, modal=`01`,
-    /// title=`02`.
+    #[doc = include_str!("dialog.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0600);
-    /// Interned name of the `modal` state property.
+    #[doc = include_str!("dialog.doc/PROP_MODAL.md")]
     const PROP_MODAL: InternedSymbol = InternedSymbol::from_raw(0x00D1_0601);
-    /// Interned name of the `title` property.
+    #[doc = include_str!("dialog.doc/PROP_TITLE.md")]
     const PROP_TITLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0602);
 
-    /// Creates a closed, modal dialog with the given `title` and no content.
+    #[doc = include_str!("dialog.doc/new.md")]
     #[must_use]
     pub fn new(title: impl Into<Box<str>>) -> Self {
         Self {
@@ -60,70 +39,60 @@ impl Dialog {
         }
     }
 
-    /// Appends a content child node, returning the updated dialog (fluent
-    /// builder).
+    #[doc = include_str!("dialog.doc/child.md")]
     #[must_use]
     pub fn child(mut self, node: ViewNode) -> Self {
         self.content.push(node);
         self
     }
 
-    /// Sets the modal flag, returning the updated dialog (fluent builder).
+    #[doc = include_str!("dialog.doc/modal.md")]
     #[must_use]
     pub fn modal(mut self, modal: bool) -> Self {
         self.modal = modal;
         self
     }
 
-    /// Opens the dialog.
+    #[doc = include_str!("dialog.doc/open.md")]
     pub fn open(&mut self) {
         self.open = true;
     }
 
-    /// Closes the dialog.
+    #[doc = include_str!("dialog.doc/close.md")]
     pub fn close(&mut self) {
         self.open = false;
     }
 
-    /// Toggles the dialog open/closed.
+    #[doc = include_str!("dialog.doc/toggle_open.md")]
     pub fn toggle_open(&mut self) {
         self.open = !self.open;
     }
 
-    /// Returns whether the dialog is open.
+    #[doc = include_str!("dialog.doc/is_open.md")]
     #[must_use]
     pub const fn is_open(&self) -> bool {
         self.open
     }
 
-    /// Returns whether the dialog is modal.
+    #[doc = include_str!("dialog.doc/is_modal.md")]
     #[must_use]
     pub const fn is_modal(&self) -> bool {
         self.modal
     }
 
-    /// Returns the dialog title.
+    #[doc = include_str!("dialog.doc/title.md")]
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    /// Returns the accessible role of this control ([`SemanticRole::Dialog`]).
+    #[doc = include_str!("dialog.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Dialog
     }
 
-    /// Derives the semantic view.
-    ///
-    /// While [closed](Self::is_open) the dialog renders nothing —
-    /// [`View::empty`] — so it contributes no top-level nodes. While open it
-    /// returns a single [`Portal`](obscur_primitives::Portal) node targeting
-    /// `"dialog-root"`, wrapping a [`COMPONENT_ID`] element that carries the
-    /// role, modal flag, and title as properties and hosts the content nodes as
-    /// its children.
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[doc = include_str!("dialog.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         if !self.open {

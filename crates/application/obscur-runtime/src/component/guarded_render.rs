@@ -1,42 +1,28 @@
-//! `GuardedRender`: what rendering a component behind its §1.7 boundary produced.
+#![doc = include_str!("guarded_render.doc/_module.md")]
 
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::view::View;
 
 use crate::recovery::RecoveryResult;
 
-/// The outcome of rendering a
-/// [`MountedComponent`](crate::component::MountedComponent) with its error
-/// boundary applied (spec §1.7).
-///
-/// A component's render either produces a view or fails, and a failure is never
-/// just an absence: the boundary has already decided what happens to the
-/// subtree, and the caller is handed both that decision and the structured
-/// failure to report.
+#[doc = include_str!("guarded_render.doc/GuardedRender.md")]
 #[derive(Debug)]
 pub enum GuardedRender {
-    /// The component rendered: this view is its new subtree.
+    #[doc = include_str!("guarded_render.doc/Rendered.md")]
     Rendered(View),
-    /// The render failed and the boundary answered for it.
+    #[doc = include_str!("guarded_render.doc/Failed.md")]
     Failed {
-        /// The structured failure, carrying the [`Diagnostic`] to report
-        /// (spec §1.6).
-        ///
-        /// [`Diagnostic`]: obscur_diagnostics::Diagnostic
+        #[doc = include_str!("guarded_render.doc/failure.md")]
         failure: ComponentFailure,
-        /// What the boundary decided (spec §1.7: *contain → (retry | fallback)
-        /// | propagate*).
+        #[doc = include_str!("guarded_render.doc/result.md")]
         result: RecoveryResult,
-        /// The fallback UI to commit in place of the failed subtree — `Some`
-        /// exactly when `result` is [`RecoveryResult::FellBack`]. A retry leaves
-        /// the subtree to the next frame, and a propagated failure leaves it to
-        /// an enclosing boundary.
+        #[doc = include_str!("guarded_render.doc/fallback.md")]
         fallback: Option<View>,
     },
 }
 
 impl GuardedRender {
-    /// The rendered view, or `None` when the render failed.
+    #[doc = include_str!("guarded_render.doc/rendered.md")]
     #[must_use]
     pub fn rendered(self) -> Option<View> {
         match self {

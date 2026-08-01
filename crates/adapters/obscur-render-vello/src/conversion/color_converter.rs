@@ -1,34 +1,20 @@
-//! Converts an obscur-scene [`Color`] into a Vello/peniko color.
-//!
-//! Pure, backend-local conversion (spec §2.7): the domain authors colors as
-//! straight-alpha sRGB `f32` components; this maps them to peniko's
-//! `AlphaColor<Srgb>` (spec §5.2 — geometry and paint order are preserved by the
-//! adapter; only rasterization is delegated to Vello).
+#![doc = include_str!("color_converter.doc/_module.md")]
 
 use obscur_scene::color::Color;
 use vello::peniko;
 
-/// A stateless converter from an obscur-scene [`Color`] to a [`peniko::Color`].
-///
-/// obscur-scene stores colors as straight-alpha sRGB `f32` components that are
-/// deliberately *not* clamped (to allow wide-gamut / HDR authoring). peniko's
-/// `AlphaColor<Srgb>` is likewise an `f32` sRGB color, so the conversion is a
-/// direct component copy; components are clamped to `[0.0, 1.0]` here because the
-/// Vello pipeline expects displayable sRGB values.
+#[doc = include_str!("color_converter.doc/ColorConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ColorConverter;
 
 impl ColorConverter {
-    /// Creates a color converter.
+    #[doc = include_str!("color_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Converts an obscur-scene [`Color`] into a [`peniko::Color`].
-    ///
-    /// Each channel is clamped to `[0.0, 1.0]`; the alpha is straight (not
-    /// premultiplied), matching peniko's `AlphaColor<Srgb>`.
+    #[doc = include_str!("color_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, color: Color) -> peniko::Color {
         peniko::Color::new([

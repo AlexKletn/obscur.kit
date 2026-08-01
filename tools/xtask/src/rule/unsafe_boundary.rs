@@ -1,4 +1,4 @@
-//! Rule: pure crates forbid unsafe (spec §1.8, §5.7).
+#![doc = include_str!("unsafe_boundary.doc/_module.md")]
 
 use std::fs;
 use std::path::Path;
@@ -10,7 +10,7 @@ const RULE: &str = "unsafe-boundary";
 // Directories whose crates are "pure" and must declare `#![forbid(unsafe_code)]`.
 const PURE_DIRS: &[&str] = &["crates/foundation", "crates/domain", "crates/application"];
 
-/// Checks that every pure crate's `lib.rs` forbids unsafe code.
+#[doc = include_str!("unsafe_boundary.doc/check.md")]
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
     let mut out = Vec::new();
     for dir in PURE_DIRS {

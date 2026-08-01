@@ -1,27 +1,4 @@
-//! **Proof: CSS `backdrop-filter: blur()` as REAL frosted-glass / acrylic.**
-//!
-//! Renders a busy hard-edged checkerboard BACKDROP filling the viewport through
-//! headless Vello/wgpu, then lays a semi-transparent rounded panel on top carrying
-//! `backdrop-filter: blur(10px)` — a `BackdropFilter { bounds, radii, blur }`
-//! command emitted BEFORE the panel's own translucent fill, exactly what the scene
-//! coordinator produces. The renderer's segmented compositing frosts the backdrop
-//! *under the panel only*: the read-back PNG (`target/backdrop_proof.png`) shows the
-//! checkerboard visibly blurred inside the rounded panel (with the tint reading as
-//! acrylic) while the surrounding backdrop stays crisp and the corners stay sharp.
-//!
-//! This drives the whole renderer half of the slice (display-list segmentation →
-//! per-segment offscreen → composite onto the accumulating frame → in-place region
-//! blur masked to the rounded radii). The CSS lowering and the coordinator's
-//! `BackdropFilter` emission are covered by unit tests; this hand-built display list
-//! is byte-for-byte the structure those produce.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. With none it prints a diagnostic and exits cleanly
-//! (no panic); it never fabricates a device.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example backdrop_proof --features render-vello`
+#![doc = include_str!("backdrop_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -36,14 +13,13 @@ use obscur_kit::scene::paint::Paint;
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// The output image extent.
+#[doc = include_str!("backdrop_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(480.0, 320.0);
-/// Number of checker cells per axis across the whole viewport (a fine grid so the
-/// frost is obvious).
+#[doc = include_str!("backdrop_proof.doc/CELLS.md")]
 const CELLS: i32 = 16;
-/// The backdrop-filter blur radius applied under the panel (logical px).
+#[doc = include_str!("backdrop_proof.doc/BLUR_RADIUS.md")]
 const BLUR_RADIUS: f32 = 10.0;
-/// The panel corner radius (logical px).
+#[doc = include_str!("backdrop_proof.doc/PANEL_RADIUS.md")]
 const PANEL_RADIUS: f32 = 28.0;
 
 fn main() {
@@ -105,9 +81,7 @@ fn main() {
     );
 }
 
-/// Builds the display list: a full-viewport hard-edged checkerboard, then a
-/// `backdrop-filter: blur` boundary + a translucent rounded panel fill (the exact
-/// command shape the coordinator emits: BackdropFilter BEFORE the panel's own bg).
+#[doc = include_str!("backdrop_proof.doc/build_scene.md")]
 fn build_scene() -> DisplayList {
     let mut commands: Vec<PaintCommand> = Vec::new();
 
@@ -134,9 +108,7 @@ fn build_scene() -> DisplayList {
     DisplayList::from_commands(commands)
 }
 
-/// Appends a hard-edged `CELLS × CELLS` checkerboard filling `panel`: alternating
-/// deep-blue and orange cells, a strong pattern whose internal edges smear visibly
-/// under the backdrop frost.
+#[doc = include_str!("backdrop_proof.doc/checkerboard.md")]
 #[allow(clippy::cast_precision_loss)]
 fn checkerboard(commands: &mut Vec<PaintCommand>, panel: Rect) {
     let cell_w = panel.size.width / CELLS as f32;
@@ -158,7 +130,7 @@ fn checkerboard(commands: &mut Vec<PaintCommand>, panel: Rect) {
     }
 }
 
-/// A solid-fill `DrawPath` command over `rect`.
+#[doc = include_str!("backdrop_proof.doc/fill.md")]
 fn fill(rect: Rect, color: Color) -> PaintCommand {
     PaintCommand::DrawPath {
         path: Path::rect(rect),
@@ -166,8 +138,7 @@ fn fill(rect: Rect, color: Color) -> PaintCommand {
     }
 }
 
-/// Acquires a headless wgpu device + queue (no surface), or [`None`] when no
-/// adapter/device is available so the caller exits cleanly instead of panicking.
+#[doc = include_str!("backdrop_proof.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -179,7 +150,7 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("backdrop_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

@@ -1,4 +1,4 @@
-//! A queue of controlled async completions (spec §7.4).
+#![doc = include_str!("completion_queue.doc/_module.md")]
 
 use std::collections::VecDeque;
 
@@ -6,21 +6,15 @@ use obscur_identity::OperationId;
 
 use super::completion::Completion;
 
-/// An ordered queue of controlled async completions that a headless test
-/// delivers at chosen synchronization points.
-///
-/// Each entry is a [`Completion<T>`] keyed by an [`OperationId`], so a test can
-/// resolve async results deterministically and callers can drop stale results
-/// whose operation no longer matches (spec §3.3, §7.4). Completions are
-/// delivered in strict FIFO order.
+#[doc = include_str!("completion_queue.doc/CompletionQueue.md")]
 #[derive(Debug, Clone)]
 pub struct CompletionQueue<T> {
-    /// Pending completions, delivered front-to-back (FIFO).
+    #[doc = include_str!("completion_queue.doc/entries.md")]
     entries: VecDeque<Completion<T>>,
 }
 
 impl<T> CompletionQueue<T> {
-    /// Creates an empty completion queue.
+    #[doc = include_str!("completion_queue.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -28,30 +22,30 @@ impl<T> CompletionQueue<T> {
         }
     }
 
-    /// Enqueues a completion pairing `operation` with its result `value`.
+    #[doc = include_str!("completion_queue.doc/push.md")]
     pub fn push(&mut self, operation: OperationId, value: T) {
         self.entries.push_back(Completion::new(operation, value));
     }
 
-    /// Delivers the front (oldest) pending completion, or `None` if empty.
+    #[doc = include_str!("completion_queue.doc/take_next.md")]
     #[must_use]
     pub fn take_next(&mut self) -> Option<Completion<T>> {
         self.entries.pop_front()
     }
 
-    /// Delivers all pending completions in FIFO order, leaving the queue empty.
+    #[doc = include_str!("completion_queue.doc/drain.md")]
     #[must_use]
     pub fn drain(&mut self) -> Vec<Completion<T>> {
         self.entries.drain(..).collect()
     }
 
-    /// Returns the number of pending completions.
+    #[doc = include_str!("completion_queue.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns `true` when no completions are pending.
+    #[doc = include_str!("completion_queue.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

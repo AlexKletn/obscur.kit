@@ -1,61 +1,4 @@
-//! **Interactive windowed imported-UI-Kit theme switcher → Vello (GPU).**
-//!
-//! The live sibling of `uikit_png.rs` / `uikit_vello_png.rs`: it renders the *very
-//! same* shared [`uikit`] view (the top theme-switcher bar over the component
-//! gallery) through winit 0.30 + Vello/wgpu into a genuine on-screen window — and
-//! makes the switcher **clickable**. Clicking a theme tab swaps that theme's
-//! stylesheet and rebuilds the identical view *live*, so the whole gallery re-skins
-//! in place at full GPU fidelity.
-//!
-//! Because this is the GPU backend, the gradient/shadow-heavy themes render for
-//! real, not the CPU approximation:
-//!
-//! - the **Skeuomorphic** tab (index 4) paints its `linear-gradient(#light,#dark)`
-//!   faces as real smooth ramps and its `inset`/outset `box-shadow` gloss + cast
-//!   shadows as real Gaussian blurs (the CPU PNG shows a flat first-stop fill and a
-//!   flat offset rect);
-//! - the **Material** tab (index 1, the default) paints its tonal fills, elevation
-//!   shadows, and the `mini-cover` gradient at full fidelity;
-//! - the remaining six tabs are the neutral placeholder stylesheet for now — a
-//!   click still swaps to them live (they just look plain, by design).
-//!
-//! The view structure is *identical* across every tab (that is the whole point of
-//! the one-view/many-stylesheets architecture); a tab click is therefore a **pure**
-//! stylesheet swap plus a rebuild of the same `uikit::view(i)` with tab `i`
-//! highlighted.
-//!
-//! # Device scale, wheel scroll & zoom
-//!
-//! The window is **device-scale aware**: the render scale is the display's HiDPI
-//! `scale_factor` — **not tied to the window size**. It hands the runtime its
-//! swapchain via [`UiRuntime::set_surface`], which points the viewport at
-//! `physical_extent / effective_scale` and sets the device scale to that same
-//! factor — the runtime then brackets the whole scene in a root `scale(s, s)`
-//! transform, so vectors, text, and gradients rasterize crisply at their authored
-//! CSS size. Because the scale is fixed to the display density, **resizing the
-//! window reflows the layout** (the gallery divides the real width; the UI is *not*
-//! zoomed up and down with the window) — exactly like a real application. Any
-//! content taller than the window is reached by **scrolling**: the mouse wheel
-//! drives a vertical `scroll_y`, pushed to the runtime as
-//! [`UiRuntime::set_content_offset`] (a root `translate` composed with the device
-//! scale). A user **zoom** multiplies on top: `Ctrl+=` / `Ctrl++` zoom in (cap
-//! 500%), `Ctrl+-` zooms out (min 30%), `Ctrl+0` resets zoom **and** scroll. The
-//! device scale + scroll clamp are recomputed on resize / scale-factor change /
-//! zoom. Pointer coordinates map through the device scale + scroll offset
-//! automatically (the runtime divides by the scale and adds the offset back), so
-//! tab hit-testing is correct at any scale, zoom, or scroll position.
-//!
-//! Run it (a display + a GPU adapter are required):
-//! `cargo run -p obscur-kit --example uikit_window --features full`
-//!
-//! Click the **Material** vs **Skeuomorphic** tabs to swap the look live;
-//! **mouse wheel** scrolls vertically; `Ctrl` +/-/0 to zoom / reset.
-//!
-//! # Environment note
-//!
-//! Like `showcase_window.rs`, this needs a display and a usable GPU adapter; in a
-//! headless environment it compiles but exits cleanly on `resumed` when no
-//! adapter/surface can be acquired (it never panics on that path).
+#![doc = include_str!("uikit_window.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -91,64 +34,42 @@ mod uikit;
 
 use uikit::{KIT_TAB_CMD, MATERIAL_INDEX};
 
-/// One wheel *line* of scroll, in logical content px, mapped to a comfortable step
-/// (a `LineDelta` of 1.0 scrolls this much content). `PixelDelta` deltas are used
-/// as-is (already in physical px).
+#[doc = include_str!("uikit_window.doc/WHEEL_LINE_STEP.md")]
 const WHEEL_LINE_STEP: f32 = 64.0;
 
-/// The initial window size in *logical* pixels. A wide, moderately tall window so
-/// the gallery renders at readable size from the first frame and there is room to
-/// wheel-scroll the rest; freely resizable (resize reflows the layout).
+#[doc = include_str!("uikit_window.doc/INITIAL_SIZE.md")]
 const INITIAL_SIZE: Size = Size::new(1080.0, 900.0);
 
-/// The winit application: owns the window, the GPU-backed Vello renderer, the
-/// swapchain surface, the embeddable [`UiRuntime`], and the shared `active_theme`
-/// index the clickable switcher drives.
+#[doc = include_str!("uikit_window.doc/UiKitWindow.md")]
 struct UiKitWindow {
-    /// The live winit window (an [`Arc`] so wgpu can build a `Surface<'static>`),
-    /// created lazily in [`ApplicationHandler::resumed`].
+    #[doc = include_str!("uikit_window.doc/window.md")]
     window: Option<Arc<Window>>,
-    /// The on-screen swapchain surface, created alongside the window.
+    #[doc = include_str!("uikit_window.doc/surface.md")]
     surface: Option<VelloSurface>,
-    /// The wgpu device, cached so resizes can reconfigure the surface.
+    #[doc = include_str!("uikit_window.doc/device.md")]
     device: Option<wgpu::Device>,
-    /// The Vello/wgpu renderer, attached once the GPU device is created.
+    #[doc = include_str!("uikit_window.doc/renderer.md")]
     renderer: Option<VelloRenderer>,
-    /// The embeddable runtime that owns the retained tree, scene, scheduler, and
-    /// live interaction state. Its reactive view builder reads the shared
-    /// `active_theme` to rebuild `uikit::view(i)`; its per-tab command handlers
-    /// mutate that same index.
+    #[doc = include_str!("uikit_window.doc/runtime.md")]
     runtime: UiRuntime,
-    /// The active theme index, shared behind an `Rc<RefCell<_>>` by the per-tab
-    /// command handlers (which set it on a click) and the reactive view builder
-    /// (which reads it back to rebuild the highlighted view) — the state bridge.
+    #[doc = include_str!("uikit_window.doc/active_theme.md")]
     active_theme: Rc<RefCell<usize>>,
-    /// The theme index whose stylesheet is currently installed on the runtime, so
-    /// the window can detect a tab-driven change and swap the stylesheet (which a
-    /// command handler cannot reach). Starts equal to `active_theme`.
+    #[doc = include_str!("uikit_window.doc/applied_theme.md")]
     applied_theme: usize,
-    /// Last known cursor position in physical pixels, so a `MouseInput` (which
-    /// carries no position) can be dispatched as a pointer event at the cursor.
+    #[doc = include_str!("uikit_window.doc/cursor.md")]
     cursor: (f64, f64),
-    /// The window's current HiDPI device-pixel ratio (winit `scale_factor`).
+    #[doc = include_str!("uikit_window.doc/scale_factor.md")]
     scale_factor: f64,
-    /// The user zoom factor (Ctrl+= / Ctrl+- / Ctrl+0), multiplied with the
-    /// display density to form the effective device scale. `1.0` is 100%.
+    #[doc = include_str!("uikit_window.doc/zoom.md")]
     zoom: f32,
-    /// The vertical scroll offset in **physical** px (mouse-wheel driven), clamped
-    /// to `0 ..= max(0, content_height*effective_scale - physical_height)`. Pushed
-    /// to the runtime as a logical content offset (`scroll_y / effective_scale`).
+    #[doc = include_str!("uikit_window.doc/scroll_y.md")]
     scroll_y: f32,
-    /// The modifier keys currently held, so the keyboard handler can recognise the
-    /// Ctrl+zoom chords.
+    #[doc = include_str!("uikit_window.doc/modifiers.md")]
     modifiers: ModifiersState,
 }
 
 impl UiKitWindow {
-    /// Builds the application with a fresh [`UiRuntime`] wired to the shared UI-Kit
-    /// scene: the reactive view builder (`uikit::view(active_theme)`), a command
-    /// handler per switcher tab, and the initial (Material) stylesheet. No window,
-    /// surface, or GPU device yet (created on `resumed`).
+    #[doc = include_str!("uikit_window.doc/new.md")]
     fn new() -> Self {
         let active_theme = Rc::new(RefCell::new(MATERIAL_INDEX));
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), INITIAL_SIZE);
@@ -190,32 +111,17 @@ impl UiKitWindow {
         }
     }
 
-    /// The base device-pixel scale the UI renders at: the display's HiDPI
-    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
-    ///
-    /// The scale is *not* tied to the window width (no fit-to-width zoom): the
-    /// gallery renders at its natural CSS size for the display density, so widening
-    /// or narrowing the window changes the logical viewport and the layout reflows
-    /// (the gallery divides the available width), exactly like a real application —
-    /// rather than scaling the whole UI up and down. The user `zoom` composes on
-    /// top for an explicit magnify.
+    #[doc = include_str!("uikit_window.doc/base_scale.md")]
     fn base_scale(&self) -> f32 {
         (self.scale_factor as f32).max(0.05)
     }
 
-    /// The effective device-pixel scale the runtime renders at: the display
-    /// density times the user `zoom`. The viewport is the physical extent divided
-    /// by this, so layout runs in logical CSS pixels that follow the real window
-    /// size and reflow on resize.
+    #[doc = include_str!("uikit_window.doc/effective_scale.md")]
     fn effective_scale(&self) -> f32 {
         self.base_scale() * self.zoom
     }
 
-    /// The tallest content extent actually laid out this frame, in **logical**
-    /// px — the largest bottom edge across the tree, read from the runtime's live
-    /// [`inspect_snapshot`](UiRuntime::inspect_snapshot). Used for the scroll
-    /// range, so scrolling reflects the real content rather than a fixed design
-    /// height.
+    #[doc = include_str!("uikit_window.doc/content_height_logical.md")]
     fn content_height_logical(&self) -> f32 {
         self.runtime
             .inspect_snapshot()
@@ -226,9 +132,7 @@ impl UiKitWindow {
             .fold(0.0_f32, f32::max)
     }
 
-    /// The maximum vertical scroll in **physical** px: how far past the bottom of
-    /// the window the real content extends. `0` when the whole content already fits
-    /// (so `scroll_y` simply clamps to `0`, harmless).
+    #[doc = include_str!("uikit_window.doc/max_scroll_y.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn max_scroll_y(&self) -> f32 {
         let Some(surface) = self.surface.as_ref() else {
@@ -239,17 +143,14 @@ impl UiKitWindow {
         (content_height - physical_height).max(0.0)
     }
 
-    /// Re-clamps `scroll_y` into `0 ..= max_scroll_y()` and pushes the resulting
-    /// **logical** content offset (`scroll_y / effective_scale`) to the runtime, so
-    /// a physical wheel step scrolls a consistent on-screen amount at any scale.
+    #[doc = include_str!("uikit_window.doc/apply_scroll.md")]
     fn apply_scroll(&mut self) {
         self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y());
         let offset = self.scroll_y / self.effective_scale();
         self.runtime.set_content_offset(0.0, offset);
     }
 
-    /// Assembles a domain button [`PointerEvent`] at the tracked cursor (physical
-    /// px; the runtime divides by the device scale to logical space).
+    #[doc = include_str!("uikit_window.doc/pointer_button_event.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
         PointerEvent::new(
@@ -260,14 +161,7 @@ impl UiKitWindow {
         )
     }
 
-    /// Re-syncs the runtime's layout viewport and device scale to the current
-    /// swapchain extent, display density, and user zoom. Called after surface
-    /// creation, on resize, on a scale-factor change, and after a zoom change.
-    ///
-    /// The viewport is the swapchain's **physical** extent divided by the effective
-    /// scale, so layout runs in **logical** CSS pixels; the runtime's device scale
-    /// is set to that same factor, so the composed scene is bracketed by a root
-    /// `scale(s, s)` and rasterizes crisply at physical resolution.
+    #[doc = include_str!("uikit_window.doc/sync_viewport.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -284,9 +178,7 @@ impl UiKitWindow {
         self.apply_scroll();
     }
 
-    /// Prints the computed fit/effective scale and content bounds once so the scale
-    /// math is inspectable from the logs even though the window itself is not
-    /// visible in a smoke run.
+    #[doc = include_str!("uikit_window.doc/log_scale_sanity.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn log_scale_sanity(&self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -304,13 +196,7 @@ impl UiKitWindow {
         }
     }
 
-    /// Reconciles the installed stylesheet with the shared `active_theme` a tab
-    /// handler may have just changed: if it differs from [`applied_theme`], swap in
-    /// `themes()[i]` (a command handler cannot reach `&mut runtime`, so this is the
-    /// window's job) and request a structural frame so the reactive builder rebuilds
-    /// the re-skinned view. Returns `true` when a swap happened.
-    ///
-    /// [`applied_theme`]: Self::applied_theme
+    #[doc = include_str!("uikit_window.doc/sync_theme_stylesheet.md")]
     fn sync_theme_stylesheet(&mut self) -> bool {
         let active = *self.active_theme.borrow();
         if active == self.applied_theme {
@@ -324,11 +210,7 @@ impl UiKitWindow {
         true
     }
 
-    /// Handles a Ctrl+zoom shortcut, returning `true` when `key` was a zoom chord
-    /// (so the caller swallows it): `Ctrl+=`/`Ctrl++` zoom in (×1.1, cap 5.0),
-    /// `Ctrl+-` zoom out (÷1.1, floor 0.3), `Ctrl+0` reset zoom **and** scroll. A
-    /// change re-syncs the viewport + device scale (+ scroll clamp) and requests a
-    /// redraw.
+    #[doc = include_str!("uikit_window.doc/handle_zoom_shortcut.md")]
     fn handle_zoom_shortcut(&mut self, key: &Key) -> bool {
         let Key::Character(text) = key else {
             return false;
@@ -360,9 +242,7 @@ impl UiKitWindow {
         true
     }
 
-    /// Renders one frame: run a scheduler-gated reactive frame (rebuilding the view
-    /// from the active theme when due), read the committed scene, and present it via
-    /// Vello.
+    #[doc = include_str!("uikit_window.doc/render_frame.md")]
     fn render_frame(&mut self) {
         // Run the due frame for its side effects; the per-present firehose is
         // intentionally silent — meaningful activity is logged as EVENTS
@@ -396,8 +276,7 @@ impl UiKitWindow {
 }
 
 impl ApplicationHandler for UiKitWindow {
-    /// Creates the window, swapchain surface, and GPU-backed Vello renderer once
-    /// the platform is ready, and wires the host text stack.
+    #[doc = include_str!("uikit_window.doc/resumed.md")]
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -559,22 +438,14 @@ impl ApplicationHandler for UiKitWindow {
     }
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`] through the
-/// real `obscur-css` frontend (identical to `uikit_vello_png.rs`).
+#[doc = include_str!("uikit_window.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Initialises a wgpu swapchain surface + device/queue for on-screen rendering
-/// from an `Arc<Window>` (mirrors `showcase_window.rs`).
-///
-/// # Errors
-///
-/// Returns an error if the surface cannot be created, no compatible GPU adapter is
-/// available (as in a headless environment), the device cannot be created, or the
-/// surface exposes no supported default configuration.
+#[doc = include_str!("uikit_window.doc/init_gpu.md")]
 fn init_gpu(
     window: &Arc<Window>,
 ) -> Result<
@@ -601,10 +472,7 @@ fn init_gpu(
     Ok((surface, config, device, queue))
 }
 
-/// Wires the full multi-font fallback stack onto the runtime and the Vello renderer
-/// (identical to `showcase_window.rs`): the primary under `sans-serif` (id 0) plus
-/// a best-effort CJK fallback under the same family (id 1), so resolution is by
-/// `cmap` COVERAGE. The renderer receives the same id↔bytes assignment.
+#[doc = include_str!("uikit_window.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primary_bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let primary_id = registry.register(
@@ -632,13 +500,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primar
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (a `u32`) for a resolved [`FontId`].
+#[doc = include_str!("uikit_window.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known Linux/macOS/Windows
-/// locations and returning the first that exists, or `None`.
+#[doc = include_str!("uikit_window.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
@@ -655,7 +522,7 @@ fn load_system_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Loads a second, CJK-covering fallback font's bytes (best effort).
+#[doc = include_str!("uikit_window.doc/load_fallback_font.md")]
 fn load_fallback_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -671,11 +538,7 @@ fn load_fallback_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Builds the winit event loop and runs the application to completion.
-///
-/// # Errors
-///
-/// Propagates any event-loop construction or run error.
+#[doc = include_str!("uikit_window.doc/main.md")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== obscur-kit imported UI Kit → Vello (windowed, interactive theme switcher) ==");
     println!("(full backend: winit window + wgpu/Vello GPU renderer, on-screen present)");

@@ -1,42 +1,36 @@
-//! One command in a path outline.
+#![doc = include_str!("path_segment.doc/_module.md")]
 
 use obscur_geometry::Point;
 
-/// One command in a path outline (spec §5.1).
-///
-/// Segments are plain geometric data with no backend meaning; a renderer or
-/// tessellator interprets them. Coordinates are absolute logical-pixel points.
+#[doc = include_str!("path_segment.doc/PathSegment.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PathSegment {
-    /// Start a new subpath at the given point, moving the pen without drawing.
+    #[doc = include_str!("path_segment.doc/MoveTo.md")]
     MoveTo(Point),
-    /// Draw a straight line from the current point to the given point.
+    #[doc = include_str!("path_segment.doc/LineTo.md")]
     LineTo(Point),
-    /// Draw a quadratic Bézier curve to `end` using a single `control` point.
+    #[doc = include_str!("path_segment.doc/QuadTo.md")]
     QuadTo {
-        /// The off-curve control point.
+        #[doc = include_str!("path_segment.doc/control.md")]
         control: Point,
-        /// The on-curve end point.
+        #[doc = include_str!("path_segment.doc/end.md")]
         end: Point,
     },
-    /// Draw a cubic Bézier curve to `end` using `control1` and `control2`.
+    #[doc = include_str!("path_segment.doc/CubicTo.md")]
     CubicTo {
-        /// The first off-curve control point (leaves the start point).
+        #[doc = include_str!("path_segment.doc/control1.md")]
         control1: Point,
-        /// The second off-curve control point (arrives at the end point).
+        #[doc = include_str!("path_segment.doc/control2.md")]
         control2: Point,
-        /// The on-curve end point.
+        #[doc = include_str!("path_segment.doc/end_2.md")]
         end: Point,
     },
-    /// Close the current subpath with a straight line back to its start.
+    #[doc = include_str!("path_segment.doc/Close.md")]
     Close,
 }
 
 impl PathSegment {
-    /// Returns the point this segment moves the pen to, if any.
-    ///
-    /// For [`PathSegment::Close`] there is no explicit end point (it returns to
-    /// the subpath start), so this yields `None`.
+    #[doc = include_str!("path_segment.doc/end_point.md")]
     #[must_use]
     pub fn end_point(&self) -> Option<Point> {
         match self {

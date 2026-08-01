@@ -1,30 +1,4 @@
-//! **Proof: `text-overflow: ellipsis` end-to-end through the real runtime.**
-//!
-//! Renders text through the REAL runtime + software [`CpuRenderer`] (no GPU),
-//! stitched top-to-bottom into `target/text_ellipsis_proof.png`, proving the
-//! already-built `text-overflow: ellipsis` path (CSS UI 3 §5.2): a box narrower
-//! than its (`white-space: nowrap`) text keeps the largest fitting prefix and
-//! appends the ellipsis glyph `…` (U+2026), never exceeding the box.
-//!
-//! Blocks (all `font-size: 18px`, `width: 60px`, no padding so the content box is
-//! exactly 60px):
-//!
-//! - **A — `text-overflow: ellipsis`** on a long `nowrap` phrase: the one
-//!   overflowing line is truncated to a prefix + the ellipsis glyph; its last
-//!   painted glyph is the ellipsis and the run width ≤ 60px.
-//! - **B — `text-overflow: clip`** (control) on the SAME phrase: the line is
-//!   truncated to a prefix too, but the last glyph is a NORMAL glyph, not the
-//!   ellipsis — proving A actually appended the ellipsis.
-//!
-//! Before writing the PNG it machine-checks the composed display list against a
-//! standalone `…` probe render (to learn the font's ellipsis glyph index, which
-//! is `0x2026` under the reference mock and a real font index under HarfRust) and
-//! against a wide `nowrap` render of the phrase (to prove the box really is
-//! narrower than the text).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example text_ellipsis_proof \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("text_ellipsis_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -47,26 +21,24 @@ use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The Unicode scalar for the horizontal ellipsis `…` — the glyph id the
-/// reference mock shaper emits (a real font emits its own glyph index instead).
+#[doc = include_str!("text_ellipsis_proof.doc/ELLIPSIS_CP.md")]
 const ELLIPSIS_CP: u32 = 0x2026;
 
-/// The logical extent each block is laid out and rasterized under.
+#[doc = include_str!("text_ellipsis_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(240.0, 40.0);
 
-/// The definite content-box width (px) of the truncating blocks (no padding).
+#[doc = include_str!("text_ellipsis_proof.doc/BOX_WIDTH.md")]
 const BOX_WIDTH: f32 = 60.0;
 
-/// The long phrase the narrow box cannot hold on one `nowrap` line.
+#[doc = include_str!("text_ellipsis_proof.doc/PHRASE.md")]
 const PHRASE: &str = "ellipsis truncation demonstration";
 
-/// One painted glyph flattened out of the composed display list.
+#[doc = include_str!("text_ellipsis_proof.doc/Glyph.md")]
 #[derive(Clone, Copy)]
 struct Glyph {
     id: u32,
     advance: f32,
-    /// Pen x within the run plus the run origin x, so glyphs from every run on a
-    /// line sort into a single left-to-right paint order.
+    #[doc = include_str!("text_ellipsis_proof.doc/x.md")]
     x: f32,
 }
 
@@ -114,9 +86,7 @@ fn main() {
     );
 }
 
-/// Machine-checks the ellipsis path: the box is narrower than the text; the
-/// ellipsis line ends with the ellipsis glyph and fits the box; the clip control
-/// fits the box but does NOT end with the ellipsis.
+#[doc = include_str!("text_ellipsis_proof.doc/verify.md")]
 fn verify(ellipsis_id: u32, natural_width: f32, ellipsis: &[Glyph], clip: &[Glyph]) {
     // Under the reference mock the glyph index IS the codepoint, so the probe
     // pins the actual U+2026; a real font uses its own index (still the ellipsis).
@@ -176,13 +146,12 @@ fn verify(ellipsis_id: u32, natural_width: f32, ellipsis: &[Glyph], clip: &[Glyp
     );
 }
 
-/// Builds one block's CSS: the shared `base` plus a per-block `.block` rule.
+#[doc = include_str!("text_ellipsis_proof.doc/css.md")]
 fn css(base: &str, name: &str, decls: &str) -> String {
     format!("{base}\n/* {name} */ .block {{ {decls} }}")
 }
 
-/// Renders one `.block` (holding a single text node) through the real runtime and
-/// returns its rasterized pixmap plus the composed line's glyphs, in paint order.
+#[doc = include_str!("text_ellipsis_proof.doc/render_block.md")]
 fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Glyph>) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
     let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
@@ -229,7 +198,7 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Glyph>) {
     )
 }
 
-/// The view: a single `.block` element wrapping one text node.
+#[doc = include_str!("text_ellipsis_proof.doc/block_view.md")]
 fn block_view(content: &str) -> View {
     let block = ViewNode::element(ComponentId::from_raw(1))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("block".into())))
@@ -240,7 +209,7 @@ fn block_view(content: &str) -> View {
     View::single(page)
 }
 
-/// Vertically stacks `pixmaps` into one image with thin gray dividers.
+#[doc = include_str!("text_ellipsis_proof.doc/stack.md")]
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
     let width = pixmaps
@@ -271,7 +240,7 @@ fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] at `origin`.
+#[doc = include_str!("text_ellipsis_proof.doc/compile.md")]
 fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
@@ -281,7 +250,7 @@ fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
         .matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("text_ellipsis_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -289,8 +258,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("text_ellipsis_proof.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -308,12 +276,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("text_ellipsis_proof.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("text_ellipsis_proof.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

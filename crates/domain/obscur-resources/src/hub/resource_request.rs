@@ -1,39 +1,22 @@
-//! An intent to acquire a resource from the Resource Hub (spec §5.15).
+#![doc = include_str!("resource_request.doc/_module.md")]
 
 use crate::handle::ResourceKind;
 use crate::hub::ResourceNamespace;
 use crate::source::ResourceSource;
 
-/// A declarative intent to acquire a resource (spec §5.15).
-///
-/// A request names *where* a resource comes from ([`ResourceSource`]), *what*
-/// category it is ([`ResourceKind`]), and the [`ResourceNamespace`] scope that
-/// owns it for disposal and hot reload. Submitting a request to the hub yields a
-/// [`crate::handle::ResourceHandle`]; the request itself performs no I/O.
-///
-/// # Deduplication
-///
-/// Two requests denote the **same** resource when they share the same source
-/// *and* the same kind; the namespace is ownership metadata and does not affect
-/// identity. The hub deduplicates on [`ResourceRequest::dedup_key`], so a second
-/// request for an already-tracked `(source, kind)` returns the existing handle
-/// and bumps its reference count rather than allocating a new resource.
+#[doc = include_str!("resource_request.doc/ResourceRequest.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceRequest {
-    /// Where the resource's bytes come from.
+    #[doc = include_str!("resource_request.doc/source.md")]
     source: ResourceSource,
-    /// The category of resource being requested.
+    #[doc = include_str!("resource_request.doc/kind.md")]
     kind: ResourceKind,
-    /// The disposal / hot-reload scope that owns the resource.
+    #[doc = include_str!("resource_request.doc/namespace.md")]
     namespace: ResourceNamespace,
 }
 
 impl ResourceRequest {
-    /// Creates a request for `source` of the given `kind`, owned by the implicit
-    /// global namespace (spec §5.15).
-    ///
-    /// Use [`ResourceRequest::in_namespace`] to scope it to a specific
-    /// [`ResourceNamespace`].
+    #[doc = include_str!("resource_request.doc/new.md")]
     #[must_use]
     pub fn new(source: ResourceSource, kind: ResourceKind) -> Self {
         Self {
@@ -43,45 +26,38 @@ impl ResourceRequest {
         }
     }
 
-    /// Returns this request scoped to `namespace` for disposal and hot reload
-    /// (spec §5.15).
+    #[doc = include_str!("resource_request.doc/in_namespace.md")]
     #[must_use]
     pub fn in_namespace(mut self, namespace: ResourceNamespace) -> Self {
         self.namespace = namespace;
         self
     }
 
-    /// Returns where the resource's bytes come from.
+    #[doc = include_str!("resource_request.doc/source_2.md")]
     #[must_use]
     pub const fn source(&self) -> &ResourceSource {
         &self.source
     }
 
-    /// Returns the category of resource requested.
+    #[doc = include_str!("resource_request.doc/kind_2.md")]
     #[must_use]
     pub const fn kind(&self) -> ResourceKind {
         self.kind
     }
 
-    /// Returns the disposal / hot-reload scope that owns the resource.
+    #[doc = include_str!("resource_request.doc/namespace_2.md")]
     #[must_use]
     pub const fn namespace(&self) -> &ResourceNamespace {
         &self.namespace
     }
 
-    /// Returns the identity key the hub deduplicates on: `(source, kind)`
-    /// (spec §5.15 deduplication).
-    ///
-    /// The namespace is deliberately excluded — it is ownership metadata, not
-    /// identity — so requests for the same bytes-and-category collapse to one
-    /// resource regardless of scope.
+    #[doc = include_str!("resource_request.doc/dedup_key.md")]
     #[must_use]
     pub const fn dedup_key(&self) -> (&ResourceSource, ResourceKind) {
         (&self.source, self.kind)
     }
 
-    /// Consumes the request into its owned parts, letting the hub build an entry
-    /// without cloning.
+    #[doc = include_str!("resource_request.doc/into_parts.md")]
     pub(crate) fn into_parts(self) -> (ResourceSource, ResourceKind, ResourceNamespace) {
         (self.source, self.kind, self.namespace)
     }

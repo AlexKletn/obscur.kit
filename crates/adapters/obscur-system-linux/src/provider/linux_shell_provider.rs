@@ -1,35 +1,18 @@
-//! A Linux [`ShellProvider`] that opens targets via `xdg-open` (spec §6.11).
-//!
-//! [`LinuxShellProvider`] implements the pure
-//! [`ShellProvider`](obscur_system::shell::ShellProvider) port by shelling out to
-//! the conventional freedesktop opener (`xdg-open`) with
-//! [`std::process::Command`] and no external crates. The open is fire-and-forget:
-//! `xdg-open` hands the target to the desktop and detaches, so a successful spawn
-//! reports [`ShellResult::Opened`] without waiting — the actual application launch
-//! is asynchronous and outside this provider's observation.
-//!
-//! A portal-based implementation (`xdg-desktop-portal` via `ashpd`) is a future
-//! refinement (spec §2.7 target-specific providers); the shell-out path here is
-//! dependency-free and synchronous.
+#![doc = include_str!("linux_shell_provider.doc/_module.md")]
 
 use std::process::Command;
 
 use obscur_system::shell::{ShellProvider, ShellResult, ShellTarget};
 
-/// A Linux [`ShellProvider`] backed by `xdg-open` (spec §6.11).
-///
-/// The provider holds the opener command name (defaulting to `"xdg-open"`) so a
-/// caller may substitute an alternative freedesktop opener. Capability probing
-/// ([`Self::can_open`]) scans `PATH` for the opener without executing it, so it
-/// never pops a GUI; [`Self::open`] spawns the opener and does not wait.
+#[doc = include_str!("linux_shell_provider.doc/LinuxShellProvider.md")]
 #[derive(Debug, Clone)]
 pub struct LinuxShellProvider {
-    /// The opener executable to invoke, e.g. `"xdg-open"`.
+    #[doc = include_str!("linux_shell_provider.doc/opener.md")]
     opener: Box<str>,
 }
 
 impl LinuxShellProvider {
-    /// Creates a provider that opens targets with `xdg-open` (spec §6.11).
+    #[doc = include_str!("linux_shell_provider.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -37,8 +20,7 @@ impl LinuxShellProvider {
         }
     }
 
-    /// Creates a provider that opens targets with a custom `opener` command
-    /// (spec §6.11).
+    #[doc = include_str!("linux_shell_provider.doc/with_opener.md")]
     #[must_use]
     pub fn with_opener(opener: impl Into<Box<str>>) -> Self {
         Self {
@@ -46,7 +28,7 @@ impl LinuxShellProvider {
         }
     }
 
-    /// Returns the opener command this provider invokes (spec §6.11).
+    #[doc = include_str!("linux_shell_provider.doc/opener_2.md")]
     #[must_use]
     pub fn opener(&self) -> &str {
         &self.opener
@@ -54,7 +36,7 @@ impl LinuxShellProvider {
 }
 
 impl Default for LinuxShellProvider {
-    /// The default provider opens targets with `xdg-open`.
+    #[doc = include_str!("linux_shell_provider.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }
@@ -83,11 +65,7 @@ impl ShellProvider for LinuxShellProvider {
     }
 }
 
-/// Extracts the string handed to the opener for `target` (spec §6.11).
-///
-/// A [`ShellTarget::Uri`] contributes the URI, a [`ShellTarget::Document`] its
-/// opaque token, and a [`ShellTarget::File`] its advisory path hint when present,
-/// falling back to the handle token otherwise.
+#[doc = include_str!("linux_shell_provider.doc/target_arg.md")]
 fn target_arg(target: &ShellTarget) -> String {
     match target {
         ShellTarget::Uri(uri) => uri.to_string(),
@@ -99,11 +77,7 @@ fn target_arg(target: &ShellTarget) -> String {
     }
 }
 
-/// Returns whether an executable named `cmd` exists on `PATH` (spec §2.7).
-///
-/// The probe scans the `PATH` environment variable, splitting on `:`, and tests
-/// each `dir/cmd` with [`std::fs::metadata`]. It deliberately does **not** execute
-/// the tool, so capability queries are deterministic and never pop a GUI.
+#[doc = include_str!("linux_shell_provider.doc/tool_available.md")]
 fn tool_available(cmd: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;

@@ -1,24 +1,18 @@
-//! Intent to close a window (spec §6.1).
+#![doc = include_str!("close_window.doc/_module.md")]
 
 use obscur_identity::WindowId;
 
-/// An application's intent to close a window (spec §6.1).
-///
-/// A graceful [`CloseWindow::request`] mirrors a
-/// [`WindowEvent::CloseRequested`](crate::window::WindowEvent::CloseRequested):
-/// it asks the window to close and lets any application-level close
-/// confirmation run. A [`CloseWindow::force`] request bypasses that
-/// confirmation and closes the window unconditionally.
+#[doc = include_str!("close_window.doc/CloseWindow.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CloseWindow {
-    /// The window to close.
+    #[doc = include_str!("close_window.doc/target.md")]
     target: WindowId,
-    /// Whether to bypass the application's close-requested confirmation.
+    #[doc = include_str!("close_window.doc/force.md")]
     force: bool,
 }
 
 impl CloseWindow {
-    /// Requests a graceful close of `target`, honoring any close confirmation.
+    #[doc = include_str!("close_window.doc/request.md")]
     #[must_use]
     pub const fn request(target: WindowId) -> Self {
         Self {
@@ -27,7 +21,7 @@ impl CloseWindow {
         }
     }
 
-    /// Requests a forced close of `target`, bypassing any close confirmation.
+    #[doc = include_str!("close_window.doc/force_2.md")]
     #[must_use]
     pub const fn force(target: WindowId) -> Self {
         Self {
@@ -36,13 +30,13 @@ impl CloseWindow {
         }
     }
 
-    /// Returns the window this request targets.
+    #[doc = include_str!("close_window.doc/target_2.md")]
     #[must_use]
     pub const fn target(&self) -> WindowId {
         self.target
     }
 
-    /// Returns whether this request bypasses the close-requested confirmation.
+    #[doc = include_str!("close_window.doc/is_forced.md")]
     #[must_use]
     pub const fn is_forced(&self) -> bool {
         self.force

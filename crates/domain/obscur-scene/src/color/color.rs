@@ -1,28 +1,20 @@
-//! A typed color: the lightweight `{r, g, b, a}` component tuple.
+#![doc = include_str!("color.doc/_module.md")]
 
-/// An sRGB color with straight alpha, as authored (spec §5.7).
-///
-/// `Color` is deliberately just the component tuple `{ r, g, b, a }`. Its
-/// interpretation — the [`ColorSpace`](super::ColorSpace) the components live in
-/// and the [`AlphaMode`](super::AlphaMode) (straight vs. premultiplied) — is
-/// tracked by the surrounding paint at each use site rather than stored here,
-/// keeping `Color` a small, copyable value. By convention the components are
-/// straight-alpha sRGB in the `0.0..=1.0` range; values outside that range are
-/// permitted (e.g. for wide-gamut or HDR authoring) and are not clamped.
+#[doc = include_str!("color.doc/Color.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Color {
-    /// Red channel, conventionally `0.0..=1.0`.
+    #[doc = include_str!("color.doc/r.md")]
     pub r: f32,
-    /// Green channel, conventionally `0.0..=1.0`.
+    #[doc = include_str!("color.doc/g.md")]
     pub g: f32,
-    /// Blue channel, conventionally `0.0..=1.0`.
+    #[doc = include_str!("color.doc/b.md")]
     pub b: f32,
-    /// Alpha channel, conventionally `0.0..=1.0`.
+    #[doc = include_str!("color.doc/a.md")]
     pub a: f32,
 }
 
 impl Color {
-    /// Fully transparent (all channels zero).
+    #[doc = include_str!("color.doc/TRANSPARENT.md")]
     pub const TRANSPARENT: Self = Self {
         r: 0.0,
         g: 0.0,
@@ -30,7 +22,7 @@ impl Color {
         a: 0.0,
     };
 
-    /// Opaque black.
+    #[doc = include_str!("color.doc/BLACK.md")]
     pub const BLACK: Self = Self {
         r: 0.0,
         g: 0.0,
@@ -38,7 +30,7 @@ impl Color {
         a: 1.0,
     };
 
-    /// Opaque white.
+    #[doc = include_str!("color.doc/WHITE.md")]
     pub const WHITE: Self = Self {
         r: 1.0,
         g: 1.0,
@@ -46,44 +38,37 @@ impl Color {
         a: 1.0,
     };
 
-    /// Creates a color from straight-alpha sRGB components.
+    #[doc = include_str!("color.doc/rgba.md")]
     #[must_use]
     pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
 
-    /// Creates an opaque color (alpha `1.0`) from sRGB components.
+    #[doc = include_str!("color.doc/rgb.md")]
     #[must_use]
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }
 
-    /// Returns a copy of this color with its alpha replaced by `a`.
+    #[doc = include_str!("color.doc/with_alpha.md")]
     #[must_use]
     pub const fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
     }
 
-    /// Returns whether the color is fully opaque (`a >= 1.0`).
+    #[doc = include_str!("color.doc/is_opaque.md")]
     #[must_use]
     pub fn is_opaque(self) -> bool {
         self.a >= 1.0
     }
 
-    /// Returns whether the color is fully transparent (`a <= 0.0`).
+    #[doc = include_str!("color.doc/is_transparent.md")]
     #[must_use]
     pub fn is_transparent(self) -> bool {
         self.a <= 0.0
     }
 
-    /// Returns the premultiplied form of this color: `(r*a, g*a, b*a, a)`.
-    ///
-    /// This is a numeric transform only; the result still lives in the same
-    /// color channels and color space — it merely folds alpha into the color
-    /// channels, as required by premultiplied-alpha compositing (spec §5.7).
-    /// The [`AlphaMode`](super::AlphaMode) of the surrounding paint should be
-    /// updated to [`Premultiplied`](super::AlphaMode::Premultiplied) at the use
-    /// site.
+    #[doc = include_str!("color.doc/premultiply.md")]
     #[must_use]
     pub fn premultiply(self) -> Color {
         Self {

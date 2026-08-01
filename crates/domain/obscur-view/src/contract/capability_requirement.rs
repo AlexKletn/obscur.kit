@@ -1,23 +1,16 @@
-//! `CapabilityRequirement`: how strongly a component needs a capability.
+#![doc = include_str!("capability_requirement.doc/_module.md")]
 
-/// Whether a component strictly requires a capability or merely benefits from
-/// it (spec §2.13).
-///
-/// This is an independent trait of a capability dependency, so it lives in its
-/// own type. `Required` means the component cannot function without the
-/// capability; `Optional` means the component adapts gracefully when it is
-/// absent.
+#[doc = include_str!("capability_requirement.doc/CapabilityRequirement.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityRequirement {
-    /// The component cannot function without the capability.
+    #[doc = include_str!("capability_requirement.doc/Required.md")]
     Required,
-    /// The component can function without the capability, using it only when
-    /// present.
+    #[doc = include_str!("capability_requirement.doc/Optional.md")]
     Optional,
 }
 
 impl CapabilityRequirement {
-    /// Returns whether this requirement is mandatory.
+    #[doc = include_str!("capability_requirement.doc/is_required.md")]
     #[must_use]
     pub const fn is_required(self) -> bool {
         matches!(self, Self::Required)

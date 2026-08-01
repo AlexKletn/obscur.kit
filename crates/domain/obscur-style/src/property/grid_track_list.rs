@@ -1,53 +1,24 @@
-//! `GridTrackList`: a style-local `grid-template-columns` / `-rows` value —
-//! the ordered track sizing functions plus the names on each grid line.
+#![doc = include_str!("grid_track_list.doc/_module.md")]
 
 use crate::property::GridTrack;
 
-/// A grid container's `grid-template-columns` / `grid-template-rows` value: the
-/// flat, author-order list of [`GridTrack`] sizing functions together with the
-/// `[name]` line names that were interleaved with them (spec §4.1, §4.13).
-///
-/// A track list names lines as well as sizing tracks: `[sidebar-start] 200px
-/// [sidebar-end main-start] 1fr [main-end]` sizes two tracks (`200px`, `1fr`) and
-/// names the three grid lines around them. The sizes live in
-/// [`tracks`](GridTrackList::tracks) and the names in
-/// [`line_names`](GridTrackList::line_names), one bucket per grid line — so
-/// `line_names.len() == tracks.len() + 1` whenever any name was authored (a track
-/// list with no `[name]` group carries an **empty** `line_names`, keeping the
-/// no-names path allocation-free and byte-identical to the pre-named-lines value).
-///
-/// A line can carry several names (`[a b]`), so each bucket is itself a list. A
-/// child's `grid-column: <name>` is resolved against this list in the runtime, the
-/// same way `grid-area: <name>` is resolved against the container's
-/// `grid-template-areas`.
-///
-/// # Determinism
-///
-/// `GridTrackList` owns its data with no interior mutability, so a container's
-/// template is a deterministic value with a stable [`PartialEq`]. Because
-/// [`GridTrack`] carries `f32` data this derives [`PartialEq`] but not [`Eq`].
+#[doc = include_str!("grid_track_list.doc/GridTrackList.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct GridTrackList {
-    /// The track sizing functions, in author order (already flat: any `repeat(…)`
-    /// was expanded before this value was built).
+    #[doc = include_str!("grid_track_list.doc/tracks.md")]
     tracks: Box<[GridTrack]>,
-    /// The names on each grid line, indexed by 0-based line position (line `i` is
-    /// the `i`-th boundary, so line `0` is before the first track). Empty when no
-    /// `[name]` group was authored; otherwise `tracks.len() + 1` buckets, each a
-    /// (possibly empty) list of the names on that line.
+    #[doc = include_str!("grid_track_list.doc/line_names.md")]
     line_names: Box<[Box<[Box<str>]>]>,
 }
 
 impl GridTrackList {
-    /// Builds a track list from its tracks and per-line names.
-    ///
-    /// Pass an empty `line_names` for a list with no authored `[name]` groups.
+    #[doc = include_str!("grid_track_list.doc/new.md")]
     #[must_use]
     pub fn new(tracks: Box<[GridTrack]>, line_names: Box<[Box<[Box<str>]>]>) -> Self {
         Self { tracks, line_names }
     }
 
-    /// Builds a track list with no line names from an ordered iterator of tracks.
+    #[doc = include_str!("grid_track_list.doc/from_tracks.md")]
     #[must_use]
     pub fn from_tracks<I>(tracks: I) -> Self
     where
@@ -59,29 +30,25 @@ impl GridTrackList {
         }
     }
 
-    /// The track sizing functions, in author order.
+    #[doc = include_str!("grid_track_list.doc/tracks_2.md")]
     #[must_use]
     pub fn tracks(&self) -> &[GridTrack] {
         &self.tracks
     }
 
-    /// Returns `true` when any track in this list is sized with a `ch` term.
-    ///
-    /// Line names carry no lengths, so only the tracks are consulted. See
-    /// [`GridTrack::uses_ch`].
+    #[doc = include_str!("grid_track_list.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         self.tracks.iter().any(GridTrack::uses_ch)
     }
 
-    /// The names on each grid line, indexed by 0-based line position. Empty when
-    /// no `[name]` group was authored.
+    #[doc = include_str!("grid_track_list.doc/line_names_2.md")]
     #[must_use]
     pub fn line_names(&self) -> &[Box<[Box<str>]>] {
         &self.line_names
     }
 
-    /// Consumes the list, returning its tracks (dropping any line names).
+    #[doc = include_str!("grid_track_list.doc/into_tracks.md")]
     #[must_use]
     pub fn into_tracks(self) -> Box<[GridTrack]> {
         self.tracks

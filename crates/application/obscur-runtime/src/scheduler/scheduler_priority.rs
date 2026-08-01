@@ -1,52 +1,26 @@
-//! Scheduler priority bands (spec §3.6): [`SchedulerPriority`].
+#![doc = include_str!("scheduler_priority.doc/_module.md")]
 
 use crate::frame::FrameReason;
 
-/// The priority band a piece of frame work belongs to (spec §3.6).
-///
-/// The variants are declared in priority order, highest urgency first, so the
-/// derived [`Ord`] makes the *most urgent* band the *smallest* value. A
-/// min-first queue (see [`SchedulerQueue`](super::SchedulerQueue)) therefore
-/// pops the most urgent work. In short: **lower [`Ord`] == higher urgency**.
-///
-/// The bands map onto the numbered priority list in spec §3.6:
-///
-/// 1. input / focus / pointer / IME → [`SchedulerPriority::Input`]
-/// 2. UI transaction commit → [`SchedulerPriority::Commit`]
-/// 3. current-frame animation, layout and paint → [`SchedulerPriority::CurrentFrame`]
-/// 4. resource completion → [`SchedulerPriority::ResourceCompletion`]
-/// 5. background shaping / decoding / cache → [`SchedulerPriority::Background`]
-/// 6. telemetry and development diagnostics → [`SchedulerPriority::Diagnostics`]
+#[doc = include_str!("scheduler_priority.doc/SchedulerPriority.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SchedulerPriority {
-    /// §3.6 (1): input, focus, pointer and IME work — the most urgent band.
+    #[doc = include_str!("scheduler_priority.doc/Input.md")]
     Input,
-    /// §3.6 (2): committing a UI transaction.
+    #[doc = include_str!("scheduler_priority.doc/Commit.md")]
     Commit,
-    /// §3.6 (3): the current frame's animation, layout and paint.
+    #[doc = include_str!("scheduler_priority.doc/CurrentFrame.md")]
     CurrentFrame,
-    /// §3.6 (4): completion of an asynchronous resource load.
+    #[doc = include_str!("scheduler_priority.doc/ResourceCompletion.md")]
     ResourceCompletion,
-    /// §3.6 (5): background shaping, decoding and cache work.
-    ///
-    /// This band has no corresponding [`FrameReason`]: it covers subsystem work
-    /// that is driven by budgeting and starvation prevention rather than by a
-    /// frame request, so [`SchedulerPriority::from_reason`] never returns it.
+    #[doc = include_str!("scheduler_priority.doc/Background.md")]
     Background,
-    /// §3.6 (6): telemetry and development diagnostics — the least urgent band.
+    #[doc = include_str!("scheduler_priority.doc/Diagnostics.md")]
     Diagnostics,
 }
 
 impl SchedulerPriority {
-    /// Returns the priority band for a given [`FrameReason`].
-    ///
-    /// The mapping follows spec §3.6: input dispatch is the most urgent, UI
-    /// commits next, then the current frame's work (animation samples plus the
-    /// layout and paint driven by window changes and external render requests),
-    /// then resource completion, and finally diagnostics captures.
-    ///
-    /// Note that [`SchedulerPriority::Background`] is never returned: no
-    /// [`FrameReason`] maps to it (see its variant documentation).
+    #[doc = include_str!("scheduler_priority.doc/from_reason.md")]
     #[must_use]
     pub const fn from_reason(reason: FrameReason) -> Self {
         match reason {
@@ -63,19 +37,13 @@ impl SchedulerPriority {
         }
     }
 
-    /// Returns whether `self` is more urgent than `other`.
-    ///
-    /// Because lower [`Ord`] means higher urgency, this is simply `self < other`.
+    #[doc = include_str!("scheduler_priority.doc/is_more_urgent_than.md")]
     #[must_use]
     pub const fn is_more_urgent_than(self, other: Self) -> bool {
         (self as u8) < (other as u8)
     }
 
-    /// Returns the urgency rank of this band, where `0` is the most urgent.
-    ///
-    /// The rank matches the declaration order, so
-    /// [`SchedulerPriority::Input`] is `0` and
-    /// [`SchedulerPriority::Diagnostics`] is `5`.
+    #[doc = include_str!("scheduler_priority.doc/rank.md")]
     #[must_use]
     pub const fn rank(self) -> u8 {
         self as u8

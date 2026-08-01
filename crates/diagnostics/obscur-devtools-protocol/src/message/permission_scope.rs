@@ -1,24 +1,20 @@
-//! Capability scopes and the granted scope set (spec §7.7).
+#![doc = include_str!("permission_scope.doc/_module.md")]
 
-/// A single class of DevTools capability an endpoint may hold.
-///
-/// Scopes separate the four capability classes so the server can grant them
-/// independently: reading live state, subscribing to event streams, issuing
-/// control actions, and injecting synthetic events (spec §7.7).
+#[doc = include_str!("permission_scope.doc/PermissionScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PermissionScope {
-    /// Read live inspectable state (tree, styles, layout, …).
+    #[doc = include_str!("permission_scope.doc/Read.md")]
     Read,
-    /// Subscribe to and unsubscribe from event streams.
+    #[doc = include_str!("permission_scope.doc/Subscribe.md")]
     Subscribe,
-    /// Issue control actions (pause, step, inspect-mode).
+    #[doc = include_str!("permission_scope.doc/Control.md")]
     Control,
-    /// Inject synthetic input/command events.
+    #[doc = include_str!("permission_scope.doc/Inject.md")]
     Inject,
 }
 
 impl PermissionScope {
-    /// The bit this scope occupies within a [`ScopeSet`].
+    #[doc = include_str!("permission_scope.doc/bit.md")]
     const fn bit(self) -> u8 {
         match self {
             Self::Read => 1 << 0,
@@ -29,40 +25,36 @@ impl PermissionScope {
     }
 }
 
-/// The set of scopes granted to an endpoint.
-///
-/// Modeled as a small bitset over the four [`PermissionScope`] values. The
-/// server builds this from its auth store during the handshake and the runtime
-/// consults it before executing each command.
+#[doc = include_str!("permission_scope.doc/ScopeSet.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ScopeSet(u8);
 
 impl ScopeSet {
-    /// Creates an empty scope set granting no capabilities.
+    #[doc = include_str!("permission_scope.doc/empty.md")]
     #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
-    /// Creates a scope set containing a single scope.
+    #[doc = include_str!("permission_scope.doc/single.md")]
     #[must_use]
     pub const fn single(scope: PermissionScope) -> Self {
         Self(scope.bit())
     }
 
-    /// A read-only scope set (`Read` only) — a safe default for production.
+    #[doc = include_str!("permission_scope.doc/all_read.md")]
     #[must_use]
     pub const fn all_read() -> Self {
         Self::single(PermissionScope::Read)
     }
 
-    /// An observer scope set granting `Read` + `Subscribe` (no control).
+    #[doc = include_str!("permission_scope.doc/observer.md")]
     #[must_use]
     pub const fn observer() -> Self {
         Self(PermissionScope::Read.bit() | PermissionScope::Subscribe.bit())
     }
 
-    /// A scope set granting every scope — development builds only (spec §7.7).
+    #[doc = include_str!("permission_scope.doc/all.md")]
     #[must_use]
     pub const fn all() -> Self {
         Self(
@@ -73,28 +65,25 @@ impl ScopeSet {
         )
     }
 
-    /// Returns whether `scope` is present in the set.
+    #[doc = include_str!("permission_scope.doc/contains.md")]
     #[must_use]
     pub const fn contains(self, scope: PermissionScope) -> bool {
         self.0 & scope.bit() != 0
     }
 
-    /// Returns a copy of the set with `scope` added.
+    #[doc = include_str!("permission_scope.doc/with.md")]
     #[must_use]
     pub const fn with(self, scope: PermissionScope) -> Self {
         Self(self.0 | scope.bit())
     }
 
-    /// Returns a copy of the set with `scope` removed.
-    ///
-    /// Used to exclude control (and injection) entirely in production builds
-    /// (spec §7.7).
+    #[doc = include_str!("permission_scope.doc/without.md")]
     #[must_use]
     pub const fn without(self, scope: PermissionScope) -> Self {
         Self(self.0 & !scope.bit())
     }
 
-    /// Returns whether the set grants no scopes.
+    #[doc = include_str!("permission_scope.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0

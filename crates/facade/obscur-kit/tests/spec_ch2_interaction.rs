@@ -1,16 +1,4 @@
-//! **SPECIFICATION-DERIVED** event, pointer, focus, command and selection cases
-//! for obscur.kit §2.3 (*Events*), §2.4 (*Pointer, gesture and hit behavior*),
-//! §2.5 (*Focus*), §2.6 (*Command model*) and §2.7 (*General selection*).
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expectation below was produced by an agent reading obscur.kit §2 with
-//! **no access to this repository's source**. The cases are a statement of what
-//! the implementation owes the spec, not a record of what it currently does. A
-//! failure here is a defect report about the engine (or, occasionally, about the
-//! spec) and must not be "corrected" by editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch2_interaction.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch2_support/mod.rs"]
@@ -32,18 +20,14 @@ use obscur_kit::view::view::{
 };
 use support::{commit_styled, one_by_class, small_runtime};
 
-/// A `10 + n` node handle, for the pure routing cases that need no tree.
+#[doc = include_str!("spec_ch2_interaction.doc/node.md")]
 fn node(raw: u64) -> NodeId {
     NodeId::from_raw(raw)
 }
 
 // ------------------------------------------------------------------- §2.3
 
-/// §2.3: "Event propagation:\n\n1. capture;\n2. target;\n3. bubble;\n4. default
-/// action."
-///
-/// The default-action step is asserted separately from the phase order because
-/// it is a distinct link in the chain, not a phase.
+#[doc = include_str!("spec_ch2_interaction.doc/propagation_is_capture_outermost_first_then_target_then_bubble_innermost_first.md")]
 #[test]
 fn propagation_is_capture_outermost_first_then_target_then_bubble_innermost_first() {
     let (a, b, c) = (node(1), node(2), node(3));
@@ -63,12 +47,7 @@ fn propagation_is_capture_outermost_first_then_target_then_bubble_innermost_firs
     );
 }
 
-/// §2.3: "- `stop_propagation`;" and "- `stop_immediate_propagation`;"
-///
-/// The two must not be aliased to one "stopped" flag: under that
-/// implementation the two runs produce identical state, and the difference — a
-/// second same-node listener still firing — is exactly the case no
-/// single-listener test exercises.
+#[doc = include_str!("spec_ch2_interaction.doc/stop_propagation_and_stop_immediate_propagation_are_distinct_states.md")]
 #[test]
 fn stop_propagation_and_stop_immediate_propagation_are_distinct_states() {
     let mut stop = EventPropagation::new();
@@ -88,7 +67,7 @@ fn stop_propagation_and_stop_immediate_propagation_are_distinct_states() {
     );
 }
 
-/// §2.3: "- `prevent_default`;" and "Event propagation: … 4. default action."
+#[doc = include_str!("spec_ch2_interaction.doc/prevent_default_and_stop_propagation_are_orthogonal.md")]
 #[test]
 fn prevent_default_and_stop_propagation_are_orthogonal() {
     let mut prevented = EventPropagation::new();
@@ -108,7 +87,7 @@ fn prevent_default_and_stop_propagation_are_orthogonal() {
     );
 }
 
-/// §2.3: "- `target`;" and "- `current_target`;"
+#[doc = include_str!("spec_ch2_interaction.doc/target_and_current_target_differ_when_the_event_bubbles.md")]
 #[test]
 fn target_and_current_target_differ_when_the_event_bubbles() {
     // A > B > C, with the *click binding on A* — so a press landing on C must
@@ -139,27 +118,7 @@ fn target_and_current_target_differ_when_the_event_bubbles() {
     );
 }
 
-/// §2.3: "- trusted/untrusted origin."
-///
-/// WEAKENED then RESTORED 2026-07-19, by the owner's decision. A correction pass
-/// dropped the gating assertion on the literal reading that §2.3's one bullet
-/// requires the origin to be *reported* and says nothing about acting on it.
-/// That reading is defensible and the assertion is restored anyway: the gate
-/// genuinely does not exist, so weakening the test would turn a known
-/// security-relevant gap from visibly red into silently green — which is the
-/// exact defect the spec-derived suite was built to remove. A red test is the
-/// honest state.
-///
-/// The general ruling ("where a test demands more than the spec's text says, the
-/// spec wins") was given on examples about version-query APIs and template tags.
-/// It was not given on a trust boundary, and is not extended to one here.
-///
-/// Candidate spec amendment, and it is now load-bearing rather than optional:
-/// state whether any default action is gated on trust, and whether the gate
-/// belongs to the runtime or the component. §9 protects "host control over
-/// plugin capabilities" as a non-goal to weaken, and §1.8 names capability-based
-/// services as a condition of running untrusted code — so the value this guards
-/// is in the spec even though §2.3's enforcement sentence is not.
+#[doc = include_str!("spec_ch2_interaction.doc/a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run.md")]
 #[test]
 fn a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run() {
     let mut rt = small_runtime();
@@ -198,8 +157,7 @@ fn a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run() {
 
 // ------------------------------------------------------------------- §2.4
 
-/// §2.4: "Pointer capture is per pointer ID and is released on pointer
-/// completion, node removal, window close or system loss."
+#[doc = include_str!("spec_ch2_interaction.doc/pointer_capture_is_per_pointer_id.md")]
 #[test]
 fn pointer_capture_is_per_pointer_id() {
     let mut registry = PointerCaptureRegistry::new();
@@ -231,8 +189,7 @@ fn pointer_capture_is_per_pointer_id() {
     );
 }
 
-/// §2.4: "Touch does not synthesize persistent hover. Pen hover depends on
-/// device capability."
+#[doc = include_str!("spec_ch2_interaction.doc/a_touch_leaves_no_persistent_hover_after_release.md")]
 #[test]
 fn a_touch_leaves_no_persistent_hover_after_release() {
     let mut rt = small_runtime();
@@ -261,8 +218,7 @@ fn a_touch_leaves_no_persistent_hover_after_release() {
 
 // ------------------------------------------------------------------- §2.5
 
-/// §2.5: "- focus-visible semantics;" and "Focus is not modeled as a CSS flag.
-/// CSS consumes focus state produced by the focus subsystem."
+#[doc = include_str!("spec_ch2_interaction.doc/a_mouse_click_focuses_without_making_focus_visible.md")]
 #[test]
 fn a_mouse_click_focuses_without_making_focus_visible() {
     let mut rt = small_runtime();
@@ -286,8 +242,7 @@ fn a_mouse_click_focuses_without_making_focus_visible() {
 
 // ------------------------------------------------------------------- §2.6
 
-/// §2.6: "Command routing:\n\n1. focused node;\n2. focus scope;\n3.
-/// ancestors;\n4. window;\n5. application fallback."
+#[doc = include_str!("spec_ch2_interaction.doc/command_routing_visits_the_five_links_in_the_spec_s_order.md")]
 #[test]
 fn command_routing_visits_the_five_links_in_the_spec_s_order() {
     use obscur_kit::interaction::focus::{FocusScope, FocusScopeId};
@@ -338,7 +293,7 @@ fn command_routing_visits_the_five_links_in_the_spec_s_order() {
     );
 }
 
-/// §2.6: "IME and text input are separate from keydown."
+#[doc = include_str!("spec_ch2_interaction.doc/an_ime_composition_delivers_its_text_once_and_not_through_keydown.md")]
 #[test]
 fn an_ime_composition_delivers_its_text_once_and_not_through_keydown() {
     use obscur_kit::text::ime::CompositionEvent;
@@ -371,15 +326,7 @@ fn an_ime_composition_delivers_its_text_once_and_not_through_keydown() {
 
 // ------------------------------------------------------------------- §2.7
 
-/// §2.7: "- anchor and active item;" and "- range selection;"
-///
-/// SETUP REPAIRED 2026-07-19: this drove `SelectionPolicy::default()`, which is
-/// `SelectionMode::Single` — and for Single, collapsing a range to its last item
-/// is the documented, correct behaviour, so the case asserted multi-selection
-/// against a policy that forbids it. §2.7 lists "- single selection;" and
-/// "- multi-selection;" as separate capabilities, and a range gesture is only
-/// meaningful under the latter, so the policy is now explicitly Multiple. The
-/// assertions are unchanged.
+#[doc = include_str!("spec_ch2_interaction.doc/the_selection_anchor_persists_across_successive_shift_clicks.md")]
 #[test]
 fn the_selection_anchor_persists_across_successive_shift_clicks() {
     let policy = SelectionPolicy::new(SelectionMode::Multiple);
@@ -428,7 +375,7 @@ fn the_selection_anchor_persists_across_successive_shift_clicks() {
 
 // ------------------------------------------------------------------ helpers
 
-/// A container carrying `class` and the given children.
+#[doc = include_str!("spec_ch2_interaction.doc/el.md")]
 fn el(class: &str, kids: Vec<ViewNode>) -> ViewNode {
     ViewNode::element(container())
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
@@ -439,7 +386,7 @@ fn container() -> ComponentId {
     obscur_kit::ui_ir::name_binding::CONTAINER
 }
 
-/// Drives a press and a release of `pointer` at `(x, y)`, trusted.
+#[doc = include_str!("spec_ch2_interaction.doc/press_release.md")]
 fn press_release(rt: &mut UiRuntime, pointer: PointerId, device: PointerDevice, x: f32, y: f32) {
     for kind in [PointerEventKind::Down, PointerEventKind::Up] {
         let _ = rt.handle_pointer(
@@ -448,7 +395,7 @@ fn press_release(rt: &mut UiRuntime, pointer: PointerId, device: PointerDevice, 
     }
 }
 
-/// Drives a full click at `(x, y)`, returning the release's dispatch.
+#[doc = include_str!("spec_ch2_interaction.doc/click.md")]
 fn click(
     rt: &mut UiRuntime,
     x: f32,
@@ -470,8 +417,7 @@ fn click(
     )))
 }
 
-/// Referenced so the `UiEvent`/`EventOrigin` imports stay live for the
-/// propagation case's envelope.
+#[doc = include_str!("spec_ch2_interaction.doc/_envelope.md")]
 #[allow(dead_code)]
 fn _envelope() -> UiEvent {
     UiEvent::new(EventOrigin::Synthetic, node(1))

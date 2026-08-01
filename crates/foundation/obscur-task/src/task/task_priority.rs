@@ -1,13 +1,12 @@
-//! Scheduling priority of a task.
+#![doc = include_str!("task_priority.doc/_module.md")]
 
-/// Coarse scheduling priority (spec §3.6). Lower-priority work must not starve,
-/// but yields to input and commit work.
+#[doc = include_str!("task_priority.doc/TaskPriority.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TaskPriority {
-    /// Background maintenance (caches, telemetry).
+    #[doc = include_str!("task_priority.doc/Background.md")]
     Background,
-    /// Normal application work.
+    #[doc = include_str!("task_priority.doc/Normal.md")]
     Normal,
-    /// Latency-sensitive work adjacent to input.
+    #[doc = include_str!("task_priority.doc/Interactive.md")]
     Interactive,
 }

@@ -1,5 +1,4 @@
-//! `LanguageTag`: the current locale, and the fallback chain it resolves through
-//! (spec §7.2).
+#![doc = include_str!("language_tag.doc/_module.md")]
 
 use std::fmt;
 
@@ -7,38 +6,19 @@ use obscur_text::shaping::TextDirection;
 
 use crate::locale::script_direction::{language_direction, script_direction};
 
-/// A BCP-47 language tag: the *current locale* of spec §7.2.
-///
-/// The supported shape is `language[-script][-region]` — `ru`, `ru-RU`,
-/// `sr-Latn-RS`, `az-Arab-IR`. That is the subset every message catalogue and
-/// every plural rule set is keyed by; variants, extensions and private-use
-/// subtags (`de-DE-1996`, `en-US-u-ca-buddhist`, `x-pig-latin`) are **rejected**
-/// by [`parse`](Self::parse) rather than silently dropped, because dropping them
-/// would answer a question that was not asked.
-///
-/// Subtags are canonicalised on parse — language lower-case, script title-case,
-/// region upper-case — so `RU-ru` and `ru-RU` are the same tag and compare equal.
-/// The separator is `-`; a POSIX-flavoured `ru_RU.UTF-8` is an *operating system*
-/// spelling, and normalising it is the job of whatever adapter read it off the
-/// host, not of this domain type.
+#[doc = include_str!("language_tag.doc/LanguageTag.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LanguageTag {
-    /// The language subtag, canonical lower-case (2–3 alphabetic characters).
+    #[doc = include_str!("language_tag.doc/language.md")]
     language: Box<str>,
-    /// The script subtag, canonical title-case (4 alphabetic characters).
+    #[doc = include_str!("language_tag.doc/script.md")]
     script: Option<Box<str>>,
-    /// The region subtag, canonical upper-case (2 alphabetic) or 3 numeric.
+    #[doc = include_str!("language_tag.doc/region.md")]
     region: Option<Box<str>>,
 }
 
 impl LanguageTag {
-    /// The undetermined root locale, `und`.
-    ///
-    /// This is CLDR's `root`/`und`: the last link of every
-    /// [`fallback_chain`](Self::fallback_chain) and the locale a
-    /// [`Localizer`](crate::catalog::Localizer) resolves against when it has been
-    /// told nothing. It is not "English" — that mistake is the whole reason §7.2
-    /// names Russian in its minimum.
+    #[doc = include_str!("language_tag.doc/root.md")]
     #[must_use]
     pub fn root() -> Self {
         Self {
@@ -48,14 +28,7 @@ impl LanguageTag {
         }
     }
 
-    /// Parses a BCP-47 `language[-script][-region]` tag, canonicalising each
-    /// subtag; returns `None` for anything outside that shape.
-    ///
-    /// Rejected, deliberately: an empty string, a 1- or 4+-letter language, a
-    /// subtag that is not the right length *and* character class for its
-    /// position, and any tag with a fourth subtag. There is no partial success —
-    /// a caller that hands over `en-US-u-ca-buddhist` gets `None`, not a silent
-    /// `en-US`.
+    #[doc = include_str!("language_tag.doc/parse.md")]
     #[must_use]
     pub fn parse(tag: &str) -> Option<Self> {
         let mut parts = tag.split('-');
@@ -91,42 +64,31 @@ impl LanguageTag {
         })
     }
 
-    /// Returns the canonical lower-case language subtag (`ru`, `en`, `und`).
+    #[doc = include_str!("language_tag.doc/language_2.md")]
     #[must_use]
     pub fn language(&self) -> &str {
         &self.language
     }
 
-    /// Returns the canonical title-case script subtag, if the tag names one.
+    #[doc = include_str!("language_tag.doc/script_2.md")]
     #[must_use]
     pub fn script(&self) -> Option<&str> {
         self.script.as_deref()
     }
 
-    /// Returns the canonical upper-case region subtag, if the tag names one.
+    #[doc = include_str!("language_tag.doc/region_2.md")]
     #[must_use]
     pub fn region(&self) -> Option<&str> {
         self.region.as_deref()
     }
 
-    /// Returns whether this is the undetermined [`root`](Self::root) locale.
+    #[doc = include_str!("language_tag.doc/is_root.md")]
     #[must_use]
     pub fn is_root(&self) -> bool {
         &*self.language == "und" && self.script.is_none() && self.region.is_none()
     }
 
-    /// Returns the base writing direction this locale is written in
-    /// (spec §7.2 RTL integration, §7.3).
-    ///
-    /// An explicit script decides it outright — that is what a script subtag is
-    /// *for*, and `az-Arab` is right-to-left while `az-Latn` is not. With no
-    /// script the language's likely script decides, via CLDR's likely-subtags
-    /// inference (see [`script_direction`](crate::locale::script_direction)); an
-    /// unknown language answers left-to-right.
-    ///
-    /// This is the *base* direction only. It seeds a paragraph; the per-character
-    /// bidi levels inside one are the itemizer's job, and a Hebrew paragraph
-    /// still lays its embedded Latin out left-to-right.
+    #[doc = include_str!("language_tag.doc/direction.md")]
     #[must_use]
     pub fn direction(&self) -> TextDirection {
         self.script
@@ -134,17 +96,7 @@ impl LanguageTag {
             .map_or_else(|| language_direction(&self.language), script_direction)
     }
 
-    /// Returns the lookup fallback chain, most specific first, always ending at
-    /// [`root`](Self::root) (spec §7.2 fallback).
-    ///
-    /// This is BCP-47 lookup: truncate one subtag from the right at a time.
-    /// `sr-Latn-RS` → `sr-Latn` → `sr` → `und`. A resolver walks it in order and
-    /// takes the first hit, so a catalogue that translates `sr` but not
-    /// `sr-Latn-RS` still answers, and one that translates neither falls through
-    /// to `und` rather than to English.
-    ///
-    /// The chain always contains `self` first and `und` last; for `und` itself it
-    /// is one element long.
+    #[doc = include_str!("language_tag.doc/fallback_chain.md")]
     #[must_use]
     pub fn fallback_chain(&self) -> Vec<Self> {
         let mut chain = vec![self.clone()];
@@ -171,15 +123,14 @@ impl LanguageTag {
 }
 
 impl Default for LanguageTag {
-    /// The undetermined [`root`](Self::root) locale — *not* `en`.
+    #[doc = include_str!("language_tag.doc/default.md")]
     fn default() -> Self {
         Self::root()
     }
 }
 
 impl fmt::Display for LanguageTag {
-    /// Writes the canonical `language[-Script][-REGION]` spelling, which
-    /// [`parse`](Self::parse) round-trips.
+    #[doc = include_str!("language_tag.doc/fmt.md")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.language)?;
         if let Some(script) = &self.script {
@@ -192,7 +143,7 @@ impl fmt::Display for LanguageTag {
     }
 }
 
-/// Canonicalises a 4-letter script subtag to CLDR's title-case spelling.
+#[doc = include_str!("language_tag.doc/title_case.md")]
 fn title_case(script: &str) -> Box<str> {
     let mut out = String::with_capacity(script.len());
     for (i, c) in script.chars().enumerate() {
@@ -205,8 +156,7 @@ fn title_case(script: &str) -> Box<str> {
     out.into_boxed_str()
 }
 
-/// Whether `part` is a BCP-47 region subtag: two letters (`RU`) or three digits
-/// (`419`).
+#[doc = include_str!("language_tag.doc/is_region.md")]
 fn is_region(part: &str) -> bool {
     (part.len() == 2 && part.chars().all(|c| c.is_ascii_alphabetic()))
         || (part.len() == 3 && part.chars().all(|c| c.is_ascii_digit()))

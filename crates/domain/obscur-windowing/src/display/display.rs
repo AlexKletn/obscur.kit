@@ -1,76 +1,54 @@
-//! A single monitor and its geometry, modes, and color capability (spec §6.6).
+#![doc = include_str!("display.doc/_module.md")]
 
 use obscur_geometry::{Rect, ScaleFactor};
 
 use crate::display::{DisplayColorCapability, DisplayMode};
 
-/// Stable, opaque identifier for a display.
-///
-/// `DisplayId` is a tightly-coupled part of [`Display`]: it identifies one
-/// monitor and has no meaning apart from the display model, so it is colocated
-/// here rather than given its own module. Backed by an integer handle; the
-/// numeric value carries no meaning outside the subsystem that mints it.
+#[doc = include_str!("display.doc/DisplayId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DisplayId(u64);
 
 impl DisplayId {
-    /// Wraps a raw handle value into a `DisplayId`.
+    #[doc = include_str!("display.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw handle value backing this identifier.
+    #[doc = include_str!("display.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// A single monitor: its identity, geometry, video modes, and color capability
-/// (spec §6.6).
-///
-/// Geometry fields are `Option` so absence can be modeled honestly. In
-/// particular, [`Self::logical_bounds`] is `None` on platforms that do not
-/// expose global screen coordinates — a Wayland compositor, for example, never
-/// reveals where a monitor sits in a global logical space. `None` therefore
-/// means "honestly unavailable", and must never be conflated with a fabricated
-/// `(0, 0)` origin.
+#[doc = include_str!("display.doc/Display.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Display {
-    /// The stable identifier of this display.
+    #[doc = include_str!("display.doc/id.md")]
     pub id: DisplayId,
-    /// The human-readable monitor name, or `None` if unknown.
+    #[doc = include_str!("display.doc/name.md")]
     pub name: Option<Box<str>>,
-    /// The display's position and size in the global logical coordinate space,
-    /// or `None` when global coordinates are unavailable.
-    ///
-    /// `None` is the honest representation on platforms such as Wayland that do
-    /// not expose global screen coordinates; it does not mean the display sits
-    /// at the origin.
+    #[doc = include_str!("display.doc/logical_bounds.md")]
     pub logical_bounds: Option<Rect>,
-    /// The display's bounds in physical pixels, or `None` where unavailable.
+    #[doc = include_str!("display.doc/physical_bounds.md")]
     pub physical_bounds: Option<Rect>,
-    /// The safe/usable area excluding panels and other reserved regions, or
-    /// `None` if unknown.
+    #[doc = include_str!("display.doc/work_area.md")]
     pub work_area: Option<Rect>,
-    /// The display's scale factor mapping logical to physical pixels.
+    #[doc = include_str!("display.doc/scale_factor.md")]
     pub scale_factor: ScaleFactor,
-    /// The currently active video mode.
+    #[doc = include_str!("display.doc/current_mode.md")]
     pub current_mode: DisplayMode,
-    /// The video modes this display can present.
+    #[doc = include_str!("display.doc/available_modes.md")]
     pub available_modes: Vec<DisplayMode>,
-    /// The display's color and HDR capability.
+    #[doc = include_str!("display.doc/color.md")]
     pub color: DisplayColorCapability,
-    /// Whether this is the primary display.
+    #[doc = include_str!("display.doc/is_primary.md")]
     pub is_primary: bool,
 }
 
 impl Display {
-    /// Creates a display with the given identity and current mode, defaulting
-    /// everything else: no name, all bounds `None` (honest absence), an identity
-    /// scale factor, no additional modes, the baseline color capability, and not
-    /// primary.
+    #[doc = include_str!("display.doc/new.md")]
     #[must_use]
     pub fn new(id: DisplayId, current_mode: DisplayMode) -> Self {
         Self {
@@ -87,128 +65,123 @@ impl Display {
         }
     }
 
-    /// Sets the human-readable monitor name, returning the updated display.
+    #[doc = include_str!("display.doc/with_name.md")]
     #[must_use]
     pub fn with_name(mut self, name: impl Into<Box<str>>) -> Self {
         self.name = Some(name.into());
         self
     }
 
-    /// Sets the global logical bounds, returning the updated display.
+    #[doc = include_str!("display.doc/with_logical_bounds.md")]
     #[must_use]
     pub fn with_logical_bounds(mut self, bounds: Rect) -> Self {
         self.logical_bounds = Some(bounds);
         self
     }
 
-    /// Sets the physical-pixel bounds, returning the updated display.
+    #[doc = include_str!("display.doc/with_physical_bounds.md")]
     #[must_use]
     pub fn with_physical_bounds(mut self, bounds: Rect) -> Self {
         self.physical_bounds = Some(bounds);
         self
     }
 
-    /// Sets the safe/usable work area, returning the updated display.
+    #[doc = include_str!("display.doc/with_work_area.md")]
     #[must_use]
     pub fn with_work_area(mut self, work_area: Rect) -> Self {
         self.work_area = Some(work_area);
         self
     }
 
-    /// Sets the scale factor, returning the updated display.
+    #[doc = include_str!("display.doc/with_scale_factor.md")]
     #[must_use]
     pub fn with_scale_factor(mut self, scale_factor: ScaleFactor) -> Self {
         self.scale_factor = scale_factor;
         self
     }
 
-    /// Sets the available video modes, returning the updated display.
+    #[doc = include_str!("display.doc/with_available_modes.md")]
     #[must_use]
     pub fn with_available_modes(mut self, available_modes: Vec<DisplayMode>) -> Self {
         self.available_modes = available_modes;
         self
     }
 
-    /// Sets the color capability, returning the updated display.
+    #[doc = include_str!("display.doc/with_color.md")]
     #[must_use]
     pub fn with_color(mut self, color: DisplayColorCapability) -> Self {
         self.color = color;
         self
     }
 
-    /// Sets whether this display is primary, returning the updated display.
+    #[doc = include_str!("display.doc/primary.md")]
     #[must_use]
     pub fn primary(mut self, is_primary: bool) -> Self {
         self.is_primary = is_primary;
         self
     }
 
-    /// Returns the display's stable identifier.
+    #[doc = include_str!("display.doc/id_2.md")]
     #[must_use]
     pub const fn id(&self) -> DisplayId {
         self.id
     }
 
-    /// Returns the human-readable monitor name, or `None` if unknown.
+    #[doc = include_str!("display.doc/name_2.md")]
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
-    /// Returns the global logical bounds, or `None` when unavailable.
+    #[doc = include_str!("display.doc/logical_bounds_2.md")]
     #[must_use]
     pub const fn logical_bounds(&self) -> Option<Rect> {
         self.logical_bounds
     }
 
-    /// Returns the physical-pixel bounds, or `None` where unavailable.
+    #[doc = include_str!("display.doc/physical_bounds_2.md")]
     #[must_use]
     pub const fn physical_bounds(&self) -> Option<Rect> {
         self.physical_bounds
     }
 
-    /// Returns the safe/usable work area, or `None` if unknown.
+    #[doc = include_str!("display.doc/work_area_2.md")]
     #[must_use]
     pub const fn work_area(&self) -> Option<Rect> {
         self.work_area
     }
 
-    /// Returns the display's scale factor.
+    #[doc = include_str!("display.doc/scale_factor_2.md")]
     #[must_use]
     pub const fn scale_factor(&self) -> ScaleFactor {
         self.scale_factor
     }
 
-    /// Returns the currently active video mode.
+    #[doc = include_str!("display.doc/current_mode_2.md")]
     #[must_use]
     pub const fn current_mode(&self) -> DisplayMode {
         self.current_mode
     }
 
-    /// Returns the video modes this display can present.
+    #[doc = include_str!("display.doc/available_modes_2.md")]
     #[must_use]
     pub fn available_modes(&self) -> &[DisplayMode] {
         &self.available_modes
     }
 
-    /// Returns the display's color and HDR capability.
+    #[doc = include_str!("display.doc/color_2.md")]
     #[must_use]
     pub const fn color(&self) -> DisplayColorCapability {
         self.color
     }
 
-    /// Returns whether this is the primary display.
+    #[doc = include_str!("display.doc/is_primary_2.md")]
     #[must_use]
     pub const fn is_primary(&self) -> bool {
         self.is_primary
     }
 
-    /// Returns whether this display exposes global logical coordinates.
-    ///
-    /// This is `true` exactly when [`Self::logical_bounds`] is present. It is
-    /// `false` on platforms such as Wayland that do not reveal a global screen
-    /// coordinate space, letting callers respect that absence rather than assume
-    /// a fabricated origin.
+    #[doc = include_str!("display.doc/has_global_coordinates.md")]
     #[must_use]
     pub const fn has_global_coordinates(&self) -> bool {
         self.logical_bounds.is_some()

@@ -1,11 +1,4 @@
-//! The DevTools **client** interface: connect, handshake, and issue
-//! capability-scoped inspect/subscribe commands, formatting the typed replies
-//! for a terminal (spec §7.6).
-//!
-//! Every function here is transport-agnostic above a connected
-//! [`SocketClient`]: `main` wires one to a real socket, tests wire one to an
-//! in-process loopback listener. The client carries no authority — the server's
-//! endpoint decides what each message may do (spec §7.7).
+#![doc = include_str!("cli.doc/_module.md")]
 
 use std::io;
 
@@ -15,7 +8,7 @@ use obscur_devtools_protocol::message::{
 };
 use obscur_devtools_server::transport::{ClientBound, SocketClient};
 
-/// The twelve inspectable live-state targets (spec §7.6), with their CLI names.
+#[doc = include_str!("cli.doc/TARGETS.md")]
 pub const TARGETS: &[(&str, Inspectable)] = &[
     ("tree", Inspectable::Tree),
     ("styles", Inspectable::Styles),
@@ -31,7 +24,7 @@ pub const TARGETS: &[(&str, Inspectable)] = &[
     ("plugin-state", Inspectable::PluginState),
 ];
 
-/// The four subscribable event topics (spec §7.6/§7.8), with their CLI names.
+#[doc = include_str!("cli.doc/TOPICS.md")]
 pub const TOPICS: &[(&str, Topic)] = &[
     ("diagnostics", Topic::Diagnostics),
     ("lifecycle", Topic::Lifecycle),
@@ -39,7 +32,7 @@ pub const TOPICS: &[(&str, Topic)] = &[
     ("focus", Topic::Focus),
 ];
 
-/// Resolves a CLI target name to its [`Inspectable`], if known.
+#[doc = include_str!("cli.doc/parse_target.md")]
 #[must_use]
 pub fn parse_target(name: &str) -> Option<Inspectable> {
     TARGETS
@@ -48,13 +41,13 @@ pub fn parse_target(name: &str) -> Option<Inspectable> {
         .map(|(_, target)| *target)
 }
 
-/// Returns every inspectable target (the `all` expansion).
+#[doc = include_str!("cli.doc/all_targets.md")]
 #[must_use]
 pub fn all_targets() -> Vec<Inspectable> {
     TARGETS.iter().map(|(_, target)| *target).collect()
 }
 
-/// The CLI name for an [`Inspectable`] target.
+#[doc = include_str!("cli.doc/target_label.md")]
 #[must_use]
 pub fn target_label(target: Inspectable) -> &'static str {
     TARGETS
@@ -63,7 +56,7 @@ pub fn target_label(target: Inspectable) -> &'static str {
         .map_or("unknown", |(label, _)| label)
 }
 
-/// Resolves a CLI topic name to its [`Topic`], if known.
+#[doc = include_str!("cli.doc/parse_topic.md")]
 #[must_use]
 pub fn parse_topic(name: &str) -> Option<Topic> {
     TOPICS
@@ -72,22 +65,13 @@ pub fn parse_topic(name: &str) -> Option<Topic> {
         .map(|(_, topic)| *topic)
 }
 
-/// Performs the connection handshake, requesting the current protocol version
-/// with `token`.
-///
-/// # Errors
-///
-/// Returns an [`io::Error`] on a socket failure or a protocol violation.
+#[doc = include_str!("cli.doc/handshake.md")]
 pub fn handshake(client: &mut SocketClient, token: &str) -> io::Result<HandshakeResponse> {
     let request = HandshakeRequest::new(VersionRange::exact(ProtocolVersion::CURRENT), token);
     client.handshake(&request)
 }
 
-/// Issues one `Inspect` command for `target`, returning the server's reply.
-///
-/// # Errors
-///
-/// Returns an [`io::Error`] on any underlying socket failure.
+#[doc = include_str!("cli.doc/inspect.md")]
 pub fn inspect(client: &mut SocketClient, id: u64, target: Inspectable) -> io::Result<ClientBound> {
     client.command(&CommandMessage::new(
         CommandId::new(id),
@@ -95,11 +79,7 @@ pub fn inspect(client: &mut SocketClient, id: u64, target: Inspectable) -> io::R
     ))
 }
 
-/// Issues one `Subscribe` command for `topic`, returning the server's reply.
-///
-/// # Errors
-///
-/// Returns an [`io::Error`] on any underlying socket failure.
+#[doc = include_str!("cli.doc/subscribe.md")]
 pub fn subscribe(client: &mut SocketClient, id: u64, topic: Topic) -> io::Result<ClientBound> {
     client.command(&CommandMessage::new(
         CommandId::new(id),
@@ -107,12 +87,7 @@ pub fn subscribe(client: &mut SocketClient, id: u64, topic: Topic) -> io::Result
     ))
 }
 
-/// Issues one `Inject` command carrying `event` (a synthetic pointer/key), the
-/// write half of the agent loop over the protocol.
-///
-/// # Errors
-///
-/// Returns an [`io::Error`] on any underlying socket failure.
+#[doc = include_str!("cli.doc/inject.md")]
 pub fn inject(client: &mut SocketClient, id: u64, event: InjectedEvent) -> io::Result<ClientBound> {
     client.command(&CommandMessage::new(
         CommandId::new(id),
@@ -120,7 +95,7 @@ pub fn inject(client: &mut SocketClient, id: u64, event: InjectedEvent) -> io::R
     ))
 }
 
-/// Formats a handshake response as one human-readable line.
+#[doc = include_str!("cli.doc/format_handshake.md")]
 #[must_use]
 pub fn format_handshake(response: &HandshakeResponse) -> String {
     match response {
@@ -134,7 +109,7 @@ pub fn format_handshake(response: &HandshakeResponse) -> String {
     }
 }
 
-/// Formats a granted scope set as a comma-separated list (or `none`).
+#[doc = include_str!("cli.doc/format_scopes.md")]
 #[must_use]
 pub fn format_scopes(scopes: ScopeSet) -> String {
     let mut names = Vec::new();
@@ -155,7 +130,7 @@ pub fn format_scopes(scopes: ScopeSet) -> String {
     }
 }
 
-/// Formats an inspect snapshot as one human-readable line.
+#[doc = include_str!("cli.doc/format_snapshot.md")]
 #[must_use]
 pub fn format_snapshot(message: &SnapshotMessage) -> String {
     let ids = if message.payload.entity_ids.is_empty() {
@@ -185,7 +160,7 @@ pub fn format_snapshot(message: &SnapshotMessage) -> String {
     line
 }
 
-/// Formats any client-bound reply for display (used for non-snapshot replies).
+#[doc = include_str!("cli.doc/format_client_bound.md")]
 #[must_use]
 pub fn format_client_bound(reply: &ClientBound) -> String {
     match reply {
@@ -201,7 +176,7 @@ pub fn format_client_bound(reply: &ClientBound) -> String {
     }
 }
 
-/// Renders up to eight entity ids, eliding the tail of longer lists.
+#[doc = include_str!("cli.doc/join_ids.md")]
 fn join_ids(ids: &[u64]) -> String {
     const MAX: usize = 8;
     let shown: Vec<String> = ids.iter().take(MAX).map(u64::to_string).collect();

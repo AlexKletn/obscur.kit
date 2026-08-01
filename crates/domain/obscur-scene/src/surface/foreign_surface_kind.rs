@@ -1,21 +1,17 @@
-//! `ForeignSurfaceKind`: the kind of external content a foreign surface hosts (§5.5).
+#![doc = include_str!("foreign_surface_kind.doc/_module.md")]
 
-/// The kind of externally-produced content hosted by a foreign surface
-/// (Obscur Kit 2 specs §5.5).
-///
-/// Foreign surfaces integrate content that is produced outside the Paint model,
-/// either texture-backed or as a native child surface/window.
+#[doc = include_str!("foreign_surface_kind.doc/ForeignSurfaceKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ForeignSurfaceKind {
-    /// A video stream or player surface.
+    #[doc = include_str!("foreign_surface_kind.doc/Video.md")]
     Video,
-    /// An embedded web view.
+    #[doc = include_str!("foreign_surface_kind.doc/WebView.md")]
     WebView,
-    /// A live camera feed.
+    #[doc = include_str!("foreign_surface_kind.doc/Camera.md")]
     Camera,
-    /// A native platform control (e.g. a native text field or map view).
+    #[doc = include_str!("foreign_surface_kind.doc/NativeControl.md")]
     NativeControl,
-    /// An externally-managed GPU surface.
+    #[doc = include_str!("foreign_surface_kind.doc/ExternalGpu.md")]
     ExternalGpu,
 }
 

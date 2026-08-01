@@ -1,27 +1,19 @@
-//! Whether a layer surface takes keyboard focus (spec §6.5).
+#![doc = include_str!("layer_keyboard_interactivity.doc/_module.md")]
 
-/// How much of the keyboard a layer surface asks for.
-///
-/// The default is [`None`](LayerKeyboardInteractivity::None) and that is the
-/// right default: a panel that silently took keyboard focus would swallow every
-/// shortcut on the desktop.
+#[doc = include_str!("layer_keyboard_interactivity.doc/LayerKeyboardInteractivity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerKeyboardInteractivity {
-    /// The surface never receives keyboard input. Keys go to whatever window has
-    /// focus, exactly as if the surface were not there.
+    #[doc = include_str!("layer_keyboard_interactivity.doc/None.md")]
     #[default]
     None,
-    /// The surface takes keyboard focus for as long as it exists, and nothing
-    /// else can have it. For lock screens; hostile in anything else.
+    #[doc = include_str!("layer_keyboard_interactivity.doc/Exclusive.md")]
     Exclusive,
-    /// The surface takes focus when the user interacts with it, and gives it
-    /// back. What an on-screen keyboard's host, a launcher or a search bar
-    /// wants.
+    #[doc = include_str!("layer_keyboard_interactivity.doc/OnDemand.md")]
     OnDemand,
 }
 
 impl LayerKeyboardInteractivity {
-    /// Whether this setting can ever route a key to the surface.
+    #[doc = include_str!("layer_keyboard_interactivity.doc/takes_keys.md")]
     #[must_use]
     pub const fn takes_keys(self) -> bool {
         !matches!(self, Self::None)

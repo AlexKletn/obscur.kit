@@ -1,41 +1,28 @@
-//! A requested font family — a specific name or a CSS generic (spec §5.18).
+#![doc = include_str!("font_family.doc/_module.md")]
 
-/// A requested font family: either a specific named family or a CSS generic
-/// family keyword (spec §5.18).
-///
-/// This models what an application *asks for*, not a concrete resolved face. A
-/// [`FontProvider`](crate::font::FontProvider) turns a `FontFamily` (together
-/// with [`FontAttributes`](crate::font::FontAttributes)) into a
-/// [`FontFace`](crate::font::FontFace); a generic family names an abstract
-/// category the provider maps onto whatever concrete family it has for that
-/// role.
+#[doc = include_str!("font_family.doc/FontFamily.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontFamily {
-    /// A specific family requested by name (e.g. `"Inter"`, `"Helvetica"`).
+    #[doc = include_str!("font_family.doc/Named.md")]
     Named(Box<str>),
-    /// A CSS generic family keyword the provider resolves to a concrete family.
+    #[doc = include_str!("font_family.doc/Generic.md")]
     Generic(GenericFamily),
 }
 
 impl FontFamily {
-    /// Creates a [`FontFamily::Named`] from `name`.
+    #[doc = include_str!("font_family.doc/named.md")]
     #[must_use]
     pub fn named(name: impl Into<Box<str>>) -> Self {
         Self::Named(name.into())
     }
 
-    /// Creates a [`FontFamily::Generic`] from `generic`.
+    #[doc = include_str!("font_family.doc/generic.md")]
     #[must_use]
     pub const fn generic(generic: GenericFamily) -> Self {
         Self::Generic(generic)
     }
 
-    /// Parses a family from a name, mapping the well-known CSS generic keywords
-    /// (`"serif"`, `"sans-serif"`, `"monospace"`, `"cursive"`, `"fantasy"`,
-    /// `"system-ui"`) to [`FontFamily::Generic`] and everything else to
-    /// [`FontFamily::Named`] (spec §5.18).
-    ///
-    /// Matching is case-sensitive against the canonical CSS spellings.
+    #[doc = include_str!("font_family.doc/from_name.md")]
     #[must_use]
     pub fn from_name(name: &str) -> Self {
         match name {
@@ -49,9 +36,7 @@ impl FontFamily {
         }
     }
 
-    /// Returns the family name: the specific name for [`FontFamily::Named`], or
-    /// the CSS keyword ([`GenericFamily::fallback_name`]) for
-    /// [`FontFamily::Generic`] (spec §5.18).
+    #[doc = include_str!("font_family.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
@@ -61,28 +46,25 @@ impl FontFamily {
     }
 }
 
-/// A CSS generic font family: an abstract category a provider resolves to a
-/// concrete family (spec §5.18).
+#[doc = include_str!("font_family.doc/GenericFamily.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GenericFamily {
-    /// Fonts with serifs (e.g. Times).
+    #[doc = include_str!("font_family.doc/Serif.md")]
     Serif,
-    /// Fonts without serifs (e.g. Helvetica); the usual UI default.
+    #[doc = include_str!("font_family.doc/SansSerif.md")]
     SansSerif,
-    /// Fixed-pitch fonts (e.g. Courier).
+    #[doc = include_str!("font_family.doc/Monospace.md")]
     Monospace,
-    /// Handwriting-style fonts.
+    #[doc = include_str!("font_family.doc/Cursive.md")]
     Cursive,
-    /// Decorative / display fonts.
+    #[doc = include_str!("font_family.doc/Fantasy.md")]
     Fantasy,
-    /// The platform's default UI font.
+    #[doc = include_str!("font_family.doc/SystemUi.md")]
     SystemUi,
 }
 
 impl GenericFamily {
-    /// Returns the canonical CSS keyword for this generic family (e.g.
-    /// [`GenericFamily::SansSerif`] → `"sans-serif"`), used as its fallback name
-    /// when no concrete family is resolved (spec §5.18).
+    #[doc = include_str!("font_family.doc/fallback_name.md")]
     #[must_use]
     pub const fn fallback_name(&self) -> &'static str {
         match self {

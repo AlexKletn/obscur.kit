@@ -1,30 +1,4 @@
-//! **Headless capabilities demo → PNG (software CPU).**
-//!
-//! Renders the shared [`capabilities`] scene — every CSS feature ported in the
-//! math campaign, authored as a CSS `&'static str` + a `View` tree — through the
-//! software [`CpuRenderer`] (no display, no GPU) and writes the rasterized frame
-//! to `target/capabilities_cpu.png`, a real viewable artifact.
-//!
-//! This is the CPU-faithful subset: layout (flex + grid + block flow), CSS
-//! Color 4 parsing (`oklch`/`lab`/`hsl`/`oklab` swatches), the `border-radius`
-//! overlap clamp, `box-shadow` spread geometry, §9.9 stacking order, flex
-//! grow/shrink distribution, grid two-value tracks, margin collapsing, the text
-//! spacing/transform/`white-space`/ellipsis runs, and the interpolated
-//! `rotate(45°)` square all render for real. The GPU-class effects — the Oklab
-//! gradient (§2) and the linearRGB blur (§3) — degrade to the documented CPU
-//! approximation (a gradient paints its first stop; a blur is coarse), so those
-//! two cards carry a "GPU / Vello" caption here. `capabilities_vello_png.rs`
-//! shows them for real.
-//!
-//! Text is a host resource: the example loads a system font off disk (best
-//! effort) and wires the full itemize → resolve-by-coverage → shape stack, then
-//! hands the SAME font bytes to the CPU renderer so glyphs rasterize as real
-//! outlines. With no system font present it still runs — text falls back to box
-//! marks (never a panic).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example capabilities_png \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("capabilities_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -47,7 +21,7 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "capabilities/scene.rs"]
 mod capabilities;
 
-/// The logical layout + rasterization viewport (the demo's design extent).
+#[doc = include_str!("capabilities_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1440.0, 1076.0);
 
 fn main() {
@@ -118,7 +92,7 @@ fn main() {
     );
 }
 
-/// The supersample render scale: `CAP_SCALE` clamped to `1.0..=4.0`, default 2.0.
+#[doc = include_str!("capabilities_png.doc/render_scale.md")]
 fn render_scale() -> f32 {
     std::env::var("CAP_SCALE")
         .ok()
@@ -127,14 +101,14 @@ fn render_scale() -> f32 {
         .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("capabilities_png.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("capabilities_png.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -142,8 +116,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the full text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer (identical id↔bytes mapping).
+#[doc = include_str!("capabilities_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -161,12 +134,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("capabilities_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("capabilities_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

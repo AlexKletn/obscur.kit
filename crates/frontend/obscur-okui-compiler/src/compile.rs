@@ -1,10 +1,4 @@
-//! The top-level `.okui` compilation orchestrator: sequences resolution,
-//! validation and lowering over one parsed document into UI IR (spec §2.9–§2.15).
-//!
-//! The individual passes ([`NameResolver`](crate::resolution::NameResolver),
-//! the validators in [`crate::validation`], [`UiIrLowering`]) remain usable
-//! standalone; [`Compiler`] merely runs them in order, accumulating every
-//! pass's diagnostics into one list rather than bailing on the first failure.
+#![doc = include_str!("compile.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -24,35 +18,20 @@ use crate::validation::{
     builtin_contracts, widget_contracts,
 };
 
-/// A lookup from component/tag name to its [`ComponentContract`], so the
-/// [`ContractValidator`] can find the allowed surface of each element instance
-/// (spec §2.13).
-///
-/// A contract is keyed by its [`component`](ComponentContract::component) name.
-/// An element whose tag has no registered contract is left unchecked (the
-/// registry does not constrain it).
+#[doc = include_str!("compile.doc/ContractRegistry.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ContractRegistry {
     contracts: HashMap<Box<str>, ComponentContract>,
 }
 
 impl ContractRegistry {
-    /// Creates an empty registry.
+    #[doc = include_str!("compile.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Creates a registry pre-populated with the contracts for every built-in
-    /// view primitive **and every shipped widget** (spec §2.6, §2.13), so a
-    /// default compile enforces their attribute/event surface without the caller
-    /// registering anything.
-    ///
-    /// This is the registry [`Compiler::new`] installs by default. See
-    /// [`builtin_contracts`](crate::validation::builtin_contracts) and
-    /// [`widget_contracts`](crate::validation::widget_contracts) for what each
-    /// covers, and why the surfaces are defined here rather than imported from
-    /// `obscur-view`/`obscur-primitives`/`obscur-widgets`.
+    #[doc = include_str!("compile.doc/builtins.md")]
     #[must_use]
     pub fn builtins() -> Self {
         let mut registry = Self::new();
@@ -62,110 +41,59 @@ impl ContractRegistry {
         registry
     }
 
-    /// Registers `contract` (keyed by its component name) and returns the
-    /// registry (fluent).
+    #[doc = include_str!("compile.doc/with.md")]
     #[must_use]
     pub fn with(mut self, contract: ComponentContract) -> Self {
         self.register(contract);
         self
     }
 
-    /// Registers `contract`, returning the contract it displaced for the same
-    /// component name, if any.
+    #[doc = include_str!("compile.doc/register.md")]
     pub fn register(&mut self, contract: ComponentContract) -> Option<ComponentContract> {
         self.contracts.insert(contract.component().into(), contract)
     }
 
-    /// Registers a user component's string [`ComponentSurface`] (bridged into a
-    /// string [`ComponentContract`]), so the `.okui` compiler enforces §2.13 for
-    /// that component just as it does for the built-ins.
-    ///
-    /// A caller wires user components in explicitly, e.g.
-    /// `ContractRegistry::builtins().with_surface(&MyProps::contract_surface())`,
-    /// where `contract_surface()` is emitted by `#[derive(Contract)]`. Start from
-    /// [`builtins`](Self::builtins), not [`new`](Self::new): `Compiler::with_registry`
-    /// **replaces** its registry wholesale, so seeding from an empty one silently
-    /// drops every built-in primitive/widget contract.
-    ///
-    /// Returns the contract it displaced for the same component name, if any.
-    ///
-    /// # Where this is callable, and where it is not
-    ///
-    /// This crate has no in-repo production caller and cannot have one: a caller
-    /// needs a *user* component, and this repo ships none — every component it
-    /// ships is a built-in whose surface is already mirrored into
-    /// [`builtin_contracts`]/[`widget_contracts`] and registered by
-    /// [`Compiler::new`] unconditionally. The other end of this seam lives in a
-    /// downstream crate.
-    ///
-    /// Which downstream callers can reach it is **not** a free choice, and the
-    /// constraint is easy to state backwards. `contract_surface()` is a function
-    /// that runs when the crate defining it runs, so nothing that *compiles* that
-    /// crate can call it:
-    ///
-    /// - A `build.rs` compiling a `.okui` file **cannot** see a component defined
-    ///   in its own crate — `[build-dependencies] X` inside `X` is rejected by
-    ///   cargo as a `cyclic package dependency`. It *can* see one from any other
-    ///   crate, and that is the build-path wire.
-    /// - The `okui!` proc-macro cannot see one at all, and has no argument to be
-    ///   handed one through. See `obscur_ui_macros`'s `validate_contracts`.
-    /// - A **running binary** that links the component crate — the `.okui`
-    ///   language server is the one in this repo — can call it freely. That is
-    ///   the least constrained consumer of this function, and §2.14's "static
-    ///   registration is the default" is reachable there in full.
-    ///
-    /// There is no auto-discovery, and inventory/link-time collection cannot
-    /// supply one on the build path (it collects when the *built* binary runs,
-    /// which is after the build script it would have to serve). A build-time
-    /// registry would have to re-parse the crate's own Rust source — the surface
-    /// is a pure function of the derive's tokens — which nothing here proposes.
-    ///
-    /// [`builtin_contracts`]: crate::validation::builtin_contracts
-    /// [`widget_contracts`]: crate::validation::widget_contracts
+    #[doc = include_str!("compile.doc/register_surface.md")]
     pub fn register_surface(&mut self, surface: &ComponentSurface) -> Option<ComponentContract> {
         self.register(surface.into())
     }
 
-    /// Registers a user component's [`ComponentSurface`] and returns the
-    /// registry (fluent); see [`register_surface`](Self::register_surface).
+    #[doc = include_str!("compile.doc/with_surface.md")]
     #[must_use]
     pub fn with_surface(mut self, surface: &ComponentSurface) -> Self {
         self.register_surface(surface);
         self
     }
 
-    /// Returns the contract registered for `component`, if any.
+    #[doc = include_str!("compile.doc/get.md")]
     #[must_use]
     pub fn get(&self, component: &str) -> Option<&ComponentContract> {
         self.contracts.get(component)
     }
 
-    /// Returns the number of registered contracts.
+    #[doc = include_str!("compile.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.contracts.len()
     }
 
-    /// Returns whether no contracts are registered.
+    #[doc = include_str!("compile.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.contracts.is_empty()
     }
 }
 
-/// A single diagnostic produced by the compilation pipeline: the sum of every
-/// pass's error type, so callers see one uniform stream (spec §2.9–§2.15).
+#[doc = include_str!("compile.doc/CompileDiagnostic.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileDiagnostic {
-    /// Name resolution failed for a reference or declaration (§2.10, §2.11).
+    #[doc = include_str!("compile.doc/Resolution.md")]
     Resolution(ResolutionError),
-    /// A type check failed (§2.9). Reserved for the future whole-document type
-    /// pass; the orchestrator does not emit it yet (see [`Compiler::compile`]).
+    #[doc = include_str!("compile.doc/Type.md")]
     Type(TypeError),
-    /// A static validation rule was violated — an expression, capability or
-    /// contract check (§2.10, §2.13).
+    #[doc = include_str!("compile.doc/Validation.md")]
     Validation(ValidationDiagnostic),
-    /// Lowering to UI IR failed (§2.15).
+    #[doc = include_str!("compile.doc/Lowering.md")]
     Lowering(LoweringError),
 }
 
@@ -213,16 +141,7 @@ impl From<LoweringError> for CompileDiagnostic {
     }
 }
 
-/// The outcome of compiling a `.okui` document (spec §2.15).
-///
-/// # Policy
-///
-/// Every pass's diagnostics are accumulated (the pipeline never bails on the
-/// first error), so `diagnostics` may hold several independent failures. The
-/// `document` is `Some` when lowering could produce UI IR and `None` when a hard
-/// lowering error (an empty document or a tagless element) prevented it — even
-/// then, all earlier diagnostics are still reported. `source_map` is the lowered
-/// document's map, or empty when no document was produced.
+#[doc = include_str!("compile.doc/CompileResult.md")]
 #[derive(Debug, Clone)]
 pub struct CompileResult {
     document: Option<UiIrDocument>,
@@ -231,46 +150,38 @@ pub struct CompileResult {
 }
 
 impl CompileResult {
-    /// Returns the lowered UI IR document, if one was produced.
+    #[doc = include_str!("compile.doc/document.md")]
     #[must_use]
     pub fn document(&self) -> Option<&UiIrDocument> {
         self.document.as_ref()
     }
 
-    /// Returns the accumulated diagnostics from every pass.
+    #[doc = include_str!("compile.doc/diagnostics.md")]
     #[must_use]
     pub fn diagnostics(&self) -> &[CompileDiagnostic] {
         &self.diagnostics
     }
 
-    /// Returns the source map linking IR node ids back to source spans.
+    #[doc = include_str!("compile.doc/source_map.md")]
     #[must_use]
     pub fn source_map(&self) -> &SourceMap {
         &self.source_map
     }
 
-    /// Returns whether any pass reported a diagnostic.
+    #[doc = include_str!("compile.doc/has_errors.md")]
     #[must_use]
     pub fn has_errors(&self) -> bool {
         !self.diagnostics.is_empty()
     }
 
-    /// Consumes the result, returning just the lowered document, if any.
+    #[doc = include_str!("compile.doc/into_document.md")]
     #[must_use]
     pub fn into_document(self) -> Option<UiIrDocument> {
         self.document
     }
 }
 
-/// Runs the full `.okui` compilation pipeline over one parsed document,
-/// producing UI IR and a unified diagnostic stream (spec §2.9–§2.15).
-///
-/// The compiler is configured fluently with the component contracts
-/// ([`with_registry`](Self::with_registry)), the granted capabilities
-/// ([`granting`](Self::granting)), the commands a handler may name
-/// ([`claiming_command`](Self::claiming_command)) and the props/state symbols in
-/// scope ([`defining`](Self::defining)) before [`compile`](Self::compile) is
-/// called.
+#[doc = include_str!("compile.doc/Compiler.md")]
 #[derive(Debug, Clone, Default)]
 pub struct Compiler {
     source_name: Box<str>,
@@ -281,13 +192,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    /// Creates a compiler whose lowered source map records spans under
-    /// `source_name` (the logical `.okui` source identifier).
-    ///
-    /// The contract registry is seeded with the built-in primitive contracts
-    /// ([`ContractRegistry::builtins`]) so a default compile already rejects
-    /// unknown attributes/events on the built-in primitives (spec §2.13);
-    /// [`with_registry`](Self::with_registry) replaces it wholesale.
+    #[doc = include_str!("compile.doc/new_2.md")]
     #[must_use]
     pub fn new(source_name: impl Into<Box<str>>) -> Self {
         Self {
@@ -297,85 +202,42 @@ impl Compiler {
         }
     }
 
-    /// Sets the contract registry the [`ContractValidator`] consults (fluent).
+    #[doc = include_str!("compile.doc/with_registry.md")]
     #[must_use]
     pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
         self.registry = registry;
         self
     }
 
-    /// Grants `capability` to the document being compiled (fluent), so a
-    /// matching `requires="…"` declaration is satisfied.
+    #[doc = include_str!("compile.doc/granting.md")]
     #[must_use]
     pub fn granting(mut self, capability: CapabilityId) -> Self {
         self.granted.push(capability);
         self
     }
 
-    /// Declares that `name` is a command a handler in this document may bind
-    /// (fluent; spec §2.13).
-    ///
-    /// Declaring the first command **closes** the command surface: from then on an
-    /// `on:<event>=<handler>` naming anything undeclared is a
-    /// [`Validation`](CompileDiagnostic::Validation) diagnostic instead of the
-    /// silent no-op it used to be. Declare every command the application
-    /// registers, or none — a partial list reports the rest as unknown.
-    ///
-    /// This is the same shape as [`granting`](Self::granting), and for the same
-    /// reason: a command is claimed by a *runtime registration*
-    /// (`UiRuntime::on_command`, `App::on_command`), which is a value that exists
-    /// only once the application runs, so no pass over the document can discover
-    /// it. The caller knows; the compiler is told. See [`CommandSurface`] for why
-    /// the default is "unchecked" rather than "nothing is claimed", and for the
-    /// half of the problem the `okui!` macro cannot reach.
+    #[doc = include_str!("compile.doc/claiming_command.md")]
     #[must_use]
     pub fn claiming_command(mut self, name: impl Into<Box<str>>) -> Self {
         self.commands.claim(name);
         self
     }
 
-    /// Sets the whole [`CommandSurface`] at once (fluent) — for a caller that has
-    /// the set in hand rather than one name at a time, and the only way to declare
-    /// the empty surface ("this document binds no handler").
+    #[doc = include_str!("compile.doc/with_commands.md")]
     #[must_use]
     pub fn with_commands(mut self, commands: CommandSurface) -> Self {
         self.commands = commands;
         self
     }
 
-    /// Defines `symbol` (a prop or state binding) in the document's root scope so
-    /// its expressions may reference it (fluent).
+    #[doc = include_str!("compile.doc/defining.md")]
     #[must_use]
     pub fn defining(mut self, symbol: Symbol) -> Self {
         self.symbols.push(symbol);
         self
     }
 
-    /// Compiles `document`, running each pass in order and accumulating every
-    /// diagnostic into the returned [`CompileResult`] (spec §2.15).
-    ///
-    /// # Pipeline
-    ///
-    /// 1. **Name resolution** — every reference is resolved against a symbol
-    ///    table seeded with the [`defining`](Self::defining) symbols.
-    /// 2. **Type checking** — no whole-document pass exists yet: the type layer
-    ///    is a per-expression vocabulary/algebra pending an expression AST
-    ///    (§2.9/§2.10), so nothing is emitted here. The
-    ///    [`Type`](CompileDiagnostic::Type) variant reserves its place in the
-    ///    diagnostic sum for when that pass lands.
-    /// 3. **Validation** — expression restrictions (§2.10), capability grants
-    ///    (§2.13), the handler references against the declared
-    ///    [`CommandSurface`] (§2.13's "string method names", silent until a caller
-    ///    declares one — see [`claiming_command`](Self::claiming_command)), the
-    ///    §2.11 collection rule (a `<VirtualFor>` is refused, see
-    ///    [`CollectionValidator`]), the §2.12 outlet rule (an authored
-    ///    `<slot name="…"/>` carries a literal name and nothing else, see
-    ///    [`OutletValidator`]) and, for every element whose tag has a registered
-    ///    contract, the contract surface (required props, unknown
-    ///    attributes/events, allowed children — §2.13).
-    /// 4. **Lowering** — the document is lowered to a [`UiIrDocument`]; on a hard
-    ///    lowering error the document is `None` but all earlier diagnostics are
-    ///    still returned.
+    #[doc = include_str!("compile.doc/compile.md")]
     #[must_use]
     pub fn compile(&self, document: &Document) -> CompileResult {
         let mut diagnostics = Vec::new();
@@ -455,8 +317,7 @@ impl Compiler {
         }
     }
 
-    /// Validates `element` (and its element-shaped descendants) against any
-    /// contract registered for its tag, recursively.
+    #[doc = include_str!("compile.doc/validate_contracts.md")]
     fn validate_contracts(
         &self,
         element: &Element,

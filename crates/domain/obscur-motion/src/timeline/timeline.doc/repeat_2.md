@@ -1,0 +1,1 @@
+Returns the repeat count.

@@ -1,25 +1,4 @@
-//! §2.6's routing chain, reached from an application: links 1 and 3, by name.
-//!
-//! `UiRuntime` implements the whole chain — *focused node → focus scope →
-//! ancestors → window → application fallback* — but the four positional links are
-//! keyed by a `NodeId`, and a `NodeId` does not exist until a frame has built the
-//! tree. An application configuring itself before the loop therefore had exactly
-//! one link available (the application fallback), and the observable costs were one
-//! flat command namespace, a symbol that could not mean two things in two places,
-//! and handlers that could not sit beside the markup they serve.
-//!
-//! What closes it is not a new routing mechanism but an *identifier that exists
-//! before the tree does*: §7.5's stable `test-id` / `automation-id`, written on the
-//! markup itself and resolved against the live tree after every commit. So these
-//! cases go the whole way an application does — author a `test-id`, name it in a
-//! registration, click the element, watch the right handler run — using only
-//! `obscur_kit`'s public API.
-//!
-//! The host contract is the pair of calls in [`Host::frame`]: run the frame, then
-//! `AppControl::apply`. That is exactly what `App`'s window runner does, and it is
-//! why these cases can prove the standalone entry point's behaviour without a
-//! display (the windowed `App` needs `window-winit` + `render-vello`, so a test that
-//! constructed one would be silently skipped in the default feature set).
+#![doc = include_str!("positional_command_routing.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::{Cell, RefCell};
@@ -41,25 +20,20 @@ use obscur_kit::view::view::{
     ViewValue,
 };
 
-/// The one command symbol both rows bind — the same in the markup (`on:click=pick`)
-/// and in Rust, because the front end hashes a handler name with the same FNV-1a
-/// [`InternedSymbol::named`] uses.
+#[doc = include_str!("positional_command_routing.doc/PICK.md")]
 const PICK: InternedSymbol = InternedSymbol::named("pick");
 
-/// Two rows, each 100x50, stacked in a 100x100 panel: row `a` covers y ∈ [0, 50),
-/// row `b` covers y ∈ [50, 100).
+#[doc = include_str!("positional_command_routing.doc/CSS.md")]
 const CSS: &str = ".panel { width: 100px; height: 100px } \
                   .row { width: 100px; height: 50px }";
 
-/// Markup with the stable identifiers **authored on the elements**, which is the
-/// point: the name a registration uses is written where the element is.
+#[doc = include_str!("positional_command_routing.doc/SCREEN.md")]
 const SCREEN: &str = r#"<div class="panel">
     <div class="row" test-id="a" on:click=pick/>
     <div class="row" test-id="b" on:click=pick/>
 </div>"#;
 
-/// The two calls a host makes per frame, and nothing else — the shape `App`'s
-/// window runner has around its winit event loop.
+#[doc = include_str!("positional_command_routing.doc/Host.md")]
 struct Host {
     runtime: UiRuntime,
     css: CssPipeline,
@@ -67,9 +41,7 @@ struct Host {
 }
 
 impl Host {
-    /// A runtime with `CSS` installed through the control handle (as the runner
-    /// does, so §4.12's source identity is decided in one place) and `builder` as its
-    /// root. No frame has run yet, so no name can have resolved.
+    #[doc = include_str!("positional_command_routing.doc/new.md")]
     fn new(builder: impl FnMut() -> View + 'static) -> Self {
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
         let mut css = CssPipeline::new();
@@ -84,9 +56,7 @@ impl Host {
         }
     }
 
-    /// Runs one reactive frame and then applies what the application queued —
-    /// including resolving every positional registration against the tree the frame
-    /// just committed.
+    #[doc = include_str!("positional_command_routing.doc/frame.md")]
     fn frame(&mut self) {
         self.runtime.request_frame(FrameReason::UiCommit);
         self.runtime
@@ -95,8 +65,7 @@ impl Host {
         self.control.apply(&mut self.runtime, &mut self.css);
     }
 
-    /// A trusted press and release at `(x, y)` — a real click, as a platform adapter
-    /// delivers it (an untrusted event does not run a gated default action).
+    #[doc = include_str!("positional_command_routing.doc/click.md")]
     fn click(&mut self, x: f32, y: f32) {
         for kind in [PointerEventKind::Down, PointerEventKind::Up] {
             self.runtime.handle_pointer(
@@ -111,28 +80,19 @@ impl Host {
         }
     }
 
-    /// The node a `test-id` is currently bound at, as the application sees it.
+    #[doc = include_str!("positional_command_routing.doc/bound.md")]
     fn bound(&self, test_id: &str) -> Option<NodeId> {
         self.control.bound_node(&SelectorTarget::test_id(test_id))
     }
 }
 
-/// A host whose root is the compiled `.okui` [`SCREEN`], with one frame committed
-/// and every registration bound.
+#[doc = include_str!("positional_command_routing.doc/screen_host.md")]
 fn screen_host() -> Host {
     let screen = OkuiScreen::compile(SCREEN).expect("the screen compiles");
     Host::new(move || screen.view())
 }
 
-/// The same two rows as [`SCREEN`], authored with the **macro** front end.
-///
-/// Audit 2-3: this function could not be written. `okui!` is a proc-macro over
-/// Rust tokens, where `-` is punctuation, so `test-id="a"` was `expected ident`
-/// — and the identifier this whole file is built on was authorable only in the
-/// front end `docs/api/09-authoring-formats.md` calls the *fallback*. The
-/// documented workaround (put the id on the authored component tag in a `.okui`
-/// file and let the handler catch the command as an ancestor on §2.6 link 3) is a
-/// different feature: it fires for every descendant, not for the node.
+#[doc = include_str!("positional_command_routing.doc/macro_host.md")]
 fn macro_host() -> Host {
     Host::new(|| {
         okui! {
@@ -144,8 +104,7 @@ fn macro_host() -> Host {
     })
 }
 
-/// **The case that was unreachable.** One command symbol, two elements, two
-/// handlers — and each click runs the handler belonging to the element it landed on.
+#[doc = include_str!("positional_command_routing.doc/a_positional_handler_runs_for_its_own_node_and_not_the_other.md")]
 #[test]
 fn a_positional_handler_runs_for_its_own_node_and_not_the_other() {
     let log: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
@@ -177,14 +136,7 @@ fn a_positional_handler_runs_for_its_own_node_and_not_the_other() {
     );
 }
 
-/// The same claim through the **primary** authoring surface: a `test-id` written
-/// in `okui!` markup resolves to the node that carries it, and one command symbol
-/// still means two things in two places.
-///
-/// Nothing about the routing changed to make this pass — [`macro_host`] is the
-/// only difference from the case above, and it is a difference of front end. That
-/// is the point: §7.5's identifier is now spellable on both, so positional
-/// routing is a feature of the toolkit rather than of one file format.
+#[doc = include_str!("positional_command_routing.doc/a_test_id_authored_in_the_macro_routes_to_its_own_node.md")]
 #[test]
 fn a_test_id_authored_in_the_macro_routes_to_its_own_node() {
     let log: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
@@ -215,9 +167,7 @@ fn a_test_id_authored_in_the_macro_routes_to_its_own_node() {
     );
 }
 
-/// A handler registered positionally is handed §2.3's event, so §2.4's payload and
-/// the trust flag arrive with it — the same widening the window-level registration
-/// got, at the link that could not be reached at all.
+#[doc = include_str!("positional_command_routing.doc/a_positional_handler_reads_the_event_payload.md")]
 #[test]
 fn a_positional_handler_reads_the_event_payload() {
     let seen: Rc<Cell<Option<(Option<NodeId>, Point, bool)>>> = Rc::new(Cell::new(None));
@@ -247,9 +197,7 @@ fn a_positional_handler_reads_the_event_payload() {
     assert!(trusted, "input a platform adapter vouched for");
 }
 
-/// §2.6's order, observed from an application: a handler at the node claims the
-/// command, so the window-level handler for the same symbol never sees it — while a
-/// click on an element with no positional handler falls through to that window link.
+#[doc = include_str!("positional_command_routing.doc/a_node_handler_claims_the_command_before_the_window_link.md")]
 #[test]
 fn a_node_handler_claims_the_command_before_the_window_link() {
     let at_node = Rc::new(Cell::new(0_u32));
@@ -282,9 +230,7 @@ fn a_node_handler_claims_the_command_before_the_window_link() {
     );
 }
 
-/// §2.3's capture phase, by name: a listener on the panel sees a command aimed at a
-/// row *before* the row does, and can end the propagation there — which is how an
-/// overlay or a gesture arbiter takes an interaction away.
+#[doc = include_str!("positional_command_routing.doc/a_capture_listener_registered_by_name_sees_and_can_stop_a_descendants_command.md")]
 #[test]
 fn a_capture_listener_registered_by_name_sees_and_can_stop_a_descendants_command() {
     let observed = Rc::new(Cell::new(None));
@@ -331,10 +277,7 @@ fn a_capture_listener_registered_by_name_sees_and_can_stop_a_descendants_command
     );
 }
 
-/// A name that matches no element is not an error and not a panic — it stays
-/// pending, is retried after every commit, and is *visible*: `bound_node` answers
-/// `None`, which is how an application finds a misspelled `test-id` instead of
-/// wondering why a button does nothing.
+#[doc = include_str!("positional_command_routing.doc/a_name_that_matches_nothing_stays_pending_and_never_fires.md")]
 #[test]
 fn a_name_that_matches_nothing_stays_pending_and_never_fires() {
     let ran = Rc::new(Cell::new(0_u32));
@@ -355,16 +298,7 @@ fn a_name_that_matches_nothing_stays_pending_and_never_fires() {
     assert_eq!(ran.get(), 0);
 }
 
-/// A registration follows the **name**, not the node id: when the element stops
-/// carrying the `test-id` the handler is released, and when it comes back the name
-/// resolves again and the same handler runs. Without that, a positional registration
-/// would be a one-frame accident on any UI that rebuilds a subtree — or, worse, would
-/// keep answering for an element that gave the name up.
-///
-/// Note what the reconciler actually does here: the row keeps its component identity,
-/// so removing its `test-id` **patches the node in place** rather than replacing it.
-/// The node is therefore still live, and a binding that only checked liveness would
-/// have stayed attached to an element that no longer answers to the name.
+#[doc = include_str!("positional_command_routing.doc/a_registration_follows_the_name_across_a_rebuild.md")]
 #[test]
 fn a_registration_follows_the_name_across_a_rebuild() {
     // A Rust view builder, because the shape has to change between frames and the
@@ -417,13 +351,12 @@ fn a_registration_follows_the_name_across_a_rebuild() {
     assert_eq!(ran.get(), 2);
 }
 
-/// A row tagged with a stable `test-id` and bound to [`PICK`] — the Rust equivalent
-/// of the markup in [`SCREEN`].
+#[doc = include_str!("positional_command_routing.doc/row.md")]
 fn row(test_id: &str) -> ViewNode {
     untagged_row().with_prop(ViewProperty::new(TEST_ID, ViewValue::Text(test_id.into())))
 }
 
-/// The same row without any stable identifier.
+#[doc = include_str!("positional_command_routing.doc/untagged_row.md")]
 fn untagged_row() -> ViewNode {
     ViewNode::element(ComponentId::from_raw(0x9011))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))

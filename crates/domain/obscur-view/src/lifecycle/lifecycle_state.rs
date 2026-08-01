@@ -1,48 +1,32 @@
-//! `LifecycleState`: the phase a component instance is currently in.
+#![doc = include_str!("lifecycle_state.doc/_module.md")]
 
-/// The lifecycle phase of a component instance (spec §2.1).
-///
-/// A component moves `Created` → `Mounted` → (`Updating` ⇄ `Mounted`)* →
-/// `Unmounted`. The phase is plain data: it records *where* an instance is in
-/// its life, and the runtime (later sub-steps) drives the transitions. There is
-/// no reactive engine here, so this type only names the states and offers a few
-/// predicates the lifecycle contexts and the error boundary consult.
+#[doc = include_str!("lifecycle_state.doc/LifecycleState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LifecycleState {
-    /// The instance has been constructed but not yet mounted; it has produced
-    /// no view and run no `on_mount` hook.
+    #[doc = include_str!("lifecycle_state.doc/Created.md")]
     Created,
-    /// The instance is mounted and settled: its subscriptions are live and it
-    /// is ready to render.
+    #[doc = include_str!("lifecycle_state.doc/Mounted.md")]
     Mounted,
-    /// The instance is applying an update (new props or invalidated inputs)
-    /// and its `on_update` hook may run.
+    #[doc = include_str!("lifecycle_state.doc/Updating.md")]
     Updating,
-    /// The instance has been torn down; its scoped subscriptions and local
-    /// state have been released.
+    #[doc = include_str!("lifecycle_state.doc/Unmounted.md")]
     Unmounted,
 }
 
 impl LifecycleState {
-    /// Returns whether the instance is currently participating in the tree.
-    ///
-    /// Active means either settled ([`LifecycleState::Mounted`]) or mid-update
-    /// ([`LifecycleState::Updating`]); a `Created` instance has not entered the
-    /// tree and an `Unmounted` one has left it.
+    #[doc = include_str!("lifecycle_state.doc/is_active.md")]
     #[must_use]
     pub const fn is_active(self) -> bool {
         matches!(self, Self::Mounted | Self::Updating)
     }
 
-    /// Returns whether the instance has been mounted at least once and not yet
-    /// unmounted (i.e. it is `Mounted` or `Updating`).
+    #[doc = include_str!("lifecycle_state.doc/is_mounted.md")]
     #[must_use]
     pub const fn is_mounted(self) -> bool {
         self.is_active()
     }
 
-    /// Returns whether the instance has reached its terminal
-    /// [`LifecycleState::Unmounted`] phase.
+    #[doc = include_str!("lifecycle_state.doc/is_unmounted.md")]
     #[must_use]
     pub const fn is_unmounted(self) -> bool {
         matches!(self, Self::Unmounted)

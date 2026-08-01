@@ -1,0 +1,1 @@
+Nanoseconds the clock advanced.

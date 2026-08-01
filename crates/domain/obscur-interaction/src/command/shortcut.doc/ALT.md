@@ -1,0 +1,1 @@
+Bit for [`Modifier::Alt`].

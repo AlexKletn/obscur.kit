@@ -1,15 +1,14 @@
-//! Observable cancellation flag.
+#![doc = include_str!("cancellation_token.doc/_module.md")]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// A cheaply cloneable handle observed by scoped tasks to learn they should
-/// stop. Produced by a [`CancellationSource`](super::CancellationSource).
+#[doc = include_str!("cancellation_token.doc/CancellationToken.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
 
 impl CancellationToken {
-    /// Returns whether cancellation has been requested.
+    #[doc = include_str!("cancellation_token.doc/is_cancelled.md")]
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)

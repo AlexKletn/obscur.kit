@@ -1,46 +1,4 @@
-//! End-to-end: the **intrinsic sizing keywords** (`min-content` / `max-content` /
-//! `fit-content`) are answered by measuring content through the live pipeline
-//! (spec §4.2, CSS Sizing 3 §4.1).
-//!
-//! These three cannot be resolved by arithmetic — the answer is a property of the
-//! content, so the box is sized by measuring its children a second time under a
-//! different offer. That makes them easy to fake and easy to get subtly wrong, so
-//! every test here asserts a real arranged box against a number derived from the
-//! text, not against itself:
-//!
-//! * `max-content` — everything on one line;
-//! * `min-content` — the widest word, with the rest wrapped under it;
-//! * `fit-content` — the content when it fits, the container when it does not,
-//!   and never below the widest word.
-//!
-//! The default shaper is monospace at `0.6 × font-size` per glyph, so a run of
-//! `n` characters at 16px is exactly `n * 9.6` wide. Every expectation below is
-//! written from the actual string, which is what makes a wrong answer visible
-//! rather than plausible.
-//!
-//! # The consumers, not just the `width`
-//!
-//! A keyword being answered on `width` says nothing about the other places CSS
-//! allows one, and for a long time `width` was the only place that measured. So
-//! this file also drives the **bounds** (`min-width: min-content` flooring a
-//! narrower authored width, `max-width: max-content` capping a stretching box)
-//! and **grid** (`grid-template-columns: min-content 1fr`, which used to abort
-//! the whole declaration at CSS lowering and take the `1fr` with it). The grid
-//! tests use an ordinary element as the grid item — not a bare text leaf —
-//! because that is the case that has to work and the case that was hollow.
-//!
-//! Three places still degrade a keyword to `auto`, and are deliberately not
-//! covered here because covering them would be asserting a wrong answer:
-//!
-//! * a flex or grid **container's own** `width` / `height` — `display: flex;
-//!   width: min-content` fills its parent;
-//! * a flex or grid container's own `min-`/`max-` bounds, which impose no clamp
-//!   (only flow measures its bounds);
-//! * a flex item's **cross**-axis size and cross bounds.
-//!
-//! Each needs a min-content pass over a formatting context that has none — flow's
-//! probe stacks children, which is not what a flex row or a grid does.
-
+#![doc = include_str!("intrinsic_sizing.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -53,15 +11,15 @@ use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::text::shaping::MockTextShaper;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// Font size every test authors, and the per-glyph advance that follows from it.
+#[doc = include_str!("intrinsic_sizing.doc/FONT.md")]
 const FONT: f32 = 16.0;
 const GLYPH: f32 = FONT * MockTextShaper::ADVANCE_RATIO;
 
-/// The text under test: three words, the longest of which is `wonderful` (9).
+#[doc = include_str!("intrinsic_sizing.doc/TEXT.md")]
 const TEXT: &str = "hello wonderful world";
-/// 21 characters on one line — the `max-content` width.
+#[doc = include_str!("intrinsic_sizing.doc/ONE_LINE.md")]
 const ONE_LINE: f32 = 21.0 * GLYPH;
-/// `wonderful`, the widest run that cannot be broken — the `min-content` width.
+#[doc = include_str!("intrinsic_sizing.doc/LONGEST_WORD.md")]
 const LONGEST_WORD: f32 = 9.0 * GLYPH;
 
 fn compile(css: &str) -> Stylesheet {
@@ -71,7 +29,7 @@ fn compile(css: &str) -> Stylesheet {
         .pipe(|parsed| StylesheetCompiler::new().compile(&parsed).matchable)
 }
 
-/// Tiny helper so `compile` reads top-down.
+#[doc = include_str!("intrinsic_sizing.doc/Pipe.md")]
 trait Pipe: Sized {
     fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R {
         f(self)
@@ -79,7 +37,7 @@ trait Pipe: Sized {
 }
 impl<T> Pipe for T {}
 
-/// The `.item`'s arranged size under `css`, with `TEXT` inside it.
+#[doc = include_str!("intrinsic_sizing.doc/item_size.md")]
 fn item_size(css: &str) -> (f32, f32) {
     let sheet = compile(css);
     let component = ComponentId::from_raw(0x00C0_0001);
@@ -103,7 +61,7 @@ fn item_size(css: &str) -> (f32, f32) {
     (layout.size().width, layout.size().height)
 }
 
-/// A 400x400 page. `width` is what the `.item` authors.
+#[doc = include_str!("intrinsic_sizing.doc/page_with.md")]
 fn page_with(width: &str) -> String {
     format!(
         ".page {{ width: 400px; height: 400px; font-size: {FONT}px }} .item {{ width: {width} }}"
@@ -294,9 +252,7 @@ fn an_auto_bound_still_imposes_no_limit() {
     assert!((width - 400.0).abs() < 1e-3, "got {width}");
 }
 
-/// The `.item` (holding `TEXT`) and `.tail` boxes of a two-item `.page` grid.
-/// Both children are ordinary elements, which is the case that matters: a grid
-/// item is normally a box, not a bare text leaf.
+#[doc = include_str!("intrinsic_sizing.doc/grid_items.md")]
 fn grid_items(css: &str) -> [(f32, f32, f32); 2] {
     let sheet = compile(css);
     let component = ComponentId::from_raw(0x00C0_0001);
@@ -326,7 +282,7 @@ fn grid_items(css: &str) -> [(f32, f32, f32); 2] {
     })
 }
 
-/// A 400px grid whose first column is `track` and whose second is `1fr`.
+#[doc = include_str!("intrinsic_sizing.doc/grid_page.md")]
 fn grid_page(track: &str) -> String {
     format!(
         ".page {{ display: grid; width: 400px; font-size: {FONT}px; \

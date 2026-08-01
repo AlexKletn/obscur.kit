@@ -1,0 +1,1 @@
+Stroke end-cap style.

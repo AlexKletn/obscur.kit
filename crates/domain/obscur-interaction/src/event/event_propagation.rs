@@ -1,27 +1,18 @@
-//! Mutable propagation control carried by an event as it routes (spec §4.7).
+#![doc = include_str!("event_propagation.doc/_module.md")]
 
-/// The propagation-control flags an event carries while it travels its path
-/// (spec §4.7).
-///
-/// Mirrors the DOM control surface a handler uses to steer routing:
-/// [`stop_propagation`](Self::stop_propagation) halts travel after the current
-/// node finishes, [`stop_immediate_propagation`](Self::stop_immediate_propagation)
-/// halts it at once (skipping any remaining handlers on the current node), and
-/// [`prevent_default`](Self::prevent_default) suppresses the host's built-in
-/// action. This crate stores the flags; honoring them is the runtime's job.
+#[doc = include_str!("event_propagation.doc/EventPropagation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventPropagation {
-    /// Propagation should stop after the current node finishes (`stopPropagation`).
+    #[doc = include_str!("event_propagation.doc/stopped.md")]
     pub stopped: bool,
-    /// Propagation should stop immediately, skipping any remaining handlers on
-    /// the current node (`stopImmediatePropagation`).
+    #[doc = include_str!("event_propagation.doc/stop_immediate.md")]
     pub stop_immediate: bool,
-    /// The host's default action has been suppressed (`preventDefault`).
+    #[doc = include_str!("event_propagation.doc/default_prevented.md")]
     pub default_prevented: bool,
 }
 
 impl EventPropagation {
-    /// Creates fresh propagation control with every flag clear.
+    #[doc = include_str!("event_propagation.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -31,33 +22,29 @@ impl EventPropagation {
         }
     }
 
-    /// Requests that propagation stop after the current node finishes
-    /// (`stopPropagation`).
+    #[doc = include_str!("event_propagation.doc/stop_propagation.md")]
     pub const fn stop_propagation(&mut self) {
         self.stopped = true;
     }
 
-    /// Requests that propagation stop immediately, skipping any remaining
-    /// handlers on the current node (`stopImmediatePropagation`). This also
-    /// implies [`stop_propagation`](Self::stop_propagation).
+    #[doc = include_str!("event_propagation.doc/stop_immediate_propagation.md")]
     pub const fn stop_immediate_propagation(&mut self) {
         self.stop_immediate = true;
         self.stopped = true;
     }
 
-    /// Suppresses the host's default action for this event (`preventDefault`).
+    #[doc = include_str!("event_propagation.doc/prevent_default.md")]
     pub const fn prevent_default(&mut self) {
         self.default_prevented = true;
     }
 
-    /// Returns whether propagation has been stopped by either the ordinary or
-    /// the immediate form.
+    #[doc = include_str!("event_propagation.doc/is_stopped.md")]
     #[must_use]
     pub const fn is_stopped(&self) -> bool {
         self.stopped || self.stop_immediate
     }
 
-    /// Returns whether the host's default action has been suppressed.
+    #[doc = include_str!("event_propagation.doc/is_default_prevented.md")]
     #[must_use]
     pub const fn is_default_prevented(&self) -> bool {
         self.default_prevented

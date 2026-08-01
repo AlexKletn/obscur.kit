@@ -1,4 +1,4 @@
-//! Font module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod font_attributes;
 pub use font_attributes::{FontAttributes, FontStretch};
 mod font_face;

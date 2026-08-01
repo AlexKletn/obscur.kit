@@ -1,22 +1,22 @@
-//! A 2D size in logical pixels.
+#![doc = include_str!("size.doc/_module.md")]
 
-/// A width/height pair in logical pixels.
+#[doc = include_str!("size.doc/Size.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Size {
-    /// Width in logical pixels.
+    #[doc = include_str!("size.doc/width.md")]
     pub width: f32,
-    /// Height in logical pixels.
+    #[doc = include_str!("size.doc/height.md")]
     pub height: f32,
 }
 
 impl Size {
-    /// The zero size.
+    #[doc = include_str!("size.doc/ZERO.md")]
     pub const ZERO: Self = Self {
         width: 0.0,
         height: 0.0,
     };
 
-    /// Constructs a size.
+    #[doc = include_str!("size.doc/new.md")]
     #[must_use]
     pub const fn new(width: f32, height: f32) -> Self {
         Self { width, height }

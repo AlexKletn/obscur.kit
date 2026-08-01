@@ -1,17 +1,4 @@
-//! End-to-end: a **drag-and-drop session** driven by real pointer input through
-//! the live runtime, with its effect gated by a provisional transaction
-//! (spec §3.2 commit/cancel, §6.21 drag and drop).
-//!
-//! The audit's §3 headline was that `ProvisionalTransaction` was "implemented but
-//! not connected to any interaction system" — and the drag domain
-//! (`DragSession` / `DragSource` / `DropTarget`) was equally unconnected at the
-//! other end. This is the interaction system between them.
-//!
-//! What the commit/cancel gate buys is asserted rather than described: a drop
-//! applies exactly the dropped-on node's work, and a drag that wanders across
-//! targets and is then abandoned applies **nothing** — not one frame that
-//! recomputes nothing, but no frame and no invalidation at all.
-
+#![doc = include_str!("drag_and_drop.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -36,7 +23,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Two stacked 100x50 boxes: `.source` on top, `.sink` below it.
+#[doc = include_str!("drag_and_drop.doc/view.md")]
 fn view() -> View {
     let component = ComponentId::from_raw(0x00C0_0001);
     let source = ViewNode::element(component)
@@ -53,7 +40,7 @@ const CSS: &str = ".page { width: 200px; height: 200px } \
                   .source { width: 100px; height: 50px; background-color: #ff0000 } \
                   .sink { width: 100px; height: 50px; background-color: #0000ff }";
 
-/// A live runtime with the view rendered, plus the `(source, sink)` node ids.
+#[doc = include_str!("drag_and_drop.doc/rendered.md")]
 fn rendered() -> (UiRuntime, NodeId, NodeId) {
     let sheet = compile(CSS);
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
@@ -70,7 +57,7 @@ fn rendered() -> (UiRuntime, NodeId, NodeId) {
     (runtime, children[0], children[1])
 }
 
-/// A pointer event of `kind` at `y` down the left edge.
+#[doc = include_str!("drag_and_drop.doc/at.md")]
 fn at(kind: PointerEventKind, y: f32) -> PointerEvent {
     PointerEvent::new(
         PointerId::from_raw(1),
@@ -80,12 +67,12 @@ fn at(kind: PointerEventKind, y: f32) -> PointerEvent {
     )
 }
 
-/// A drag carrying `text/plain` from `origin`.
+#[doc = include_str!("drag_and_drop.doc/text_drag.md")]
 fn text_drag(origin: NodeId) -> DragSource {
     DragSource::new(origin, TransferPayload::new(DataOffer::text("payload")))
 }
 
-/// The `.source` box occupies y 0..50; `.sink` occupies y 50..100.
+#[doc = include_str!("drag_and_drop.doc/OVER_SOURCE.md")]
 const OVER_SOURCE: f32 = 25.0;
 const OVER_SINK: f32 = 75.0;
 const OVER_NOTHING: f32 = 150.0;
@@ -111,14 +98,7 @@ fn a_drop_on_a_registered_target_reports_it_and_reconciles_that_node() {
     assert!(runtime.drag_session().is_none(), "and the session is over");
 }
 
-/// The same view with an extra node under `.sink`, so that "did the drop's
-/// transaction classify a reconcile" is observable.
-///
-/// Asserting on a pending frame would not do it: the drag requests frames for its
-/// own visuals, so one is pending either way. Asserting on `reconciled()` against
-/// an identical view would not either — a reconcile over an unchanged view commits
-/// empty and reports `false`. Only adopting a node the tree did not have can tell
-/// the two apart.
+#[doc = include_str!("drag_and_drop.doc/grown_view.md")]
 fn grown_view() -> View {
     let component = ComponentId::from_raw(0x00C0_0001);
     let source = ViewNode::element(component)

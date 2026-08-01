@@ -1,0 +1,1 @@
+Registers `migration`.

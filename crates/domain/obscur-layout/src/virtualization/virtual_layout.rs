@@ -1,34 +1,21 @@
-//! The [`VirtualLayout`] — computes which items to materialize for a scroll
-//! position (spec §4.9 *virtualization and collections*).
-//!
-//! This is the reusable 1-D virtualization mechanism the higher-level collections
-//! (tables, trees, grids) compose: given a scroll offset and viewport extent it
-//! resolves the visible item band via the [`SizeEstimator`], widens it by the
-//! [`OverscanPolicy`], and clamps the result to a [`MaterializedRange`]. It also
-//! captures [`ScrollAnchor`]s for stable scroll positions across resizes.
+#![doc = include_str!("virtual_layout.doc/_module.md")]
 
 use super::materialized_range::MaterializedRange;
 use super::overscan_policy::OverscanPolicy;
 use super::scroll_anchor::ScrollAnchor;
 use super::size_estimator::SizeEstimator;
 
-/// Computes the materialized item range for a scroll position (spec §4.9).
-///
-/// A `VirtualLayout` pairs a [`SizeEstimator`] (the index ↔ offset mapping,
-/// refined by measurement) with an [`OverscanPolicy`] (how far past the viewport
-/// to materialize). This is the reusable virtualization mechanism; tables, trees
-/// and grids build on it rather than reimplementing materialization.
+#[doc = include_str!("virtual_layout.doc/VirtualLayout.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct VirtualLayout {
-    /// Maps between item indices and cumulative scroll offsets.
+    #[doc = include_str!("virtual_layout.doc/estimator.md")]
     estimator: SizeEstimator,
-    /// How many extra items to materialize beyond the viewport edges.
+    #[doc = include_str!("virtual_layout.doc/overscan.md")]
     overscan: OverscanPolicy,
 }
 
 impl VirtualLayout {
-    /// Creates a layout from a size `estimator` and an `overscan` policy (spec
-    /// §4.9).
+    #[doc = include_str!("virtual_layout.doc/new.md")]
     #[must_use]
     pub fn new(estimator: SizeEstimator, overscan: OverscanPolicy) -> Self {
         Self {
@@ -37,19 +24,13 @@ impl VirtualLayout {
         }
     }
 
-    /// Creates a layout with uniform `default_extent` items and no overscan.
+    #[doc = include_str!("virtual_layout.doc/with_default_extent.md")]
     #[must_use]
     pub fn with_default_extent(default_extent: f32) -> Self {
         Self::new(SizeEstimator::new(default_extent), OverscanPolicy::none())
     }
 
-    /// The materialized range for a viewport of `viewport_extent` logical pixels
-    /// starting at `scroll_offset`, over `item_count` items (spec §4.9).
-    ///
-    /// The visible band runs from the item at `scroll_offset` through the item at
-    /// `scroll_offset + viewport_extent`, i.e. `[first, last + 1)`. That band is
-    /// then widened by the overscan policy and clamped to `[0, item_count]`. An
-    /// empty collection yields an empty range.
+    #[doc = include_str!("virtual_layout.doc/visible_range.md")]
     #[must_use]
     pub fn visible_range(
         &self,
@@ -78,11 +59,7 @@ impl VirtualLayout {
         MaterializedRange::new(start, end)
     }
 
-    /// Captures a [`ScrollAnchor`] at the current viewport top (spec §4.9).
-    ///
-    /// The anchor pins the item at `scroll_offset`, remembering how far into that
-    /// item the top sits, so the scroll position can be restored after items above
-    /// it are inserted or re-measured.
+    #[doc = include_str!("virtual_layout.doc/anchor_at.md")]
     #[must_use]
     pub fn anchor_at(&self, scroll_offset: f32, item_count: usize) -> ScrollAnchor {
         let index = self.estimator.index_at_offset(scroll_offset, item_count);
@@ -90,24 +67,24 @@ impl VirtualLayout {
         ScrollAnchor::new(index, offset_within_item, scroll_offset)
     }
 
-    /// The size estimator backing this layout.
+    #[doc = include_str!("virtual_layout.doc/estimator_2.md")]
     #[must_use]
     pub const fn estimator(&self) -> &SizeEstimator {
         &self.estimator
     }
 
-    /// Mutable access to the size estimator, for recording measured extents.
+    #[doc = include_str!("virtual_layout.doc/estimator_mut.md")]
     pub const fn estimator_mut(&mut self) -> &mut SizeEstimator {
         &mut self.estimator
     }
 
-    /// The overscan policy backing this layout.
+    #[doc = include_str!("virtual_layout.doc/overscan_2.md")]
     #[must_use]
     pub const fn overscan(&self) -> OverscanPolicy {
         self.overscan
     }
 
-    /// The total extent of all `item_count` items (delegates to the estimator).
+    #[doc = include_str!("virtual_layout.doc/total_extent.md")]
     #[must_use]
     pub fn total_extent(&self, item_count: usize) -> f32 {
         self.estimator.total_extent(item_count)

@@ -1,30 +1,4 @@
-//! **Proof: CSS Text 3 `white-space` processing + `tab-size` in the coordinator.**
-//!
-//! Renders text blocks through the REAL runtime + software [`CpuRenderer`] (no
-//! GPU), stitched top-to-bottom into `target/white_space_proof.png`, proving the
-//! four behaviours of the white-space model (CSS Text 3 §3, §4.1.1, §4.3):
-//!
-//! - **A — `white-space: normal`** on `"a    b\nc"` (four spaces + a newline) in a
-//!   wide box: the run of spaces collapses to ONE space and the segment break
-//!   collapses to a space, so it is a single line of width `W_normal`.
-//! - **B — `white-space: pre`** on the SAME `"a    b\nc"`: the four spaces are
-//!   PRESERVED (so the first line is wider than A's collapsed one) and the `\n`
-//!   forces a SECOND line.
-//! - **C — `white-space: nowrap`** on a long phrase in a NARROW box: it never
-//!   soft-wraps, staying on ONE line whose width exceeds the box (overflow).
-//! - **D — `white-space: pre; tab-size: 4`** on `"a\tb"`: the preserved tab
-//!   advances the pen to the next tab stop (a multiple of `4 × space-advance`),
-//!   proven against a plain single-space `"a b"` (narrower) and a `tab-size: 8`
-//!   render (wider), with the tab landing exactly on the stop.
-//!
-//! Before writing the PNG it machine-checks the composed display list:
-//! `W_normal < W_pre` (collapsing is narrower than preserving); B is two lines;
-//! C is one line wider than its box; and D's pen after the tab lands on
-//! `4 × space-advance`, with `tab-size: 8` landing on `8 × space-advance`.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example white_space_proof \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("white_space_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -47,12 +21,10 @@ use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The logical extent each block is laid out and rasterized under.
+#[doc = include_str!("white_space_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 90.0);
 
-/// One wrapped visual line: its y-origin and total width (summed glyph advances
-/// of every `DrawText` run sharing that y), plus the per-glyph advances of the
-/// first run on the line (enough to inspect a tab's advance).
+#[doc = include_str!("white_space_proof.doc/Line.md")]
 struct Line {
     y: f32,
     width: f32,
@@ -120,7 +92,7 @@ fn main() {
     );
 }
 
-/// Machine-checks the four blocks against the CSS Text 3 white-space model.
+#[doc = include_str!("white_space_proof.doc/verify.md")]
 #[allow(clippy::too_many_arguments)]
 fn verify(
     a: &[Line],
@@ -211,14 +183,12 @@ fn verify(
     );
 }
 
-/// Builds one block's CSS: the shared `base` plus a per-block `.block` rule (given
-/// the extra `decls`). The `name` is only for readability.
+#[doc = include_str!("white_space_proof.doc/css.md")]
 fn css(base: &str, name: &str, decls: &str) -> String {
     format!("{base}\n/* {name} */ .block {{ {decls} }}")
 }
 
-/// Renders one `.block` (a container holding a single text node) through the real
-/// runtime and returns its rasterized pixmap plus its visual [`Line`]s.
+#[doc = include_str!("white_space_proof.doc/render_block.md")]
 fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Line>) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
     let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
@@ -271,7 +241,7 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Line>) {
     )
 }
 
-/// The view: a single `.block` element wrapping one text node.
+#[doc = include_str!("white_space_proof.doc/block_view.md")]
 fn block_view(content: &str) -> View {
     let block = ViewNode::element(ComponentId::from_raw(1))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("block".into())))
@@ -282,7 +252,7 @@ fn block_view(content: &str) -> View {
     View::single(page)
 }
 
-/// Vertically stacks `pixmaps` into one image with thin gray dividers.
+#[doc = include_str!("white_space_proof.doc/stack.md")]
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
     let width = pixmaps
@@ -313,7 +283,7 @@ fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] at `origin`.
+#[doc = include_str!("white_space_proof.doc/compile.md")]
 fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
@@ -323,7 +293,7 @@ fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
         .matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("white_space_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -331,8 +301,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("white_space_proof.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -350,12 +319,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("white_space_proof.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("white_space_proof.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

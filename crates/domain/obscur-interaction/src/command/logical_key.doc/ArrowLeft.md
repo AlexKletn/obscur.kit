@@ -1,0 +1,1 @@
+The left arrow key.

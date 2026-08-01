@@ -1,52 +1,39 @@
-//! Buffering and backpressure configuration for a subscription.
+#![doc = include_str!("diagnostic_buffer_policy.doc/_module.md")]
 
-/// How a subscription's buffer behaves when it is full and a new diagnostic
-/// arrives (spec §7.8 backpressure).
+#[doc = include_str!("diagnostic_buffer_policy.doc/OverflowStrategy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverflowStrategy {
-    /// Evict the oldest buffered diagnostic to make room for the new one. The
-    /// newest diagnostics are always retained.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/DropOldest.md")]
     DropOldest,
-    /// Reject the incoming diagnostic, keeping the existing buffer intact. The
-    /// oldest diagnostics are always retained.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/DropNewest.md")]
     DropNewest,
-    /// Merge the incoming diagnostic with an existing one that shares the same
-    /// code and subsystem (the retained copy is updated to the newest
-    /// occurrence); only fall back to dropping the oldest if no match exists.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/Coalesce.md")]
     Coalesce,
 }
 
-/// Buffering and backpressure policy for a [`DiagnosticSubscription`].
-///
-/// A subscription buffers up to `capacity` diagnostics; when full, `overflow`
-/// decides what happens to further arrivals (spec §7.8).
-///
-/// [`DiagnosticSubscription`]: crate::DiagnosticSubscription
+#[doc = include_str!("diagnostic_buffer_policy.doc/DiagnosticBufferPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiagnosticBufferPolicy {
-    /// Maximum number of buffered diagnostics. `usize::MAX` is treated as
-    /// effectively unbounded.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/capacity.md")]
     pub capacity: usize,
-    /// Strategy applied when the buffer is at capacity.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/overflow.md")]
     pub overflow: OverflowStrategy,
 }
 
 impl DiagnosticBufferPolicy {
-    /// Creates a policy with the given `capacity` and `overflow` strategy.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/new.md")]
     #[must_use]
     pub const fn new(capacity: usize, overflow: OverflowStrategy) -> Self {
         Self { capacity, overflow }
     }
 
-    /// Creates a bounded policy of `capacity` entries that drops the oldest
-    /// diagnostic on overflow.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/bounded.md")]
     #[must_use]
     pub const fn bounded(capacity: usize) -> Self {
         Self::new(capacity, OverflowStrategy::DropOldest)
     }
 
-    /// Creates an effectively unbounded policy (no backpressure). The overflow
-    /// strategy is irrelevant since the capacity is never reached in practice.
+    #[doc = include_str!("diagnostic_buffer_policy.doc/unbounded.md")]
     #[must_use]
     pub const fn unbounded() -> Self {
         Self::new(usize::MAX, OverflowStrategy::DropOldest)

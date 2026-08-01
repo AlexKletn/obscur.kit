@@ -1,68 +1,54 @@
-//! `ValueType`: the .okui DSL value-type vocabulary (spec §2.9).
+#![doc = include_str!("value_type.doc/_module.md")]
 
-/// A value type in the .okui DSL's type system (spec §2.9).
-///
-/// This is the vocabulary of types a prop, state binding or expression result
-/// can carry. It is deliberately small: the DSL types are the scalar
-/// primitives, homogeneous [`List`](ValueType::List)s, [`Optional`](ValueType::Optional)
-/// values (spec §2.10 null/none), and the opaque [`Component`](ValueType::Component)
-/// type. Two escape hatches round it out: [`Unknown`](ValueType::Unknown) marks a
-/// type that has not been inferred yet, and [`Any`](ValueType::Any) matches every
-/// type.
-///
-/// The type *algebra* lives in [`ValueType::is_assignable_to`], which the typing
-/// and lowering steps use to check that a value fits where it is used.
+#[doc = include_str!("value_type.doc/ValueType.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueType {
-    /// A boolean (`true`/`false`).
+    #[doc = include_str!("value_type.doc/Bool.md")]
     Bool,
-    /// A signed integer.
+    #[doc = include_str!("value_type.doc/Int.md")]
     Int,
-    /// A floating-point number.
+    #[doc = include_str!("value_type.doc/Float.md")]
     Float,
-    /// A UTF-8 text string.
+    #[doc = include_str!("value_type.doc/Text.md")]
     Text,
-    /// A homogeneous list whose elements all share the boxed element type.
+    #[doc = include_str!("value_type.doc/List.md")]
     List(Box<ValueType>),
-    /// An optional value that may be absent (`null`/`none`, spec §2.10); the box
-    /// holds the wrapped (present) type.
+    #[doc = include_str!("value_type.doc/Optional.md")]
     Optional(Box<ValueType>),
-    /// A component value (spec §2.9).
+    #[doc = include_str!("value_type.doc/Component.md")]
     Component,
-    /// A type that has not been inferred yet (a deferred placeholder).
+    #[doc = include_str!("value_type.doc/Unknown.md")]
     Unknown,
-    /// The escape-hatch type that is assignable to and from every other type.
+    #[doc = include_str!("value_type.doc/Any.md")]
     Any,
 }
 
 impl ValueType {
-    /// Builds a [`List`](ValueType::List) of `element`.
+    #[doc = include_str!("value_type.doc/list.md")]
     #[must_use]
     pub fn list(element: ValueType) -> Self {
         Self::List(Box::new(element))
     }
 
-    /// Builds an [`Optional`](ValueType::Optional) of `inner`.
+    #[doc = include_str!("value_type.doc/optional.md")]
     #[must_use]
     pub fn optional(inner: ValueType) -> Self {
         Self::Optional(Box::new(inner))
     }
 
-    /// Returns whether this is a numeric type ([`Int`](ValueType::Int) or
-    /// [`Float`](ValueType::Float)).
+    #[doc = include_str!("value_type.doc/is_numeric.md")]
     #[must_use]
     pub const fn is_numeric(&self) -> bool {
         matches!(self, Self::Int | Self::Float)
     }
 
-    /// Returns whether this is an [`Optional`](ValueType::Optional) type.
+    #[doc = include_str!("value_type.doc/is_optional.md")]
     #[must_use]
     pub const fn is_optional(&self) -> bool {
         matches!(self, Self::Optional(_))
     }
 
-    /// Returns the element type of a [`List`](ValueType::List) or the wrapped
-    /// type of an [`Optional`](ValueType::Optional); `None` for any other type.
+    #[doc = include_str!("value_type.doc/inner.md")]
     #[must_use]
     pub const fn inner(&self) -> Option<&ValueType> {
         match self {
@@ -71,24 +57,7 @@ impl ValueType {
         }
     }
 
-    /// Returns whether a value of this type may be assigned to a slot of
-    /// `target` (spec §2.9 assignability).
-    ///
-    /// The rules, checked in order:
-    ///
-    /// * [`Any`](ValueType::Any) is the escape hatch: it assigns to and from
-    ///   every type, in either direction.
-    /// * [`Unknown`](ValueType::Unknown) is a not-yet-inferred placeholder, so it
-    ///   assigns to anything (the real check is deferred).
-    /// * Identical types always assign.
-    /// * [`Int`](ValueType::Int) widens to [`Float`](ValueType::Float).
-    /// * A [`List`](ValueType::List)`<T>` assigns to `List<U>` exactly when its
-    ///   element type `T` assigns to `U`.
-    /// * An [`Optional`](ValueType::Optional)`<T>` assigns to `Optional<U>`
-    ///   exactly when `T` assigns to `U`.
-    /// * A bare value `T` assigns to `Optional<U>` when `T` assigns to `U` (a
-    ///   present value fits an optional slot).
-    /// * Otherwise the assignment is rejected.
+    #[doc = include_str!("value_type.doc/is_assignable_to.md")]
     #[must_use]
     pub fn is_assignable_to(&self, target: &ValueType) -> bool {
         // `Any` matches everything, in both directions.

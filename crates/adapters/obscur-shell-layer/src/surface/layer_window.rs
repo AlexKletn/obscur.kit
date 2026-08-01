@@ -1,4 +1,4 @@
-//! [`LayerWindow`]: a live `wlr-layer-shell` surface and its dispatch loop.
+#![doc = include_str!("layer_window.doc/_module.md")]
 
 use core::ptr::NonNull;
 
@@ -28,66 +28,25 @@ use super::layer_state::LayerState;
 use super::layer_waker::LayerWaker;
 use super::layer_window_target::LayerWindowTarget;
 
-/// A live layer surface: the Wayland connection, the surface, and the queue that
-/// drives them.
-///
-/// # Lifecycle
-///
-/// Opening does **not** give you a drawable surface. The protocol requires an
-/// initial commit with no buffer, after which the compositor answers with a
-/// configure carrying the real size — which is why
-/// [`LayerEvent::Configured`](crate::event::LayerEvent::Configured) exists and
-/// why [`is_configured`](Self::is_configured) gates the first frame. Drawing
-/// before it is a protocol error, not a race.
-///
-/// # Driving it
-///
-/// ```ignore
-/// let mut window = LayerWindow::open(&LayerSurfaceConfig::top_bar("panel", 32))?;
-/// while !window.is_closed() {
-///     for event in window.dispatch()? {
-///         // feed pointer events to the runtime, resize on Configured, …
-///     }
-/// }
-/// ```
-///
-/// [`dispatch`](Self::dispatch) blocks until the compositor says something;
-/// [`dispatch_pending`](Self::dispatch_pending) does not, for a host that also
-/// has its own timer or frame source.
+#[doc = include_str!("layer_window.doc/LayerWindow.md")]
 pub struct LayerWindow {
     connection: Connection,
     event_loop: EventLoop<'static, LayerState>,
     state: LayerState,
-    /// The compositor global must outlive the surface made from it.
+    #[doc = include_str!("layer_window.doc/_compositor.md")]
     _compositor: CompositorState,
-    /// Kept alive for the same reason; absent where the compositor does not
-    /// offer fractional scaling, which is what makes the integer path a
-    /// fallback rather than a mode.
+    #[doc = include_str!("layer_window.doc/_fractional_manager.md")]
     _fractional_manager: Option<WpFractionalScaleManagerV1>,
     _viewporter: Option<WpViewporter>,
 }
 
 impl LayerWindow {
-    /// Connects, binds `wlr-layer-shell`, and creates a surface described by
-    /// `config`.
-    ///
-    /// # Errors
-    ///
-    /// [`LayerShellError::NoDisplay`] when there is no Wayland session,
-    /// [`LayerShellError::Unsupported`] when the compositor does not implement
-    /// the protocol — the expected answer on GNOME, and a capability result
-    /// rather than a failure — and [`LayerShellError::MissingGlobal`] when a
-    /// required global is absent.
+    #[doc = include_str!("layer_window.doc/open.md")]
     pub fn open(config: &LayerSurfaceConfig) -> Result<Self, LayerShellError> {
         Self::open_with(config, None)
     }
 
-    /// [`open`](Self::open), plus a [`LayerWaker`] the loop will answer to.
-    ///
-    /// # Errors
-    ///
-    /// The same as [`open`](Self::open), plus [`LayerShellError::Dispatch`] if
-    /// the waker's source cannot be inserted into the loop.
+    #[doc = include_str!("layer_window.doc/open_with.md")]
     pub fn open_with(
         config: &LayerSurfaceConfig,
         waker: Option<&LayerWaker>,
@@ -178,17 +137,7 @@ impl LayerWindow {
         })
     }
 
-    /// Runs the loop until something happens, or until `timeout` elapses, and
-    /// returns everything that did.
-    ///
-    /// `None` sleeps until woken — by the compositor, or by a
-    /// [`LayerWaker`] given at open time. A duration bounds the wait, which is
-    /// what an animating host wants: it needs a turn per frame whether or not
-    /// anything arrived.
-    ///
-    /// # Errors
-    ///
-    /// [`LayerShellError::Dispatch`] when the connection or the loop fails.
+    #[doc = include_str!("layer_window.doc/dispatch.md")]
     pub fn dispatch(
         &mut self,
         timeout: Option<std::time::Duration>,
@@ -199,93 +148,56 @@ impl LayerWindow {
         Ok(core::mem::take(&mut self.state.events))
     }
 
-    /// A handle for inserting further sources — timers, other file descriptors —
-    /// into the same loop the surface runs on.
-    ///
-    /// This is what keeps a host from needing a second thread to own a timer: one
-    /// loop, one place events come from.
+    #[doc = include_str!("layer_window.doc/loop_handle.md")]
     #[must_use]
     pub fn loop_handle(&self) -> calloop::LoopHandle<'static, LayerState> {
         self.event_loop.handle()
     }
 
-    /// Flushes queued requests to the compositor.
-    ///
-    /// # Errors
-    ///
-    /// [`LayerShellError::Dispatch`] when the connection fails.
+    #[doc = include_str!("layer_window.doc/flush.md")]
     pub fn flush(&self) -> Result<(), LayerShellError> {
         self.connection
             .flush()
             .map_err(|error| LayerShellError::Dispatch(error.to_string()))
     }
 
-    /// The size the compositor last configured, in logical pixels.
-    ///
-    /// Before the first configure this is what was requested, which is a
-    /// placeholder — [`is_configured`](Self::is_configured) says whether it is
-    /// real yet.
+    #[doc = include_str!("layer_window.doc/size.md")]
     #[must_use]
     pub const fn size(&self) -> Size {
         self.state.size
     }
 
-    /// The output scale the surface is on.
+    #[doc = include_str!("layer_window.doc/scale.md")]
     #[must_use]
     pub const fn scale(&self) -> f32 {
         self.state.scale
     }
 
-    /// Whether the first configure has arrived, so the surface may be drawn to.
+    #[doc = include_str!("layer_window.doc/is_configured.md")]
     #[must_use]
     pub const fn is_configured(&self) -> bool {
         self.state.configured
     }
 
-    /// Whether the compositor has closed the surface.
+    #[doc = include_str!("layer_window.doc/is_closed.md")]
     #[must_use]
     pub const fn is_closed(&self) -> bool {
         self.state.closed
     }
 
-    /// Re-applies `config` to the live surface — a panel changing its height, its
-    /// anchor, or how much space it reserves.
-    ///
-    /// The compositor answers with a fresh configure; the host should treat the
-    /// resulting [`LayerEvent::Configured`](crate::event::LayerEvent::Configured)
-    /// as the new size rather than assuming the request was honoured verbatim.
+    #[doc = include_str!("layer_window.doc/reconfigure.md")]
     pub fn reconfigure(&self, config: &LayerSurfaceConfig) {
         apply(self.state.layer(), config);
         self.state.layer().commit();
     }
 
-    /// Every output the compositor has announced, by connector name.
-    ///
-    /// A host reports this as its multi-output capability and offers it as the
-    /// choice a user makes; it is the same set
-    /// [`LayerOutput::Named`](obscur_windowing::layer::LayerOutput::Named)
-    /// is matched against.
+    #[doc = include_str!("layer_window.doc/outputs.md")]
     #[must_use]
     pub fn outputs(&self) -> Vec<String> {
         self.state.output_names()
     }
 
-    /// Tells the compositor how the buffer relates to logical pixels, by
-    /// whichever mechanism this surface has.
-    ///
-    /// Without this a HiDPI surface is **twice the size it should be**: Wayland
-    /// measures a surface in logical units as `buffer_size / buffer_scale`, so a
-    /// buffer rendered at 2× and never declared as such is read as a surface
-    /// twice as wide and twice as tall.
-    ///
-    /// Two mechanisms, and the caller should not have to know which is live:
-    ///
-    /// * **Fractional** — the buffer stays at scale `1` and a viewport maps it
-    ///   onto the logical size. This is the only way to express 1.5, and it is
-    ///   what avoids rendering a 1.6× display at 2× and letting the compositor
-    ///   soften it back down.
-    /// * **Integer** — `set_buffer_scale`, where fractional scaling is absent.
-    ///   A fractional output then rounds up, as it always did.
+    #[doc = include_str!("layer_window.doc/sync_scale.md")]
     pub fn sync_scale(&self) {
         let logical = self.state.size;
         if let Some(viewport) = self.state.viewport.as_ref() {
@@ -303,10 +215,7 @@ impl LayerWindow {
         self.state.layer().commit();
     }
 
-    /// The buffer extent to render at, in physical pixels.
-    ///
-    /// This is the logical size times the surface's scale, rounded — the one
-    /// place the two spaces are related, so a host never multiplies by hand.
+    #[doc = include_str!("layer_window.doc/physical_size.md")]
     #[must_use]
     pub fn physical_size(&self) -> Size {
         Size::new(
@@ -315,19 +224,13 @@ impl LayerWindow {
         )
     }
 
-    /// Whether the surface's scale can be fractional, i.e. whether the
-    /// compositor offered `wp_fractional_scale_v1` **and** `wp_viewporter`.
+    #[doc = include_str!("layer_window.doc/has_fractional_scale.md")]
     #[must_use]
     pub const fn has_fractional_scale(&self) -> bool {
         self.state.viewport.is_some()
     }
 
-    /// The raw handles a `wgpu::Surface` is built from.
-    ///
-    /// # Panics
-    ///
-    /// If the Wayland library hands back a null display or surface pointer, which
-    /// would mean the connection is already dead.
+    #[doc = include_str!("layer_window.doc/target.md")]
     #[must_use]
     pub fn target(&self) -> LayerWindowTarget {
         let display = NonNull::new(self.connection.backend().display_ptr().cast())
@@ -340,7 +243,7 @@ impl LayerWindow {
     }
 }
 
-/// Pushes every field of `config` onto a live layer surface.
+#[doc = include_str!("layer_window.doc/apply.md")]
 fn apply(layer: &LayerSurface, config: &LayerSurfaceConfig) {
     layer.set_layer(layer_of(config.layer));
     layer.set_anchor(anchor_of(config.anchor));
@@ -356,7 +259,7 @@ fn apply(layer: &LayerSurface, config: &LayerSurfaceConfig) {
     layer.set_size(width, height);
 }
 
-/// The protocol's band for a [`LayerKind`].
+#[doc = include_str!("layer_window.doc/layer_of.md")]
 const fn layer_of(kind: LayerKind) -> Layer {
     match kind {
         LayerKind::Background => Layer::Background,
@@ -366,7 +269,7 @@ const fn layer_of(kind: LayerKind) -> Layer {
     }
 }
 
-/// The protocol's anchor bitset for a [`LayerAnchor`].
+#[doc = include_str!("layer_window.doc/anchor_of.md")]
 fn anchor_of(anchor: LayerAnchor) -> Anchor {
     let mut out = Anchor::empty();
     if anchor.top {
@@ -384,7 +287,7 @@ fn anchor_of(anchor: LayerAnchor) -> Anchor {
     out
 }
 
-/// The protocol's keyboard mode for a [`LayerKeyboardInteractivity`].
+#[doc = include_str!("layer_window.doc/keyboard_of.md")]
 const fn keyboard_of(interactivity: LayerKeyboardInteractivity) -> KeyboardInteractivity {
     match interactivity {
         LayerKeyboardInteractivity::None => KeyboardInteractivity::None,

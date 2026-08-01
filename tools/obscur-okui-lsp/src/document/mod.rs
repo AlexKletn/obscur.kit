@@ -1,5 +1,4 @@
-//! Document model: the open-document [`DocumentStore`], each [`TextDocument`]
-//! and its [`LineIndex`] for offset ↔ position mapping.
+#![doc = include_str!("mod.doc/_module.md")]
 mod document_store;
 pub use document_store::DocumentStore;
 mod text_document;

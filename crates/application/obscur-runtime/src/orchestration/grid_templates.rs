@@ -1,23 +1,4 @@
-//! Bridges an authored CSS grid template into an `obscur-layout` [`GridTemplate`].
-//!
-//! `grid-template-columns` / `grid-template-rows` are computed on a node's
-//! [`ComputedStyle`] as a style-local [`PropertyValue::GridTracks`] list (each a
-//! [`GridTrack`]). Layout consumes its own vocabulary, so — exactly as
-//! [`layout_style_from`](super::layout_coordinator) maps computed lengths into
-//! [`Dimension`](obscur_layout::model::Dimension)s — this module converts each
-//! [`GridTrack`] into an `obscur_layout` [`TrackSize`] and assembles the
-//! [`GridTemplate`] a grid container lays out with (spec §4.1).
-//!
-//! A [`GridTrack::Fixed`] length is resolved to logical pixels through the same
-//! [`LengthContext`] the box-model lengths use. A bare percentage inside a track
-//! has no known basis at this point (the grid container's content size is not yet
-//! known here), so it is carried symbolically as a [`TrackSize::Percent`]
-//! fraction and resolved against the container content extent *inside* the layout
-//! algorithm. A `repeat(auto-fill | auto-fit, …)` track — whose repetition count
-//! also depends on the (not-yet-known) container size — is likewise carried
-//! symbolically: it becomes a layout [`AutoRepeat`] inside the axis
-//! [`TrackList`], expanded to concrete tracks by the grid algorithm. Line
-//! placement / spanning remain out of scope for this step.
+#![doc = include_str!("grid_templates.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -30,28 +11,12 @@ use obscur_style::property::{GridTrack, Length, LengthContext, PropertyId, Prope
 use obscur_text::shaping::ParagraphShaper;
 
 use super::ComputedStyles;
-use super::layout_coordinator::{ch_width_for, length_context};
+use super::length_resolution::{ch_width_for, length_context};
 
-/// The [`GridTemplate`] derived for every grid node that authored one, keyed by
-/// [`NodeId`].
-///
-/// This is the grid twin of [`LayoutStyles`](super::LayoutStyles): a per-node
-/// side-table the coordinator threads into the layout walk so a
-/// [`LayoutDisplay::Grid`](obscur_layout::model::LayoutDisplay::Grid) node with an
-/// authored template dispatches the real track-sizing algorithm. A node absent
-/// from this map simply has no authored template and falls back to the default
-/// single implicit column.
+#[doc = include_str!("grid_templates.doc/GridTemplates.md")]
 pub type GridTemplates = HashMap<NodeId, GridTemplate>;
 
-/// Builds a [`GridTemplates`] side-table from every node's [`ComputedStyle`].
-///
-/// Only nodes that authored `grid-template-columns` and/or
-/// `grid-template-rows` produce an entry; a node with neither is skipped, so the
-/// map stays small. `viewport`, `root_font_size` and `paragraph` supply the
-/// resolution context for relative / viewport units in a fixed track (`em`,
-/// `rem`, `vw`, `ch`, …), exactly as in
-/// [`layout_styles_from`](super::LayoutCoordinator::layout_styles_from) — so
-/// `grid-template-columns: repeat(3, 20ch)` sizes its tracks from the `0` glyph.
+#[doc = include_str!("grid_templates.doc/grid_templates_from.md")]
 #[must_use]
 pub fn grid_templates_from(
     computed: &ComputedStyles,
@@ -68,14 +33,7 @@ pub fn grid_templates_from(
         .collect()
 }
 
-/// Converts a single node's computed grid template into an `obscur_layout`
-/// [`GridTemplate`], or [`None`] when the node authored neither track list.
-///
-/// The column and row track lists are read from [`PropertyId::GridTemplateColumns`]
-/// / [`PropertyId::GridTemplateRows`] (each a [`PropertyValue::GridTracks`]) and
-/// each [`GridTrack`] is mapped to a [`TrackSize`] via [`track_size_of`]. An empty
-/// `rows` list yields an all-implicit-row (auto) grid, the common columns-only
-/// template.
+#[doc = include_str!("grid_templates.doc/grid_template_for.md")]
 #[must_use]
 pub fn grid_template_for(
     computed: &ComputedStyle,
@@ -108,26 +66,12 @@ pub fn grid_template_for(
     )
 }
 
-/// Converts a flat `grid-auto-columns` / `grid-auto-rows` [`GridTrack`] list into
-/// the implicit-track [`TrackSize`] vector, reusing [`track_size_of`].
-///
-/// These lists carry no auto-repeat (the CSS layer rejects `auto-fill` / `auto-fit`
-/// here), so every element maps 1:1; a stray auto-repeat would degrade to a
-/// content-sized [`TrackSize::Auto`] via [`track_size_of`] rather than panic.
+#[doc = include_str!("grid_templates.doc/auto_track_sizes.md")]
 fn auto_track_sizes(tracks: &[GridTrack], ctx: &LengthContext) -> Vec<TrackSize> {
     tracks.iter().map(|t| track_size_of(t, ctx)).collect()
 }
 
-/// Converts one axis's style [`GridTrack`] list into a layout [`TrackList`],
-/// splitting it around its (first) `repeat(auto-fill | auto-fit, …)`.
-///
-/// Tracks before the auto-repeat become the leading run, the auto-repeat's pattern
-/// becomes the [`AutoRepeat`], and tracks after it become the trailing run — the
-/// shape [`TrackList`] and the grid algorithm expand against the container size.
-/// A list with no auto-repeat yields a leading-only `TrackList` that expands
-/// byte-identically to its explicit tracks. Only the first auto-repeat is honoured
-/// (as in CSS, which allows one per axis); any later `AutoRepeat` degrades through
-/// [`track_size_of`] to a single [`TrackSize::Auto`] track.
+#[doc = include_str!("grid_templates.doc/track_list_of.md")]
 fn track_list_of(tracks: &[GridTrack], ctx: &LengthContext) -> TrackList {
     let mut leading = Vec::new();
     let mut auto_repeat = None;
@@ -159,8 +103,7 @@ fn track_list_of(tracks: &[GridTrack], ctx: &LengthContext) -> TrackList {
     TrackList::new(leading, auto_repeat, trailing)
 }
 
-/// Reads a `grid-template-*` property as its authored [`GridTrack`] slice, or
-/// [`None`] when the property is absent or not a track list.
+#[doc = include_str!("grid_templates.doc/grid_tracks_of.md")]
 fn grid_tracks_of(computed: &ComputedStyle, property: PropertyId) -> Option<&[GridTrack]> {
     computed
         .get(property)
@@ -168,14 +111,7 @@ fn grid_tracks_of(computed: &ComputedStyle, property: PropertyId) -> Option<&[Gr
         .and_then(PropertyValue::as_grid_tracks)
 }
 
-/// Maps one style [`GridTrack`] into an `obscur_layout` [`TrackSize`].
-///
-/// A [`GridTrack::Fixed`] length is resolved to logical pixels against `ctx`; a
-/// bare percentage — its basis is the not-yet-known container content size —
-/// becomes a [`TrackSize::Percent`] fraction the algorithm resolves later, and
-/// `auto` (no numeric value) degrades to [`TrackSize::Auto`]. `fr`, `auto`,
-/// `min-content` / `max-content`, and `minmax` map structurally, recursing on the
-/// `minmax` bounds.
+#[doc = include_str!("grid_templates.doc/track_size_of.md")]
 fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     match track {
         GridTrack::Fixed(length) => fixed_track_size(*length, ctx),
@@ -196,13 +132,7 @@ fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     }
 }
 
-/// Resolves a fixed-track [`Length`] to a concrete [`TrackSize`].
-///
-/// A `px` (or resolvable relative unit) becomes a [`TrackSize::Fixed`]; a bare
-/// percentage becomes a [`TrackSize::Percent`] fraction (the `0..100` percent is
-/// converted to `0..1`) carried symbolically to the layout algorithm, where the
-/// container content extent — its basis — is known; `auto` (no numeric value)
-/// degrades to [`TrackSize::Auto`].
+#[doc = include_str!("grid_templates.doc/fixed_track_size.md")]
 fn fixed_track_size(length: Length, ctx: &LengthContext) -> TrackSize {
     match length {
         Length::Px(px) => TrackSize::Fixed(px.0),

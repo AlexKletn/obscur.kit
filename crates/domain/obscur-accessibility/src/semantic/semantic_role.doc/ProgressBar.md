@@ -1,0 +1,1 @@
+A progress indicator.

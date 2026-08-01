@@ -1,80 +1,33 @@
-//! [`UiOperation`]: a single normalized UI mutation intent (spec §3.2).
+#![doc = include_str!("ui_operation.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use crate::invalidation::{Invalidation, InvalidationReason};
 
-/// A single normalized UI operation: a typed intent that the frame pipeline
-/// interprets against the domains (tree, style, layout).
-///
-/// Operations are *normalized*: a mutation coming from application code is
-/// reduced to one of these variants before it enters a [`UiTransaction`], so
-/// the runtime never dispatches on strings and always reasons over a closed set
-/// of intents. This is only the *intent* — nothing is applied when a
-/// `UiOperation` is created. The concrete effect happens later in the frame
-/// pipeline once the transaction has been validated and committed.
-///
-/// # What an operation actually does
-///
-/// [`invalidation`](Self::invalidation) is where an intent becomes an effect: it
-/// states the change as an [`Invalidation`], which the
-/// [`InvalidationRouter`](crate::invalidation::InvalidationRouter) turns into the
-/// set of pipeline phases a frame must run. That is the whole of it — an
-/// operation *classifies work*, it does not describe an edit. The edit itself
-/// comes from reconciling the desired [`View`](obscur_view::view::View); an
-/// operation says which phases have to look at the result.
-///
-/// This is the Phase-1 set; more operation kinds are added in later phases.
-///
-/// [`UiTransaction`]: crate::transaction::UiTransaction
+#[doc = include_str!("ui_operation.doc/UiOperation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiOperation {
-    /// The root desired output changed and the whole tree must reconcile.
-    ///
-    /// This targets no specific node — it applies to the tree as a whole.
+    #[doc = include_str!("ui_operation.doc/ReplaceRoot.md")]
     ReplaceRoot,
-    /// A component subtree rooted at `node` must be re-rendered.
+    #[doc = include_str!("ui_operation.doc/Rerender.md")]
     Rerender {
-        /// The node at the root of the subtree to re-render.
+        #[doc = include_str!("ui_operation.doc/node.md")]
         node: NodeId,
     },
-    /// A node's style must be recomputed.
+    #[doc = include_str!("ui_operation.doc/InvalidateStyle.md")]
     InvalidateStyle {
-        /// The node whose style is now stale.
+        #[doc = include_str!("ui_operation.doc/node_2.md")]
         node: NodeId,
     },
-    /// A node's layout must be recomputed.
+    #[doc = include_str!("ui_operation.doc/InvalidateLayout.md")]
     InvalidateLayout {
-        /// The node whose layout is now stale.
+        #[doc = include_str!("ui_operation.doc/node_3.md")]
         node: NodeId,
     },
 }
 
 impl UiOperation {
-    /// States this operation as the [`Invalidation`] it causes — the runtime-level
-    /// change a frame must classify (spec §3.4 phase 5, §4.3).
-    ///
-    /// This is the seam that gives the operation vocabulary an effect. Route the
-    /// result through an
-    /// [`InvalidationRouter`](crate::invalidation::InvalidationRouter) and its
-    /// phase flags say what the frame recalculates.
-    ///
-    /// The mapping is total and each arm says what the operation *claims*:
-    ///
-    /// * [`ReplaceRoot`](Self::ReplaceRoot) — a **global**
-    ///   [`TreeChanged`](InvalidationReason::TreeChanged). It names no node
-    ///   because it targets none: the whole tree reconciles.
-    /// * [`Rerender`](Self::Rerender) — `TreeChanged` **at that node**. A
-    ///   component's output can change its subtree's structure, so this is the
-    ///   same cause, narrowed.
-    /// * [`InvalidateStyle`](Self::InvalidateStyle) —
-    ///   [`StyleChanged`](InvalidationReason::StyleChanged): the node restyles,
-    ///   and layout follows because a style can feed geometry.
-    /// * [`InvalidateLayout`](Self::InvalidateLayout) —
-    ///   [`LayoutChanged`](InvalidationReason::LayoutChanged): geometry only. It
-    ///   deliberately does **not** dirty the style phase, which is the entire
-    ///   difference from `InvalidateStyle` and the reason the two are separate
-    ///   operations.
+    #[doc = include_str!("ui_operation.doc/invalidation.md")]
     #[must_use]
     pub fn invalidation(self) -> Invalidation {
         match self {
@@ -91,9 +44,7 @@ impl UiOperation {
         }
     }
 
-    /// Returns the node this operation targets, or `None` for
-    /// [`UiOperation::ReplaceRoot`], which applies to the whole tree rather than
-    /// a single node.
+    #[doc = include_str!("ui_operation.doc/target.md")]
     #[must_use]
     pub const fn target(&self) -> Option<NodeId> {
         match self {
@@ -104,25 +55,25 @@ impl UiOperation {
         }
     }
 
-    /// Returns `true` if this operation replaces the root (a whole-tree reconcile).
+    #[doc = include_str!("ui_operation.doc/is_root_replacement.md")]
     #[must_use]
     pub const fn is_root_replacement(&self) -> bool {
         matches!(self, Self::ReplaceRoot)
     }
 
-    /// Returns `true` if this operation requests a component subtree re-render.
+    #[doc = include_str!("ui_operation.doc/is_rerender.md")]
     #[must_use]
     pub const fn is_rerender(&self) -> bool {
         matches!(self, Self::Rerender { .. })
     }
 
-    /// Returns `true` if this operation invalidates a node's style.
+    #[doc = include_str!("ui_operation.doc/is_style_invalidation.md")]
     #[must_use]
     pub const fn is_style_invalidation(&self) -> bool {
         matches!(self, Self::InvalidateStyle { .. })
     }
 
-    /// Returns `true` if this operation invalidates a node's layout.
+    #[doc = include_str!("ui_operation.doc/is_layout_invalidation.md")]
     #[must_use]
     pub const fn is_layout_invalidation(&self) -> bool {
         matches!(self, Self::InvalidateLayout { .. })

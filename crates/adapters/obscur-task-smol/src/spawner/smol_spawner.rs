@@ -1,20 +1,4 @@
-//! A smol-backed [`Spawner`] + [`BlockingExecutor`] adapter (spec §2.7 optional
-//! task ports — "Опциональные реализации task ports. Ни одна не является core
-//! dependency.").
-//!
-//! [`SmolSpawner`] implements the executor-agnostic [`Spawner`] port on top of
-//! [`async_executor::Executor`]. Unlike an ambient runtime, that executor does
-//! nothing until a thread drives it, so this adapter owns a worker thread that
-//! runs the executor until the spawner is dropped. The kit's core never names
-//! smol; this adapter is one concrete way a host wires the port.
-//!
-//! It also implements [`BlockingExecutor`] (spec §3.3), on smol's *separate*
-//! blocking thread pool rather than on that worker — see the impl for why the
-//! two must not share a thread. That impl is what lets a `UiRuntime` run its
-//! resource loads off the frame (§1.5 "resource loading" as parallel work):
-//! before it, the only `BlockingExecutor` in the workspace was the headless
-//! `DeterministicExecutor`, which runs every job inline on the caller by
-//! design, so nothing could put a real thread behind the port.
+#![doc = include_str!("smol_spawner.doc/_module.md")]
 
 use std::fmt;
 use std::sync::Arc;
@@ -23,34 +7,18 @@ use std::thread::JoinHandle;
 use async_executor::Executor;
 use obscur_task::{BlockingExecutor, BoxFuture, Spawner};
 
-/// A [`Spawner`] that schedules `Send` futures onto a smol
-/// [`async_executor::Executor`] driven by an owned worker thread (spec §2.7
-/// optional task ports).
-///
-/// The executor is shared behind an [`Arc`]; the worker thread calls
-/// [`Executor::run`] to drive every spawned task until shutdown. Because the
-/// executor is shared, a [`SmolTimer`](crate::timer::SmolTimer) built from
-/// [`SmolSpawner::executor`] schedules its wake tasks onto the same running
-/// executor, which is required for those timers to fire.
+#[doc = include_str!("smol_spawner.doc/SmolSpawner.md")]
 pub struct SmolSpawner {
-    /// The shared executor spawned work runs on; also handed to timers so they
-    /// schedule onto the same driven executor.
+    #[doc = include_str!("smol_spawner.doc/executor.md")]
     executor: Arc<Executor<'static>>,
-    /// Shutdown signal: sending (or dropping) this completes the worker's
-    /// [`Executor::run`] future so the thread returns cleanly.
+    #[doc = include_str!("smol_spawner.doc/shutdown.md")]
     shutdown: async_channel::Sender<()>,
-    /// The worker thread driving the executor. `Option` so [`Drop`] can take and
-    /// join it exactly once.
+    #[doc = include_str!("smol_spawner.doc/worker.md")]
     worker: Option<JoinHandle<()>>,
 }
 
 impl SmolSpawner {
-    /// Creates a spawner with a fresh executor and a worker thread that drives
-    /// it until the spawner is dropped.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the worker thread cannot be spawned by the OS.
+    #[doc = include_str!("smol_spawner.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         let executor = Arc::new(Executor::new());
@@ -76,11 +44,7 @@ impl SmolSpawner {
         }
     }
 
-    /// Returns a handle to the shared executor.
-    ///
-    /// Cloning the [`Arc`] lets a [`SmolTimer`](crate::timer::SmolTimer) schedule
-    /// wake tasks onto the same executor this spawner drives, which is required
-    /// for those timers to run.
+    #[doc = include_str!("smol_spawner.doc/executor_2.md")]
     #[must_use]
     pub fn executor(&self) -> Arc<Executor<'static>> {
         Arc::clone(&self.executor)
@@ -88,72 +52,35 @@ impl SmolSpawner {
 }
 
 impl Default for SmolSpawner {
-    /// Equivalent to [`SmolSpawner::new`].
+    #[doc = include_str!("smol_spawner.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl fmt::Debug for SmolSpawner {
-    /// Formats without the executor internals, shutdown channel, or worker
-    /// handle, none of which carry a useful `Debug` representation here.
+    #[doc = include_str!("smol_spawner.doc/fmt.md")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SmolSpawner").finish_non_exhaustive()
     }
 }
 
 impl Spawner for SmolSpawner {
-    /// Spawns `future` onto the executor.
-    ///
-    /// [`Executor::spawn`] returns a `Task` handle; it is immediately
-    /// [`detach`](async_executor::Task::detach)ed so the work runs
-    /// fire-and-forget on the worker thread and its completion is not awaited
-    /// here.
+    #[doc = include_str!("smol_spawner.doc/spawn.md")]
     fn spawn(&self, future: BoxFuture) {
         self.executor.spawn(future).detach();
     }
 }
 
 impl BlockingExecutor for SmolSpawner {
-    /// Runs `job` on smol's blocking thread pool, off the caller's thread.
-    ///
-    /// **This does not touch [`Self::executor`], and that is the point.** The
-    /// [`Spawner`] half of this type drives its executor with exactly *one*
-    /// worker thread, shared with every [`SmolTimer`](crate::timer::SmolTimer)
-    /// built from [`SmolSpawner::executor`]. A blocking job — the whole point of
-    /// this port is that it blocks — would own that thread for its duration and
-    /// stall every future and timer queued behind it. So blocking work goes to
-    /// [`blocking::unblock`]'s dedicated, dynamically-grown pool instead, which
-    /// is the same split smol itself draws between `smol::spawn` and
-    /// `smol::unblock`. The two halves therefore share nothing but the type.
-    ///
-    /// The returned `Task` is detached: this port is fire-and-forget, and a
-    /// detached task still runs — `unblock` schedules its runnable onto the pool
-    /// before returning it. A job that panics does not take a pool thread with
-    /// it: `blocking` builds its tasks with `propagate_panic(true)`
-    /// (`blocking-1.6.2/src/lib.rs:219`), which catches the unwind inside
-    /// `Runnable::run` and re-raises it only when the `Task` is polled — and a
-    /// detached task is never polled. The result simply never arrives, which for
-    /// a resource load means the image is not painted.
-    ///
-    /// # Panics
-    ///
-    /// On `wasm` targets `blocking`'s pool cannot exist and `unblock` panics
-    /// ("cannot spawn a blocking task on WASM", `blocking-1.6.2/src/lib.rs:212`).
-    /// §1.5's WASM workers are a separate, unbuilt facility; do not install this
-    /// adapter on a WASM host.
+    #[doc = include_str!("smol_spawner.doc/run_blocking.md")]
     fn run_blocking(&self, job: Box<dyn FnOnce() + Send + 'static>) {
         blocking::unblock(job).detach();
     }
 }
 
 impl Drop for SmolSpawner {
-    /// Signals shutdown so the worker's [`Executor::run`] future resolves, then
-    /// joins the worker thread so no thread is leaked.
-    ///
-    /// Sending on the bounded channel (or its later drop) completes the recv the
-    /// worker awaits, which ends `run` and lets the thread finish; the join then
-    /// returns promptly rather than blocking.
+    #[doc = include_str!("smol_spawner.doc/drop.md")]
     fn drop(&mut self) {
         let _ = self.shutdown.try_send(());
         if let Some(worker) = self.worker.take() {

@@ -1,7 +1,4 @@
-//! End-to-end: the DevTools CLI client drives the demo host over a **real**
-//! loopback socket (spec §7.6/§7.7). One process, two threads, one kernel
-//! socket — exercising handshake → authorize → inspect → typed reply through the
-//! unchanged endpoint and the same `WireCodec` framing a separate process uses.
+#![doc = include_str!("socket_roundtrip.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::thread;
@@ -13,8 +10,7 @@ use obscur_devtools_protocol::message::{
 };
 use obscur_devtools_server::transport::{ClientBound, SocketClient, SocketListener};
 
-/// Binds a loopback host serving exactly one session with `token`/`scopes`, and
-/// returns its address plus the server thread's join handle.
+#[doc = include_str!("socket_roundtrip.doc/spawn_host.md")]
 fn spawn_host(
     token: &'static str,
     scopes: ScopeSet,

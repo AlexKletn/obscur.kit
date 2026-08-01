@@ -1,25 +1,15 @@
-//! The offered data with its multiple MIME representations (spec §6.20
-//! `DataOffer`).
+#![doc = include_str!("data_offer.doc/_module.md")]
 
 use crate::offer::{DataRepresentation, MimeType};
 
-/// The data being offered across a transfer, described as multiple MIME
-/// representations (spec §6.20 `DataOffer`).
-///
-/// A `DataOffer` is what a source publishes and a consumer inspects: it lists
-/// the same logical content under one or more
-/// [representations](DataRepresentation), letting the consumer pick the richest
-/// format it understands (rich text over plain text, an image over its URI). The
-/// representations may be eager or lazy; the offer itself only records the menu.
-/// Order is preserved, so callers may treat earlier representations as
-/// preferred.
+#[doc = include_str!("data_offer.doc/DataOffer.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DataOffer {
     representations: Vec<DataRepresentation>,
 }
 
 impl DataOffer {
-    /// Creates an empty offer (spec §6.20).
+    #[doc = include_str!("data_offer.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -27,7 +17,7 @@ impl DataOffer {
         }
     }
 
-    /// Creates an offer with a single representation (spec §6.20).
+    #[doc = include_str!("data_offer.doc/single.md")]
     #[must_use]
     pub fn single(representation: DataRepresentation) -> Self {
         Self {
@@ -35,8 +25,7 @@ impl DataOffer {
         }
     }
 
-    /// Creates an offer carrying one eager `text/plain` representation from
-    /// `text`'s UTF-8 bytes (spec §6.20).
+    #[doc = include_str!("data_offer.doc/text.md")]
     #[must_use]
     pub fn text(text: impl Into<Box<str>>) -> Self {
         let text = text.into();
@@ -46,25 +35,25 @@ impl DataOffer {
         ))
     }
 
-    /// Appends a representation to this offer (spec §6.20).
+    #[doc = include_str!("data_offer.doc/push.md")]
     pub fn push(&mut self, representation: DataRepresentation) {
         self.representations.push(representation);
     }
 
-    /// Returns this offer with `representation` appended (spec §6.20).
+    #[doc = include_str!("data_offer.doc/with.md")]
     #[must_use]
     pub fn with(mut self, representation: DataRepresentation) -> Self {
         self.push(representation);
         self
     }
 
-    /// Returns the representations in preference order (spec §6.20).
+    #[doc = include_str!("data_offer.doc/representations.md")]
     #[must_use]
     pub fn representations(&self) -> &[DataRepresentation] {
         &self.representations
     }
 
-    /// Returns the MIME types this offer advertises, in order (spec §6.20).
+    #[doc = include_str!("data_offer.doc/available_mimes.md")]
     #[must_use]
     pub fn available_mimes(&self) -> Vec<MimeType> {
         self.representations
@@ -73,15 +62,13 @@ impl DataOffer {
             .collect()
     }
 
-    /// Returns whether this offer advertises a representation for `mime` (spec
-    /// §6.20).
+    #[doc = include_str!("data_offer.doc/has_mime.md")]
     #[must_use]
     pub fn has_mime(&self, mime: &MimeType) -> bool {
         self.representation_for(mime).is_some()
     }
 
-    /// Returns the first representation whose MIME matches `mime`, or `None`
-    /// (spec §6.20).
+    #[doc = include_str!("data_offer.doc/representation_for.md")]
     #[must_use]
     pub fn representation_for(&self, mime: &MimeType) -> Option<&DataRepresentation> {
         self.representations
@@ -89,13 +76,13 @@ impl DataOffer {
             .find(|rep| rep.mime().matches(mime))
     }
 
-    /// Returns whether this offer has no representations (spec §6.20).
+    #[doc = include_str!("data_offer.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.representations.is_empty()
     }
 
-    /// Returns the number of representations (spec §6.20).
+    #[doc = include_str!("data_offer.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.representations.len()

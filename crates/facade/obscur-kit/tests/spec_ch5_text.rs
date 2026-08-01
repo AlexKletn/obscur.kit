@@ -1,17 +1,4 @@
-//! **SPECIFICATION-DERIVED** text-subsystem cases for obscur.kit §5.10 ("Text
-//! subsystem") and §5.18 ("Fonts").
-//!
-//! §5 fixes no font and no metric conventions, so **no** absolute text width,
-//! advance, line height or caret x is derivable from it. Every case below is
-//! therefore written as a *relation* between measured quantities — "the advance
-//! equals the advance of this other string", "x(3) == x(4)", "exactly 2 line
-//! boxes", "the run's face is FontB" — never as a pixel count. A test in this
-//! area that asserts a concrete width is asserting the shaper's constants back at
-//! itself.
-//!
-//! Every expected value was produced by an agent reading obscur.kit §5 and the
-//! css-fonts-4 / css-text-3 text it normatively cites, with **no access to this
-//! repository's source**.
+#![doc = include_str!("spec_ch5_text.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch5_support/mod.rs"]
@@ -31,21 +18,14 @@ use obscur_kit::text::shaping::{
 // A coverage-driven font resolver: the fallback model css-fonts-4 §5.3 describes.
 // ---------------------------------------------------------------------------
 
-/// A face plus the exact set of code points it contains.
+#[doc = include_str!("spec_ch5_text.doc/Coverage.md")]
 struct Coverage {
     face: FontFace,
     id: FontId,
     covers: Vec<char>,
 }
 
-/// A [`FontResolver`] that answers "the first font in the chain that covers the
-/// *whole* run", which is what css-fonts-4 §5.3 asks for: "If all characters in
-/// the sequence b + c1 + c2 … are completely supported by the font, select this
-/// font for the sequence."
-///
-/// It additionally implements the canonical-equivalence rule: "If a sequence of
-/// multiple codepoints is canonically equivalent to a single character and the
-/// font supports that character, select this font for the sequence."
+#[doc = include_str!("spec_ch5_text.doc/CoverageResolver.md")]
 struct CoverageResolver {
     fonts: Vec<Coverage>,
 }
@@ -71,7 +51,7 @@ impl FontResolver for CoverageResolver {
     }
 }
 
-/// A named face with idealized metrics; the name is the only thing asserted.
+#[doc = include_str!("spec_ch5_text.doc/face.md")]
 fn face(name: &str) -> FontFace {
     FontFace::new(
         FontFamily::named(name),
@@ -81,9 +61,7 @@ fn face(name: &str) -> FontFace {
     )
 }
 
-/// The itemizer under test. The real Unicode itemizer is what decides whether a
-/// combining mark stays with its base; a single-run stub would make TX-01
-/// vacuous.
+#[doc = include_str!("spec_ch5_text.doc/itemizer.md")]
 #[cfg(feature = "text-unicode")]
 fn itemizer() -> Box<dyn TextItemizer> {
     Box::new(obscur_kit::text_unicode::UnicodeTextItemizer::new())
@@ -94,8 +72,7 @@ fn itemizer() -> Box<dyn TextItemizer> {
     Box::new(obscur_kit::text::shaping::SingleRunItemizer)
 }
 
-/// Shapes `text` through the whole itemize → resolve → shape pipeline with a
-/// two-font chain whose coverage is given explicitly.
+#[doc = include_str!("spec_ch5_text.doc/shape_with.md")]
 fn shape_with(text: &str, fonts: Vec<Coverage>, families: &[&str]) -> Vec<ShapedRun> {
     let chain =
         FontFallback::from_families(families.iter().map(|n| FontFamily::named(*n)).collect());
@@ -115,10 +92,7 @@ fn shape_with(text: &str, fonts: Vec<Coverage>, families: &[&str]) -> Vec<Shaped
     )
 }
 
-/// css-fonts-4 §5.3: "the base character should be rendered using the same font
-/// as the mark, this assures proper placement of the mark" / "If all characters in
-/// the sequence b + c1 + c2 … are completely supported by the font, select this
-/// font for the sequence." Invoked by §5.18 "- fallback resolution;".
+#[doc = include_str!("spec_ch5_text.doc/tx_01_a_cluster_falls_back_as_one_unit.md")]
 #[test]
 fn tx_01_a_cluster_falls_back_as_one_unit() {
     // FontA has 'e' but not the combining acute; FontB has both.
@@ -156,10 +130,7 @@ fn tx_01_a_cluster_falls_back_as_one_unit() {
     );
 }
 
-/// css-fonts-4 §5.3: "If a sequence of multiple codepoints is canonically
-/// equivalent to a single character and the font supports that character, select
-/// this font for the sequence and use the glyph associated with the canonically
-/// equivalent character for the entire cluster."
+#[doc = include_str!("spec_ch5_text.doc/tx_02_a_canonically_equivalent_cluster_becomes_one_glyph.md")]
 #[test]
 fn tx_02_a_canonically_equivalent_cluster_becomes_one_glyph() {
     // FontC has 'e' and 'é' but NOT the combining acute.
@@ -195,11 +166,7 @@ fn tx_02_a_canonically_equivalent_cluster_becomes_one_glyph() {
     );
 }
 
-/// css-text-3 §4.1.1: "Any collapsible space immediately following another
-/// collapsible space—even one outside the boundary of the inline containing that
-/// space, provided both spaces are within the same inline formatting context—is
-/// collapsed to have zero advance width. (It is invisible, but retains its soft
-/// wrap opportunity, if any.)" Invoked by §5.10 "- CSS typography integration;".
+#[doc = include_str!("spec_ch5_text.doc/tx_03_collapsed_spaces_have_zero_advance_and_keep_their_offsets.md")]
 #[test]
 fn tx_03_collapsed_spaces_have_zero_advance_and_keep_their_offsets() {
     let collapsed = plain_layout("a   b");
@@ -245,10 +212,7 @@ fn tx_03_collapsed_spaces_have_zero_advance_and_keep_their_offsets() {
     );
 }
 
-/// css-text-3 §5.1: "in the absence of hyphenation a soft wrap opportunity occurs
-/// only at word boundaries" and "the UA must minimize the amount of content
-/// overflowing a line by wrapping the line at a soft wrap opportunity, if one
-/// exists." Invoked by §5.10 "- line breaking;".
+#[doc = include_str!("spec_ch5_text.doc/tx_04_an_unbreakable_word_overflows_rather_than_breaking.md")]
 #[test]
 fn tx_04_an_unbreakable_word_overflows_rather_than_breaking() {
     let text = "a".repeat(20);
@@ -295,8 +259,7 @@ fn tx_04_an_unbreakable_word_overflows_rather_than_breaking() {
     assert_eq!(next, 20, "the lines cover the whole 20-character word");
 }
 
-/// §5.10 "- bidi;" and "- selection;". UAX#9 L2 reorders the Hebrew run as a unit;
-/// the Latin runs are not reversed.
+#[doc = include_str!("spec_ch5_text.doc/tx_05_bidi_selection_is_disjoint_and_runs_reorder.md")]
 #[test]
 fn tx_05_bidi_selection_is_disjoint_and_runs_reorder() {
     let text = "abc\u{05D0}\u{05D1}\u{05D2}def";
@@ -343,7 +306,7 @@ fn tx_05_bidi_selection_is_disjoint_and_runs_reorder() {
 // Measurement helpers. These MEASURE; they carry no expectations.
 // ---------------------------------------------------------------------------
 
-/// A shaper over one uniformly-covering face, for the pure-layout cases.
+#[doc = include_str!("spec_ch5_text.doc/universal_shaper.md")]
 fn universal_shaper() -> ParagraphShaper {
     ParagraphShaper::new(
         itemizer(),
@@ -352,12 +315,12 @@ fn universal_shaper() -> ParagraphShaper {
     )
 }
 
-/// Shapes `text` and wraps it unconstrained under `white-space: normal`.
+#[doc = include_str!("spec_ch5_text.doc/plain_layout.md")]
 fn plain_layout(text: &str) -> ParagraphLayout {
     wrapped(text, f32::INFINITY)
 }
 
-/// Shapes `text` and wraps it at `max_width` under `white-space: normal`.
+#[doc = include_str!("spec_ch5_text.doc/wrapped.md")]
 fn wrapped(text: &str, max_width: f32) -> ParagraphLayout {
     let shaper = universal_shaper();
     let runs = shaper.shape_paragraph(
@@ -380,16 +343,11 @@ fn wrapped(text: &str, max_width: f32) -> ParagraphLayout {
     )
 }
 
-/// Wraps `text` at `max_width` with `overflow-wrap: anywhere` in force.
-///
-/// `overflow-wrap` is authored CSS; the paragraph wrapper's emergency-break knob
-/// is [`WhiteSpace::Normal`] plus an anywhere-breaking hyphenator, which is the
-/// nearest public expression of it.
+#[doc = include_str!("spec_ch5_text.doc/wrapped_anywhere.md")]
 fn wrapped_anywhere(text: &str, max_width: f32) -> ParagraphLayout {
     use obscur_kit::text::layout::Hyphenator;
 
-    /// A hyphenator proposing a break between every pair of characters, with no
-    /// visible hyphen — i.e. `overflow-wrap: anywhere`.
+    #[doc = include_str!("spec_ch5_text.doc/Anywhere.md")]
     struct Anywhere;
     impl Hyphenator for Anywhere {
         fn hyphenate(&self, word: &str) -> Vec<usize> {
@@ -421,7 +379,7 @@ fn wrapped_anywhere(text: &str, max_width: f32) -> ParagraphLayout {
     )
 }
 
-/// The widest line's advance.
+#[doc = include_str!("spec_ch5_text.doc/line_advance.md")]
 fn line_advance(layout: &ParagraphLayout) -> f32 {
     layout
         .lines()
@@ -430,9 +388,7 @@ fn line_advance(layout: &ParagraphLayout) -> f32 {
         .fold(0.0_f32, f32::max)
 }
 
-/// The caret x for the cluster boundary at `byte_offset`, measured exactly as the
-/// engine's own documented rule: the pen position just before the first glyph
-/// whose cluster is `>= byte_offset`, or the line's trailing edge.
+#[doc = include_str!("spec_ch5_text.doc/caret_x.md")]
 fn caret_x(layout: &ParagraphLayout, byte_offset: usize) -> f32 {
     let Some(line) = layout.lines().first() else {
         return 0.0;

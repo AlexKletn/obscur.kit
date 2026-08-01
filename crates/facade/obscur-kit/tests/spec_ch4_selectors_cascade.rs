@@ -1,20 +1,4 @@
-//! **SPECIFICATION-DERIVED** selector, specificity and cascade cases for
-//! obscur.kit §4.13 ("complex selectors", ":nth-*") and §4.14 (CSS cascade,
-//! `!important`), plus `display: contents`.
-//!
-//! Every expected value below was produced by an agent reading the specification
-//! — obscur.kit §4 and the W3C selectors-4 / css-display-3 text it normatively
-//! cites — with **no access to this repository's source**. A failure here is a
-//! defect report about the engine, and must not be "corrected" by editing the
-//! expected value.
-//!
-//! Translation note: this workspace's view tree has no element *tag names* that a
-//! CSS type selector could match, so where the deriver wrote `em`, `li`, `p`,
-//! `div` or `strong` as the **matching** part of a selector, a class of the same
-//! name is authored instead (`.em`, `.li`, …) and the node carries that class.
-//! The specificity arithmetic each case turns on is preserved or made *harder*,
-//! never easier — see each test. Type selectors that are only there to *not*
-//! match (the `:not(em, strong#foo)` arguments) are left verbatim.
+#![doc = include_str!("spec_ch4_selectors_cascade.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch4_support/mod.rs"]
@@ -42,7 +26,7 @@ const BLUE: StyleColor = StyleColor {
     a: 1.0,
 };
 
-/// An element carrying both an `id` and a `class`.
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/el_id.md")]
 fn el_id(raw: u64, id: &str, class: &str, kids: Vec<ViewNode>) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(raw))
         .with_prop(ViewProperty::new(ID, ViewValue::Text(id.into())))
@@ -73,8 +57,7 @@ fn is_red(rt: &UiRuntime, node: NodeId) -> bool {
     color_of(rt, node).is_some_and(|c| c.r > 0.5 && c.g < 0.5 && c.b < 0.5)
 }
 
-/// selectors-4 §15: "The specificity of a :where() pseudo-class is replaced by
-/// zero."
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/where_contributes_zero_specificity.md")]
 #[test]
 fn where_contributes_zero_specificity() {
     let v = view(vec![el_id(10, "root", "", vec![el(100, "x", vec![])])]);
@@ -93,10 +76,7 @@ fn where_contributes_zero_specificity() {
     );
 }
 
-/// selectors-4 §15: "The specificity of an :is(), :not(), or :has() pseudo-class
-/// is replaced by the specificity of the most specific complex selector in its
-/// selector list argument." — with the spec's examples ":is(em, #foo) has a
-/// specificity of (1,0,0)" and ":not(em, strong#foo) has a specificity of (1,0,1)".
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/is_and_not_take_the_specificity_of_their_most_specific_argument.md")]
 #[test]
 fn is_and_not_take_the_specificity_of_their_most_specific_argument() {
     // (a) `.em` stands in for the type selector `em`; the element matches through
@@ -130,9 +110,7 @@ fn is_and_not_take_the_specificity_of_their_most_specific_argument() {
     );
 }
 
-/// selectors-4 §13.3.1: "Note: For these purposes, the list of elements is
-/// 1-indexed; that is, the first child of an element has index 1, and will be
-/// matched by :nth-child(2n+1), because when n=0 the expression evaluates to 1."
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/nth_child_is_one_indexed.md")]
 #[test]
 fn nth_child_is_one_indexed() {
     // The rule is scoped to the parent's children (`.p > `) and the parent is
@@ -161,13 +139,7 @@ fn nth_child_is_one_indexed() {
     }
 }
 
-/// selectors-4 §13.3.1: "The :nth-child(An+B [of S]? ) pseudo-class notation
-/// represents elements that are among An+Bth elements from the list composed of
-/// their inclusive siblings that match the selector list S, which is a
-/// <complex-real-selector-list>."
-///
-/// `li` is authored as the class `.li` (see the file note); the structural claim —
-/// that S filters the sibling list *before* indexing — is untouched.
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/nth_child_of_s_filters_before_counting.md")]
 #[test]
 fn nth_child_of_s_filters_before_counting() {
     let children = || {
@@ -210,9 +182,7 @@ fn nth_child_of_s_filters_before_counting() {
     );
 }
 
-/// obscur.kit §4.14: "Normal origins, low to high: 1. system defaults; 2. theme
-/// stylesheet; 3. global application CSS; 4. component/module CSS; 5. inline CSS;
-/// 6. runtime override." and "Within an origin: 1. specificity; 2. source order."
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/origin_outranks_specificity.md")]
 #[test]
 fn origin_outranks_specificity() {
     let v = view(vec![el_id(10, "panel", "", vec![el(100, "btn", vec![])])]);
@@ -227,8 +197,7 @@ fn origin_outranks_specificity() {
     );
 }
 
-/// obscur.kit §4.14 `!important`: "runtime override is an explicit runtime layer
-/// above authored CSS, including authored `!important`".
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/a_runtime_override_beats_authored_important.md")]
 #[test]
 fn a_runtime_override_beats_authored_important() {
     let v = view(vec![el(10, "btn", vec![])]);
@@ -249,12 +218,7 @@ fn a_runtime_override_beats_authored_important() {
     );
 }
 
-/// css-display-3 §3.3: "The element itself does not generate any boxes, but its
-/// children and pseudo-elements still generate boxes and text sequences as normal.
-/// For the purposes of box generation and layout, the element must be treated as
-/// if it had been replaced in the element tree by its contents" and "Note: As only
-/// the box tree is affected, any semantics based on the document tree, such as
-/// selector-matching, event handling, and property inheritance, are not affected."
+#[doc = include_str!("spec_ch4_selectors_cascade.doc/display_contents_affects_the_box_tree_only.md")]
 #[test]
 fn display_contents_affects_the_box_tree_only() {
     let v = view(vec![el_id(

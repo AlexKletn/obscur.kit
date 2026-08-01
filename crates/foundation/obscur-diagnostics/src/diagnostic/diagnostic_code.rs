@@ -1,19 +1,17 @@
-//! Stable diagnostic code.
+#![doc = include_str!("diagnostic_code.doc/_module.md")]
 
-/// A stable, machine-readable diagnostic code. Codes are part of the
-/// diagnostics contract and must not be reused for unrelated conditions
-/// (spec §1.6, §7.8).
+#[doc = include_str!("diagnostic_code.doc/DiagnosticCode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DiagnosticCode(&'static str);
 
 impl DiagnosticCode {
-    /// Creates a code from a stable string literal.
+    #[doc = include_str!("diagnostic_code.doc/new.md")]
     #[must_use]
     pub const fn new(code: &'static str) -> Self {
         Self(code)
     }
 
-    /// Returns the code string.
+    #[doc = include_str!("diagnostic_code.doc/as_str.md")]
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         self.0

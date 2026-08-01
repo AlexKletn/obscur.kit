@@ -1,7 +1,4 @@
-//! The boundary claims: what an application must be able to do with the facade
-//! as its only dependency.
-//!
-//! Compiling this file at all is most of the assertion — see `src/counter.rs`.
+#![doc = include_str!("facade_boundary.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::headless::input::{SelectorResolver, SelectorTarget};
@@ -158,8 +155,7 @@ fn a_derived_contract_is_the_declaration_the_author_wrote() {
     assert_eq!(BadgeProps::contract().id, authored_tag_id());
 }
 
-/// The id `<Badge/>` lowers to, computed from the tag name the way a front end
-/// computes it — the other half of the agreement above.
+#[doc = include_str!("facade_boundary.doc/authored_tag_id.md")]
 fn authored_tag_id() -> obscur_kit::identity::ComponentId {
     obscur_kit::ui_ir::name_binding::component_id_for(
         "Badge",

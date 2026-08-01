@@ -1,4 +1,4 @@
-//! `SignalGenerations`: the current version of every observable source.
+#![doc = include_str!("signal_generations.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -6,39 +6,21 @@ use obscur_identity::SignalId;
 
 use crate::state::StateGeneration;
 
-/// The current [`StateGeneration`] of each observable source (spec §3.1).
-///
-/// State enters the UI through typed props, local component state, and
-/// **read-only signal/observable sources**. This is the version book for the
-/// third: an application bumps a source when the value behind it changes, and a
-/// component records which sources its render read. Comparing the two is what
-/// makes "dependency tracking invalidates only consumers of changed values" true
-/// — a source that did not advance invalidates nobody, and a component that read
-/// nothing is never invalidated.
-///
-/// # It holds versions, not values
-///
-/// Deliberately: the toolkit provides no store, and a component owns its own
-/// data (§2.1). A `SignalId` is an opaque name for "something the app can
-/// change"; what it names, and where that value lives, is entirely the
-/// application's business. This only answers *has it changed since you looked*.
-///
-/// An unknown source reads as [`StateGeneration::INITIAL`], so tracking a source
-/// nobody has bumped yet is well-defined rather than an error.
+#[doc = include_str!("signal_generations.doc/SignalGenerations.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SignalGenerations {
-    /// Sources that have been bumped at least once. Absent == `INITIAL`.
+    #[doc = include_str!("signal_generations.doc/versions.md")]
     versions: HashMap<SignalId, StateGeneration>,
 }
 
 impl SignalGenerations {
-    /// Creates a book in which every source is at [`StateGeneration::INITIAL`].
+    #[doc = include_str!("signal_generations.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The current generation of `source`.
+    #[doc = include_str!("signal_generations.doc/generation.md")]
     #[must_use]
     pub fn generation(&self, source: SignalId) -> StateGeneration {
         self.versions
@@ -47,24 +29,20 @@ impl SignalGenerations {
             .unwrap_or(StateGeneration::INITIAL)
     }
 
-    /// Advances `source` to a new generation and returns it.
-    ///
-    /// Called when the value behind the source changed. The toolkit does not diff
-    /// values to decide whether a change occurred — bumping *is* the statement
-    /// that it did, matching [`LocalState`](crate::state::LocalState)'s rule.
+    #[doc = include_str!("signal_generations.doc/bump.md")]
     pub fn bump(&mut self, source: SignalId) -> StateGeneration {
         let next = self.generation(source).next();
         self.versions.insert(source, next);
         next
     }
 
-    /// How many sources have ever been bumped.
+    #[doc = include_str!("signal_generations.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.versions.len()
     }
 
-    /// Whether no source has ever been bumped.
+    #[doc = include_str!("signal_generations.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.versions.is_empty()

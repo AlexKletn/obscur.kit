@@ -1,38 +1,31 @@
-//! The visual parent of a retained node.
+#![doc = include_str!("visual_parent.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// A node's **visual** parent: where it is actually painted, i.e. its place in
-/// the visual / stacking tree.
-///
-/// For an ordinary node the visual parent coincides with its
-/// [`super::LogicalParent`]. For a portalled node they differ: the portal moves
-/// the node's paint location (visual parent) while its logical parent — and thus
-/// its style/theme scope — is preserved (spec §4.14). A newtype over
-/// `Option<NodeId>`: `None` denotes a visual root.
+#[doc = include_str!("visual_parent.doc/VisualParent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VisualParent(Option<NodeId>);
 
 impl VisualParent {
-    /// A visual parent denoting the visual root (no parent).
+    #[doc = include_str!("visual_parent.doc/root.md")]
     #[must_use]
     pub const fn root() -> Self {
         Self(None)
     }
 
-    /// A visual parent pointing at `parent`.
+    #[doc = include_str!("visual_parent.doc/of.md")]
     #[must_use]
     pub const fn of(parent: NodeId) -> Self {
         Self(Some(parent))
     }
 
-    /// Returns the parent `NodeId`, or `None` at the visual root.
+    #[doc = include_str!("visual_parent.doc/parent.md")]
     #[must_use]
     pub const fn parent(self) -> Option<NodeId> {
         self.0
     }
 
-    /// Returns `true` if this node has no visual parent (it is a visual root).
+    #[doc = include_str!("visual_parent.doc/is_root.md")]
     #[must_use]
     pub const fn is_root(self) -> bool {
         self.0.is_none()

@@ -1,22 +1,18 @@
-//! The outcome of a capture request (spec §6.17 — capture and privacy).
+#![doc = include_str!("capture_result.doc/_module.md")]
 
 use obscur_geometry::Size;
 
-/// A descriptor of successfully captured pixels (spec §6.17).
-///
-/// `CapturedImage` names the [`size`](Self::size) and pixel [`format`](Self::format)
-/// of a capture; the actual bytes live in an interface adapter, never in the pure
-/// domain. It is the payload of [`CaptureResult::Captured`].
+#[doc = include_str!("capture_result.doc/CapturedImage.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapturedImage {
-    /// The pixel dimensions of the captured image.
+    #[doc = include_str!("capture_result.doc/size.md")]
     size: Size,
-    /// The pixel format token (for example `"rgba8"`).
+    #[doc = include_str!("capture_result.doc/format.md")]
     format: Box<str>,
 }
 
 impl CapturedImage {
-    /// Creates a descriptor for pixels of `size` in `format` (spec §6.17).
+    #[doc = include_str!("capture_result.doc/new.md")]
     #[must_use]
     pub fn new(size: Size, format: impl Into<Box<str>>) -> Self {
         Self {
@@ -25,47 +21,40 @@ impl CapturedImage {
         }
     }
 
-    /// Returns the pixel dimensions of the captured image (spec §6.17).
+    #[doc = include_str!("capture_result.doc/size_2.md")]
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    /// Returns the pixel format token (spec §6.17).
+    #[doc = include_str!("capture_result.doc/format_2.md")]
     #[must_use]
     pub fn format(&self) -> &str {
         &self.format
     }
 }
 
-/// The outcome a [`CaptureProvider`](crate::capture::CaptureProvider) returns for a
-/// [`CaptureRequest`](crate::capture::CaptureRequest) (spec §6.17).
-///
-/// The four outcomes mirror the spec's vocabulary: the target was captured, was
-/// denied by permission policy, is unsupported on this host, or failed. Only
-/// [`Captured`](Self::Captured) carries a [`CapturedImage`]; [`Failed`](Self::Failed)
-/// carries a human-readable reason.
+#[doc = include_str!("capture_result.doc/CaptureResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CaptureResult {
-    /// The capture succeeded, yielding an image descriptor.
+    #[doc = include_str!("capture_result.doc/Captured.md")]
     Captured(CapturedImage),
-    /// The capture was denied by permission policy.
+    #[doc = include_str!("capture_result.doc/Denied.md")]
     Denied,
-    /// The host does not support capturing this source.
+    #[doc = include_str!("capture_result.doc/Unsupported.md")]
     Unsupported,
-    /// The capture was attempted but failed, carrying a human-readable reason.
+    #[doc = include_str!("capture_result.doc/Failed.md")]
     Failed(Box<str>),
 }
 
 impl CaptureResult {
-    /// Returns whether the capture succeeded (spec §6.17).
+    #[doc = include_str!("capture_result.doc/is_captured.md")]
     #[must_use]
     pub const fn is_captured(&self) -> bool {
         matches!(self, Self::Captured(_))
     }
 
-    /// Returns the captured image when the outcome is [`Captured`](Self::Captured),
-    /// else `None` (spec §6.17).
+    #[doc = include_str!("capture_result.doc/image.md")]
     #[must_use]
     pub const fn image(&self) -> Option<&CapturedImage> {
         match self {
@@ -74,8 +63,7 @@ impl CaptureResult {
         }
     }
 
-    /// Returns the failure reason when the outcome is [`Failed`](Self::Failed),
-    /// else `None` (spec §6.17).
+    #[doc = include_str!("capture_result.doc/failure_reason.md")]
     #[must_use]
     pub fn failure_reason(&self) -> Option<&str> {
         match self {

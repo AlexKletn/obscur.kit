@@ -1,16 +1,10 @@
-//! A generic typed resource handle and its resource-kind tag (spec §5.15).
+#![doc = include_str!("resource_handle.doc/_module.md")]
 
 use obscur_identity::ResourceId;
 
 use crate::handle::{FontHandle, ImageHandle, ShaderHandle, StylesheetHandle};
 
-/// The kind of resource a [`ResourceHandle`] refers to (spec §5.15).
-///
-/// `ResourceKind` is a tightly-coupled part of [`ResourceHandle`]: it tags a
-/// handle's id with the category of resource it denotes, and has no meaning
-/// apart from the handle model, so it is colocated here rather than given its
-/// own module. The variants are the resource categories the Resource Hub
-/// manages.
+#[doc = include_str!("resource_handle.doc/ResourceKind.md")]
 //
 // Note: only `Image`, `Font`, `Stylesheet`, and `Shader` have a dedicated
 // typed-handle newtype in this module's layout. `Svg`, `Atlas`, and
@@ -18,30 +12,23 @@ use crate::handle::{FontHandle, ImageHandle, ShaderHandle, StylesheetHandle};
 // their `ResourceKind`; that omission is intentional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceKind {
-    /// A raster or decoded image resource.
+    #[doc = include_str!("resource_handle.doc/Image.md")]
     Image,
-    /// A font resource.
+    #[doc = include_str!("resource_handle.doc/Font.md")]
     Font,
-    /// A CSS stylesheet resource.
+    #[doc = include_str!("resource_handle.doc/Stylesheet.md")]
     Stylesheet,
-    /// A shader program resource.
+    #[doc = include_str!("resource_handle.doc/Shader.md")]
     Shader,
-    /// An SVG (vector graphics) resource.
+    #[doc = include_str!("resource_handle.doc/Svg.md")]
     Svg,
-    /// A texture atlas resource.
+    #[doc = include_str!("resource_handle.doc/Atlas.md")]
     Atlas,
-    /// An embedded asset baked into the binary.
+    #[doc = include_str!("resource_handle.doc/EmbeddedAsset.md")]
     EmbeddedAsset,
 }
 
-/// A cheap, `Copy` identifier for a resource managed by the Resource Hub
-/// (spec §5.15).
-///
-/// A `ResourceHandle` pairs a [`ResourceId`] with a [`ResourceKind`] tag; it is
-/// a pure identifier that owns no data and no state (load lifecycle state lives
-/// in [`crate::state`], keyed by handle in the hub). The typed handles such as
-/// [`ImageHandle`] are distinct newtypes that convert to and from this generic
-/// handle, giving compile-time type-safety while sharing one identity space.
+#[doc = include_str!("resource_handle.doc/ResourceHandle.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResourceHandle {
     id: ResourceId,
@@ -49,44 +36,43 @@ pub struct ResourceHandle {
 }
 
 impl ResourceHandle {
-    /// Creates a handle for the given resource id and kind.
+    #[doc = include_str!("resource_handle.doc/new.md")]
     #[must_use]
     pub const fn new(id: ResourceId, kind: ResourceKind) -> Self {
         Self { id, kind }
     }
 
-    /// Returns the resource identity this handle refers to.
+    #[doc = include_str!("resource_handle.doc/id.md")]
     #[must_use]
     pub const fn id(self) -> ResourceId {
         self.id
     }
 
-    /// Returns the kind of resource this handle refers to.
+    #[doc = include_str!("resource_handle.doc/kind.md")]
     #[must_use]
     pub const fn kind(self) -> ResourceKind {
         self.kind
     }
 
-    /// Downcasts to an [`ImageHandle`], or `None` if this is not an image.
+    #[doc = include_str!("resource_handle.doc/as_image.md")]
     #[must_use]
     pub const fn as_image(self) -> Option<ImageHandle> {
         ImageHandle::from_handle(self)
     }
 
-    /// Downcasts to a [`FontHandle`], or `None` if this is not a font.
+    #[doc = include_str!("resource_handle.doc/as_font.md")]
     #[must_use]
     pub const fn as_font(self) -> Option<FontHandle> {
         FontHandle::from_handle(self)
     }
 
-    /// Downcasts to a [`StylesheetHandle`], or `None` if this is not a
-    /// stylesheet.
+    #[doc = include_str!("resource_handle.doc/as_stylesheet.md")]
     #[must_use]
     pub const fn as_stylesheet(self) -> Option<StylesheetHandle> {
         StylesheetHandle::from_handle(self)
     }
 
-    /// Downcasts to a [`ShaderHandle`], or `None` if this is not a shader.
+    #[doc = include_str!("resource_handle.doc/as_shader.md")]
     #[must_use]
     pub const fn as_shader(self) -> Option<ShaderHandle> {
         ShaderHandle::from_handle(self)

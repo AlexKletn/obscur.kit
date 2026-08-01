@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** clipboard, command-routing and drag-and-drop cases
-//! for obscur.kit §6.20 and §6.21.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §6
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the toolkit, not about the test; expected values must not be
-//! edited to match current behaviour.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch6_data_transfer.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch6_support/mod.rs"]
@@ -29,12 +21,7 @@ use support::{at, drive, el, pointer, view};
 // P6-31
 // -------------------------------------------------------------------------
 
-/// §6.20 Data transfer: "- multiple representations;" under "Clipboard and DnD
-/// share a common `DataTransfer` subsystem:"
-///
-/// One offer carries three flavours side by side; each reads back as itself, and
-/// a flavour that was never offered fails loudly instead of degrading to the
-/// plain-text one.
+#[doc = include_str!("spec_ch6_data_transfer.doc/a_clipboard_offer_keeps_every_representation_and_refuses_absent_ones.md")]
 #[test]
 fn a_clipboard_offer_keeps_every_representation_and_refuses_absent_ones() {
     let offer = DataOffer::new()
@@ -102,13 +89,7 @@ fn a_clipboard_offer_keeps_every_representation_and_refuses_absent_ones() {
 // P6-34
 // -------------------------------------------------------------------------
 
-/// §6.20: "Capabilities, permissions, limits and copy/cut/paste commands are
-/// integrated." with §2.6 "Command routing:" / "1. focused node;" / "2. focus
-/// scope;" / "3. ancestors;" / "4. window;" / "5. application fallback."
-///
-/// A semantic Copy reaches the focused node first, then the enclosing focus
-/// scope, then the ancestors, then the window, then the application fallback —
-/// in that exact order.
+#[doc = include_str!("spec_ch6_data_transfer.doc/a_copy_command_routes_focused_node_scope_ancestors_window_then_app.md")]
 #[test]
 fn a_copy_command_routes_focused_node_scope_ancestors_window_then_app() {
     let css = ".panel{width:200px;height:200px} .scope{width:200px;height:100px} \
@@ -167,10 +148,7 @@ fn a_copy_command_routes_focused_node_scope_ancestors_window_then_app() {
 // P6-35
 // -------------------------------------------------------------------------
 
-/// §6.21 Drag and drop: "- enter/leave/over/drop;"
-///
-/// Exactly one target is active at a time: two moves inside A produce one enter,
-/// crossing into B leaves A before entering B, and only B receives the drop.
+#[doc = include_str!("spec_ch6_data_transfer.doc/a_drag_across_two_targets_enters_each_once_and_drops_on_the_second_only.md")]
 #[test]
 fn a_drag_across_two_targets_enters_each_once_and_drops_on_the_second_only() {
     let css = ".page{width:200px;height:100px;display:flex} \
@@ -216,11 +194,7 @@ fn a_drag_across_two_targets_enters_each_once_and_drops_on_the_second_only() {
 // P6-37
 // -------------------------------------------------------------------------
 
-/// §6.21: "- effects;" and "- cancel;"
-///
-/// The negotiated effect is the intersection of what the source allows and what
-/// the target accepts — never merely the source's first allowed effect — and a
-/// target that rejects the data receives no drop at all.
+#[doc = include_str!("spec_ch6_data_transfer.doc/the_negotiated_drop_effect_respects_both_source_and_target.md")]
 #[test]
 fn the_negotiated_drop_effect_respects_both_source_and_target() {
     let origin = NodeId::from_raw(1);

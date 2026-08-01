@@ -1,4 +1,4 @@
-//! `ComponentStore`: the runtime's per-node component instances.
+#![doc = include_str!("component_store.doc/_module.md")]
 
 use obscur_identity::{ComponentId, NodeId, SignalId};
 use obscur_tree::node::{NodeFlags, NodeKind};
@@ -9,94 +9,66 @@ use obscur_view::state::SignalGenerations;
 
 use crate::component::MountedComponent;
 
-/// The registered component kinds plus one live [`MountedComponent`] per node
-/// that instantiates one (spec §2.1, §2.14).
-///
-/// # Why keyed by `NodeId`
-///
-/// A [`SecondaryMap`] *augments* the retained tree's identity rather than
-/// competing with it (spec §1.5): the tree owns and mints the `NodeId`, and this
-/// map attaches the instance to it. That is exactly the relationship wanted here,
-/// and it means [`RetainedNode`](obscur_tree::node::RetainedNode) needs no
-/// component-instance field.
-///
-/// Keying on `NodeId` is also safe against slot reuse: a `NodeId` packs the
-/// arena slot's *generation*, which advances both when a slot is vacated and when
-/// it is reused, so a recycled slot never collides with a stale entry.
-///
-/// The reconciler already resolves `(ComponentId, Option<ViewKey>)`-in-position
-/// into a stable `NodeId` via keyed matching, so the node id *is* the instance
-/// identity — there is no second identity to invent, and an
-/// [`InstanceId`] remains only a diagnostic handle.
+#[doc = include_str!("component_store.doc/ComponentStore.md")]
 #[derive(Debug, Default)]
 pub struct ComponentStore {
-    /// The kinds a host has registered; nothing mounts without one.
+    #[doc = include_str!("component_store.doc/registry.md")]
     registry: ComponentRegistry,
-    /// One live instance per component-backed node.
+    #[doc = include_str!("component_store.doc/mounted.md")]
     mounted: SecondaryMap<MountedComponent>,
-    /// Monotonic source of [`InstanceId`]s. Never reused, so an id in a
-    /// diagnostic always names one historical instance.
+    #[doc = include_str!("component_store.doc/next_instance.md")]
     next_instance: u64,
-    /// The current version of every observable source (spec §3.1). A component
-    /// records which of these its render read; comparing the two is what
-    /// invalidates only the consumers of a value that actually changed.
+    #[doc = include_str!("component_store.doc/signals.md")]
     signals: SignalGenerations,
 }
 
 impl ComponentStore {
-    /// Creates an empty store with no registered kinds.
+    #[doc = include_str!("component_store.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers a component kind.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RegistryError`] when a kind is already registered under the same
-    /// [`ComponentId`].
+    #[doc = include_str!("component_store.doc/register.md")]
     pub fn register(&mut self, registration: ComponentRegistration) -> Result<(), RegistryError> {
         self.registry.register(registration)
     }
 
-    /// Whether any component kind is registered — the cheap guard that lets a
-    /// host which uses no components skip every code path here.
+    #[doc = include_str!("component_store.doc/has_registrations.md")]
     #[must_use]
     pub fn has_registrations(&self) -> bool {
         !self.registry.is_empty()
     }
 
-    /// The number of currently mounted instances.
+    #[doc = include_str!("component_store.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.mounted.len()
     }
 
-    /// Whether nothing is mounted.
+    #[doc = include_str!("component_store.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.mounted.is_empty()
     }
 
-    /// The instance mounted at `node`, if any.
+    #[doc = include_str!("component_store.doc/get.md")]
     #[must_use]
     pub fn get(&self, node: NodeId) -> Option<&MountedComponent> {
         self.mounted.get(node)
     }
 
-    /// Mutable access to the instance mounted at `node`, if any.
+    #[doc = include_str!("component_store.doc/get_mut.md")]
     pub fn get_mut(&mut self, node: NodeId) -> Option<&mut MountedComponent> {
         self.mounted.get_mut(node)
     }
 
-    /// Every mounted node, in unspecified order.
+    #[doc = include_str!("component_store.doc/nodes.md")]
     pub fn nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.mounted.iter().map(|(node, _)| node)
     }
 
-    /// Every mounted node whose component's output is stale and must be
-    /// re-rendered — the only ones a frame needs to touch.
+    #[doc = include_str!("component_store.doc/stale_nodes.md")]
     #[must_use]
     pub fn stale_nodes(&self) -> Vec<NodeId> {
         self.mounted
@@ -106,23 +78,13 @@ impl ComponentStore {
             .collect()
     }
 
-    /// The current version of every observable source, for a caller that renders
-    /// a component itself.
+    #[doc = include_str!("component_store.doc/signals_2.md")]
     #[must_use]
     pub const fn signals(&self) -> &SignalGenerations {
         &self.signals
     }
 
-    /// Records that the value behind `source` changed, and marks every component
-    /// that depends on it stale (spec §3.1: "dependency tracking invalidates only
-    /// consumers of changed values").
-    ///
-    /// Returns how many components were invalidated — zero when nothing reads the
-    /// source, which is the normal and cheap case for an app with many sources.
-    ///
-    /// A component that tracked a *different* source is untouched, and one that
-    /// tracked nothing is never invalidated by any notification. That asymmetry is
-    /// the whole point: it is what a wholesale root rebuild cannot express.
+    #[doc = include_str!("component_store.doc/notify.md")]
     pub fn notify(&mut self, source: SignalId) -> usize {
         let current = self.signals.bump(source);
         let stale: Vec<NodeId> = self
@@ -139,32 +101,13 @@ impl ComponentStore {
         stale.len()
     }
 
-    /// Whether any mounted component is waiting to be re-rendered.
-    ///
-    /// A host reads this after a frame: a component that asked to update during
-    /// its own render is serviced by the *next* frame, so someone has to schedule
-    /// one.
+    #[doc = include_str!("component_store.doc/has_stale.md")]
     #[must_use]
     pub fn has_stale(&self) -> bool {
         self.mounted.iter().any(|(_, m)| m.needs_render())
     }
 
-    /// Brings the store in line with a reconcile that just ran: mounts an
-    /// instance for every inserted node whose component kind is registered, and
-    /// unmounts every removed node's instance.
-    ///
-    /// Driven by the [`ReconciliationPlan`] rather than by a tree walk, because
-    /// the plan already states the exact structural deltas — and driven from
-    /// *here* rather than from inside the reconciler, which lives in the domain
-    /// tier and can neither see a registry nor accumulate state.
-    ///
-    /// An `Update` op keeps the instance — the node's identity did not change, so
-    /// its local state rides along, which is the whole point of keyed identity —
-    /// but marks it stale, because the node's authored props changed and the
-    /// component's typed props may now decode differently.
-    ///
-    /// A `Move` op is ignored outright: it repositions a node without touching
-    /// its content, so the component's output is still correct.
+    #[doc = include_str!("component_store.doc/sync.md")]
     pub fn sync(&mut self, tree: &mut RetainedTree, plan: &ReconciliationPlan) {
         for op in plan {
             if op.is_insert() {
@@ -179,11 +122,7 @@ impl ComponentStore {
         }
     }
 
-    /// Mounts an instance for `node` when it is an element of a registered kind.
-    ///
-    /// A node whose kind is unregistered — a plain container, a widget tag, a
-    /// text leaf — simply gets no instance, which is what leaves a
-    /// component-free host paying nothing.
+    #[doc = include_str!("component_store.doc/mount.md")]
     fn mount(&mut self, tree: &mut RetainedTree, node: NodeId) {
         let Some(component) = tree.get(node).and_then(|n| component_id_of(n.kind())) else {
             return;
@@ -215,10 +154,7 @@ impl ComponentStore {
         }
     }
 
-    /// Unmounts and drops the instance at `node`, if one is mounted.
-    ///
-    /// The hook runs while the component's state is still readable; dropping the
-    /// value afterwards releases that state and the scoped subscriptions.
+    #[doc = include_str!("component_store.doc/unmount.md")]
     fn unmount(&mut self, tree: &mut RetainedTree, node: NodeId) {
         if let Some(mut mounted) = self.mounted.remove(node) {
             mounted.unmount(&self.signals);
@@ -234,8 +170,7 @@ impl ComponentStore {
     }
 }
 
-/// The [`ComponentId`] a node instantiates, or [`None`] for a kind that names no
-/// component (root, text, synthetic).
+#[doc = include_str!("component_store.doc/component_id_of.md")]
 fn component_id_of(kind: &NodeKind) -> Option<ComponentId> {
     kind.component_id()
 }

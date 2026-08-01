@@ -1,7 +1,4 @@
-//! **SPECIFICATION-DERIVED** accessibility cases for obscur.kit §7.1 / §7.14.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §7.1,
-//! §7.4 and §7.14 with **no access to this repository's source**.
+#![doc = include_str!("spec_ch7_accessibility.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7_support/mod.rs"]
@@ -33,8 +30,7 @@ fn tree() -> View {
     )])
 }
 
-/// A renderable, comparable rendering of a semantic snapshot: role, name, state
-/// and parentage for every node, in tree order.
+#[doc = include_str!("spec_ch7_accessibility.doc/describe.md")]
 fn describe(snapshot: &SemanticSnapshot) -> String {
     let mut rows: Vec<String> = snapshot
         .iter()
@@ -57,9 +53,7 @@ fn describe(snapshot: &SemanticSnapshot) -> String {
     rows.join("\n")
 }
 
-/// §7.14: "Golden tests should prefer backend-independent snapshots:" /
-/// "- accessibility;" with §7.4 "Official headless mode operates without window
-/// or GPU."
+#[doc = include_str!("spec_ch7_accessibility.doc/the_accessibility_tree_is_identical_with_and_without_a_raster_backend.md")]
 #[test]
 fn the_accessibility_tree_is_identical_with_and_without_a_raster_backend() {
     // (a) Headless with no renderer backend registered at all.

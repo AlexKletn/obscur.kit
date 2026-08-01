@@ -1,4 +1,4 @@
-//! Subscription module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod diagnostic_filter;
 
 pub use diagnostic_filter::DiagnosticFilter;

@@ -1,18 +1,4 @@
-//! Lowering CSS `animation-*` declarations into `@keyframes` references (§4.17).
-//!
-//! Unlike `transition`, an `animation` names one or more `@keyframes` rules to
-//! play on the element plus a duration. [`AnimationCompiler`] extracts, from a
-//! style rule's declarations, the list of [`AnimationRef`]s it declares: an
-//! interned animation name (resolved against the stylesheet's compiled
-//! `@keyframes` later, at [`compile`](crate::compiler::StylesheetCompiler::compile)
-//! time) paired with its duration in seconds.
-//!
-//! Both the `animation` shorthand (`animation: pulse 1s ease-in`) and the
-//! longhands (`animation-name: pulse; animation-duration: 1s`) are recognised,
-//! as are `animation-delay`, `animation-iteration-count`, `animation-direction`
-//! and `animation-fill-mode` — each lowered onto the [`AnimationRef`] the
-//! runtime turns into a [`Timeline`](obscur_motion::timeline::Timeline).
-//! `animation-play-state` and `animation-timing-function` are still ignored.
+#![doc = include_str!("animation_compiler.doc/_module.md")]
 
 use crate::parser::{ParsedDeclaration, ParsedValue};
 
@@ -22,36 +8,27 @@ use obscur_motion::timeline::{FillMode, PlaybackDirection, RepeatCount};
 use super::property_compiler::narrow_f32;
 use super::stylesheet_compiler::CssSymbolInterner;
 
-/// A single `@keyframes` reference declared by a style rule: the interned
-/// animation name, its duration, and the playback controls the `animation-*`
-/// longhands set (css-animations-1 §3.3–§3.9).
-///
-/// The name is interned in the stylesheet's shared [`CssSymbolInterner`], so it
-/// compares equal to the matching [`CompiledKeyframes`](super::CompiledKeyframes)
-/// name and can be resolved to that rule's tracks.
+#[doc = include_str!("animation_compiler.doc/AnimationRef.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnimationRef {
-    /// The interned `@keyframes` name this rule plays.
+    #[doc = include_str!("animation_compiler.doc/name.md")]
     pub name: InternedSymbol,
-    /// The animation duration, in seconds (`0.0` when unspecified).
+    #[doc = include_str!("animation_compiler.doc/duration_secs.md")]
     pub duration_secs: f32,
-    /// `animation-delay`, in seconds. Negative values seek into the playback
-    /// (css-animations-1 §3.8).
+    #[doc = include_str!("animation_compiler.doc/delay_secs.md")]
     pub delay_secs: f32,
-    /// `animation-iteration-count`, as a repeat count.
+    #[doc = include_str!("animation_compiler.doc/repeat.md")]
     pub repeat: RepeatCount,
-    /// The direction iteration 1 plays in — `reverse`/`alternate-reverse` start
-    /// reversed (css-animations-1 §3.6).
+    #[doc = include_str!("animation_compiler.doc/direction.md")]
     pub direction: PlaybackDirection,
-    /// Whether each iteration flips direction (`alternate`/`alternate-reverse`).
+    #[doc = include_str!("animation_compiler.doc/alternates.md")]
     pub alternates: bool,
-    /// `animation-fill-mode` (css-animations-1 §3.9).
+    #[doc = include_str!("animation_compiler.doc/fill.md")]
     pub fill: FillMode,
 }
 
 impl AnimationRef {
-    /// A reference to `name` with every playback control at its CSS initial
-    /// value: no delay, one iteration, `normal` direction, `none` fill.
+    #[doc = include_str!("animation_compiler.doc/new.md")]
     #[must_use]
     fn new(name: InternedSymbol, duration_secs: f32) -> Self {
         Self {
@@ -66,19 +43,18 @@ impl AnimationRef {
     }
 }
 
-/// The playback controls an `animation` layer or the `animation-*` longhands
-/// specify, independent of which `@keyframes` they apply to.
+#[doc = include_str!("animation_compiler.doc/Playback.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Playback {
-    /// `animation-delay`, in seconds.
+    #[doc = include_str!("animation_compiler.doc/delay_secs_2.md")]
     delay_secs: f32,
-    /// `animation-iteration-count`.
+    #[doc = include_str!("animation_compiler.doc/repeat_2.md")]
     repeat: RepeatCount,
-    /// The direction iteration 1 plays in.
+    #[doc = include_str!("animation_compiler.doc/direction_2.md")]
     direction: PlaybackDirection,
-    /// Whether iterations alternate direction.
+    #[doc = include_str!("animation_compiler.doc/alternates_2.md")]
     alternates: bool,
-    /// `animation-fill-mode`.
+    #[doc = include_str!("animation_compiler.doc/fill_2.md")]
     fill: FillMode,
 }
 
@@ -95,7 +71,7 @@ impl Default for Playback {
 }
 
 impl Playback {
-    /// Stamps these controls onto `reference`.
+    #[doc = include_str!("animation_compiler.doc/apply_to.md")]
     fn apply_to(self, mut reference: AnimationRef) -> AnimationRef {
         reference.delay_secs = self.delay_secs;
         reference.repeat = self.repeat;
@@ -106,12 +82,7 @@ impl Playback {
     }
 }
 
-/// Maps a `<single-animation-direction>` keyword to the direction iteration 1
-/// plays in plus whether iterations alternate (css-animations-1 §3.6).
-///
-/// `alternate` starts normal and flips; `alternate-reverse` starts reversed and
-/// flips. Because iteration 1 is the first one played, this is exactly the
-/// spec's one-based parity: "iterations start counting from 1".
+#[doc = include_str!("animation_compiler.doc/direction_from_keyword.md")]
 fn direction_from_keyword(keyword: &str) -> Option<(PlaybackDirection, bool)> {
     if keyword.eq_ignore_ascii_case("normal") {
         Some((PlaybackDirection::Forward, false))
@@ -126,10 +97,7 @@ fn direction_from_keyword(keyword: &str) -> Option<(PlaybackDirection, bool)> {
     }
 }
 
-/// Maps an `<single-animation-iteration-count>` component value to a
-/// [`RepeatCount`]: `infinite`, or a non-negative number rounded to whole
-/// iterations. Fractional counts are not modelled and round to the nearest
-/// whole iteration.
+#[doc = include_str!("animation_compiler.doc/repeat_from_value.md")]
 fn repeat_from_value(value: &ParsedValue) -> Option<RepeatCount> {
     match value {
         ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("infinite") => {
@@ -140,31 +108,18 @@ fn repeat_from_value(value: &ParsedValue) -> Option<RepeatCount> {
     }
 }
 
-/// Lowers `animation`/`animation-*` declarations into [`AnimationRef`]s.
+#[doc = include_str!("animation_compiler.doc/AnimationCompiler.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AnimationCompiler;
 
 impl AnimationCompiler {
-    /// Creates an animation compiler.
+    #[doc = include_str!("animation_compiler.doc/new_2.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Extracts every [`AnimationRef`] declared across `decls`, interning each
-    /// animation name in `interner`.
-    ///
-    /// `animation` shorthand layers each contribute one ref (name + that layer's
-    /// duration, delay, iteration count, direction and fill mode); bare
-    /// `animation-name` idents each contribute one ref carrying the
-    /// `animation-duration` longhand's value (or `0` when absent) and the
-    /// playback longhands. An `animation-name: none` layer is skipped.
-    ///
-    /// A playback longhand declared **after** the `animation` shorthand
-    /// overrides it on every shorthand-derived ref (`animation: a 1s;
-    /// animation-direction: alternate`); one declared *before* it is reset by
-    /// the shorthand, as the cascade requires. Per-layer longhand lists are not
-    /// modelled: one longhand value applies to all of a rule's refs.
+    #[doc = include_str!("animation_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(
         &self,
@@ -276,9 +231,7 @@ impl AnimationCompiler {
     }
 }
 
-/// Rounds a non-negative iteration count to whole iterations, clamped into
-/// `u32`. A count above `u32::MAX` saturates (it is indistinguishable from
-/// `infinite` in practice, but is still finite).
+#[doc = include_str!("animation_compiler.doc/whole_iterations.md")]
 // The value is rounded to an integer and clamped to `0..=u32::MAX` first, so
 // neither truncation nor sign loss can occur.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -287,7 +240,7 @@ fn whole_iterations(count: f64) -> u32 {
     clamped as u32
 }
 
-/// Splits a component-value list into comma-separated layers.
+#[doc = include_str!("animation_compiler.doc/split_layers.md")]
 fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
     values
         .split(|value| matches!(value, ParsedValue::Comma))
@@ -295,15 +248,7 @@ fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
         .collect()
 }
 
-/// Compiles one `animation` shorthand layer into an [`AnimationRef`], or [`None`]
-/// when the layer names no animation.
-///
-/// The first keyword that is not a recognised timing-function/animation keyword
-/// is taken as the animation name. Per css-animations-1 §3.10, "the first value
-/// in each `<single-animation>` that can be parsed as a `<time>` is assigned to
-/// animation-duration, and the second value … is assigned to animation-delay";
-/// the first `<number>`/`infinite` is the iteration count, and the direction and
-/// fill-mode keywords are recognised by name.
+#[doc = include_str!("animation_compiler.doc/compile_shorthand_layer.md")]
 fn compile_shorthand_layer(
     layer: &[ParsedValue],
     interner: &mut CssSymbolInterner,
@@ -351,7 +296,7 @@ fn compile_shorthand_layer(
     name.map(|name| playback.apply_to(AnimationRef::new(name, duration)))
 }
 
-/// Returns the first time dimension in `values`, in seconds.
+#[doc = include_str!("animation_compiler.doc/first_time_secs.md")]
 fn first_time_secs(values: &[ParsedValue]) -> Option<f32> {
     values.iter().find_map(|value| match value {
         ParsedValue::Dimension { value, unit } => time_secs(*value, unit),
@@ -359,7 +304,7 @@ fn first_time_secs(values: &[ParsedValue]) -> Option<f32> {
     })
 }
 
-/// Converts a `s`/`ms` dimension to seconds, or [`None`] for any other unit.
+#[doc = include_str!("animation_compiler.doc/time_secs.md")]
 fn time_secs(value: f64, unit: &str) -> Option<f32> {
     if unit.eq_ignore_ascii_case("s") {
         Some(narrow_f32(value))
@@ -370,8 +315,7 @@ fn time_secs(value: f64, unit: &str) -> Option<f32> {
     }
 }
 
-/// Returns whether `keyword` is a reserved `animation`/timing keyword (so it is
-/// not mistaken for an animation *name* in the shorthand).
+#[doc = include_str!("animation_compiler.doc/is_reserved_keyword.md")]
 fn is_reserved_keyword(keyword: &str) -> bool {
     const RESERVED: &[&str] = &[
         "none",

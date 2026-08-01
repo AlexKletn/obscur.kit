@@ -1,39 +1,26 @@
-//! Frame performance measurement for windowed hosts (spec §7.9 telemetry, host
-//! side).
-//!
-//! The runtime never reads a clock (it records structured phase *counts*, not
-//! wall time — the host owns timing). [`FrameStats`] is the small reusable
-//! aggregator a windowed host feeds two per-frame durations — the **CPU** phase
-//! (build → reconcile → style → layout → compose) and the **present** phase
-//! (GPU submit + blit) — to get a rolling FPS and timing breakdown it can print
-//! or draw, instead of every example hand-rolling the same ring buffer.
+#![doc = include_str!("perf.doc/_module.md")]
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// One measured frame: the CPU (layout/compose) and GPU (present) durations.
+#[doc = include_str!("perf.doc/FrameSample.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameSample {
-    /// Time spent producing the frame on the CPU (the runtime's reactive frame:
-    /// build → reconcile → style → layout → compose).
+    #[doc = include_str!("perf.doc/cpu.md")]
     pub cpu: Duration,
-    /// Time spent presenting the frame on the GPU (submit + blit to surface).
+    #[doc = include_str!("perf.doc/present.md")]
     pub present: Duration,
 }
 
 impl FrameSample {
-    /// The total wall-clock cost of the frame (CPU + present).
+    #[doc = include_str!("perf.doc/total.md")]
     #[must_use]
     pub fn total(self) -> Duration {
         self.cpu + self.present
     }
 }
 
-/// A rolling window of the most recent [`FrameSample`]s, with FPS and timing
-/// summaries derived from them.
-///
-/// The window is a fixed-capacity ring: once full, each new sample evicts the
-/// oldest, so the stats always describe the recent past.
+#[doc = include_str!("perf.doc/FrameStats.md")]
 #[derive(Debug, Clone)]
 pub struct FrameStats {
     samples: VecDeque<FrameSample>,
@@ -47,7 +34,7 @@ impl Default for FrameStats {
 }
 
 impl FrameStats {
-    /// Creates a stats window retaining the last `capacity` frames (min `1`).
+    #[doc = include_str!("perf.doc/new.md")]
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -56,8 +43,7 @@ impl FrameStats {
         }
     }
 
-    /// Records one frame's CPU and present durations, evicting the oldest sample
-    /// when the window is full.
+    #[doc = include_str!("perf.doc/record.md")]
     pub fn record(&mut self, cpu: Duration, present: Duration) {
         if self.samples.len() == self.capacity {
             self.samples.pop_front();
@@ -65,19 +51,19 @@ impl FrameStats {
         self.samples.push_back(FrameSample { cpu, present });
     }
 
-    /// The number of frames currently in the window.
+    #[doc = include_str!("perf.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.samples.len()
     }
 
-    /// Whether no frames have been recorded yet.
+    #[doc = include_str!("perf.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.samples.is_empty()
     }
 
-    /// The mean of `f` over the window, or `Duration::ZERO` when empty.
+    #[doc = include_str!("perf.doc/mean.md")]
     fn mean(&self, f: impl Fn(&FrameSample) -> Duration) -> Duration {
         let n = self.samples.len();
         if n == 0 {
@@ -87,25 +73,25 @@ impl FrameStats {
         total / n as u32
     }
 
-    /// The mean CPU (layout/compose) time per frame.
+    #[doc = include_str!("perf.doc/avg_cpu.md")]
     #[must_use]
     pub fn avg_cpu(&self) -> Duration {
         self.mean(|s| s.cpu)
     }
 
-    /// The mean present (GPU) time per frame.
+    #[doc = include_str!("perf.doc/avg_present.md")]
     #[must_use]
     pub fn avg_present(&self) -> Duration {
         self.mean(|s| s.present)
     }
 
-    /// The mean total time per frame.
+    #[doc = include_str!("perf.doc/avg_total.md")]
     #[must_use]
     pub fn avg_total(&self) -> Duration {
         self.mean(|s| s.total())
     }
 
-    /// The worst (largest) total frame time in the window.
+    #[doc = include_str!("perf.doc/max_total.md")]
     #[must_use]
     pub fn max_total(&self) -> Duration {
         self.samples
@@ -115,17 +101,14 @@ impl FrameStats {
             .unwrap_or(Duration::ZERO)
     }
 
-    /// The sustainable FPS implied by the mean frame cost (`1000 / avg_total_ms`)
-    /// — the rate the frame *could* be produced at back-to-back. `0.0` when
-    /// empty. For the *actual* present rate under a continuous redraw, divide the
-    /// frames recorded by the wall-clock interval instead.
+    #[doc = include_str!("perf.doc/cost_fps.md")]
     #[must_use]
     pub fn cost_fps(&self) -> f32 {
         let ms = self.avg_total().as_secs_f32() * 1000.0;
         if ms > 0.0 { 1000.0 / ms } else { 0.0 }
     }
 
-    /// A one-line human summary: `cost fps + cpu/gpu/total ms (+ worst)`.
+    #[doc = include_str!("perf.doc/summary.md")]
     #[must_use]
     pub fn summary(&self) -> String {
         format!(
@@ -139,26 +122,18 @@ impl FrameStats {
         )
     }
 
-    /// Empties the window.
+    #[doc = include_str!("perf.doc/clear.md")]
     pub fn clear(&mut self) {
         self.samples.clear();
     }
 }
 
-/// A [`Duration`] as fractional milliseconds.
+#[doc = include_str!("perf.doc/ms.md")]
 fn ms(d: Duration) -> f32 {
     d.as_secs_f32() * 1000.0
 }
 
-/// A drop-in per-frame profiler a windowed host feeds two measured durations —
-/// the CPU frame and the GPU present — to get a rolling [`FrameStats`] plus a
-/// ready-to-print report line at a fixed cadence.
-///
-/// This is the whole "measure FPS + timings" facility as *kit* code: a host
-/// records each frame's two spans and prints the returned line; it no longer
-/// hand-rolls a ring buffer, an interval timer, and a format string per example.
-/// The real present FPS is `frames this interval / wall-clock interval`, so the
-/// host should request a redraw every frame for a continuous rate.
+#[doc = include_str!("perf.doc/FrameProfiler.md")]
 #[derive(Debug, Clone)]
 pub struct FrameProfiler {
     stats: FrameStats,
@@ -174,13 +149,13 @@ impl Default for FrameProfiler {
 }
 
 impl FrameProfiler {
-    /// Creates a profiler reporting once per second over a 120-frame window.
+    #[doc = include_str!("perf.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::with_interval(Duration::from_secs(1))
     }
 
-    /// Creates a profiler reporting once per `interval`.
+    #[doc = include_str!("perf.doc/with_interval.md")]
     #[must_use]
     pub fn with_interval(interval: Duration) -> Self {
         Self {
@@ -191,10 +166,7 @@ impl FrameProfiler {
         }
     }
 
-    /// Records one frame's CPU and present durations. Returns a formatted
-    /// `"N fps · cpu …ms · gpu …ms · frame …ms (worst …ms)"` line **once per
-    /// interval** (the wall-clock present FPS plus the rolling timing breakdown),
-    /// or `None` on the frames in between.
+    #[doc = include_str!("perf.doc/record_2.md")]
     pub fn record(&mut self, cpu: Duration, present: Duration) -> Option<String> {
         self.stats.record(cpu, present);
         self.frames_this_interval += 1;
@@ -216,8 +188,7 @@ impl FrameProfiler {
         Some(line)
     }
 
-    /// The underlying rolling stats (e.g. to build a DevTools `Rendering`
-    /// snapshot with [`crate::devtools::perf_payload`]).
+    #[doc = include_str!("perf.doc/stats.md")]
     #[must_use]
     pub fn stats(&self) -> &FrameStats {
         &self.stats

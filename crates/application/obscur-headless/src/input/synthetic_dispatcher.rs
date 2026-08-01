@@ -1,4 +1,4 @@
-//! `SyntheticDispatcher`: replaying a [`SyntheticInput`] through the real input path.
+#![doc = include_str!("synthetic_dispatcher.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
@@ -6,31 +6,14 @@ use obscur_runtime::UiRuntime;
 
 use crate::input::{DispatchOutcome, SelectorResolver, SyntheticInput};
 
-/// Replays a [`SyntheticInput`] against a live runtime and reports what it did
-/// (spec §7.4).
-///
-/// This is the write half of headless testing. The descriptors and the resolver
-/// only *describe* and *locate*; this drives.
-///
-/// # It uses the real path, deliberately
-///
-/// A dispatch is not a shortcut into the runtime's internals: a pointer input
-/// becomes a [`PointerEvent`] aimed at a viewport point and goes through
-/// [`UiRuntime::handle_pointer`] — the same call a windowed host makes from a
-/// winit event. So hit-testing, the hover chain, focus movement and command
-/// dispatch all behave exactly as they would for a real user, and a headless
-/// assertion cannot pass while the real thing is broken. Aiming a `test-id` at
-/// the centre of its box is the only synthesis; everything after is the engine.
-///
-/// This also generalises what every headless demo hand-rolled: locate a node,
-/// compute a point inside it, build the event, call the runtime.
+#[doc = include_str!("synthetic_dispatcher.doc/SyntheticDispatcher.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SyntheticDispatcher {
     resolver: SelectorResolver,
 }
 
 impl SyntheticDispatcher {
-    /// Creates a dispatcher.
+    #[doc = include_str!("synthetic_dispatcher.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -38,12 +21,7 @@ impl SyntheticDispatcher {
         }
     }
 
-    /// Dispatches `input` against `runtime`, returning the typed outcome.
-    ///
-    /// An input whose target does not resolve — an unknown `test-id`, a node that
-    /// is no longer live — is a no-op that reports
-    /// [`DispatchOutcome::unresolved`]; it never panics and never guesses a
-    /// different target.
+    #[doc = include_str!("synthetic_dispatcher.doc/dispatch.md")]
     pub fn dispatch(self, runtime: &mut UiRuntime, input: &SyntheticInput) -> DispatchOutcome {
         match input {
             SyntheticInput::PointerMove { target } => {
@@ -64,11 +42,7 @@ impl SyntheticDispatcher {
         }
     }
 
-    /// Dispatches every `input` in order, returning each outcome.
-    ///
-    /// Order matters and is preserved: a click is a `PointerDown` followed by a
-    /// `PointerUp` on the same node, and the runtime only completes a click when
-    /// it sees that pair.
+    #[doc = include_str!("synthetic_dispatcher.doc/dispatch_all.md")]
     pub fn dispatch_all(
         self,
         runtime: &mut UiRuntime,
@@ -80,8 +54,7 @@ impl SyntheticDispatcher {
             .collect()
     }
 
-    /// Aims a pointer event of `kind` at `target` and sends it through the real
-    /// input path.
+    #[doc = include_str!("synthetic_dispatcher.doc/pointer.md")]
     fn pointer(
         self,
         runtime: &mut UiRuntime,
@@ -116,12 +89,7 @@ impl SyntheticDispatcher {
     }
 }
 
-/// The chain from `node` to the root, inclusive — the path an event's default
-/// action is resolved along.
-///
-/// Walks the **logical** parent, which is the structural chain a command binding
-/// is looked up through; a portalled node's visual parent is a paint concern and
-/// would report a path events do not travel.
+#[doc = include_str!("synthetic_dispatcher.doc/ancestors_of.md")]
 fn ancestors_of(runtime: &UiRuntime, node: NodeId) -> Vec<NodeId> {
     let mut path = vec![node];
     let mut current = node;

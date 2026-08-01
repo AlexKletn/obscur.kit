@@ -1,4 +1,4 @@
-//! Host module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod headless_host;
 
 pub use headless_host::HeadlessHost;

@@ -1,20 +1,17 @@
-//! `MigrationRegistry`: chains registered migrations to bring a document up to a
-//! target version (spec §2.5 migrations).
+#![doc = include_str!("migration_registry.doc/_module.md")]
 
 use crate::document::UiIrDocument;
 use crate::migration::UiIrMigration;
 use crate::version::UiIrVersion;
 
-/// The reason a [`MigrationRegistry`] could not migrate a document (spec §2.5).
+#[doc = include_str!("migration_registry.doc/MigrationError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationError {
-    /// No chain of registered migrations leads from `from` to `to`. Raised when
-    /// some intermediate version has no outgoing migration, or when the search
-    /// exceeds its iteration bound (a cyclic or non-advancing chain).
+    #[doc = include_str!("migration_registry.doc/NoPath.md")]
     NoPath {
-        /// The version the chain stalled at.
+        #[doc = include_str!("migration_registry.doc/from.md")]
         from: UiIrVersion,
-        /// The requested target version.
+        #[doc = include_str!("migration_registry.doc/to.md")]
         to: UiIrVersion,
     },
 }
@@ -36,22 +33,14 @@ impl std::fmt::Display for MigrationError {
 
 impl std::error::Error for MigrationError {}
 
-/// A registry of [`UiIrMigration`]s that applies a chain of them to bring a
-/// document up to a target version (spec §2.5).
-///
-/// Migrations are [`register`](MigrationRegistry::register)ed in any order;
-/// [`migrate`](MigrationRegistry::migrate) starts at the document's own version
-/// and repeatedly applies the migration whose `from_version` matches the current
-/// version, advancing until it reaches the target. The search is bounded so a
-/// cyclic or non-advancing set of migrations fails with
-/// [`MigrationError::NoPath`] rather than looping forever.
+#[doc = include_str!("migration_registry.doc/MigrationRegistry.md")]
 #[derive(Debug, Default)]
 pub struct MigrationRegistry {
     migrations: Vec<Box<dyn UiIrMigration>>,
 }
 
 impl MigrationRegistry {
-    /// Creates an empty registry.
+    #[doc = include_str!("migration_registry.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -59,24 +48,24 @@ impl MigrationRegistry {
         }
     }
 
-    /// Registers `migration`.
+    #[doc = include_str!("migration_registry.doc/register.md")]
     pub fn register(&mut self, migration: Box<dyn UiIrMigration>) {
         self.migrations.push(migration);
     }
 
-    /// Returns the number of registered migrations.
+    #[doc = include_str!("migration_registry.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.migrations.len()
     }
 
-    /// Returns whether no migrations are registered.
+    #[doc = include_str!("migration_registry.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.migrations.is_empty()
     }
 
-    /// Finds a registered migration whose `from_version` matches `version`.
+    #[doc = include_str!("migration_registry.doc/migration_from.md")]
     fn migration_from(&self, version: UiIrVersion) -> Option<&dyn UiIrMigration> {
         self.migrations
             .iter()
@@ -84,23 +73,7 @@ impl MigrationRegistry {
             .find(|migration| migration.from_version() == version)
     }
 
-    /// Migrates `doc` from its current version up to `target`.
-    ///
-    /// Starting at `doc.version()`, repeatedly applies the migration whose
-    /// `from_version` equals the current version, advancing the version each
-    /// step, until the version equals `target`. If the document is already at
-    /// `target` it is returned unchanged. If no registered migration advances
-    /// the current version before reaching `target`, returns
-    /// [`MigrationError::NoPath`].
-    ///
-    /// The step count is bounded by `migrations.len() + 1` so a migration whose
-    /// `to_version == from_version` (or any cycle) cannot loop forever; on
-    /// exceeding the bound the same `NoPath` error is returned.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`MigrationError::NoPath`] when no chain of registered migrations
-    /// reaches `target`.
+    #[doc = include_str!("migration_registry.doc/migrate.md")]
     pub fn migrate(
         &self,
         doc: UiIrDocument,
@@ -131,8 +104,7 @@ impl MigrationRegistry {
         })
     }
 
-    /// Returns whether a chain of registered migrations reaches `to` from
-    /// `from`, without applying anything.
+    #[doc = include_str!("migration_registry.doc/can_migrate.md")]
     #[must_use]
     pub fn can_migrate(&self, from: UiIrVersion, to: UiIrVersion) -> bool {
         let mut current = from;

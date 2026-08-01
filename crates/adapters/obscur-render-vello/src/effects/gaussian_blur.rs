@@ -1,62 +1,28 @@
-//! An owned wgpu separable-gaussian blur pass layered over Vello (spec §5.2).
-//!
-//! Vello 0.9 has no content-blur primitive, so `filter: blur()` is implemented as
-//! our **own** wgpu post-process: a blur layer's subtree is rendered to an
-//! offscreen texture, run through a horizontal then a vertical gaussian pass (a
-//! WGSL fragment shader with gaussian weights derived from the radius, ping-ponging
-//! between textures), and composited back onto the target with premultiplied-over
-//! alpha blending. The pipelines and shader are built once and cached on the
-//! renderer; only the small per-blur textures and uniform buffers are per-call.
-//!
-//! # Scope and limitations (documented, honest)
-//!
-//! - **Z-order.** The blurred result is composited **on top** of the target at its
-//!   bounds. This is correct for the common case — a blurred panel/card with
-//!   nothing painted above it — but a later sibling that should paint over the
-//!   blurred element would be overdrawn. Full stacking-correct blur needs the
-//!   effect folded into the compositor, a follow-up.
-//! - **Margin / edges.** The offscreen texture is padded by `ceil(3 * radius)` on
-//!   every side so the gaussian tail is not clipped at the element's edge; the
-//!   sampler clamps to a transparent border, so nothing bleeds in from outside.
-//! - **Coordinate space.** Bounds are the element's *untransformed* border box and
-//!   the target is assumed 1:1 logical↔physical pixels; a device scale or an
-//!   enclosing transform combined with blur is approximate (documented).
-//! - **`backdrop-filter`** (blurring the content BEHIND the element) reuses this
-//!   same pipeline set via [`GaussianBlur::render_backdrop`]: the renderer's
-//!   segmented compositing path copies a region of the accumulated frame, runs the
-//!   same separable gaussian over it, and composites it back masked to the panel's
-//!   rounded shape (the frosted-glass / acrylic effect, spec §5.2).
+#![doc = include_str!("gaussian_blur.doc/_module.md")]
 
 use crate::conversion::BlurLayer;
 use crate::renderer::VelloFrame;
 
-/// The render-target texture format the blur pipelines are built for. Both the
-/// Vello offscreen frame and the per-blur sub-scene textures use
-/// [`wgpu::TextureFormat::Rgba8Unorm`], so a single pipeline set suffices.
+#[doc = include_str!("gaussian_blur.doc/BLUR_FORMAT.md")]
 const BLUR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// The largest per-axis extent of a blur offscreen texture, clamping a pathological
-/// radius / bounds so the pass never allocates an unbounded texture.
+#[doc = include_str!("gaussian_blur.doc/MAX_BLUR_EXTENT.md")]
 const MAX_BLUR_EXTENT: u32 = 8192;
 
-/// A cached wgpu pipeline set implementing a separable gaussian blur + composite.
-///
-/// Built once via [`GaussianBlur::new`] and reused across frames; each
-/// [`GaussianBlur::render`] call only allocates the small ping-pong textures and
-/// uniform buffers a single blur layer needs.
+#[doc = include_str!("gaussian_blur.doc/GaussianBlur.md")]
 pub struct GaussianBlur {
-    /// One separable gaussian pass (horizontal or vertical, per its uniform).
+    #[doc = include_str!("gaussian_blur.doc/blur_pipeline.md")]
     blur_pipeline: wgpu::RenderPipeline,
     blur_layout: wgpu::BindGroupLayout,
-    /// The premultiplied-over composite of a blurred texture onto the target.
+    #[doc = include_str!("gaussian_blur.doc/composite_pipeline.md")]
     composite_pipeline: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
-    /// Clamp-to-edge linear sampler shared by every pass.
+    #[doc = include_str!("gaussian_blur.doc/sampler.md")]
     sampler: wgpu::Sampler,
 }
 
 impl GaussianBlur {
-    /// Builds the blur + composite pipelines on `device` for [`BLUR_FORMAT`].
+    #[doc = include_str!("gaussian_blur.doc/new.md")]
     #[must_use]
     pub fn new(device: &wgpu::Device) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -153,14 +119,7 @@ impl GaussianBlur {
         }
     }
 
-    /// Blurs a single already-rendered [`BlurLayer`] sub-scene texture and
-    /// composites it onto `target`.
-    ///
-    /// `source` is the sub-scene rendered into a margin-padded offscreen texture
-    /// whose top-left corresponds to absolute pixel `source_origin`; `layer` gives
-    /// the blur radius; `target` is the final frame the blurred result blends onto
-    /// (with `target_size` its extent). The work is recorded into `encoder`; the
-    /// caller submits it after the Vello render-to-texture passes so ordering holds.
+    #[doc = include_str!("gaussian_blur.doc/render.md")]
     #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
     pub fn render(
         &self,
@@ -188,14 +147,7 @@ impl GaussianBlur {
         );
     }
 
-    /// Blurs an already-rendered source **texture view** (rather than a
-    /// [`VelloFrame`]) and composites it onto `target` — the shared core of
-    /// [`Self::render`], reused when a color-matrix pass has already written the
-    /// source into a scratch texture (a `filter` that mixes a color op and a blur).
-    ///
-    /// `source_size` is the source's `(width, height)` in pixels; the rest matches
-    /// [`Self::render`]. With no color pre-pass this is byte-identical to the shipped
-    /// blur (same ping-pong passes, same composite).
+    #[doc = include_str!("gaussian_blur.doc/render_view.md")]
     #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
     pub fn render_view(
         &self,
@@ -255,16 +207,7 @@ impl GaussianBlur {
         );
     }
 
-    /// Composites an already-post-processed source **texture** onto `target` at its
-    /// absolute pixel rect (top-left `source_origin`, extent `source_size`), with no
-    /// rounded mask — the composite step shared by the blur path and the color-only
-    /// `filter` path (a color matrix with no blur).
-    ///
-    /// `premultiply` selects whether the (straight-alpha Vello) source is
-    /// premultiplied before the premultiplied-over blend: the blur path passes
-    /// `false` (byte-identical to the shipped opaque composite), the color-only path
-    /// passes `true` so a translucent color result (e.g. `opacity()`) composites
-    /// correctly.
+    #[doc = include_str!("gaussian_blur.doc/composite_texture.md")]
     #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
     pub fn composite_texture(
         &self,
@@ -298,19 +241,7 @@ impl GaussianBlur {
         );
     }
 
-    /// Frosts the **backdrop** in place: blurs the region of the accumulating frame
-    /// `accum` under `bounds` (the panel's border box, physical pixels
-    /// `(x0, y0, x1, y1)`), clipped to the rounded `radii`, and writes the blurred
-    /// result back over `accum` (spec §5.2, CSS `backdrop-filter`).
-    ///
-    /// Unlike [`Self::render`] (which blurs a *sub-scene* and composites it), this
-    /// samples the already-composited frame itself: a padded region of `accum` is
-    /// copied into a scratch texture (the `~3σ` margin keeps the gaussian tail from
-    /// clipping at the panel edge, clamped to the frame), run through the same
-    /// separable gaussian, and composited back over `accum` masked to the rounded
-    /// panel shape — so only the panel area is frosted and its corners stay sharp
-    /// outside the radius. Recorded into `encoder`; the caller submits after the
-    /// prior segment composites so the backdrop is fully painted first.
+    #[doc = include_str!("gaussian_blur.doc/clippy.md")]
     #[allow(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
@@ -421,9 +352,7 @@ impl GaussianBlur {
         );
     }
 
-    /// Composites the whole of `source` premultiplied-over `target` (both the same
-    /// extent) — the per-segment layering of the backdrop-filter path, which stacks
-    /// each rendered segment onto the accumulating frame in paint order.
+    #[doc = include_str!("gaussian_blur.doc/composite_over.md")]
     pub fn composite_over(
         &self,
         device: &wgpu::Device,
@@ -445,7 +374,7 @@ impl GaussianBlur {
         );
     }
 
-    /// Records one separable gaussian pass sampling `input` into `output`.
+    #[doc = include_str!("gaussian_blur.doc/blur_pass.md")]
     fn blur_pass(
         &self,
         device: &wgpu::Device,
@@ -484,12 +413,7 @@ impl GaussianBlur {
         pass.draw(0..3, 0..1);
     }
 
-    /// Records the premultiplied-over composite of `input` onto `target` at the
-    /// target-space NDC `rect` (`[x0, y_top, x1, y_bottom]`).
-    ///
-    /// `mask` optionally clips the composite to a rounded-rect panel shape (the
-    /// backdrop-filter frost); `None` composites the whole quad (the `filter: blur`
-    /// path), byte-identical to the pre-mask uniform (coverage is a constant `1`).
+    #[doc = include_str!("gaussian_blur.doc/composite_pass.md")]
     #[allow(clippy::too_many_arguments)]
     fn composite_pass(
         &self,
@@ -555,7 +479,7 @@ impl GaussianBlur {
         pass.draw(0..6, 0..1);
     }
 
-    /// The three bind-group entries (texture, sampler, uniform) both pipelines use.
+    #[doc = include_str!("gaussian_blur.doc/bind_entries.md")]
     fn bind_entries<'a>(
         texture: &'a wgpu::TextureView,
         sampler: &'a wgpu::Sampler,
@@ -578,28 +502,21 @@ impl GaussianBlur {
     }
 }
 
-/// The optional rounded-rect mask a [`composite_pass`](GaussianBlur::composite_pass)
-/// clips its blurred quad to — the backdrop-filter panel shape.
-///
-/// [`Default`] is the **disabled** mask (`quad == [0, 0]` → coverage constant `1`),
-/// so the `filter: blur` composite stays byte-identical. A constructed mask carries
-/// the panel border box + per-corner radii in the composited quad's own pixel
-/// space, plus the antialiased edge half-width `aa`.
+#[doc = include_str!("gaussian_blur.doc/CompositeMask.md")]
 #[derive(Clone, Copy, Default)]
 struct CompositeMask {
-    /// Panel border box `[x0, y0, x1, y1]` in the quad's pixel space.
+    #[doc = include_str!("gaussian_blur.doc/panel.md")]
     panel: [f32; 4],
-    /// Per-corner radii `(tl, tr, br, bl)` in quad pixels.
+    #[doc = include_str!("gaussian_blur.doc/radii.md")]
     radii: [f32; 4],
-    /// The composited quad's `(width, height)` in pixels; `[0, 0]` disables the mask.
+    #[doc = include_str!("gaussian_blur.doc/quad.md")]
     quad: [f32; 2],
-    /// Antialiased edge half-width, in pixels.
+    #[doc = include_str!("gaussian_blur.doc/aa.md")]
     aa: f32,
 }
 
 impl CompositeMask {
-    /// The shader's `mask_enabled` flag: `1` when a non-degenerate quad is set,
-    /// else `0` (the disabled default → whole-quad composite).
+    #[doc = include_str!("gaussian_blur.doc/enabled.md")]
     fn enabled(&self) -> f32 {
         if self.quad[0] > 0.0 && self.quad[1] > 0.0 {
             1.0
@@ -617,8 +534,7 @@ impl std::fmt::Debug for GaussianBlur {
     }
 }
 
-/// Builds one fullscreen render pipeline from `vs`/`fs` entry points, with the
-/// given optional color blend (`None` = replace).
+#[doc = include_str!("gaussian_blur.doc/build_pipeline.md")]
 fn build_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
@@ -660,7 +576,7 @@ fn build_pipeline(
     })
 }
 
-/// A transient uniform buffer initialised with `bytes`.
+#[doc = include_str!("gaussian_blur.doc/uniform_buffer.md")]
 fn uniform_buffer(device: &wgpu::Device, bytes: &[u8], label: &'static str) -> wgpu::Buffer {
     use wgpu::util::DeviceExt;
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -670,8 +586,7 @@ fn uniform_buffer(device: &wgpu::Device, bytes: &[u8], label: &'static str) -> w
     })
 }
 
-/// A scratch color texture (`BLUR_FORMAT`, sampled + render target) for a blur
-/// pass, clamped to [`MAX_BLUR_EXTENT`] per axis.
+#[doc = include_str!("gaussian_blur.doc/scratch_texture.md")]
 fn scratch_texture(
     device: &wgpu::Device,
     width: u32,
@@ -698,8 +613,7 @@ fn scratch_texture(
     })
 }
 
-/// Serialises `f32`s to little-endian bytes for a uniform buffer, avoiding a
-/// `bytemuck` dependency (no new external deps).
+#[doc = include_str!("gaussian_blur.doc/f32s_to_bytes.md")]
 fn f32s_to_bytes(values: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(values.len() * 4);
     for value in values {
@@ -710,14 +624,7 @@ fn f32s_to_bytes(values: &[f32]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    //! Deterministic CPU port of the `blur_fs` decode → blur → encode pipeline,
-    //! validating (without a GPU) that convolving in **linear light** — per the
-    //! Filter Effects Module default `color-interpolation-filters: linearRGB` — keeps
-    //! a bright/dark boundary brighter than a naive gamma-sRGB gaussian, and that a
-    //! flat opaque region round-trips the transfer unchanged.
-    //!
-    //! These mirror the exact WGSL helpers/formulas in `gaussian_blur.wgsl`; the GPU
-    //! render `examples/blur_linear_light_proof.rs` proves the shader itself.
+    #![doc = include_str!("gaussian_blur.doc/_module_2.md")]
 
     /// sRGB electro-optical transfer (decode gamma → linear), matching the shader.
     fn srgb_to_linear(c: f32) -> f32 {

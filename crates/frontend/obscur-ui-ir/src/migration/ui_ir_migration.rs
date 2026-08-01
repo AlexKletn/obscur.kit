@@ -1,43 +1,21 @@
-//! `UiIrMigration`: an object-safe transform from one IR version to the next
-//! (spec §2.5 migrations).
+#![doc = include_str!("ui_ir_migration.doc/_module.md")]
 
 use crate::document::UiIrDocument;
 use crate::version::UiIrVersion;
 
-/// A single version-to-version transform over a UI IR document (spec §2.5).
-///
-/// A migration knows the [`from_version`](UiIrMigration::from_version) it
-/// consumes and the [`to_version`](UiIrMigration::to_version) it produces, and
-/// rewrites a document from the former schema to the latter via
-/// [`migrate`](UiIrMigration::migrate) (which takes the document by value and
-/// returns the migrated document). Real migrations override `migrate` to
-/// rewrite the node tree and its properties for the new schema; see
-/// [`IdentityMigration`] for the trivial version-bump-only reference.
-///
-/// The trait is object-safe — migrations are stored as `Box<dyn UiIrMigration>`
-/// in a [`MigrationRegistry`](crate::migration::MigrationRegistry) — and
-/// requires a [`std::fmt::Debug`] supertrait so a boxed migration is itself
-/// `Debug`.
+#[doc = include_str!("ui_ir_migration.doc/UiIrMigration.md")]
 pub trait UiIrMigration: std::fmt::Debug {
-    /// Returns the IR version this migration consumes.
+    #[doc = include_str!("ui_ir_migration.doc/from_version.md")]
     fn from_version(&self) -> UiIrVersion;
 
-    /// Returns the IR version this migration produces.
+    #[doc = include_str!("ui_ir_migration.doc/to_version.md")]
     fn to_version(&self) -> UiIrVersion;
 
-    /// Rewrites `doc` from [`from_version`](UiIrMigration::from_version) to
-    /// [`to_version`](UiIrMigration::to_version), returning the migrated
-    /// document.
+    #[doc = include_str!("ui_ir_migration.doc/migrate.md")]
     fn migrate(&self, doc: UiIrDocument) -> UiIrDocument;
 }
 
-/// The trivial reference migration: a pure version bump that leaves the tree
-/// untouched (spec §2.5).
-///
-/// [`migrate`](UiIrMigration::migrate) returns the document unchanged except for
-/// stamping it with [`to`](IdentityMigration::to). It is useful for versions
-/// whose schema did not actually change, and as a template real migrations
-/// build on by overriding `migrate` to rewrite nodes and properties.
+#[doc = include_str!("ui_ir_migration.doc/IdentityMigration.md")]
 #[derive(Debug, Clone)]
 pub struct IdentityMigration {
     from: UiIrVersion,
@@ -45,7 +23,7 @@ pub struct IdentityMigration {
 }
 
 impl IdentityMigration {
-    /// Creates an identity migration from `from` to `to`.
+    #[doc = include_str!("ui_ir_migration.doc/new.md")]
     #[must_use]
     pub const fn new(from: UiIrVersion, to: UiIrVersion) -> Self {
         Self { from, to }

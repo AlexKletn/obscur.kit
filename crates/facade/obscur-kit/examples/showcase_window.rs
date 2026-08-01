@@ -1,72 +1,4 @@
-//! **Windowed capability showcase → Vello (GPU, interactive).**
-//!
-//! The GPU sibling of `showcase_png.rs`: it renders the *very same* shared
-//! [`showcase`] scene (grid + flex layout, gradients, borders, radius, shadows,
-//! blur, group opacity, transforms, a `background-image` + an `<img>` primitive,
-//! and real shaped text driving the [`Button`]/[`Checkbox`]/[`Input`] widgets) —
-//! but through winit 0.30 + Vello/wgpu 29 into a genuine on-screen window, so the
-//! GPU-class effects render at **full fidelity** instead of the CPU
-//! approximation. Concretely, on this backend:
-//!
-//! - `linear-gradient` / `radial-gradient` / `conic-gradient` paint real smooth
-//!   ramps (the CPU PNG shows only the first stop);
-//! - `box-shadow` and `filter: drop-shadow(...)` paint real Gaussian-blurred
-//!   shadows (the CPU PNG paints a flat offset rect);
-//! - `opacity: 0.5` composites a real translucent group layer;
-//! - `transform: rotate()/scale()`, borders, radius, images, and shaped text all
-//!   render as on the CPU, but presented live.
-//!
-//! It is also **interactive**, driving the shared [`ShowcaseState`] through the
-//! runtime's real domain input + command path and rebuilding the view reactively:
-//!
-//! - clicking the **Button** ("Click me") fires its `EVENT_CLICK` command, whose
-//!   handler bumps `state.counter` — the toolbar's `counter = N` text updates;
-//! - clicking the **Checkbox** fires its change command, toggling `state.checked`;
-//! - the **Input** is editable: clicking it seats the caret, and typing / IME
-//!   flows winit → converters → `UiRuntime` → the runtime-owned editing session,
-//!   whose per-keystroke `on_text_input` handler mirrors the resulting text into
-//!   `state.input_text` so the reactive builder repaints the field.
-//!
-//! # Device scale, wheel scroll & zoom
-//!
-//! The window is **device-scale aware**: the render scale is the display's HiDPI
-//! `scale_factor` — **not tied to the window size**. It points the runtime's
-//! viewport at `physical_extent / effective_scale` and sets
-//! `UiRuntime::set_device_scale(effective_scale)` — the runtime then brackets the
-//! whole scene in a root `scale(s, s)` transform, so vectors, text, and gradients
-//! rasterize crisply at their authored CSS size. Because the scale is fixed to the
-//! display density, **resizing the window reflows the layout** (the `1fr` gallery
-//! tracks divide the real width; the UI is *not* zoomed up and down with the
-//! window) — exactly like a real application. Any content taller than the window
-//! is reached by the **mouse wheel** (`scroll_y` → `UiRuntime::set_content_offset`,
-//! a root `translate`); when the content fits, scroll clamps to `0`. A user
-//! **zoom** multiplies on top: `Ctrl+=` / `Ctrl++` zoom in (cap 500%), `Ctrl+-`
-//! zooms out (min 30%), and `Ctrl+0` resets zoom **and** scroll. The initial window
-//! is 1000×700 *logical* pixels.
-//!
-//! Run it (a display + a GPU adapter are required):
-//! `cargo run -p obscur-kit --example showcase_window --features full`
-//!
-//! # Wiring
-//!
-//! This is a thin driver over the shared scene and the existing
-//! runtime/converter/Vello APIs — it adds no rendering logic of its own. The
-//! window/device/surface/present path mirrors `windowed_counter.rs`; the scene,
-//! stylesheet, and image-asset setup mirror `showcase_png.rs`. The image asset is
-//! staged into a sandbox temp dir the runtime's filesystem loader is rooted at
-//! (via [`KitBootstrap::install_image_resources`]), so both the
-//! `background-image: url("gallery.png")` card and the `<img>` primitive resolve
-//! to real decoded pixels. Text is a host resource: a system font (plus a
-//! best-effort CJK fallback) is loaded off disk and wired as the full itemize →
-//! resolve-by-coverage → shape stack, with the same id↔bytes assignment handed to
-//! the Vello renderer.
-//!
-//! # Environment note
-//!
-//! Like `windowed_counter.rs`, this example needs a display and a usable GPU
-//! adapter; in a headless environment it compiles but exits cleanly on
-//! `resumed` when no adapter/surface can be acquired (it never panics on that
-//! path). On a real machine it opens a window and presents the showcase live.
+#![doc = include_str!("showcase_window.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -117,90 +49,53 @@ mod showcase;
 
 use showcase::ShowcaseState;
 
-/// The command symbols the shared scene binds to its interactive widgets. The
-/// scene keeps these private (both examples subset it), so the windowed driver
-/// mirrors the exact same raw values here to register the matching handlers — the
-/// symbols the runtime resolves a widget activation to.
+#[doc = include_str!("showcase_window.doc/CMD_BUTTON.md")]
 const CMD_BUTTON: InternedSymbol = InternedSymbol::from_raw(0x5001);
 const CMD_CHECKBOX: InternedSymbol = InternedSymbol::from_raw(0x5002);
 const CMD_INPUT: InternedSymbol = InternedSymbol::from_raw(0x5003);
 
-/// One wheel *line* of scroll, in logical content px, mapped to a comfortable step
-/// (a `LineDelta` of 1.0 scrolls this much content). `PixelDelta` deltas are used
-/// as-is (already in physical px).
+#[doc = include_str!("showcase_window.doc/WHEEL_LINE_STEP.md")]
 const WHEEL_LINE_STEP: f32 = 64.0;
 
-/// The initial (and layout) window size in logical pixels. The window is
-/// resizable — resize reconfigures the swapchain and re-lays-out under the new
-/// physical extent.
+#[doc = include_str!("showcase_window.doc/INITIAL_SIZE.md")]
 const INITIAL_SIZE: Size = Size::new(1000.0, 700.0);
 
-/// The winit application: owns the window, the GPU-backed Vello renderer, the
-/// swapchain surface, the embeddable [`UiRuntime`] frame driver, and the shared
-/// [`ShowcaseState`] the interactive widgets drive.
+#[doc = include_str!("showcase_window.doc/ShowcaseWindow.md")]
 struct ShowcaseWindow {
-    /// The live winit window (an [`Arc`] so wgpu can build a `Surface<'static>`),
-    /// created lazily in [`ApplicationHandler::resumed`].
+    #[doc = include_str!("showcase_window.doc/window.md")]
     window: Option<Arc<Window>>,
-    /// The on-screen swapchain surface, created alongside the window.
+    #[doc = include_str!("showcase_window.doc/surface.md")]
     surface: Option<VelloSurface>,
-    /// The wgpu device, cached so resizes can reconfigure the surface.
+    #[doc = include_str!("showcase_window.doc/device.md")]
     device: Option<wgpu::Device>,
-    /// The Vello/wgpu renderer, attached once the GPU device is created.
+    #[doc = include_str!("showcase_window.doc/renderer.md")]
     renderer: Option<VelloRenderer>,
-    /// The embeddable runtime that owns the retained tree, scene, scheduler, and
-    /// live interaction (hover/focus/editing) state, and runs the real pipeline
-    /// when a frame is due. The shared [`ShowcaseState`] lives behind an
-    /// `Rc<RefCell<_>>` owned jointly by the command / text-input handlers (which
-    /// mutate it) and the reactive view builder (which reads it back to rebuild
-    /// [`showcase::view`] each frame) — both installed on this runtime, so the
-    /// state needs no separate field here.
+    #[doc = include_str!("showcase_window.doc/runtime.md")]
     runtime: UiRuntime,
-    /// Last known cursor position in physical pixels, so a `MouseInput` (which
-    /// carries no position) can be dispatched as a pointer event at the cursor.
+    #[doc = include_str!("showcase_window.doc/cursor.md")]
     cursor: (f64, f64),
-    /// The window's current HiDPI device-pixel ratio (winit `scale_factor`), so
-    /// the app lays out in logical CSS pixels while rendering at the display's
-    /// physical resolution. Updated from the window on `resumed` and on every
-    /// `ScaleFactorChanged`.
+    #[doc = include_str!("showcase_window.doc/scale_factor.md")]
     scale_factor: f64,
-    /// The user zoom factor (Ctrl+= / Ctrl+- / Ctrl+0), multiplied with the
-    /// fit-to-width scale to form the effective device scale. `1.0` is 100%.
+    #[doc = include_str!("showcase_window.doc/zoom.md")]
     zoom: f32,
-    /// The vertical scroll offset in **physical** px (mouse-wheel driven), clamped
-    /// to `0 ..= max(0, content_height*effective_scale - physical_height)`. Pushed
-    /// to the runtime as a logical content offset (`scroll_y / effective_scale`).
+    #[doc = include_str!("showcase_window.doc/scroll_y.md")]
     scroll_y: f32,
-    /// The modifier keys currently held, tracked from winit `ModifiersChanged`
-    /// so the keyboard handler can recognise the Ctrl+zoom chords before text is
-    /// forwarded to the runtime's editable.
+    #[doc = include_str!("showcase_window.doc/modifiers.md")]
     modifiers: ModifiersState,
-    /// The last node reported by the in-window inspector, so a hover-change
-    /// prints its readout at most once (tracked by raw id to avoid importing
-    /// `NodeId` into the example).
+    #[doc = include_str!("showcase_window.doc/last_inspect_node.md")]
     last_inspect_node: Option<u64>,
-    /// The kit's per-frame profiler: rolling CPU/present timings + a per-second
-    /// FPS report line (all timing logic lives in the kit, not here).
+    #[doc = include_str!("showcase_window.doc/profiler.md")]
     profiler: FrameProfiler,
-    /// The live inspect source served to external DevTools clients; refreshed
-    /// once per second with the tree/layout/styles + the `Rendering` perf snapshot.
+    #[doc = include_str!("showcase_window.doc/inspect.md")]
     inspect: SharedInspectSource,
-    /// The pushed half: events this host produces for subscribed DevTools
-    /// clients. The frame thread pushes; the serving thread fans out through the
-    /// endpoint, so it — not this queue — still decides who may hear each one.
+    #[doc = include_str!("showcase_window.doc/events.md")]
     events: EventQueue,
-    /// Turns the runtime's real frame-commit and focus transitions into events on
-    /// `events`. Diagnostics take a separate path: a `DiagnosticEventSink`
-    /// installed on the runtime feeds the same queue.
+    #[doc = include_str!("showcase_window.doc/publisher.md")]
     publisher: RuntimeEventPublisher,
 }
 
 impl ShowcaseWindow {
-    /// Builds the application with a fresh [`UiRuntime`] wired to the shared
-    /// scene: the compiled stylesheet, the reactive view builder, and a handler
-    /// per interactive command. No window, surface, or GPU device yet (created on
-    /// `resumed`); image resources are also installed there since the sandbox dir
-    /// is staged at startup.
+    #[doc = include_str!("showcase_window.doc/new.md")]
     fn new(asset_dir: &std::path::Path) -> Self {
         let state = Rc::new(RefCell::new(ShowcaseState::default()));
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), INITIAL_SIZE);
@@ -274,33 +169,17 @@ impl ShowcaseWindow {
         }
     }
 
-    /// The base device-pixel scale the UI renders at: the display's HiDPI
-    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
-    ///
-    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
-    /// renders at its natural CSS size for the display density, so widening or
-    /// narrowing the window changes the logical viewport and the layout reflows
-    /// (the `1fr` gallery tracks divide the available width), exactly like a real
-    /// application — rather than scaling the whole UI up and down. The user `zoom`
-    /// composes on top for an explicit magnify.
+    #[doc = include_str!("showcase_window.doc/base_scale.md")]
     fn base_scale(&self) -> f32 {
         (self.scale_factor as f32).max(0.05)
     }
 
-    /// The effective device-pixel scale the runtime renders at: the display
-    /// density times the user `zoom`. The viewport is the physical extent divided
-    /// by this, so layout runs in logical CSS pixels that follow the real window
-    /// size and reflow on resize.
+    #[doc = include_str!("showcase_window.doc/effective_scale.md")]
     fn effective_scale(&self) -> f32 {
         self.base_scale() * self.zoom
     }
 
-    /// The tallest content extent actually laid out this frame, in **logical**
-    /// px — the largest bottom edge across the tree, read from the runtime's live
-    /// [`inspect_snapshot`](UiRuntime::inspect_snapshot). Used for the scroll
-    /// range, so scrolling reflects the real content rather than a fixed design
-    /// height (with `#app { min-height: 100vh }` this equals the viewport, so
-    /// there is nothing to scroll until the content genuinely overflows).
+    #[doc = include_str!("showcase_window.doc/content_height_logical.md")]
     fn content_height_logical(&self) -> f32 {
         self.runtime
             .inspect_snapshot()
@@ -311,9 +190,7 @@ impl ShowcaseWindow {
             .fold(0.0_f32, f32::max)
     }
 
-    /// The maximum vertical scroll in **physical** px: how far past the bottom of
-    /// the window the real content extends. `0` when the whole content already
-    /// fits (so `scroll_y` simply clamps to `0`, harmless).
+    #[doc = include_str!("showcase_window.doc/max_scroll_y.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn max_scroll_y(&self) -> f32 {
         let Some(surface) = self.surface.as_ref() else {
@@ -324,18 +201,14 @@ impl ShowcaseWindow {
         (content_height - physical_height).max(0.0)
     }
 
-    /// Re-clamps `scroll_y` into `0 ..= max_scroll_y()` and pushes the resulting
-    /// **logical** content offset (`scroll_y / effective_scale`) to the runtime, so
-    /// a physical wheel step scrolls a consistent on-screen amount at any scale.
+    #[doc = include_str!("showcase_window.doc/apply_scroll.md")]
     fn apply_scroll(&mut self) {
         self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y());
         let offset = self.scroll_y / self.effective_scale();
         self.runtime.set_content_offset(0.0, offset);
     }
 
-    /// Prints the computed fit/effective scale and content bounds once so the scale
-    /// math is inspectable from the logs even though the window itself is not
-    /// visible in a smoke run.
+    #[doc = include_str!("showcase_window.doc/log_scale_sanity.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn log_scale_sanity(&self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -353,10 +226,7 @@ impl ShowcaseWindow {
         }
     }
 
-    /// Assembles a domain button [`PointerEvent`] at the tracked cursor, reusing
-    /// [`PointerConverter::kind`] to map the winit [`ElementState`] to the domain
-    /// event kind (the converter exposes no builder for a button transition *at a
-    /// position*, so the event is built directly — as in `windowed_counter.rs`).
+    #[doc = include_str!("showcase_window.doc/pointer_button_event.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
         PointerEvent::new(
@@ -367,16 +237,7 @@ impl ShowcaseWindow {
         )
     }
 
-    /// Re-syncs the runtime's layout viewport and device scale to the current
-    /// swapchain extent, HiDPI factor, and user zoom. Called after surface
-    /// creation, on resize, on a scale-factor change, and after a zoom change.
-    ///
-    /// The viewport is the swapchain's **physical** extent divided by the
-    /// effective scale, so layout runs in **logical** CSS pixels; the runtime's
-    /// device scale is set to that same factor, so the composed scene is bracketed
-    /// by a root `scale(s, s)` and rasterizes crisply at physical resolution. This
-    /// is what keeps the UI from being tiny on a HiDPI display (and what the zoom
-    /// shortcuts drive).
+    #[doc = include_str!("showcase_window.doc/sync_viewport.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -391,15 +252,7 @@ impl ShowcaseWindow {
         self.apply_scroll();
     }
 
-    /// Handles a Ctrl+zoom shortcut, returning `true` when `key` was a zoom chord
-    /// (so the caller swallows it instead of forwarding it as text):
-    ///
-    /// - `Ctrl+=` / `Ctrl++` → zoom in (×1.1, capped at 5.0);
-    /// - `Ctrl+-` → zoom out (÷1.1, floored at 0.3);
-    /// - `Ctrl+0` → reset zoom to 1.0 **and** scroll to the top.
-    ///
-    /// A change re-syncs the viewport + device scale (+ scroll clamp) and requests a
-    /// redraw, so the whole showcase grows/shrinks crisply about the new scale.
+    #[doc = include_str!("showcase_window.doc/handle_zoom_shortcut.md")]
     fn handle_zoom_shortcut(&mut self, key: &Key) -> bool {
         let Key::Character(text) = key else {
             return false;
@@ -431,9 +284,7 @@ impl ShowcaseWindow {
         true
     }
 
-    /// Renders one frame: run a scheduler-gated reactive frame through the
-    /// runtime (rebuilding the view from the current state when one is due), read
-    /// the committed scene, package it, and present it on-screen via Vello.
+    #[doc = include_str!("showcase_window.doc/render_frame.md")]
     fn render_frame(&mut self) {
         // Run a REACTIVE frame only if one is due (§3.5); the runtime holds the
         // view builder + stylesheets, so it rebuilds `showcase::view` from the
@@ -500,11 +351,7 @@ impl ShowcaseWindow {
         }
     }
 
-    /// Binds a loopback DevTools endpoint and serves it on a background thread,
-    /// so an external `obscur-devtools` client can inspect this live window — its
-    /// tree/layout/styles and the `Rendering` frame-perf snapshot (spec §7.6/§7.9)
-    /// — and *subscribe* to the frame/focus/diagnostic events it publishes.
-    /// Local-only and token-authenticated; a bind failure is non-fatal.
+    #[doc = include_str!("showcase_window.doc/start_devtools_endpoint.md")]
     fn start_devtools_endpoint(&self) {
         let listener = match SocketListener::bind_loopback() {
             Ok(listener) => listener,
@@ -526,17 +373,7 @@ impl ShowcaseWindow {
     }
 }
 
-/// Serves the DevTools endpoint over `listener` forever, one session at a time:
-/// each answers inspects from the shared, per-frame-refreshed `source` and is
-/// pushed whatever the frame thread put on `events`.
-///
-/// # Scopes
-///
-/// `observer()` = read + subscribe. Deliberately **not** `all()`: control and
-/// injection stay ungranted, so an attached client can watch this window but not
-/// steer it. Subscribe is granted only because this host genuinely services it
-/// (`serve_with_events` below); a host that could not push would have its
-/// subscriptions denied by the endpoint rather than left hanging.
+#[doc = include_str!("showcase_window.doc/devtools_serve.md")]
 fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource, events: &EventQueue) {
     while let Ok(stream) = listener.accept() {
         let mut authenticator = Authenticator::new();
@@ -557,8 +394,7 @@ fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource, event
 }
 
 impl ApplicationHandler for ShowcaseWindow {
-    /// Creates the window, swapchain surface, and GPU-backed Vello renderer once
-    /// the platform is ready, and wires the host text stack.
+    #[doc = include_str!("showcase_window.doc/resumed.md")]
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -792,17 +628,14 @@ impl ApplicationHandler for ShowcaseWindow {
     }
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`] through the
-/// real `obscur-css` frontend (identical to `showcase_png.rs`).
+#[doc = include_str!("showcase_window.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Writes the embedded showcase PNG into a fresh temp directory (the resource
-/// loader's sandbox root) and returns it. A `url()` / `src` path resolves
-/// relative to this directory.
+#[doc = include_str!("showcase_window.doc/stage_image_asset.md")]
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-showcase-win-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
@@ -814,14 +647,7 @@ fn stage_image_asset() -> PathBuf {
     dir
 }
 
-/// Initialises a wgpu swapchain surface + device/queue for on-screen rendering
-/// from an `Arc<Window>` (mirrors `windowed_counter.rs`).
-///
-/// # Errors
-///
-/// Returns an error if the surface cannot be created, no compatible GPU adapter
-/// is available (as in a headless environment), the device cannot be created, or
-/// the surface exposes no supported default configuration.
+#[doc = include_str!("showcase_window.doc/init_gpu.md")]
 fn init_gpu(
     window: &Arc<Window>,
 ) -> Result<
@@ -848,11 +674,7 @@ fn init_gpu(
     Ok((surface, config, device, queue))
 }
 
-/// Wires the full multi-font fallback stack onto the runtime and the Vello
-/// renderer (identical to `windowed_counter.rs`): the primary under `sans-serif`
-/// (id 0) plus a best-effort CJK fallback under the same family (id 1), so
-/// resolution is by `cmap` COVERAGE, not name. The renderer receives the same
-/// id↔bytes assignment so scene font handles line up with rasterized outlines.
+#[doc = include_str!("showcase_window.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primary_bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let primary_id = registry.register(
@@ -880,14 +702,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primar
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (a `u32`) for a resolved [`FontId`]: the renderer and
-/// the scene both key fonts by this value, so the two must agree.
+#[doc = include_str!("showcase_window.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes for the text path, scanning well-known
-/// Linux/macOS/Windows locations and returning the first that exists, or `None`.
+#[doc = include_str!("showcase_window.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
@@ -904,8 +724,7 @@ fn load_system_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Loads a second, CJK-covering fallback font's bytes (best effort), so a
-/// mixed-script label has a covering font for ideographs the primary lacks.
+#[doc = include_str!("showcase_window.doc/load_fallback_font.md")]
 fn load_fallback_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -921,11 +740,7 @@ fn load_fallback_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Builds the winit event loop and runs the application to completion.
-///
-/// # Errors
-///
-/// Propagates any event-loop construction or run error.
+#[doc = include_str!("showcase_window.doc/main.md")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== obscur-kit capability showcase → Vello (windowed, interactive) ==");
     println!("(full backend: winit window + wgpu/Vello GPU renderer, on-screen present)\n");

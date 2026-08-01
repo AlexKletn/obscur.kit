@@ -1,41 +1,26 @@
-//! `MessageValue`: one argument bound into a message (spec §7.2 parameters).
+#![doc = include_str!("message_value.doc/_module.md")]
 
 use crate::message::{GrammaticalCase, GrammaticalGender};
 use crate::plural::PluralOperands;
 
-/// One value bound to a message parameter.
-///
-/// The variants are the three things a message can *do* with an argument, and
-/// they are distinct because the operations are distinct: text is interpolated,
-/// a number is interpolated **and** can be pluralised (which needs its
-/// [`PluralOperands`], not its value), and a selector is only ever matched
-/// against arm names.
+#[doc = include_str!("message_value.doc/MessageValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageValue {
-    /// A literal string, interpolated as-is.
+    #[doc = include_str!("message_value.doc/Text.md")]
     Text(Box<str>),
-    /// A number: the digits to interpolate, plus the operands its category is
-    /// selected from.
+    #[doc = include_str!("message_value.doc/Number.md")]
     Number {
-        /// How the number is written, and what `{name}` or `#` interpolates.
+        #[doc = include_str!("message_value.doc/literal.md")]
         literal: Box<str>,
-        /// The CLDR operands `literal` denotes, which a `plural` arm selects on.
+        #[doc = include_str!("message_value.doc/operands.md")]
         operands: PluralOperands,
     },
-    /// A selector matched against `select` arm names — a gender, a case, or any
-    /// other closed-by-the-catalogue choice.
+    #[doc = include_str!("message_value.doc/Selector.md")]
     Selector(Box<str>),
 }
 
 impl MessageValue {
-    /// Binds an integer count.
-    ///
-    /// # The digits are ASCII, and that is a gap, not a decision
-    ///
-    /// `literal` is `count`'s plain Rust formatting: `-1234` renders `-1234`,
-    /// never `−1 234` and never `١٢٣٤`. Locale-aware number formatting — digit
-    /// system, grouping separator, minus sign — is **not built** (see the crate
-    /// docs). The *category* is fully locale-aware; the digits are not.
+    #[doc = include_str!("message_value.doc/integer.md")]
     #[must_use]
     pub fn integer(count: i64) -> Self {
         Self::Number {
@@ -44,11 +29,7 @@ impl MessageValue {
         }
     }
 
-    /// Binds a number written as `decimal` (`"1"`, `"1.0"`, `"2.50"`).
-    ///
-    /// The spelling is the input because the trailing zeros change the category —
-    /// see [`PluralOperands::from_decimal`], which is also why this returns `None`
-    /// for a spelling it cannot read.
+    #[doc = include_str!("message_value.doc/decimal.md")]
     #[must_use]
     pub fn decimal(decimal: &str) -> Option<Self> {
         Some(Self::Number {
@@ -57,34 +38,31 @@ impl MessageValue {
         })
     }
 
-    /// Binds a literal string.
+    #[doc = include_str!("message_value.doc/text.md")]
     #[must_use]
     pub fn text(text: impl Into<Box<str>>) -> Self {
         Self::Text(text.into())
     }
 
-    /// Binds a bare selector value.
+    #[doc = include_str!("message_value.doc/selector.md")]
     #[must_use]
     pub fn selector(value: impl Into<Box<str>>) -> Self {
         Self::Selector(value.into())
     }
 
-    /// Binds a grammatical gender as a selector (spec §7.2 gender).
+    #[doc = include_str!("message_value.doc/gender.md")]
     #[must_use]
     pub fn gender(gender: &GrammaticalGender) -> Self {
         Self::Selector(gender.as_str().into())
     }
 
-    /// Binds a grammatical case as a selector (spec §7.2 case variants).
+    #[doc = include_str!("message_value.doc/grammatical_case.md")]
     #[must_use]
     pub fn grammatical_case(case: &GrammaticalCase) -> Self {
         Self::Selector(case.as_str().into())
     }
 
-    /// Returns the text this value interpolates to.
-    ///
-    /// Every variant has one, including a selector: a message may both switch on
-    /// a value and print it.
+    #[doc = include_str!("message_value.doc/literal_2.md")]
     #[must_use]
     pub fn literal(&self) -> &str {
         match self {
@@ -93,11 +71,7 @@ impl MessageValue {
         }
     }
 
-    /// Returns the operands a `plural` arm selects on, for a
-    /// [`Number`](Self::Number); `None` for anything else.
-    ///
-    /// A `plural` selector over a non-number has no answer, and this returning
-    /// `None` is how the formatter finds that out rather than inventing one.
+    #[doc = include_str!("message_value.doc/operands_2.md")]
     #[must_use]
     pub const fn operands(&self) -> Option<&PluralOperands> {
         match self {
@@ -106,12 +80,7 @@ impl MessageValue {
         }
     }
 
-    /// Returns the name a `select` arm matches against.
-    ///
-    /// Both [`Selector`](Self::Selector) and [`Text`](Self::Text) answer with
-    /// their text — a plain string argument is a perfectly good selector — and a
-    /// number answers with its digits, so `{n, select, 0{none} other{some}}` is
-    /// possible even though `plural` is the right tool.
+    #[doc = include_str!("message_value.doc/selector_name.md")]
     #[must_use]
     pub fn selector_name(&self) -> &str {
         self.literal()

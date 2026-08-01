@@ -1,5 +1,4 @@
-//! The [`SpatialIndex`] — the incremental, z-order-aware index backing hit
-//! testing (spec §4.7).
+#![doc = include_str!("spatial_index.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
@@ -8,40 +7,31 @@ use obscur_identity::NodeId;
 
 use super::HitTest;
 
-/// A single indexed node: its visual `bounds` and `z_order` (spec §4.7).
+#[doc = include_str!("spatial_index.doc/Entry.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Entry {
-    /// The node's already-resolved visual bounds (transform/clip applied
-    /// upstream).
+    #[doc = include_str!("spatial_index.doc/bounds.md")]
     pub bounds: Rect,
-    /// The node's z-order; higher values are drawn on top.
+    #[doc = include_str!("spatial_index.doc/z_order.md")]
     pub z_order: i32,
 }
 
 impl Entry {
-    /// Constructs an entry from resolved `bounds` and a `z_order`.
+    #[doc = include_str!("spatial_index.doc/new.md")]
     #[must_use]
     pub const fn new(bounds: Rect, z_order: i32) -> Self {
         Self { bounds, z_order }
     }
 }
 
-/// The incremental spatial index used for hit testing (spec §4.7).
-///
-/// The index stores each node's resolved visual [`bounds`](Entry::bounds) and
-/// [`z_order`](Entry::z_order). It is maintained *incrementally* — nodes are
-/// inserted, removed, and re-bounded individually rather than rebuilt — and is
-/// backed by a [`BTreeMap`] keyed by [`NodeId`] for deterministic iteration.
-///
-/// Queries return [`HitTest`] records ordered topmost-first (descending
-/// z-order, ties broken by `NodeId`).
+#[doc = include_str!("spatial_index.doc/SpatialIndex.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SpatialIndex {
     entries: BTreeMap<NodeId, Entry>,
 }
 
 impl SpatialIndex {
-    /// Creates an empty index.
+    #[doc = include_str!("spatial_index.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -49,18 +39,17 @@ impl SpatialIndex {
         }
     }
 
-    /// Inserts or replaces the entry for `node` — the incremental update.
+    #[doc = include_str!("spatial_index.doc/insert.md")]
     pub fn insert(&mut self, node: NodeId, bounds: Rect, z_order: i32) {
         self.entries.insert(node, Entry::new(bounds, z_order));
     }
 
-    /// Removes `node` from the index, returning whether it was present.
+    #[doc = include_str!("spatial_index.doc/remove.md")]
     pub fn remove(&mut self, node: NodeId) -> bool {
         self.entries.remove(&node).is_some()
     }
 
-    /// Updates only the `bounds` of `node`, keeping its z-order. Returns whether
-    /// `node` was present.
+    #[doc = include_str!("spatial_index.doc/update_bounds.md")]
     pub fn update_bounds(&mut self, node: NodeId, bounds: Rect) -> bool {
         match self.entries.get_mut(&node) {
             Some(entry) => {
@@ -71,35 +60,30 @@ impl SpatialIndex {
         }
     }
 
-    /// Returns whether `node` is present in the index.
+    #[doc = include_str!("spatial_index.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.entries.contains_key(&node)
     }
 
-    /// The number of indexed nodes.
+    #[doc = include_str!("spatial_index.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns whether the index is empty.
+    #[doc = include_str!("spatial_index.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Removes every entry.
+    #[doc = include_str!("spatial_index.doc/clear.md")]
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    /// Returns every entry whose bounds contain `point`, ordered topmost-first.
-    ///
-    /// Ordering is by descending [`z_order`](Entry::z_order); ties are broken
-    /// deterministically by ascending [`NodeId`]. Each result's
-    /// [`local_point`](HitTest::local_point) is `point` translated into the
-    /// entry's local space (`point - bounds.origin`).
+    #[doc = include_str!("spatial_index.doc/hits_at.md")]
     #[must_use]
     pub fn hits_at(&self, point: Point) -> Vec<HitTest> {
         let mut hits: Vec<HitTest> = self
@@ -121,7 +105,7 @@ impl SpatialIndex {
         hits
     }
 
-    /// Returns the topmost hit at `point`, if any.
+    #[doc = include_str!("spatial_index.doc/topmost_at.md")]
     #[must_use]
     pub fn topmost_at(&self, point: Point) -> Option<HitTest> {
         self.hits_at(point).into_iter().next()

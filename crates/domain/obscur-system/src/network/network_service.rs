@@ -1,48 +1,32 @@
-//! The host-provided port for satisfying network fetches (spec §5.15).
-//!
-//! The toolkit performs **no network I/O of its own**: [`NetworkService`] is a
-//! port a host/application implements to resolve a
-//! [`NetworkRequest`](crate::network::NetworkRequest) into a
-//! [`NetworkResponse`](crate::network::NetworkResponse) through its own loader
-//! (spec §5.15). The honest kit default — [`NullNetworkService`] — provides
-//! nothing, enforcing the no-network policy; [`StubNetworkService`] is a
-//! deterministic test host with canned routes.
+#![doc = include_str!("network_service.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 
 use crate::network::{CredentialHandle, NetworkRequest, NetworkResponse};
 
-/// Why a [`NetworkService`] fetch failed (spec §5.15).
-///
-/// Each variant is a pure, backend-agnostic value; the informational variants
-/// carry a human-readable detail. This type implements [`std::error::Error`] so
-/// it composes with the standard error ecosystem while remaining I/O-free.
+#[doc = include_str!("network_service.doc/NetworkError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkError {
-    /// This service performs no network access at all — the honest kit default
-    /// (spec §5.15).
+    #[doc = include_str!("network_service.doc/Unsupported.md")]
     Unsupported,
-    /// The host declined the fetch by policy (permission, sandbox, allowlist).
+    #[doc = include_str!("network_service.doc/Denied.md")]
     Denied,
-    /// The fetch did not complete within the host's time budget.
+    #[doc = include_str!("network_service.doc/Timeout.md")]
     Timeout,
-    /// The URL was malformed or unroutable; the payload echoes the offending
-    /// URL.
+    #[doc = include_str!("network_service.doc/InvalidUrl.md")]
     InvalidUrl(Box<str>),
-    /// An underlying transport failed; the payload describes the failure.
+    #[doc = include_str!("network_service.doc/Transport.md")]
     Transport(Box<str>),
 }
 
 impl NetworkError {
-    /// Returns whether this is the policy-refusal [`Denied`](Self::Denied)
-    /// variant (spec §5.15).
+    #[doc = include_str!("network_service.doc/is_denied.md")]
     #[must_use]
     pub const fn is_denied(&self) -> bool {
         matches!(self, Self::Denied)
     }
 
-    /// Returns whether this is the no-network [`Unsupported`](Self::Unsupported)
-    /// variant (spec §5.15).
+    #[doc = include_str!("network_service.doc/is_unsupported.md")]
     #[must_use]
     pub const fn is_unsupported(&self) -> bool {
         matches!(self, Self::Unsupported)
@@ -63,40 +47,12 @@ impl std::fmt::Display for NetworkError {
 
 impl std::error::Error for NetworkError {}
 
-/// The host-provided port for satisfying network fetches (spec §5.15).
-///
-/// The kit opens no sockets: an adapter implements this once per host (a real
-/// HTTP client, a sandboxed loader, a test double) and the domain drives it as
-/// `Box<dyn NetworkService>`. The trait is therefore deliberately
-/// **object-safe** — no generic methods and no `Self`-returning methods.
-/// Fetches take `&mut self` because a real host mutates connection/pool state
-/// as it works; failures are reported through [`NetworkError`] rather than
-/// panics.
+#[doc = include_str!("network_service.doc/NetworkService.md")]
 pub trait NetworkService {
-    /// Fetches `request` and returns the host's [`NetworkResponse`]
-    /// (spec §5.15).
-    ///
-    /// A service that performs no network access returns
-    /// [`NetworkError::Unsupported`] rather than panicking.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`NetworkError`] when the fetch cannot be satisfied (denied,
-    /// timed out, unsupported, or a transport failure).
+    #[doc = include_str!("network_service.doc/fetch.md")]
     fn fetch(&mut self, request: NetworkRequest) -> Result<NetworkResponse, NetworkError>;
 
-    /// Fetches `request`, authenticating with `credential` (spec §5.15).
-    ///
-    /// The default implementation simply delegates to [`Self::fetch`]: the
-    /// [`CredentialHandle`] carries only an opaque reference (§7.12), so the
-    /// host is responsible for resolving it to the real secret and injecting
-    /// the actual `Authorization` header when it performs the fetch — the kit
-    /// never holds the secret. An adapter may override this to thread the
-    /// credential through its own authentication flow.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`NetworkError`] when the underlying fetch cannot be satisfied.
+    #[doc = include_str!("network_service.doc/fetch_with_credential.md")]
     fn fetch_with_credential(
         &mut self,
         request: NetworkRequest,
@@ -106,26 +62,17 @@ pub trait NetworkService {
         self.fetch(request)
     }
 
-    /// Reports the honest [`SupportLevel`] at which this service offers network
-    /// access (spec §5.15).
+    #[doc = include_str!("network_service.doc/availability.md")]
     #[must_use]
     fn availability(&self) -> SupportLevel;
 }
 
-/// The honest kit default: a [`NetworkService`] that performs **no** network
-/// access (spec §5.15).
-///
-/// `NullNetworkService` enforces the §5.15 policy that the toolkit does no
-/// network I/O by itself: every [`fetch`](NetworkService::fetch) returns
-/// [`NetworkError::Unsupported`] and [`availability`](NetworkService::availability)
-/// reports [`SupportLevel::Unavailable`]. Its refusals are correct behavior,
-/// not stubs waiting to be filled in — a host that wants network access
-/// supplies its own adapter.
+#[doc = include_str!("network_service.doc/NullNetworkService.md")]
 #[derive(Debug, Default, Clone)]
 pub struct NullNetworkService;
 
 impl NullNetworkService {
-    /// Creates the no-network default service (spec §5.15).
+    #[doc = include_str!("network_service.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
@@ -143,41 +90,30 @@ impl NetworkService for NullNetworkService {
     }
 }
 
-/// A deterministic test host [`NetworkService`] backed by canned routes
-/// (spec §5.15).
-///
-/// `StubNetworkService` maps an exact request URL to a pre-built
-/// [`NetworkResponse`] and records every request it receives, with no real
-/// I/O, clock, or randomness. A [`fetch`](NetworkService::fetch) returns a
-/// clone of the response routed for the request's URL, or
-/// [`NetworkError::InvalidUrl`] when no route matches. It reports
-/// [`SupportLevel::Emulated`] because it emulates a host loader rather than
-/// reaching a real network.
+#[doc = include_str!("network_service.doc/StubNetworkService.md")]
 #[derive(Debug, Default, Clone)]
 pub struct StubNetworkService {
-    /// Exact-URL to canned-response routes, consulted in order.
+    #[doc = include_str!("network_service.doc/routes.md")]
     routes: Vec<(Box<str>, NetworkResponse)>,
-    /// Every request received, in arrival order — inspectable by tests.
+    #[doc = include_str!("network_service.doc/requests.md")]
     requests: Vec<NetworkRequest>,
 }
 
 impl StubNetworkService {
-    /// Creates an empty stub host with no routes and no recorded requests
-    /// (spec §5.15).
+    #[doc = include_str!("network_service.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers a canned `response` for the exact `url`, returning `self`
-    /// (fluent; spec §5.15).
+    #[doc = include_str!("network_service.doc/route.md")]
     #[must_use]
     pub fn route(mut self, url: impl Into<Box<str>>, response: NetworkResponse) -> Self {
         self.routes.push((url.into(), response));
         self
     }
 
-    /// Returns the requests recorded so far, in arrival order (spec §5.15).
+    #[doc = include_str!("network_service.doc/requests_2.md")]
     #[must_use]
     pub fn requests(&self) -> &[NetworkRequest] {
         &self.requests

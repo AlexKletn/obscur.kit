@@ -1,49 +1,4 @@
-//! The **Browser Elements Wireframe Kit** scene: a grayscale, flat "spec sheet"
-//! of every native HTML control shown across all of its visual states
-//! (default / hover / focus / active / disabled / error / …). This is the
-//! toolkit's **base-component / user-agent-stylesheet reference**, authored as one
-//! theme-agnostic view built from *semantic* classes plus a single wireframe
-//! stylesheet keyed to those classes (so [`stylesheet`] reads like a real UA sheet
-//! whose state variants are ordinary CSS classes: `.wf-btn.hover`, `.wf-field.focus`,
-//! `.wf-check.checked`, …). Rendered headless to a PNG by the sibling
-//! `wireframe_png.rs` example.
-//!
-//! # Fidelity notes — now authored on REAL primitives
-//!
-//! An earlier pass of this sheet was a deliberate *gap-finding* exercise: six
-//! base-element features the design leans on were only *approximated*. Those gaps
-//! have since been closed, so this sheet now renders the AUTHENTIC CSS for each
-//! (search "REAL" in the CSS below):
-//!
-//! - **`outline` + `outline-offset` focus rings** — the focused control carries a
-//!   real `outline: 2px dashed #2b2a27; outline-offset: 3px` on the `.wf-focus`
-//!   wrapper; the ring paints OUTSIDE the box with a visible offset gap and takes
-//!   no layout space (via the coordinator's outline path).
-//! - **Dashed borders** (disabled controls, dashed dividers/underlines) — real
-//!   `border: 1.5px dashed …`, stroked as actual dashes by both backends.
-//! - **CSS-border triangles / arrows** (select `▼` / open `▲`, disclosure `▸` / `▾`,
-//!   number-spinner `▲` / `▼`) — the classic `width:0; height:0; border-width:…;
-//!   border-color:… transparent …` trick: three transparent sides + one inked side
-//!   paint a true triangle (mitered trapezoid quads, transparent sides skipped).
-//! - **Graph-paper page grid** — two crossing `repeating-linear-gradient()` layers
-//!   in one `background-image` comma list over the page `background-color` (a real
-//!   24px grid; GPU-faithful on Vello).
-//! - **`repeating-linear-gradient`** hatches — the indeterminate progress hatch,
-//!   the meter stripe fills, and the colour-swatch checker are real repeating
-//!   gradients (GPU-faithful on Vello; flat first-stop on CPU, by policy).
-//! - **Multi-line `<textarea>`** — a single real paragraph string that WRAPS inside
-//!   the fixed-size box with a real `line-height` (no manual line splitting).
-//! - **Inset `box-shadow` error ring** — a real `box-shadow: 0 0 0 1.5px #2b2a27
-//!   inset` painted inside the field box.
-//! - **`overflow: hidden`** — the open-select list, the table, the disclosure, the
-//!   progress track and the colour swatch clip their children to their rounded
-//!   corners.
-//!
-//! Two things remain genuine gaps (NOT part of this batch, still approximated):
-//! **`border-radius: 50%`** circles are given explicit half-px radii, and
-//! **`letter-spacing` / `text-transform`** mono captions are authored already-
-//! uppercased. The `✓` check, `✕` clear, `⌕` magnifier and `◣` resize grip stay as
-//! host-font glyphs (they are not border-triangles).
+#![doc = include_str!("scene.doc/_module.md")]
 // One entity per file (xtask forbids logic in mod.rs); both the module and its PNG
 // harness could share this, so some items look unused inside a single binary.
 #![allow(dead_code, unreachable_pub)]
@@ -55,9 +10,7 @@ use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 // View
 // ---------------------------------------------------------------------------
 
-/// Builds the full wireframe sheet: the masthead over the 15 control-group cards
-/// and the footer. Pure view/primitive construction — no colours or backend types
-/// — so the single [`stylesheet`] drives the whole tree.
+#[doc = include_str!("scene.doc/view.md")]
 #[must_use]
 pub fn view() -> View {
     let page = el(
@@ -653,8 +606,7 @@ fn trow(class: &str, name: &str, role: &str, status: &str) -> ViewNode {
 // Structural helpers
 // ---------------------------------------------------------------------------
 
-/// A control group card: the mono number + `<h2>` title + muted `<code>` tag header
-/// (with a bottom rule) over the group's body rows.
+#[doc = include_str!("scene.doc/card.md")]
 fn card(num: &str, title: &str, tag: &str, mut body: Vec<ViewNode>) -> ViewNode {
     let head = el(
         "wf-head",
@@ -669,13 +621,12 @@ fn card(num: &str, title: &str, tag: &str, mut body: Vec<ViewNode>) -> ViewNode 
     el("wf-card", kids)
 }
 
-/// A row of state columns. `flex-wrap` is unsupported, so callers pre-split their
-/// columns into rows that fit the card width; each row is a plain flex track.
+#[doc = include_str!("scene.doc/row.md")]
 fn row(cols: Vec<ViewNode>) -> ViewNode {
     el("wf-row", cols)
 }
 
-/// One state column: the control above a mono caption.
+#[doc = include_str!("scene.doc/col.md")]
 fn col(caption: &str, control: ViewNode) -> ViewNode {
     el(
         "wf-col",
@@ -683,21 +634,17 @@ fn col(caption: &str, control: ViewNode) -> ViewNode {
     )
 }
 
-/// REAL (outline + outline-offset): wraps a control in a `.wf-focus` box carrying a
-/// real `outline: 2px dashed #2b2a27; outline-offset: 3px` — the ring paints outside
-/// the box with a visible offset gap and takes no layout space.
+#[doc = include_str!("scene.doc/focus.md")]
 fn focus(control: ViewNode) -> ViewNode {
     el("wf-focus", vec![control])
 }
 
-/// A 0×0 CSS border-triangle box (the arrow/marker classes set the inked side +
-/// three transparent sides, so the coordinator's mitered border quads draw a true
-/// triangle). Content-less; its size is entirely its border widths.
+#[doc = include_str!("scene.doc/tri.md")]
 fn tri(class: &str) -> ViewNode {
     el(class, vec![])
 }
 
-/// Wraps `children` in a classed [`Container`] element node.
+#[doc = include_str!("scene.doc/el.md")]
 fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
@@ -705,7 +652,7 @@ fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A classed [`Text`] node (the class carries colour / size / weight).
+#[doc = include_str!("scene.doc/text.md")]
 fn text(class: &str, content: &str) -> ViewNode {
     Text::new(content.to_owned())
         .into_view_node()
@@ -718,9 +665,7 @@ fn text(class: &str, content: &str) -> ViewNode {
 // this reads like a real user-agent stylesheet with state selectors.
 // ---------------------------------------------------------------------------
 
-/// The complete grayscale wireframe stylesheet. Palette/tokens follow the spec:
-/// ink `#2b2a27`, muted `#5a584f`, faint `#9b998f`, disabled-ink `#b7b5ad`, page
-/// `#eceae5`, surface `#faf9f6`, hover `#e4e2db`, 1.5px borders, 2–4px radii.
+#[doc = include_str!("scene.doc/stylesheet.md")]
 #[must_use]
 pub const fn stylesheet() -> &'static str {
     STYLESHEET

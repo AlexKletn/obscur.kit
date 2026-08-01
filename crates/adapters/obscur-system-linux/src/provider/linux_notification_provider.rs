@@ -1,40 +1,21 @@
-//! A Linux [`NotificationProvider`] that posts via `notify-send` (spec §6.12).
-//!
-//! [`LinuxNotificationProvider`] implements the pure
-//! [`NotificationProvider`](obscur_system::notification::NotificationProvider)
-//! port by shelling out to `notify-send` with [`std::process::Command`] and no
-//! external crates. A [`Notification`](obscur_system::notification::Notification)
-//! maps to a `notify-send` argv (see [`build_args`]); the provider spawns the tool
-//! fire-and-forget. `notify-send` failing to spawn usually means no notification
-//! daemon is running, which maps to [`NotificationResult::Denied`].
-//!
-//! Linux has no standard per-application icon badge, so [`Self::set_badge`] only
-//! records the value — surfacing it (for example on the Unity launcher) would need
-//! a D-Bus round-trip and is a future refinement (spec §2.7 target-specific
-//! providers).
+#![doc = include_str!("linux_notification_provider.doc/_module.md")]
 
 use std::process::Command;
 
 use obscur_capability::SupportLevel;
 use obscur_system::notification::{Notification, NotificationProvider, NotificationResult};
 
-/// A Linux [`NotificationProvider`] backed by `notify-send` (spec §6.12).
-///
-/// The provider holds the tool command name (defaulting to `"notify-send"`) and
-/// the last badge value set through [`Self::set_badge`]. [`Self::permission`]
-/// scans `PATH` for the tool without executing it — so it never pops a
-/// notification — and [`Self::post`] spawns the tool fire-and-forget.
+#[doc = include_str!("linux_notification_provider.doc/LinuxNotificationProvider.md")]
 #[derive(Debug, Clone)]
 pub struct LinuxNotificationProvider {
-    /// The notification tool to invoke, e.g. `"notify-send"`.
+    #[doc = include_str!("linux_notification_provider.doc/tool.md")]
     tool: Box<str>,
-    /// The last app-icon badge count set; recorded but not surfaced on Linux.
+    #[doc = include_str!("linux_notification_provider.doc/badge.md")]
     badge: Option<u32>,
 }
 
 impl LinuxNotificationProvider {
-    /// Creates a provider that posts notifications with `notify-send`
-    /// (spec §6.12).
+    #[doc = include_str!("linux_notification_provider.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -43,8 +24,7 @@ impl LinuxNotificationProvider {
         }
     }
 
-    /// Creates a provider that posts notifications with a custom `tool` command
-    /// (spec §6.12).
+    #[doc = include_str!("linux_notification_provider.doc/with_tool.md")]
     #[must_use]
     pub fn with_tool(tool: impl Into<Box<str>>) -> Self {
         Self {
@@ -53,16 +33,13 @@ impl LinuxNotificationProvider {
         }
     }
 
-    /// Returns the notification tool this provider invokes (spec §6.12).
+    #[doc = include_str!("linux_notification_provider.doc/tool_2.md")]
     #[must_use]
     pub fn tool(&self) -> &str {
         &self.tool
     }
 
-    /// Returns the last recorded app-icon badge value (spec §6.12).
-    ///
-    /// Linux has no standard app-badge, so this is recorded state only — it is not
-    /// shown to the user.
+    #[doc = include_str!("linux_notification_provider.doc/badge_2.md")]
     #[must_use]
     pub const fn badge(&self) -> Option<u32> {
         self.badge
@@ -70,7 +47,7 @@ impl LinuxNotificationProvider {
 }
 
 impl Default for LinuxNotificationProvider {
-    /// The default provider posts notifications with `notify-send`.
+    #[doc = include_str!("linux_notification_provider.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }
@@ -107,13 +84,7 @@ impl NotificationProvider for LinuxNotificationProvider {
     }
 }
 
-/// Builds the `notify-send` argv for `notification`, excluding the tool name
-/// (spec §6.12).
-///
-/// This is the pure notification→argv mapping, factored out so the flag choices
-/// can be unit-tested without spawning `notify-send`. When the notification
-/// [requests attention](Notification::request_attention) the argv leads with
-/// `--urgency=critical`; the title and body then follow as positional arguments.
+#[doc = include_str!("linux_notification_provider.doc/build_args.md")]
 #[must_use]
 fn build_args(notification: &Notification) -> Vec<String> {
     let mut args = Vec::new();
@@ -125,11 +96,7 @@ fn build_args(notification: &Notification) -> Vec<String> {
     args
 }
 
-/// Returns whether an executable named `cmd` exists on `PATH` (spec §2.7).
-///
-/// The probe scans the `PATH` environment variable, splitting on `:`, and tests
-/// each `dir/cmd` with [`std::fs::metadata`]. It deliberately does **not** execute
-/// the tool, so capability queries are deterministic and never pop a notification.
+#[doc = include_str!("linux_notification_provider.doc/tool_available.md")]
 fn tool_available(cmd: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;

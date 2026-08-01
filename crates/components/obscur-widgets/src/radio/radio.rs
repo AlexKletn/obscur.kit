@@ -1,4 +1,4 @@
-//! `Radio`: a headless two-state radio-button control (spec §2.6).
+#![doc = include_str!("radio.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -8,19 +8,7 @@ use obscur_view::view::{
     ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
-/// A headless two-state radio-button control (spec §2.6).
-///
-/// `Radio` mirrors [`Checkbox`](crate::checkbox::Checkbox) as a *two-state*
-/// (selected / not) control: it owns its `selected` flag, a `disabled` flag,
-/// the `label`, and the `command` it fires on change. It bakes in **no** visual
-/// theme — [`view`](Self::view) derives a [`SemanticRole::RadioButton`] element
-/// carrying its state as properties plus (as children) a circular `.radio-dot`
-/// indicator sub-part — whose `.radio-fill` dot appears only when selected —
-/// followed by the label [`Text`].
-///
-/// Grouping / single-selection enforcement is the caller's concern (a radio
-/// group owns which member is selected); this control just reports and toggles
-/// its own membership via [`select`](Self::select) / [`toggle`](Self::toggle).
+#[doc = include_str!("radio.doc/Radio.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Radio {
     label: Box<str>,
@@ -30,29 +18,22 @@ pub struct Radio {
 }
 
 impl Radio {
-    /// Stable component id for the radio widget (see [`Button::COMPONENT_ID`]
-    /// for the shared `0x00D0_00NN` scheme; radio = `..0C`).
-    ///
-    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    #[doc = include_str!("radio.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_000C);
 
-    /// Component id of the circular indicator sub-part (`.radio-dot`), in the
-    /// widget sub-part id space (`..1C`).
+    #[doc = include_str!("radio.doc/DOT_ID.md")]
     const DOT_ID: ComponentId = ComponentId::from_raw(0x00D0_001C);
-    /// Component id of the filled centre dot sub-part (`.radio-fill`, `..2C`).
+    #[doc = include_str!("radio.doc/FILL_ID.md")]
     const FILL_ID: ComponentId = ComponentId::from_raw(0x00D0_002C);
 
-    /// Interned name of the semantic-role property (`role`); shares the
-    /// `0x00D1_NNXX` scheme with `NN = 0C` (radio): role=`00`, disabled=`01`,
-    /// selected=`02`.
+    #[doc = include_str!("radio.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C00);
-    /// Interned name of the `disabled` state property.
+    #[doc = include_str!("radio.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C01);
-    /// Interned name of the `selected` state property.
+    #[doc = include_str!("radio.doc/PROP_SELECTED.md")]
     const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C02);
 
-    /// Creates an enabled, *unselected* radio showing `label` that fires
-    /// `command` on change.
+    #[doc = include_str!("radio.doc/new.md")]
     #[must_use]
     pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -63,89 +44,75 @@ impl Radio {
         }
     }
 
-    /// Sets the selected state, returning the updated radio (fluent builder).
+    #[doc = include_str!("radio.doc/selected.md")]
     #[must_use]
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
     }
 
-    /// Sets the disabled state, returning the updated radio (fluent builder).
+    #[doc = include_str!("radio.doc/disabled.md")]
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Selects this radio (a no-op while disabled). Deselection is the group's
-    /// concern — a radio does not deselect itself on re-activation.
+    #[doc = include_str!("radio.doc/select.md")]
     pub fn select(&mut self) {
         if !self.disabled {
             self.selected = true;
         }
     }
 
-    /// Toggles the selected state (a no-op while disabled). Mirrors
-    /// [`Checkbox::toggle`](crate::checkbox::Checkbox::toggle) for symmetry;
-    /// most groups will call [`select`](Self::select) instead.
+    #[doc = include_str!("radio.doc/toggle.md")]
     pub fn toggle(&mut self) {
         if !self.disabled {
             self.selected = !self.selected;
         }
     }
 
-    /// Returns whether this radio is selected.
+    #[doc = include_str!("radio.doc/is_selected.md")]
     #[must_use]
     pub const fn is_selected(&self) -> bool {
         self.selected
     }
 
-    /// Sets the selected state in place.
+    #[doc = include_str!("radio.doc/set_selected.md")]
     pub fn set_selected(&mut self, selected: bool) {
         self.selected = selected;
     }
 
-    /// Returns the command fired when the radio changes.
+    #[doc = include_str!("radio.doc/command.md")]
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    /// Returns the radio label.
+    #[doc = include_str!("radio.doc/label.md")]
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
-    /// Returns whether the radio is disabled.
+    #[doc = include_str!("radio.doc/is_disabled.md")]
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    /// Sets the disabled state in place.
+    #[doc = include_str!("radio.doc/set_disabled.md")]
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    /// Returns the accessible role of this control.
+    #[doc = include_str!("radio.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::RadioButton
     }
 
-    /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
-    /// disabled and selected state, a change event bound to `command`, and — as
-    /// children — the circular `.radio-dot` indicator followed by the label
-    /// [`Text`].
-    ///
-    /// The indicator is a `.radio-dot` element the UA/theme sheet fills; its
-    /// child is a `.radio-fill` centre dot present **only when selected**. The
-    /// interactive state (`EVENT_CHANGE`, reserved `:checked`/`:disabled` attrs)
-    /// stays on the OUTER control element, so a click on the dot bubbles to it
-    /// and pseudo-classes drive the whole control.
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[doc = include_str!("radio.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let mut node = ViewNode::element(Self::COMPONENT_ID)

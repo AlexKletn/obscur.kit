@@ -1,53 +1,39 @@
-//! `Position` and its paired [`Range`]: zero-based text coordinates used by the
-//! language-server core.
+#![doc = include_str!("position.doc/_module.md")]
 
-/// A zero-based position in a text document.
-///
-/// `line` is the zero-based line number (newlines split lines) and `character`
-/// is the zero-based **UTF-8 byte** offset from the start of that line.
-///
-/// # Column unit
-///
-/// The Language Server Protocol defines `character` as a UTF-16 code-unit
-/// offset. This transport-agnostic core instead uses a **UTF-8 byte** column so
-/// coordinates map losslessly to and from the byte offsets carried by the okui
-/// parser and compiler diagnostics (which are byte offsets). A JSON-RPC wrapper
-/// that must speak strict LSP can re-encode the column against the line's text;
-/// for a byte-oriented `.okui` checker the byte column is exact and stable.
+#[doc = include_str!("position.doc/Position.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Position {
-    /// Zero-based line number.
+    #[doc = include_str!("position.doc/line.md")]
     pub line: u32,
-    /// Zero-based UTF-8 byte offset within the line.
+    #[doc = include_str!("position.doc/character.md")]
     pub character: u32,
 }
 
 impl Position {
-    /// Creates a position at `line` and `character` (both zero-based).
+    #[doc = include_str!("position.doc/new.md")]
     #[must_use]
     pub const fn new(line: u32, character: u32) -> Self {
         Self { line, character }
     }
 }
 
-/// A half-open span between two [`Position`]s (`start` inclusive, `end`
-/// exclusive), mirroring the LSP `Range` shape.
+#[doc = include_str!("position.doc/Range.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Range {
-    /// The start of the span (inclusive).
+    #[doc = include_str!("position.doc/start.md")]
     pub start: Position,
-    /// The end of the span (exclusive).
+    #[doc = include_str!("position.doc/end.md")]
     pub end: Position,
 }
 
 impl Range {
-    /// Creates a range from `start` to `end`.
+    #[doc = include_str!("position.doc/new_2.md")]
     #[must_use]
     pub const fn new(start: Position, end: Position) -> Self {
         Self { start, end }
     }
 
-    /// Creates an empty (zero-width) range anchored at `position`.
+    #[doc = include_str!("position.doc/empty.md")]
     #[must_use]
     pub const fn empty(position: Position) -> Self {
         Self {
@@ -56,8 +42,7 @@ impl Range {
         }
     }
 
-    /// Returns `true` if `position` lies within this range (`start <= position <
-    /// end`), or equals `start` for an empty range.
+    #[doc = include_str!("position.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, position: Position) -> bool {
         if self.start == self.end {

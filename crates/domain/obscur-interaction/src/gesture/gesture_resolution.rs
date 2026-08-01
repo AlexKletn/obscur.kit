@@ -1,35 +1,26 @@
-//! The [`GestureResolution`] — the outcome of resolving a gesture arena (spec
-//! §6.16 mobile gestures).
+#![doc = include_str!("gesture_resolution.doc/_module.md")]
 
 use super::RecognizerId;
 
-/// The outcome of resolving a [`GestureArena`](super::GestureArena) (spec
-/// §6.16).
-///
-/// - [`Winner`](Self::Winner): a recognizer won the pointer sequence; the arena
-///   cancels all other contenders.
-/// - [`NoWinner`](Self::NoWinner): every contender failed — no gesture.
-/// - [`Pending`](Self::Pending): contenders remain active and none has
-///   resolved yet.
+#[doc = include_str!("gesture_resolution.doc/GestureResolution.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GestureResolution {
-    /// The identified recognizer won; the others are cancelled.
+    #[doc = include_str!("gesture_resolution.doc/Winner.md")]
     Winner(RecognizerId),
-    /// All contenders resolved without recognition.
+    #[doc = include_str!("gesture_resolution.doc/NoWinner.md")]
     NoWinner,
-    /// The arena is still contending — no recognizer has resolved.
+    #[doc = include_str!("gesture_resolution.doc/Pending.md")]
     Pending,
 }
 
 impl GestureResolution {
-    /// Returns whether the arena has reached a final outcome
-    /// ([`Winner`](Self::Winner) or [`NoWinner`](Self::NoWinner)).
+    #[doc = include_str!("gesture_resolution.doc/is_resolved.md")]
     #[must_use]
     pub const fn is_resolved(self) -> bool {
         matches!(self, Self::Winner(_) | Self::NoWinner)
     }
 
-    /// Returns the winning recognizer, if any.
+    #[doc = include_str!("gesture_resolution.doc/winner.md")]
     #[must_use]
     pub const fn winner(self) -> Option<RecognizerId> {
         match self {

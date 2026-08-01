@@ -1,46 +1,27 @@
-//! A compiled route pattern with static, parameter, and wildcard segments
-//! (spec §6.13).
+#![doc = include_str!("route_pattern.doc/_module.md")]
 
 use crate::route::RouteParams;
 
-/// A single segment of a [`RoutePattern`] (spec §6.13).
-///
-/// Patterns are compiled into a sequence of these segments, one per non-empty
-/// path component.
+#[doc = include_str!("route_pattern.doc/PatternSegment.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatternSegment {
-    /// A literal segment that must equal the corresponding path segment.
+    #[doc = include_str!("route_pattern.doc/Static.md")]
     Static(Box<str>),
-    /// A `:name` segment that captures exactly one path segment under `name`.
+    #[doc = include_str!("route_pattern.doc/Param.md")]
     Param(Box<str>),
-    /// A `*name` segment that captures all remaining path segments (joined by
-    /// `/`) under `name` and ends the match.
+    #[doc = include_str!("route_pattern.doc/Wildcard.md")]
     Wildcard(Box<str>),
 }
 
-/// A compiled route pattern such as `/users/:id/posts/:postId` or
-/// `/files/*rest` (spec §6.13).
-///
-/// A pattern is a sequence of [`PatternSegment`]s matched against a path's
-/// segments by [`match_path`](RoutePattern::match_path). Nested routes are
-/// expressed simply as longer patterns (deeper paths) or a trailing
-/// [`Wildcard`](PatternSegment::Wildcard) that absorbs an arbitrarily deep
-/// tail; the toolkit does not maintain a separate route tree.
+#[doc = include_str!("route_pattern.doc/RoutePattern.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutePattern {
-    /// The compiled segments, in path order.
+    #[doc = include_str!("route_pattern.doc/segments.md")]
     segments: Vec<PatternSegment>,
 }
 
 impl RoutePattern {
-    /// Compiles a pattern string into a [`RoutePattern`] (spec §6.13).
-    ///
-    /// The string is split on `/` and empty components are skipped, so leading
-    /// and trailing slashes are irrelevant. Each remaining component becomes a
-    /// segment: `:name` is a [`Param`](PatternSegment::Param), `*name` is a
-    /// [`Wildcard`](PatternSegment::Wildcard), and anything else is a
-    /// [`Static`](PatternSegment::Static) literal. A pattern with no segments
-    /// (for example `/`) matches only the root path.
+    #[doc = include_str!("route_pattern.doc/parse.md")]
     #[must_use]
     pub fn parse(pattern: &str) -> Self {
         let segments = pattern
@@ -59,14 +40,13 @@ impl RoutePattern {
         Self { segments }
     }
 
-    /// Returns the compiled pattern segments.
+    #[doc = include_str!("route_pattern.doc/segments_2.md")]
     #[must_use]
     pub fn segments(&self) -> &[PatternSegment] {
         &self.segments
     }
 
-    /// Returns whether the pattern is fully static (no param or wildcard
-    /// segments).
+    #[doc = include_str!("route_pattern.doc/is_static.md")]
     #[must_use]
     pub fn is_static(&self) -> bool {
         self.segments
@@ -74,25 +54,7 @@ impl RoutePattern {
             .all(|s| matches!(s, PatternSegment::Static(_)))
     }
 
-    /// Matches `path` against the pattern, returning the captured
-    /// [`RouteParams`] on success (spec §6.13).
-    ///
-    /// The path is split into non-empty segments and consumed left to right
-    /// against the pattern segments:
-    ///
-    /// - [`Static`](PatternSegment::Static) must equal the current path
-    ///   segment.
-    /// - [`Param`](PatternSegment::Param) captures one path segment under its
-    ///   name.
-    /// - [`Wildcard`](PatternSegment::Wildcard) captures *all* remaining path
-    ///   segments (re-joined with `/`) under its name and ends the match; a
-    ///   wildcard with no remaining segments captures the empty string.
-    ///
-    /// A match succeeds only when the pattern and path are consumed in step:
-    /// every path segment must be accounted for (unless a wildcard absorbed the
-    /// tail) and every non-wildcard pattern segment must have a path segment.
-    /// Returns `None` on any mismatch. An empty pattern matches only a path
-    /// with no segments (the root `/`).
+    #[doc = include_str!("route_pattern.doc/match_path.md")]
     #[must_use]
     pub fn match_path(&self, path: &str) -> Option<RouteParams> {
         let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();

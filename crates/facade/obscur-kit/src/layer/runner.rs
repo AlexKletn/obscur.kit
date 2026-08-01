@@ -1,4 +1,4 @@
-//! The frame loop behind [`LayerApp::run`](super::LayerApp::run).
+#![doc = include_str!("runner.doc/_module.md")]
 
 use crate::bootstrap::{CssPipeline, KitBootstrap};
 use crate::css::source::CssSource;
@@ -18,15 +18,13 @@ use super::LayerHandle;
 
 use super::LayerAppError;
 
-/// The largest time step one frame may advance motion by, matching the windowed
-/// runner: a surface that was occluded or starved must not fast-forward every
-/// animation by the whole gap.
+#[doc = include_str!("runner.doc/MAX_FRAME_DELTA.md")]
 const MAX_FRAME_DELTA: f32 = 0.1;
 
-/// The frame interval used while motion is in flight, in milliseconds.
+#[doc = include_str!("runner.doc/ANIMATION_STEP_MS.md")]
 const ANIMATION_STEP_MS: u64 = 16;
 
-/// Opens the layer surface and runs it to completion.
+#[doc = include_str!("runner.doc/run.md")]
 pub(super) fn run(
     config: LayerSurfaceConfig,
     stylesheets: Vec<String>,
@@ -162,11 +160,7 @@ pub(super) fn run(
     Ok(())
 }
 
-/// Acquires a GPU device and a swapchain for the layer surface.
-///
-/// The same alpha handling as the windowed runner: a premultiplied surface hands
-/// the root's own alpha to the compositor, so a panel is see-through exactly when
-/// its stylesheet says so and there is no mode to opt into.
+#[doc = include_str!("runner.doc/init_gpu.md")]
 fn init_gpu(
     window: &LayerWindow,
 ) -> Result<(VelloRenderer, VelloSurface, wgpu::Device, wgpu::Queue), LayerAppError> {

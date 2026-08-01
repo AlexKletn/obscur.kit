@@ -1,4 +1,4 @@
-//! Extension module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod custom_pass;
 pub use custom_pass::{CustomPass, PassStage};
 mod render_extension;

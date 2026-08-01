@@ -1,4 +1,4 @@
-//! Event module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod capability_changed;
 pub use capability_changed::CapabilityChanged;
 mod capability_revoked;

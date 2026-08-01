@@ -1,33 +1,23 @@
-//! A transient request to resolve a font for one itemized run (spec §5.10).
+#![doc = include_str!("font_resolve_request.doc/_module.md")]
 
 use crate::font::{FontAttributes, FontFallback};
 use crate::shaping::ScriptTag;
 
-/// A lightweight, borrowed description of one itemized run for which a font must
-/// be resolved (spec §5.10 font fallback).
-///
-/// A [`FontResolver`](crate::font::FontResolver) is asked to pick a face for a
-/// single [`TextItem`](crate::shaping::TextItem): the request bundles the
-/// [`families`](Self::families) fallback chain to search, the requested
-/// [`attributes`](Self::attributes), the run's [`text`](Self::text), and its
-/// resolved [`script`](Self::script). It borrows everything rather than owning
-/// it — a request describes one resolution in flight and is never stored — so it
-/// carries a lifetime tying it to the paragraph being shaped.
+#[doc = include_str!("font_resolve_request.doc/FontResolveRequest.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct FontResolveRequest<'a> {
-    /// The ordered fallback chain to search for a covering family.
+    #[doc = include_str!("font_resolve_request.doc/families.md")]
     families: &'a FontFallback,
-    /// The weight/slant/width attributes the resolved face should match.
+    #[doc = include_str!("font_resolve_request.doc/attributes.md")]
     attributes: &'a FontAttributes,
-    /// The run's source text (already itemized to a single script).
+    #[doc = include_str!("font_resolve_request.doc/text.md")]
     text: &'a str,
-    /// The run's resolved script.
+    #[doc = include_str!("font_resolve_request.doc/script.md")]
     script: ScriptTag,
 }
 
 impl<'a> FontResolveRequest<'a> {
-    /// Creates a request to resolve a face for `text` (written in `script`) from
-    /// `families`, matching `attributes`.
+    #[doc = include_str!("font_resolve_request.doc/new.md")]
     #[must_use]
     pub const fn new(
         families: &'a FontFallback,
@@ -43,25 +33,25 @@ impl<'a> FontResolveRequest<'a> {
         }
     }
 
-    /// Returns the ordered fallback chain to search.
+    #[doc = include_str!("font_resolve_request.doc/families_2.md")]
     #[must_use]
     pub const fn families(&self) -> &'a FontFallback {
         self.families
     }
 
-    /// Returns the attributes the resolved face should match.
+    #[doc = include_str!("font_resolve_request.doc/attributes_2.md")]
     #[must_use]
     pub const fn attributes(&self) -> &'a FontAttributes {
         self.attributes
     }
 
-    /// Returns the run's source text.
+    #[doc = include_str!("font_resolve_request.doc/text_2.md")]
     #[must_use]
     pub const fn text(&self) -> &'a str {
         self.text
     }
 
-    /// Returns the run's resolved script.
+    #[doc = include_str!("font_resolve_request.doc/script_2.md")]
     #[must_use]
     pub const fn script(&self) -> ScriptTag {
         self.script

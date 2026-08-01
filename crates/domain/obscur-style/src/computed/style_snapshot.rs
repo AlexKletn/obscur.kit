@@ -1,24 +1,10 @@
-//! An immutable, versioned snapshot of a computed style: [`StyleSnapshot`]
-//! (§1.6).
-//!
-//! A [`StyleSnapshot`] hands a node's [`ComputedStyle`] to heavy downstream
-//! subsystems (layout, paint) together with a [`VersionStamp`], so a consumer can
-//! cheaply tell whether the style it holds is stale — mirroring how the tree
-//! hands out a versioned `TreeSnapshot`. The snapshot owns its style and exposes
-//! read-only accessors; it has no mutators.
+#![doc = include_str!("style_snapshot.doc/_module.md")]
 
 use crate::computed::{ComputedStyle, ComputedValue};
 use crate::property::PropertyId;
 use obscur_identity::VersionStamp;
 
-/// An immutable, versioned view of a node's computed style.
-///
-/// Wraps an owned [`ComputedStyle`] plus the [`VersionStamp`] it was produced at.
-/// It is read-only: consumers observe the style and compare version stamps but
-/// never mutate the snapshot.
-///
-/// Because [`ComputedStyle`] may carry `f32` data, this derives [`PartialEq`] but
-/// not [`Eq`]/[`Hash`].
+#[doc = include_str!("style_snapshot.doc/StyleSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleSnapshot {
     style: ComputedStyle,
@@ -26,26 +12,25 @@ pub struct StyleSnapshot {
 }
 
 impl StyleSnapshot {
-    /// Creates a snapshot of `style` stamped with `version`.
+    #[doc = include_str!("style_snapshot.doc/new.md")]
     #[must_use]
     pub fn new(style: ComputedStyle, version: VersionStamp) -> Self {
         Self { style, version }
     }
 
-    /// Returns the snapshotted computed style.
+    #[doc = include_str!("style_snapshot.doc/style.md")]
     #[must_use]
     pub fn style(&self) -> &ComputedStyle {
         &self.style
     }
 
-    /// Returns the version stamp this snapshot was produced at.
+    #[doc = include_str!("style_snapshot.doc/version.md")]
     #[must_use]
     pub fn version(&self) -> VersionStamp {
         self.version
     }
 
-    /// Returns the computed value for `property`, delegating to the wrapped
-    /// [`ComputedStyle`].
+    #[doc = include_str!("style_snapshot.doc/get.md")]
     #[must_use]
     pub fn get(&self, property: PropertyId) -> Option<&ComputedValue> {
         self.style.get(property)

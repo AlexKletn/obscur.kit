@@ -1,7 +1,4 @@
-//! **SPECIFICATION-DERIVED** vector-document cases for obscur.kit §5.17 ("SVG").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §5.17
-//! and §5.2 with **no access to this repository's source**.
+#![doc = include_str!("spec_ch5_svg.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(feature = "resource-fs", feature = "render-cpu"))]
 
@@ -28,18 +25,17 @@ use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue}
 
 use support::{at, compile, rgb8_of};
 
-/// The viewport every case renders under.
+#[doc = include_str!("spec_ch5_svg.doc/VW.md")]
 const VW: f32 = 400.0;
 
-/// Process-unique counter so concurrent tests never collide on a temp name.
+#[doc = include_str!("spec_ch5_svg.doc/COUNTER.md")]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A minimal SVG whose one shape fills with `currentColor`.
+#[doc = include_str!("spec_ch5_svg.doc/ICON.md")]
 const ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
   viewBox="0 0 20 20"><circle cx="10" cy="10" r="10" fill="currentColor"/></svg>"##;
 
-/// A [`VectorDecoder`] that counts how many times it parses, and always yields a
-/// `currentColor` circle-shaped document.
+#[doc = include_str!("spec_ch5_svg.doc/CountingDecoder.md")]
 struct CountingDecoder {
     parses: Arc<AtomicUsize>,
 }
@@ -73,7 +69,7 @@ impl VectorDecoder for CountingDecoder {
     }
 }
 
-/// A fresh temp directory holding `icon.svg`.
+#[doc = include_str!("spec_ch5_svg.doc/asset_dir.md")]
 fn asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-ch5-svg-{}-{n}", std::process::id()));
@@ -82,14 +78,14 @@ fn asset_dir() -> PathBuf {
     dir
 }
 
-/// An `Image` node referencing `icon.svg`, classed `class`.
+#[doc = include_str!("spec_ch5_svg.doc/icon.md")]
 fn icon(class: &str) -> obscur_kit::view::view::ViewNode {
     Image::new("icon.svg")
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// The solid fill colours of every `DrawPath` in the last frame.
+#[doc = include_str!("spec_ch5_svg.doc/fills.md")]
 fn fills(runtime: &UiRuntime) -> Vec<String> {
     runtime
         .snapshot()
@@ -106,8 +102,7 @@ fn fills(runtime: &UiRuntime) -> Vec<String> {
         .collect()
 }
 
-/// §5.17: "`currentColor` is required and resolves from computed `color`, allowing
-/// theme/state changes **without reparsing**."
+#[doc = include_str!("spec_ch5_svg.doc/sv_01_current_color_resolves_per_node_without_reparsing.md")]
 #[test]
 fn sv_01_current_color_resolves_per_node_without_reparsing() {
     let dir = asset_dir();
@@ -172,8 +167,7 @@ fn sv_01_current_color_resolves_per_node_without_reparsing() {
     );
 }
 
-/// §5.17: "SVG remains vector through the scene pipeline where possible." With
-/// §5.2 "Must match across backends: … - scene geometry; - Scene/Paint snapshots;".
+#[doc = include_str!("spec_ch5_svg.doc/sv_02_an_svg_under_scale_stays_vector.md")]
 #[test]
 fn sv_02_an_svg_under_scale_stays_vector() {
     let dir = asset_dir();

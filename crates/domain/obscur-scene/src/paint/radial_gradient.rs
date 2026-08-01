@@ -1,48 +1,26 @@
-//! A radial (concentric) gradient brush.
+#![doc = include_str!("radial_gradient.doc/_module.md")]
 
 use obscur_geometry::Point;
 
 use super::{ExtendMode, GradientStop};
 
-/// A gradient whose color varies radially outward from `center` (spec §5.1).
-///
-/// Offset `0.0` maps to `center` and offset `1.0` maps to the ending shape of
-/// horizontal radius `radius` and vertical radius `radius_y`; the color at any
-/// point depends on its normalized distance from `center`. Behavior beyond the
-/// ending shape (positions past offset `1.0`) is governed by the [`ExtendMode`].
-///
-/// The ending shape is a **circle** when `radius_y == radius` and an axis-aligned
-/// **ellipse** otherwise (`radius` is the x-axis radius, `radius_y` the y-axis
-/// radius) — see [CSS Images §3.2]. Color-stop offsets are measured along the
-/// x-axis radius; a backend renders the ellipse by stretching the concentric
-/// circle of radius `radius` vertically by `radius_y / radius`.
-///
-/// This is a simple **concentric** radial gradient: the color rings are centered
-/// on a single point. A distinct focal point (an offset origin for the `0.0`
-/// ring) is a later extension.
-///
-/// Stops are stored in ascending `offset` order (callers supply them sorted;
-/// see [`GradientStop`]).
-///
-/// [CSS Images §3.2]: https://drafts.csswg.org/css-images-3/#radial-gradients
+#[doc = include_str!("radial_gradient.doc/RadialGradient.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RadialGradient {
-    /// Center of the gradient, mapping to offset `0.0`.
+    #[doc = include_str!("radial_gradient.doc/center.md")]
     pub center: Point,
-    /// Horizontal (x-axis) radius of the ending shape, mapping to offset `1.0`.
+    #[doc = include_str!("radial_gradient.doc/radius.md")]
     pub radius: f32,
-    /// Vertical (y-axis) radius of the ending shape. Equal to `radius` for a
-    /// circle; different for an ellipse.
+    #[doc = include_str!("radial_gradient.doc/radius_y.md")]
     pub radius_y: f32,
-    /// Color stops, ordered by ascending offset.
+    #[doc = include_str!("radial_gradient.doc/stops.md")]
     pub stops: Vec<GradientStop>,
-    /// How the gradient extends beyond its `[0, 1]` range.
+    #[doc = include_str!("radial_gradient.doc/extend.md")]
     pub extend: ExtendMode,
 }
 
 impl RadialGradient {
-    /// Creates a **circular** radial gradient centered at `center` with the given
-    /// `radius` and `stops`, using the default [`ExtendMode::Pad`] extend mode.
+    #[doc = include_str!("radial_gradient.doc/new.md")]
     #[must_use]
     pub fn new(center: Point, radius: f32, stops: Vec<GradientStop>) -> Self {
         Self {
@@ -54,9 +32,7 @@ impl RadialGradient {
         }
     }
 
-    /// Creates an axis-aligned **elliptical** radial gradient centered at `center`
-    /// with x-axis radius `radius_x`, y-axis radius `radius_y`, and `stops`, using
-    /// the default [`ExtendMode::Pad`] extend mode. Equal radii yield a circle.
+    #[doc = include_str!("radial_gradient.doc/new_elliptical.md")]
     #[must_use]
     pub fn new_elliptical(
         center: Point,
@@ -73,47 +49,44 @@ impl RadialGradient {
         }
     }
 
-    /// Returns a copy of this gradient with its extend mode set to `mode`.
+    #[doc = include_str!("radial_gradient.doc/with_extend.md")]
     #[must_use]
     pub fn with_extend(mut self, mode: ExtendMode) -> Self {
         self.extend = mode;
         self
     }
 
-    /// Returns the gradient's center point (offset `0.0`).
+    #[doc = include_str!("radial_gradient.doc/center_2.md")]
     #[must_use]
     pub const fn center(&self) -> Point {
         self.center
     }
 
-    /// Returns the gradient's horizontal (x-axis) radius (offset `1.0`).
+    #[doc = include_str!("radial_gradient.doc/radius_2.md")]
     #[must_use]
     pub const fn radius(&self) -> f32 {
         self.radius
     }
 
-    /// Returns the gradient's vertical (y-axis) radius. Equal to [`radius`] for a
-    /// circle; different for an ellipse.
-    ///
-    /// [`radius`]: Self::radius
+    #[doc = include_str!("radial_gradient.doc/radius_y_2.md")]
     #[must_use]
     pub const fn radius_y(&self) -> f32 {
         self.radius_y
     }
 
-    /// Whether the ending shape is an ellipse (the two radii differ).
+    #[doc = include_str!("radial_gradient.doc/is_elliptical.md")]
     #[must_use]
     pub fn is_elliptical(&self) -> bool {
         self.radius_y != self.radius
     }
 
-    /// Returns the gradient's color stops.
+    #[doc = include_str!("radial_gradient.doc/stops_2.md")]
     #[must_use]
     pub fn stops(&self) -> &[GradientStop] {
         &self.stops
     }
 
-    /// Returns the gradient's extend mode.
+    #[doc = include_str!("radial_gradient.doc/extend_2.md")]
     #[must_use]
     pub const fn extend(&self) -> ExtendMode {
         self.extend

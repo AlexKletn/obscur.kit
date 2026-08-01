@@ -1,19 +1,4 @@
-//! §4.12's explicit stylesheet invalidation, reached from an application.
-//!
-//! §4.12 requires that "CSS parsing is cached per unique source/version and
-//! invalidated **explicitly**", and the mechanism was all there: a `CssSource`
-//! carries a `SourceVersion`, `StylesheetCache` is keyed by `(SourceId,
-//! SourceVersion)`, and `UiRuntime::set_stylesheets` replaces the set at any time.
-//! What was missing was a *caller*: `App` collected the authored sheets once before
-//! the loop started, handed them over as **anonymous** sources (which the cache
-//! refuses to key, by design), and never exposed the runtime again. So an
-//! application could not invalidate anything, and every style edit cost a rebuild.
-//!
-//! These cases drive the same pair of calls `App`'s window runner makes — apply at
-//! the frame boundary, run the frame — so what they prove holds for a standalone
-//! window without needing one (the windowed `App` is gated on `window-winit` +
-//! `render-vello`, and a test behind those features would be silently skipped by the
-//! default feature set that CI runs).
+#![doc = include_str!("stylesheet_invalidation.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::Cell;
@@ -30,17 +15,16 @@ use obscur_kit::view::view::{
     CLASS, EVENT_CLICK, View, ViewEventBinding, ViewNode, ViewProperty, ViewValue,
 };
 
-/// The command the box binds, so a *handler* can be the thing that invalidates.
+#[doc = include_str!("stylesheet_invalidation.doc/THEME.md")]
 const THEME: InternedSymbol = InternedSymbol::named("theme");
 
-/// The initial authored sheet.
+#[doc = include_str!("stylesheet_invalidation.doc/NARROW.md")]
 const NARROW: &str = ".box { width: 10px; height: 40px }";
 
-/// The replacement: the same selector, a different width.
+#[doc = include_str!("stylesheet_invalidation.doc/WIDE.md")]
 const WIDE: &str = ".box { width: 80px; height: 40px }";
 
-/// One clickable, sizeable box — the smallest view whose *computed* style is
-/// observable through its layout box.
+#[doc = include_str!("stylesheet_invalidation.doc/view.md")]
 fn view() -> View {
     View::single(
         ViewNode::element(ComponentId::from_raw(0x4C01))
@@ -49,8 +33,7 @@ fn view() -> View {
     )
 }
 
-/// The two calls a host makes around a frame; see
-/// [`AppControl::apply`](obscur_kit::control::AppControl::apply)'s host contract.
+#[doc = include_str!("stylesheet_invalidation.doc/Host.md")]
 struct Host {
     runtime: UiRuntime,
     css: CssPipeline,
@@ -58,8 +41,7 @@ struct Host {
 }
 
 impl Host {
-    /// A runtime with the UA default sheet installed, `NARROW` as the authored set,
-    /// and one frame committed.
+    #[doc = include_str!("stylesheet_invalidation.doc/new.md")]
     fn new() -> Self {
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
         KitBootstrap::new().install_default_stylesheet(&mut runtime);
@@ -77,8 +59,7 @@ impl Host {
         host
     }
 
-    /// Applies whatever is queued, then runs one reactive frame, then applies again —
-    /// the runner's two edges.
+    #[doc = include_str!("stylesheet_invalidation.doc/frame.md")]
     fn frame(&mut self) {
         self.control.apply(&mut self.runtime, &mut self.css);
         self.runtime.request_frame(FrameReason::UiCommit);
@@ -88,7 +69,7 @@ impl Host {
         self.control.apply(&mut self.runtime, &mut self.css);
     }
 
-    /// The box's laid-out width — the observable end of the cascade.
+    #[doc = include_str!("stylesheet_invalidation.doc/width.md")]
     fn width(&self) -> f32 {
         let node = self.box_node();
         self.runtime
@@ -99,7 +80,7 @@ impl Host {
             .width
     }
 
-    /// The retained box element (the root's only child).
+    #[doc = include_str!("stylesheet_invalidation.doc/box_node.md")]
     fn box_node(&self) -> NodeId {
         let root = self.runtime.tree().root().expect("a root after a frame");
         self.runtime
@@ -109,7 +90,7 @@ impl Host {
             .child_nodes()[0]
     }
 
-    /// A trusted click at the box's top-left corner.
+    #[doc = include_str!("stylesheet_invalidation.doc/click.md")]
     fn click(&mut self) {
         for kind in [PointerEventKind::Down, PointerEventKind::Up] {
             self.runtime.handle_pointer(
@@ -125,8 +106,7 @@ impl Host {
     }
 }
 
-/// **The case that was unreachable.** A replaced stylesheet changes computed style in
-/// a running application: same process, same runtime, same view builder, no rebuild.
+#[doc = include_str!("stylesheet_invalidation.doc/a_replaced_stylesheet_changes_computed_style_without_a_rebuild.md")]
 #[test]
 fn a_replaced_stylesheet_changes_computed_style_without_a_rebuild() {
     let mut host = Host::new();
@@ -142,8 +122,7 @@ fn a_replaced_stylesheet_changes_computed_style_without_a_rebuild() {
     );
 }
 
-/// The replacement replaces: a rule that was in the old set and not the new one stops
-/// applying, rather than lingering because the sets were concatenated.
+#[doc = include_str!("stylesheet_invalidation.doc/the_authored_set_is_replaced_rather_than_appended.md")]
 #[test]
 fn the_authored_set_is_replaced_rather_than_appended() {
     let mut host = Host::new();
@@ -163,10 +142,7 @@ fn the_authored_set_is_replaced_rather_than_appended() {
     );
 }
 
-/// The frame-lifecycle contract, observed: a handler queues the invalidation, nothing
-/// happens while it runs, and the next frame carries it. A handler cannot install a
-/// stylesheet itself — it is called from inside §2.3's propagation, with the runtime
-/// mid-frame — so the queue is what makes this expressible at all.
+#[doc = include_str!("stylesheet_invalidation.doc/an_invalidation_queued_by_a_handler_lands_on_the_next_frame.md")]
 #[test]
 fn an_invalidation_queued_by_a_handler_lands_on_the_next_frame() {
     let mut host = Host::new();
@@ -194,11 +170,7 @@ fn an_invalidation_queued_by_a_handler_lands_on_the_next_frame() {
     assert!(!host.control.has_pending());
 }
 
-/// The §4.12 cache key, which the authored set never had: sheets are handed over as
-/// *identified* sources, so they are cached at all, and a replacement replaces an
-/// entry instead of piling up a new one. An anonymous source — what `App` used to
-/// build — is deliberately never cached, because two unrelated sheets would collide
-/// under one key.
+#[doc = include_str!("stylesheet_invalidation.doc/authored_sheets_are_cached_by_identity_and_revision.md")]
 #[test]
 fn authored_sheets_are_cached_by_identity_and_revision() {
     let mut host = Host::new();

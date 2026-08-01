@@ -1,32 +1,24 @@
-//! A box's four margin edges.
+#![doc = include_str!("margin_edges.doc/_module.md")]
 
 use obscur_geometry::Insets;
 
 use crate::model::Margin;
 
-/// The four margin edges of a box (spec §4.2).
-///
-/// The physical twin of [`Insets`], differing in exactly one way: each edge is a
-/// [`Margin`], so it can be `auto`. That is the whole reason this type exists —
-/// `Insets` is four `f32`s, and an `auto` margin has no `f32` to be until the box
-/// has been measured and the leftover space is known.
-///
-/// Border and padding stay [`Insets`]: neither accepts `auto` in CSS, so neither
-/// has anything to defer.
+#[doc = include_str!("margin_edges.doc/MarginEdges.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MarginEdges {
-    /// The top edge.
+    #[doc = include_str!("margin_edges.doc/top.md")]
     pub top: Margin,
-    /// The right edge.
+    #[doc = include_str!("margin_edges.doc/right.md")]
     pub right: Margin,
-    /// The bottom edge.
+    #[doc = include_str!("margin_edges.doc/bottom.md")]
     pub bottom: Margin,
-    /// The left edge.
+    #[doc = include_str!("margin_edges.doc/left.md")]
     pub left: Margin,
 }
 
 impl MarginEdges {
-    /// Edges that are all zero — the initial value.
+    #[doc = include_str!("margin_edges.doc/ZERO.md")]
     pub const ZERO: Self = Self {
         top: Margin::ZERO,
         right: Margin::ZERO,
@@ -34,7 +26,7 @@ impl MarginEdges {
         left: Margin::ZERO,
     };
 
-    /// Edges built from four lengths, none of them `auto`.
+    #[doc = include_str!("margin_edges.doc/px.md")]
     #[must_use]
     pub const fn px(top: f32, right: f32, bottom: f32, left: f32) -> Self {
         Self {
@@ -45,24 +37,13 @@ impl MarginEdges {
         }
     }
 
-    /// The same margin on all four edges.
+    #[doc = include_str!("margin_edges.doc/uniform.md")]
     #[must_use]
     pub const fn uniform(value: f32) -> Self {
         Self::px(value, value, value, value)
     }
 
-    /// These edges as plain [`Insets`], against a containing-block inline size of
-    /// `basis`.
-    ///
-    /// `basis` resolves percentage edges — all four of them, since CSS 2.1 §8.3
-    /// resolves even `margin-top` against the containing block's *width*. Every
-    /// `auto` reads as `0`.
-    ///
-    /// The lossy direction, and deliberately so: it is for the callers that consume
-    /// margins purely as lengths and have no leftover space to hand out. A caller
-    /// that *distributes* leftover space must read the edges directly and ask
-    /// [`Margin::is_auto`] — collapsing to `0` first is exactly how `auto` gets
-    /// lost. See [`Margin::resolve`] for what a non-finite or zero `basis` means.
+    #[doc = include_str!("margin_edges.doc/resolve.md")]
     #[must_use]
     pub fn resolve(self, basis: f32) -> Insets {
         Insets {
@@ -73,8 +54,7 @@ impl MarginEdges {
         }
     }
 
-    /// Whether either **inline**-axis edge is `auto` — the pair that centres a box
-    /// (`margin: 0 auto`).
+    #[doc = include_str!("margin_edges.doc/has_auto_inline.md")]
     #[must_use]
     pub const fn has_auto_inline(self) -> bool {
         self.left.is_auto() || self.right.is_auto()

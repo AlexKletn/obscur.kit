@@ -1,47 +1,31 @@
-//! One laid-out visual line of a paragraph (spec §5.10).
+#![doc = include_str!("text_line.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
 use crate::shaping::GlyphRun;
 use crate::span::TextRange;
 
-/// A single laid-out visual line: the glyph runs it contains plus the geometry
-/// placing it within the paragraph (spec §5.10).
-///
-/// A line owns one or more [`GlyphRun`]s (a single run in the common,
-/// already-itemized case), the source byte [`range`](Self::range) it covers, and
-/// the metrics needed to position it: [`top`](Self::top) is the y of the line
-/// box's top edge within the paragraph, [`height`](Self::height) its box height,
-/// [`baseline`](Self::baseline) the baseline offset measured down from `top`, and
-/// [`x_offset`](Self::x_offset) the horizontal start offset produced by alignment.
-/// [`width`](Self::width) is the sum of the runs' advances and is computed at
-/// construction. Because it embeds `f32` metrics and non-`Eq` glyph runs it
-/// derives `PartialEq` but not `Eq`.
+#[doc = include_str!("text_line.doc/TextLine.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextLine {
-    /// The glyph runs composing the line, in visual order.
+    #[doc = include_str!("text_line.doc/runs.md")]
     runs: Vec<GlyphRun>,
-    /// The byte range of the source text this line covers.
+    #[doc = include_str!("text_line.doc/range.md")]
     range: TextRange,
-    /// The y of the line box's top edge within the paragraph, in logical pixels.
+    #[doc = include_str!("text_line.doc/top.md")]
     top: f32,
-    /// The sum of the runs' advance widths, in logical pixels.
+    #[doc = include_str!("text_line.doc/width.md")]
     width: f32,
-    /// The line box height, in logical pixels.
+    #[doc = include_str!("text_line.doc/height.md")]
     height: f32,
-    /// The baseline offset measured down from `top`, in logical pixels.
+    #[doc = include_str!("text_line.doc/baseline.md")]
     baseline: f32,
-    /// The horizontal start offset from alignment, in logical pixels.
+    #[doc = include_str!("text_line.doc/x_offset.md")]
     x_offset: f32,
 }
 
 impl TextLine {
-    /// Creates a line from its `runs`, source `range`, box `top`, box `height`,
-    /// and `baseline` offset.
-    ///
-    /// The line [`width`](Self::width) is computed as the sum of the runs'
-    /// advances, and [`x_offset`](Self::x_offset) starts at `0` — set it with
-    /// [`with_x_offset`](Self::with_x_offset) once alignment is resolved.
+    #[doc = include_str!("text_line.doc/new.md")]
     #[must_use]
     pub fn new(
         runs: Vec<GlyphRun>,
@@ -62,63 +46,62 @@ impl TextLine {
         }
     }
 
-    /// Returns this line with its horizontal start offset set to `x_offset`.
+    #[doc = include_str!("text_line.doc/with_x_offset.md")]
     #[must_use]
     pub fn with_x_offset(mut self, x_offset: f32) -> Self {
         self.x_offset = x_offset;
         self
     }
 
-    /// Returns the glyph runs composing the line, in visual order.
+    #[doc = include_str!("text_line.doc/runs_2.md")]
     #[must_use]
     pub fn runs(&self) -> &[GlyphRun] {
         &self.runs
     }
 
-    /// Returns the byte range of the source text this line covers.
+    #[doc = include_str!("text_line.doc/range_2.md")]
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    /// Returns the y of the line box's top edge within the paragraph.
+    #[doc = include_str!("text_line.doc/top_2.md")]
     #[must_use]
     pub const fn top(&self) -> f32 {
         self.top
     }
 
-    /// Returns the sum of the runs' advance widths, in logical pixels.
+    #[doc = include_str!("text_line.doc/width_2.md")]
     #[must_use]
     pub const fn width(&self) -> f32 {
         self.width
     }
 
-    /// Returns the line box height, in logical pixels.
+    #[doc = include_str!("text_line.doc/height_2.md")]
     #[must_use]
     pub const fn height(&self) -> f32 {
         self.height
     }
 
-    /// Returns the baseline offset measured down from [`top`](Self::top).
+    #[doc = include_str!("text_line.doc/baseline_2.md")]
     #[must_use]
     pub const fn baseline(&self) -> f32 {
         self.baseline
     }
 
-    /// Returns the horizontal start offset from alignment, in logical pixels.
+    #[doc = include_str!("text_line.doc/x_offset_2.md")]
     #[must_use]
     pub const fn x_offset(&self) -> f32 {
         self.x_offset
     }
 
-    /// Returns the total number of glyphs across all of the line's runs.
+    #[doc = include_str!("text_line.doc/glyph_count.md")]
     #[must_use]
     pub fn glyph_count(&self) -> usize {
         self.runs.iter().map(GlyphRun::len).sum()
     }
 
-    /// Returns the line's box as a [`Rect`] positioned at
-    /// `(x_offset, top)` and sized `width` × `height` (spec §5.10).
+    #[doc = include_str!("text_line.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Rect {
         Rect::new(
@@ -127,7 +110,7 @@ impl TextLine {
         )
     }
 
-    /// Returns whether the line contains no glyphs.
+    #[doc = include_str!("text_line.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.glyph_count() == 0

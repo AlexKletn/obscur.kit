@@ -1,155 +1,52 @@
-//! A software/headless [`Renderer`] that rasterizes a scene to a CPU bitmap with
-//! `tiny-skia` (spec §5.2 renderer abstraction, §2.7 "Software/headless
-//! renderer").
-//!
-//! [`CpuRenderer`] walks a [`SceneSnapshot`](obscur_scene::scene::SceneSnapshot)'s
-//! display list — in paint order, maintaining the clip stack — and fills or
-//! strokes each path into a [`tiny_skia::Pixmap`]. The last frame's pixels are
-//! retained so a golden-image test can inspect them.
-//!
-//! # Determinism boundary (spec §5.2)
-//!
-//! This backend reproduces layout, paint order, clipping, and the consumed
-//! Scene/Paint snapshots identically to every other backend; only rasterization,
-//! anti-aliasing, and precision differ. Effects it cannot reproduce degrade to a
-//! documented approximation rather than a panic — and, per §5.2, that degradation
-//! is an **explicit diagnostic**: [`Renderer::supports_effect`] answers what this
-//! backend will do with an effect before a host asks for it, and
-//! [`Renderer::render`] emits [`RendererError::UnsupportedEffect`] into the
-//! [`CpuRenderer::set_diagnostic_sink`] sink for every effect a scene demands that
-//! the list below drops.
-//!
-//! An effect this backend *does* draw, only approximately, is not in that set — it
-//! is `Limited`, not `Unavailable` — so its restriction is emitted separately, and
-//! only when the scene actually trips it: today that is a text run whose font is
-//! not registered here. The other
-//! approximations below are unconditional properties of the rasterizer, declared by
-//! `supports_effect` rather than announced per frame. The approximations:
-//!
-//! - **Gradient brushes**: linear and conic gradients rasterize for real (the
-//!   linear shader with premultiplied-sampled stops, the conic sweep as wedges);
-//!   the **radial** brush still degrades to a flat solid of its first stop color
-//!   (spec §5.2 permits rasterization to differ). A stop-less gradient is skipped.
-//! - **Layer compositing** ([`PushLayer`]/[`PopLayer`]) honors **group opacity**:
-//!   a layer with opacity `< 1.0` (a CSS `opacity` group) rasterizes its whole
-//!   subtree into a fresh offscreen [`tiny_skia::Pixmap`] and composites it back
-//!   at that opacity, so overlapping opaque children blend as one group (not
-//!   double-darkened per element) and nested layers multiply. A trivial layer
-//!   (opacity `1.0`) stays a cheap passthrough — children draw directly, so the
-//!   plain path is byte-identical. A layer's own **clip** *is* honored: it
-//!   resolves through the same rule as a [`PushClip`] of the same region, so a
-//!   layer clip and a clip command confine drawing identically and agree with the
-//!   GPU backend (spec §5.2). The layer's **blend mode, transform, and effects**
-//!   are still *not* honored here — a documented approximation; `filter` /
-//!   `backdrop-filter` remain absent.
-//!
-//! [`PushClip`]: obscur_scene::command::PaintCommand::PushClip
-//! - **Mask clips** (as opposed to geometric shape clips) inherit the current
-//!   effective clip, since coverage from separate source content is not
-//!   rasterized here.
-//! - **Box shadows** ([`DrawShadow`]) rasterize as a flat, offset rounded rect at
-//!   reduced alpha (no gaussian blur; the `blur` radius is ignored) — a documented
-//!   approximation of the soft shadow the GPU backend blurs. A CSS
-//!   `filter: drop-shadow(...)` reaches the same [`DrawShadow`] path (the
-//!   coordinator emits a drop shadow of the border box), so it rasterizes
-//!   identically; the rest of `filter` / `backdrop-filter` (content blur,
-//!   color-matrix) remain absent.
-//! - **Images** ([`DrawImage`]) blit the real decoded RGBA8 pixels: the buffer is
-//!   premultiplied (as `tiny-skia` stores) if the [`SceneImage`] is straight-alpha,
-//!   wrapped into a source [`tiny_skia::Pixmap`], and drawn with `draw_pixmap` under
-//!   a transform that scales the image's intrinsic size to each copy's tile rect.
-//!   This is a genuine sampled bitmap, not an approximation, so both backends show
-//!   the same picture. The tile is placed (`background-position`), sized
-//!   (`background-size`), clipped to the paint region (the border box), and tiled
-//!   along the `repeat_x` / `repeat_y` axes (`background-repeat`) with a bounded
-//!   loop; a source sub-rectangle and nine-slice are not modeled yet.
-//!
-//! [`DrawImage`]: obscur_scene::command::PaintCommand::DrawImage
-//!
-//! - **Text runs** ([`DrawText`]) consume the same pre-shaped
-//!   [`GlyphRun`](obscur_scene::text::GlyphRun) the GPU backend does — text is
-//!   shaped once in `obscur-text`, never here — so both backends agree on glyph
-//!   count and position (spec §5.2 determinism boundary). When the run's font has
-//!   been registered with [`CpuRenderer::register_font`] (mirroring the Vello
-//!   backend's registry), each glyph's real outline is extracted with `skrifa`,
-//!   scaled to the run's font size, placed on its baseline, and filled — honest
-//!   glyph shapes, deterministic for a given font. When no font is registered for
-//!   the run's handle, the backend falls back to a solid coverage cell of the
-//!   glyph's advance width and the run's font size (whitespace glyphs draw
-//!   nothing) — a documented approximation of the mark so device-free callers
-//!   still get a defined result.
-//!
-//! [`DrawText`]: obscur_scene::command::PaintCommand::DrawText
-//!
-//! [`DrawShadow`]: obscur_scene::command::PaintCommand::DrawShadow
-//!
-//! [`PushLayer`]: obscur_scene::command::PaintCommand::PushLayer
-//! [`PopLayer`]: obscur_scene::command::PaintCommand::PopLayer
+#![doc = include_str!("cpu_renderer.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use obscur_capability::SupportLevel;
 use obscur_diagnostics::{DiagnosticSink, NullDiagnosticSink};
-use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::target::RenderTarget;
 use obscur_render::{
     EffectFallback, EffectFallbackReporter, Renderer, RendererCapabilities, RendererError,
     RendererId, SceneEffect, text_run_font_handles, unsupported_effects,
 };
-use obscur_scene::clip::{Clip, ClipShape};
-use obscur_scene::color::{AlphaMode, Color};
 use obscur_scene::command::PaintCommand;
-use obscur_scene::paint::{BlendMode, Brush, Paint, SceneImage};
-use obscur_scene::path::{FillRule, Path, PathSegment};
-use obscur_scene::text::GlyphRun;
-use skrifa::instance::{LocationRef, Size as SkrifaSize};
-use skrifa::outline::DrawSettings;
-use skrifa::{FontRef, GlyphId, MetadataProvider};
+use obscur_scene::paint::{Brush, Paint};
+use skrifa::FontRef;
 
 use crate::error::CpuRenderError;
-use crate::renderer::glyph_pen::GlyphPathPen;
+use crate::renderer::brush_fill::{brush_color, fill_conic, fill_linear};
+use crate::renderer::clip_mask::resolve_clip_entry;
+use crate::renderer::glyph_raster::draw_text_run;
+use crate::renderer::group_compositing::composite_top_layer;
+use crate::renderer::image_tiling::draw_image;
+use crate::renderer::shadow_approximation::draw_shadow_approx;
+use crate::renderer::skia_lowering::{
+    sk_dimensions, solid_paint, to_sk_blend_mode, to_sk_fill_rule, to_sk_path, to_sk_transform,
+};
 
-/// A software [`Renderer`] backend that rasterizes scenes to a CPU bitmap
-/// (spec §5.2, §2.7).
-///
-/// The renderer owns no GPU or OS handle: it advertises a conservative software
-/// capability profile (offscreen output, no MSAA/HDR/custom shaders) and renders
-/// entirely on the CPU with `tiny-skia`. Each [`Renderer::render`] call
-/// rasterizes into a fresh [`tiny_skia::Pixmap`], which it retains as
-/// [`CpuRenderer::pixmap`] for headless golden-image comparison.
+#[doc = include_str!("cpu_renderer.doc/CpuRenderer.md")]
 #[derive(Clone)]
 pub struct CpuRenderer {
-    /// The stable identity of this backend instance.
+    #[doc = include_str!("cpu_renderer.doc/id.md")]
     id: RendererId,
-    /// The software capability profile advertised to callers.
+    #[doc = include_str!("cpu_renderer.doc/capabilities.md")]
     capabilities: RendererCapabilities,
-    /// The pixels of the most recently rendered frame, if any.
+    #[doc = include_str!("cpu_renderer.doc/last_pixmap.md")]
     last_pixmap: Option<tiny_skia::Pixmap>,
-    /// How many frames this renderer has rasterized.
+    #[doc = include_str!("cpu_renderer.doc/frames_rendered.md")]
     frames_rendered: u64,
-    /// Host-registered font faces keyed by the run font handle (spec §5.2). A run
-    /// tagged with handle `run.font()` is rasterized against the matching sfnt
-    /// bytes; when no font is registered for the handle the run falls back to
-    /// box-coverage cells. The bytes are shared (`Arc`) so `clone` is cheap and a
-    /// borrowed [`FontRef`] is rebuilt per draw (bytes must outlive the borrow).
+    #[doc = include_str!("cpu_renderer.doc/fonts.md")]
     fonts: HashMap<u32, Arc<[u8]>>,
-    /// Where the §5.2 explicit fallback diagnostics go. Defaults to
-    /// [`NullDiagnosticSink`], so an effect this backend will not reproduce follows
-    /// exactly the same code path whether or not a host is listening. Shared
-    /// (`Arc`) because a `CpuRenderer` is [`Clone`] and a clone reports to the same
-    /// host sink.
+    #[doc = include_str!("cpu_renderer.doc/diagnostics.md")]
     diagnostics: Arc<dyn DiagnosticSink>,
-    /// Which unsupported effects have already been reported to `diagnostics`, so a
-    /// standing gradient does not re-raise its diagnostic every frame.
+    #[doc = include_str!("cpu_renderer.doc/fallbacks.md")]
     fallbacks: EffectFallbackReporter,
 }
 
 impl CpuRenderer {
-    /// Creates a software renderer with the given `id` and a conservative
-    /// software capability profile: offscreen output available, and no MSAA,
-    /// HDR, or custom shaders. It has rendered no frames.
+    #[doc = include_str!("cpu_renderer.doc/new.md")]
     #[must_use]
     pub fn new(id: RendererId) -> Self {
         Self {
@@ -167,76 +64,30 @@ impl CpuRenderer {
         }
     }
 
-    /// Installs the [`DiagnosticSink`] the §5.2 explicit fallback diagnostics are
-    /// emitted to.
-    ///
-    /// This backend approximates the GPU-class effects by design (see
-    /// [`Renderer::supports_effect`]); the sink is how a host is *told* which of the
-    /// effects its scene asked for will not appear, rather than discovering it by
-    /// looking at the pixels. Two kinds arrive here, each once:
-    ///
-    /// - a [`RendererError::UnsupportedEffect`] per effect a rendered scene demands
-    ///   that this backend reports [`Unavailable`](SupportLevel::Unavailable);
-    /// - an [`EffectFallback`] per effect it *did* draw, approximated, because the
-    ///   restriction its [`Limited`](SupportLevel::Limited) level names actually bit
-    ///   on that scene — today, a text run whose font is not registered here.
-    ///
-    /// Not every approximation is announced — the text fallback above is the only one
-    /// today. [`Renderer::supports_effect`] remains the complete statement of what
-    /// this backend does with an effect.
-    ///
-    /// Installing a sink is the **host's** job and nothing in this workspace does it:
-    /// the default is a [`NullDiagnosticSink`], and the `Renderer` port carries no
-    /// sink, so a generic runtime cannot install one — only whoever constructs this
-    /// concrete backend can. Until it is called, both diagnostics above are built and
-    /// dropped. That is deliberate (the render path does not branch on whether anyone
-    /// is listening), but it does mean §5.2's "explicit diagnostics" are *available*
-    /// here, not *delivered*.
+    #[doc = include_str!("cpu_renderer.doc/set_diagnostic_sink.md")]
     pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
         self.diagnostics = sink;
     }
 
-    /// Registers (or replaces) the host-provided sfnt `font_bytes` for the run
-    /// font handle `id` (spec §5.2).
-    ///
-    /// A [`DrawText`](obscur_scene::command::PaintCommand::DrawText) run tagged
-    /// with [`GlyphRun::font`]`() == id` is then rasterized as real glyph
-    /// outlines against these bytes; runs whose handle has no registered font
-    /// fall back to box-coverage cells. Mirrors the Vello backend's
-    /// `register_font(id, bytes)` shape so a host registers the same id↔bytes into
-    /// both and the two backends draw the same faces. The bytes are stored (shared
-    /// via [`Arc`]) and a borrowed [`FontRef`] is rebuilt per draw.
+    #[doc = include_str!("cpu_renderer.doc/register_font.md")]
     pub fn register_font(&mut self, id: u32, font_bytes: Vec<u8>) {
         self.fonts
             .insert(id, Arc::from(font_bytes.into_boxed_slice()));
     }
 
-    /// The pixels of the most recently rendered frame, or `None` before the
-    /// first successful [`Renderer::render`].
-    ///
-    /// This is the surface a golden-image test inspects: its dimensions match the
-    /// last render target, and its contents are the deterministic rasterization of
-    /// that frame's display list (spec §5.2).
+    #[doc = include_str!("cpu_renderer.doc/pixmap.md")]
     #[must_use]
     pub fn pixmap(&self) -> Option<&tiny_skia::Pixmap> {
         self.last_pixmap.as_ref()
     }
 
-    /// The number of frames this renderer has rasterized so far.
+    #[doc = include_str!("cpu_renderer.doc/frames_rendered_2.md")]
     #[must_use]
     pub const fn frames_rendered(&self) -> u64 {
         self.frames_rendered
     }
 
-    /// The [`SceneEffect::Text`] fallbacks this backend will take drawing `list`:
-    /// one per font handle whose runs will rasterize as box-coverage cells instead
-    /// of real glyph outlines (spec §5.2).
-    ///
-    /// The predicate is [`draw_text_run`]'s own resolution rule, restated: an exact
-    /// registry hit whose bytes `skrifa` accepts. It has to be — a scan that
-    /// disagrees with the paint path reports a fallback that did not happen, or
-    /// stays quiet about one that did, which is the failure this whole diagnostic
-    /// exists to end.
+    #[doc = include_str!("cpu_renderer.doc/text_fallbacks.md")]
     fn text_fallbacks(&self, list: &obscur_scene::command::DisplayList) -> Vec<EffectFallback> {
         text_run_font_handles(list)
             .into_iter()
@@ -254,7 +105,7 @@ impl CpuRenderer {
             .collect()
     }
 
-    /// Whether a run tagged with `handle` will draw real outlines here.
+    #[doc = include_str!("cpu_renderer.doc/has_outlines_for.md")]
     fn has_outlines_for(&self, handle: u32) -> bool {
         self.fonts
             .get(&handle)
@@ -263,17 +114,14 @@ impl CpuRenderer {
 }
 
 impl Default for CpuRenderer {
-    /// The default renderer has identity `0` and the software capability profile
-    /// of [`CpuRenderer::new`].
+    #[doc = include_str!("cpu_renderer.doc/default.md")]
     fn default() -> Self {
         Self::new(RendererId::from_raw(0))
     }
 }
 
 impl std::fmt::Debug for CpuRenderer {
-    /// Hand-written because [`tiny_skia::Pixmap`] is not [`Debug`]; the pixel
-    /// buffer is summarized by its presence rather than dumped, and the host's
-    /// diagnostic sink is elided (it is a trait object).
+    #[doc = include_str!("cpu_renderer.doc/fmt.md")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CpuRenderer")
             .field("id", &self.id)
@@ -295,20 +143,7 @@ impl Renderer for CpuRenderer {
         self.capabilities
     }
 
-    /// Rasterizes `submission`'s display list into a CPU bitmap sized to `target`.
-    ///
-    /// Walks the commands in paint order, filling or stroking each path with the
-    /// solid color resolved from its paint and honoring the clip stack. On success
-    /// the rasterized pixels are retained (see [`CpuRenderer::pixmap`]) and the
-    /// scene generation that "reached the screen" is echoed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RendererError::InvalidTarget`] when the target has zero area or
-    /// its pixel buffer cannot be allocated (a zero or too-large dimension). A
-    /// malformed or unbalanced display list never errors and never panics: stray
-    /// pops are ignored and unrepresentable commands degrade to a documented
-    /// best-effort (see the module docs).
+    #[doc = include_str!("cpu_renderer.doc/render.md")]
     fn render(
         &mut self,
         submission: &FrameSubmission,
@@ -607,48 +442,7 @@ impl Renderer for CpuRenderer {
         })
     }
 
-    /// The honest [`SupportLevel`] at which this software backend reproduces each
-    /// [`SceneEffect`] (spec §5.2).
-    ///
-    /// Every arm below states what the paint path in [`Renderer::render`] *does*
-    /// with that effect's parameters — not what a software rasterizer could in
-    /// principle do:
-    ///
-    /// - [`Image`](SceneEffect::Image) is [`Native`](SupportLevel::Native): a
-    ///   `DrawImage` blits the real decoded pixels through `draw_pixmap`, honoring
-    ///   the tile, region, and both repeat axes. A genuine sampled bitmap, not an
-    ///   approximation.
-    /// - [`Shadow`](SceneEffect::Shadow) is [`Limited`](SupportLevel::Limited): the
-    ///   shadow is drawn with its color, offset, spread, radii, and inset flag — but
-    ///   its **blur radius is ignored**, so the edge is hard. A
-    ///   `filter: drop-shadow(...)` reaches the same path and is equally limited.
-    /// - [`Text`](SceneEffect::Text) is `Limited`: a run whose font handle was given
-    ///   to [`CpuRenderer::register_font`] rasterizes as real glyph outlines; a run
-    ///   with no registered font falls back to box-coverage cells.
-    /// - [`Clip`](SceneEffect::Clip) is [`Emulated`](SupportLevel::Emulated): a
-    ///   `PushClip` shape becomes a per-pixel coverage mask, honoring the active
-    ///   transform and the enclosing clip. (A shape clip carried on a `PushLayer`
-    ///   would be dropped, but the coordinator only puts one there on filter layers,
-    ///   which are `Unavailable` here anyway.)
-    /// - [`Blur`](SceneEffect::Blur), [`BackdropFilter`](SceneEffect::BackdropFilter),
-    ///   and [`ColorMatrix`](SceneEffect::ColorMatrix) are
-    ///   [`Unavailable`](SupportLevel::Unavailable): these are the GPU-class effects
-    ///   of the effect-split policy and this backend has **no pass** for any of
-    ///   them. There is no gaussian anywhere in it: a blurred `DrawShadow` draws a
-    ///   hard rect, a `filter: blur()` layer draws its subtree sharp, a
-    ///   `BackdropFilter` draws nothing at all, and a color-matrix layer draws
-    ///   unfiltered. Dropping the parameter is not emulation.
-    /// - [`Gradient`](SceneEffect::Gradient) is `Unavailable`: this is a single
-    ///   coarse flag over all gradient kinds, and it stays `Unavailable` because not
-    ///   every kind renders. Linear (premultiplied-sampled shader) and conic (wedge
-    ///   sweep) brushes DO rasterize for real, but a **radial** brush still degrades
-    ///   to a flat solid of its first stop — its stops and geometry are dropped. The
-    ///   flag reports the weakest case rather than over-claiming full support.
-    /// - [`Mask`](SceneEffect::Mask) is `Unavailable`: a mask clip's coverage is
-    ///   never applied (it inherits the enclosing clip instead), on this backend and
-    ///   on Vello alike.
-    /// - [`BlendMode`](SceneEffect::BlendMode) is `Unavailable`: a layer composites
-    ///   with `SrcOver` only; its blend mode is dropped.
+    #[doc = include_str!("cpu_renderer.doc/supports_effect.md")]
     fn supports_effect(&self, effect: SceneEffect) -> SupportLevel {
         match effect {
             SceneEffect::Image => SupportLevel::Native,
@@ -664,1038 +458,19 @@ impl Renderer for CpuRenderer {
     }
 }
 
-/// Maps a scene [`BlendMode`] onto the `tiny-skia` compositing operator. The
-/// separable CSS `mix-blend-mode` values map one-to-one; [`BlendMode::Normal`] is
-/// `SourceOver`, the neutral operator.
-fn to_sk_blend_mode(mode: BlendMode) -> tiny_skia::BlendMode {
-    match mode {
-        BlendMode::Normal => tiny_skia::BlendMode::SourceOver,
-        BlendMode::Multiply => tiny_skia::BlendMode::Multiply,
-        BlendMode::Screen => tiny_skia::BlendMode::Screen,
-        BlendMode::Overlay => tiny_skia::BlendMode::Overlay,
-        BlendMode::Darken => tiny_skia::BlendMode::Darken,
-        BlendMode::Lighten => tiny_skia::BlendMode::Lighten,
-        BlendMode::ColorDodge => tiny_skia::BlendMode::ColorDodge,
-        BlendMode::ColorBurn => tiny_skia::BlendMode::ColorBurn,
-        BlendMode::HardLight => tiny_skia::BlendMode::HardLight,
-        BlendMode::SoftLight => tiny_skia::BlendMode::SoftLight,
-        BlendMode::Difference => tiny_skia::BlendMode::Difference,
-        BlendMode::Exclusion => tiny_skia::BlendMode::Exclusion,
-    }
-}
-
-/// Composites the top layer target of `targets` back onto the target beneath it
-/// at `opacity` and `blend`, then drops it — the group blend for a CSS `opacity` /
-/// `mix-blend-mode` layer (spec §5.1, compositing-1 §5).
-///
-/// The offscreen (which already holds the whole group's paint at full opacity) is
-/// drawn onto the parent with a [`tiny_skia::PixmapPaint`] at `opacity` and the
-/// `blend` operator, so the group blends **as one**: two overlapping opaque
-/// children composite once, not twice (real group compositing, not per-element
-/// alpha), and a non-`SourceOver` blend multiplies/screens/… the whole group onto
-/// its backdrop. Does nothing when only the root target remains (a stray pop), so
-/// the root is never consumed.
-fn composite_top_layer(
-    targets: &mut Vec<tiny_skia::Pixmap>,
-    opacity: f32,
-    blend: tiny_skia::BlendMode,
-) {
-    // Only composite an actual layer: never pop the root frame buffer.
-    if targets.len() < 2 {
-        return;
-    }
-    let Some(child) = targets.pop() else {
-        return;
-    };
-    let Some(parent) = targets.last_mut() else {
-        // Cannot happen (len was >= 2), but keep the buffer to avoid data loss.
-        targets.push(child);
-        return;
-    };
-    let paint = tiny_skia::PixmapPaint {
-        opacity: opacity.clamp(0.0, 1.0),
-        blend_mode: blend,
-        ..Default::default()
-    };
-    parent.draw_pixmap(
-        0,
-        0,
-        child.as_ref(),
-        &paint,
-        tiny_skia::Transform::identity(),
-        None,
-    );
-}
-
-/// Computes the integer pixel dimensions of a target from its logical [`Size`],
-/// rounding to the nearest pixel and clamping negatives to zero.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn sk_dimensions(size: Size) -> (u32, u32) {
-    let width = size.width.round().max(0.0) as u32;
-    let height = size.height.round().max(0.0) as u32;
-    (width, height)
-}
-
-/// Converts a domain [`Path`] into a [`tiny_skia::Path`], or `None` when the
-/// outline is empty or degenerate (`tiny_skia::PathBuilder::finish` rejects it).
-fn to_sk_path(path: &Path) -> Option<tiny_skia::Path> {
-    let mut builder = tiny_skia::PathBuilder::new();
-    for segment in path.segments() {
-        match segment {
-            PathSegment::MoveTo(p) => builder.move_to(p.x, p.y),
-            PathSegment::LineTo(p) => builder.line_to(p.x, p.y),
-            PathSegment::QuadTo { control, end } => {
-                builder.quad_to(control.x, control.y, end.x, end.y);
-            }
-            PathSegment::CubicTo {
-                control1,
-                control2,
-                end,
-            } => builder.cubic_to(control1.x, control1.y, control2.x, control2.y, end.x, end.y),
-            PathSegment::Close => builder.close(),
-        }
-    }
-    builder.finish()
-}
-
-/// Converts an obscur-geometry [`AffineTransform`] into a
-/// [`tiny_skia::Transform`]. The obscur coefficients `[a, b, c, d, tx, ty]` map to
-/// tiny-skia's row order `(sx, ky, kx, sy, tx, ty)` one-to-one (both map a point
-/// `(x, y)` to `(a·x + c·y + tx, b·x + d·y + ty)`).
-fn to_sk_transform(t: &AffineTransform) -> tiny_skia::Transform {
-    let m = t.coeffs;
-    tiny_skia::Transform::from_row(m[0], m[1], m[2], m[3], m[4], m[5])
-}
-
-/// Maps a domain [`FillRule`] onto the `tiny-skia` equivalent.
-fn to_sk_fill_rule(rule: FillRule) -> tiny_skia::FillRule {
-    match rule {
-        FillRule::NonZero => tiny_skia::FillRule::Winding,
-        FillRule::EvenOdd => tiny_skia::FillRule::EvenOdd,
-    }
-}
-
-/// Resolves the flat solid color a brush rasterizes to.
-///
-/// A [`Brush::Solid`] yields its color directly. A gradient brush degrades to its
-/// first stop color (spec §5.2 rasterization approximation); a stop-less gradient
-/// yields `None`, so the command is skipped. Linear and conic fills no longer route
-/// through here (they rasterize for real, see `fill_linear` / `fill_conic`); this
-/// remains the path for strokes and radial fills.
-fn brush_color(brush: &Brush) -> Option<Color> {
-    match brush {
-        Brush::Solid(solid) => Some(solid.color),
-        Brush::Linear(gradient) => gradient.stops().first().map(|stop| stop.color),
-        Brush::Radial(gradient) => gradient.stops().first().map(|stop| stop.color),
-        Brush::Conic(gradient) => gradient.stops().first().map(|stop| stop.color),
-    }
-}
-
-/// Rasterizes a conic (angular) gradient over the element outline `sk_path`
-/// (§5.1's "conic gradients"). tiny-skia has no conic shader, so the sweep is
-/// decomposed into angular **wedges** — thin triangles fanning out from the
-/// gradient center — each filled at the color swept at its mid-angle and confined
-/// to the element outline (intersected with the active `clip`).
-///
-/// The gradient center and start angle come from [`ConicGradient`]; a wedge at
-/// normalized offset `o` points along `start_angle + o·2π` (screen-space
-/// clockwise), matching the coordinator's `(from_angle − 90°)` convention and the
-/// `atan2(dy, dx)` a reader would sample with. Wedges cover the full `[0, 1]` turn:
-/// the range before the first stop and after the last is filled with that stop's
-/// color (the [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode) edge), and each
-/// inter-stop span is subdivided finely and its endpoints' colors interpolated, so
-/// a smooth gradient is approximated and a hard-stop gradient (equal endpoint
-/// colors) is exact. Wedges are filled **aliased** so adjacent triangles tile
-/// without a seam; the outline's own anti-aliasing comes from the clip mask.
-#[allow(clippy::too_many_arguments)]
-fn fill_conic(
-    pixmap: &mut tiny_skia::Pixmap,
-    conic: &obscur_scene::paint::ConicGradient,
-    sk_path: &tiny_skia::Path,
-    fill_rule: tiny_skia::FillRule,
-    width: u32,
-    height: u32,
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-) {
-    let stops = conic.stops();
-    let Some(&first) = stops.first() else {
-        return;
-    };
-    let last = stops[stops.len() - 1];
-    // The element outline (∩ active clip) becomes the mask every wedge is confined
-    // to. Without it there is nothing to fill.
-    let Some(region) = build_clip_mask(width, height, sk_path, fill_rule, clip, transform) else {
-        return;
-    };
-    let center = conic.center();
-    let start = conic.start_angle();
-    // A radius that reaches beyond every corner of the buffer from the center, so a
-    // wedge's outer edge always lies outside the region being filled.
-    #[allow(clippy::cast_precision_loss)]
-    let radius = (width as f32 + center.x.abs()).hypot(height as f32 + center.y.abs()) + 1.0;
-
-    // The gap-free segment list covering the whole `[0, 1]` turn: a leading pad, the
-    // inter-stop spans, and a trailing pad (each `(o0, c0, o1, c1)`).
-    let mut segments: Vec<(f32, Color, f32, Color)> = Vec::new();
-    if first.offset() > 0.0 {
-        segments.push((0.0, first.color(), first.offset(), first.color()));
-    }
-    for pair in stops.windows(2) {
-        if pair[1].offset() > pair[0].offset() {
-            segments.push((
-                pair[0].offset(),
-                pair[0].color(),
-                pair[1].offset(),
-                pair[1].color(),
-            ));
-        }
-    }
-    if last.offset() < 1.0 {
-        segments.push((last.offset(), last.color(), 1.0, last.color()));
-    }
-    // A single stop (or all-coincident stops) paints the whole region one color.
-    if segments.is_empty() {
-        segments.push((0.0, first.color(), 1.0, first.color()));
-    }
-
-    for (o0, c0, o1, c1) in segments {
-        let span = o1 - o0;
-        if span <= 0.0 {
-            continue;
-        }
-        // ~1° per sub-wedge so the outer arc stays outside the box and a smooth
-        // span reads as a gradient rather than a fan of facets.
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            clippy::cast_precision_loss
-        )]
-        let steps = ((span * 360.0).ceil() as usize).max(1);
-        for k in 0..steps {
-            #[allow(clippy::cast_precision_loss)]
-            let f0 = k as f32 / steps as f32;
-            #[allow(clippy::cast_precision_loss)]
-            let f1 = (k + 1) as f32 / steps as f32;
-            let color = lerp_color(c0, c1, (f0 + f1) * 0.5);
-            let Some(sk_paint) = aliased_solid_paint(color) else {
-                continue;
-            };
-            let a0 = start + (o0 + span * f0) * std::f32::consts::TAU;
-            let a1 = start + (o0 + span * f1) * std::f32::consts::TAU;
-            let mut builder = tiny_skia::PathBuilder::new();
-            builder.move_to(center.x, center.y);
-            builder.line_to(center.x + radius * a0.cos(), center.y + radius * a0.sin());
-            builder.line_to(center.x + radius * a1.cos(), center.y + radius * a1.sin());
-            builder.close();
-            if let Some(wedge) = builder.finish() {
-                pixmap.fill_path(
-                    &wedge,
-                    &sk_paint,
-                    tiny_skia::FillRule::Winding,
-                    transform,
-                    Some(&region),
-                );
-            }
-        }
-    }
-}
-
-/// Linearly interpolates between two straight-alpha [`Color`]s at `t ∈ [0, 1]`
-/// (component-wise; `t` is clamped). Used to sample a gradient span's swept color.
-fn lerp_color(a: Color, b: Color, t: f32) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    let mix = |x: f32, y: f32| (y - x).mul_add(t, x);
-    Color::rgba(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a))
-}
-
-/// Interpolates between two straight-alpha [`Color`]s in **premultiplied** space at
-/// `t ∈ [0, 1]`, returning a straight-alpha result (css-color-4 §12.3, obscur.kit
-/// §5.7).
-///
-/// Each endpoint is premultiplied (`rgb·a`), the four premultiplied channels are
-/// lerped, and the result is un-premultiplied by the interpolated alpha. This is
-/// what keeps a `transparent → blue` stop from fading through grey: at the midpoint
-/// the colour stays full-strength blue at half alpha, not half-strength blue. A
-/// straight component-wise lerp (see [`lerp_color`]) is the classic wrong answer,
-/// silently visible only where the endpoints differ in alpha.
-fn premul_lerp_color(a: Color, b: Color, t: f32) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    let mix = |x: f32, y: f32| (y - x).mul_add(t, x);
-    let pa = mix(a.a, b.a);
-    let pr = mix(a.r * a.a, b.r * b.a);
-    let pg = mix(a.g * a.a, b.g * b.a);
-    let pb = mix(a.b * a.a, b.b * b.a);
-    if pa <= 0.0 {
-        Color::rgba(0.0, 0.0, 0.0, 0.0)
-    } else {
-        Color::rgba(pr / pa, pg / pa, pb / pa, pa)
-    }
-}
-
-/// The number of sub-samples inserted across each authored inter-stop span when a
-/// linear gradient is handed to tiny-skia. tiny-skia lerps between adjacent stops in
-/// straight-alpha space, so a span is pre-expanded into this many segments whose
-/// endpoints already sit on the premultiplied curve; between them the residual
-/// straight/premultiplied divergence is sub-perceptual. Even, so a probe at a span's
-/// exact midpoint lands on an inserted sample.
-const GRADIENT_SUBDIVISIONS: usize = 32;
-
-/// Rasterizes a linear (axial) gradient over the element outline `sk_path` for real,
-/// using tiny-skia's linear shader (§5.1's "linear gradients").
-///
-/// The authored stops are expanded into a dense stop list sampled along the
-/// **premultiplied** interpolation curve ([`premul_lerp_color`]), so tiny-skia's
-/// straight-alpha interpolation between the dense samples reproduces the
-/// premultiplied result css-color-4 §12.3 requires. The gradient axis (`start` →
-/// `end`) and stop offsets come straight from the [`LinearGradient`]; `transform`
-/// maps both the path and the shader, so the gradient tracks any active CSS 2D
-/// transform. A gradient with fewer than two usable stops falls back to a flat fill
-/// of its first stop (`brush_color`), matching the stop-less/solid degenerate cases.
-fn fill_linear(
-    pixmap: &mut tiny_skia::Pixmap,
-    linear: &obscur_scene::paint::LinearGradient,
-    sk_path: &tiny_skia::Path,
-    fill_rule: tiny_skia::FillRule,
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-) {
-    let stops = linear.stops();
-    // Build the dense, premultiplied-sampled stop list. Each authored span is
-    // subdivided; the shared boundary between spans is emitted once (skip k==0 for
-    // every span after the first) so tiny-skia sees a strictly forward list.
-    let mut sk_stops: Vec<tiny_skia::GradientStop> = Vec::new();
-    let mut push = |offset: f32, color: Color| {
-        if let Some(sk_color) = to_sk_color(color) {
-            sk_stops.push(tiny_skia::GradientStop::new(
-                offset.clamp(0.0, 1.0),
-                sk_color,
-            ));
-        }
-    };
-    for (i, pair) in stops.windows(2).enumerate() {
-        let (s0, s1) = (pair[0], pair[1]);
-        let span = s1.offset() - s0.offset();
-        for k in 0..=GRADIENT_SUBDIVISIONS {
-            if i > 0 && k == 0 {
-                continue;
-            }
-            #[allow(clippy::cast_precision_loss)]
-            let f = k as f32 / GRADIENT_SUBDIVISIONS as f32;
-            push(
-                span.mul_add(f, s0.offset()),
-                premul_lerp_color(s0.color(), s1.color(), f),
-            );
-        }
-    }
-
-    // Fewer than two representable stops cannot form a shader: fall back to the flat
-    // first-stop fill (the documented solid/stop-less degenerate path).
-    let first_stop_paint = || stops.first().map(|s| s.color()).and_then(solid_paint);
-    if sk_stops.len() < 2 {
-        if let Some(sk_paint) = first_stop_paint() {
-            pixmap.fill_path(sk_path, &sk_paint, fill_rule, transform, clip);
-        }
-        return;
-    }
-
-    let start = tiny_skia::Point::from_xy(linear.start().x, linear.start().y);
-    let end = tiny_skia::Point::from_xy(linear.end().x, linear.end().y);
-    let mode = to_sk_spread(linear.extend());
-    let Some(shader) = tiny_skia::LinearGradient::new(
-        start,
-        end,
-        sk_stops,
-        mode,
-        tiny_skia::Transform::identity(),
-    ) else {
-        // A degenerate axis (start == end) has no direction: fall back to the flat
-        // first-stop fill rather than dropping the mark.
-        if let Some(sk_paint) = first_stop_paint() {
-            pixmap.fill_path(sk_path, &sk_paint, fill_rule, transform, clip);
-        }
-        return;
-    };
-    let sk_paint = tiny_skia::Paint {
-        shader,
-        anti_alias: true,
-        ..Default::default()
-    };
-    pixmap.fill_path(sk_path, &sk_paint, fill_rule, transform, clip);
-}
-
-/// Maps a domain [`ExtendMode`](obscur_scene::paint::ExtendMode) onto tiny-skia's
-/// [`SpreadMode`](tiny_skia::SpreadMode) for gradient sampling outside `[0, 1]`.
-fn to_sk_spread(mode: obscur_scene::paint::ExtendMode) -> tiny_skia::SpreadMode {
-    match mode {
-        obscur_scene::paint::ExtendMode::Pad => tiny_skia::SpreadMode::Pad,
-        obscur_scene::paint::ExtendMode::Repeat => tiny_skia::SpreadMode::Repeat,
-        obscur_scene::paint::ExtendMode::Reflect => tiny_skia::SpreadMode::Reflect,
-    }
-}
-
-/// An **aliased** solid-color [`tiny_skia::Paint`] — used for conic-gradient wedges,
-/// whose shared internal edges must tile pixel-exactly without the AA seam an
-/// anti-aliased fill would leave between adjacent triangles.
-fn aliased_solid_paint(color: Color) -> Option<tiny_skia::Paint<'static>> {
-    let sk_color = to_sk_color(color)?;
-    Some(tiny_skia::Paint {
-        shader: tiny_skia::Shader::SolidColor(sk_color),
-        anti_alias: false,
-        ..Default::default()
-    })
-}
-
-/// Maps a domain [`Color`] (straight-alpha sRGB, `f32`) onto a
-/// [`tiny_skia::Color`], clamping each component to `0.0..=1.0`. Returns `None`
-/// only if `tiny-skia` rejects the clamped components.
-fn to_sk_color(color: Color) -> Option<tiny_skia::Color> {
-    tiny_skia::Color::from_rgba(
-        color.r.clamp(0.0, 1.0),
-        color.g.clamp(0.0, 1.0),
-        color.b.clamp(0.0, 1.0),
-        color.a.clamp(0.0, 1.0),
-    )
-}
-
-/// Builds an anti-aliased solid-color [`tiny_skia::Paint`] from a domain
-/// [`Color`], or `None` when the color cannot be represented.
-fn solid_paint(color: Color) -> Option<tiny_skia::Paint<'static>> {
-    let sk_color = to_sk_color(color)?;
-    Some(tiny_skia::Paint {
-        shader: tiny_skia::Shader::SolidColor(sk_color),
-        anti_alias: true,
-        ..Default::default()
-    })
-}
-
-/// The alpha multiplier the software backend applies to a `box-shadow` fill to
-/// fake the softness a real gaussian blur would give (this backend has no blur).
-/// A documented approximation (spec §5.2): the offset rounded rect is filled at
-/// half the shadow color's alpha rather than blurred.
-const SHADOW_APPROX_ALPHA: f32 = 0.5;
-
-/// Rasterizes a CSS `box-shadow` as a **flat**, offset rounded rectangle at
-/// reduced alpha — the software backend's blur-free approximation (spec §5.2).
-///
-/// The box's border box `rect` is translated by `offset` and inflated by `spread`,
-/// then filled as a rounded rect (`radii`) in the shadow `color` at
-/// [`SHADOW_APPROX_ALPHA`] of its alpha. The `blur` radius is **ignored** (this
-/// backend has no gaussian blur), so the mark is a hard-edged, semi-transparent
-/// rounded rect rather than a soft shadow — a documented approximation that keeps
-/// device-free callers deterministic.
-///
-/// An **inset** shadow takes [`draw_inset_shadow_approx`] instead: it renders as an
-/// inner *frame* (a rounded-rect ring) confined to the box, not an offset blob.
-/// A degenerate (non-positive) rect draws nothing.
-#[allow(clippy::too_many_arguments)]
-fn draw_shadow_approx(
-    pixmap: &mut tiny_skia::Pixmap,
-    rect: Rect,
-    radii: CornerRadii,
-    color: Color,
-    blur: f32,
-    spread: f32,
-    offset: (f32, f32),
-    inset: bool,
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-) {
-    // An inset shadow is an inner frame confined to the box, not an offset rect.
-    if inset {
-        draw_inset_shadow_approx(pixmap, rect, radii, color, spread, offset, clip, transform);
-        return;
-    }
-    // Drop shadows inflate by `spread`.
-    let inflate = spread;
-    let (ox, oy) = offset;
-    let x = rect.origin.x + ox - inflate;
-    let y = rect.origin.y + oy - inflate;
-    let w = 2.0f32.mul_add(inflate, rect.size.width);
-    let h = 2.0f32.mul_add(inflate, rect.size.height);
-    if w <= 0.0 || h <= 0.0 {
-        return;
-    }
-    let shadow_rect = Rect::new(Point::new(x, y), Size::new(w, h));
-    // CSS Backgrounds 3 §6.1.1: an outset shadow's corner radii are the box radii
-    // grown by `+spread` (a sharp corner stays sharp), so the rounded corners on
-    // the spread-inflated rect stay concentric with the box's corners — with
-    // §6.1.1's easing where a radius is smaller than the spread, which is why this
-    // is `spread_offset` and not the raw `offset` primitive §4.2 uses.
-    let path = Path::rounded_rect(shadow_rect, radii.spread_offset(spread));
-    let Some(sk_path) = to_sk_path(&path) else {
-        return;
-    };
-    // The alpha fade fakes the softness a real gaussian blur would give. A shadow
-    // with **no blur** (`blur == 0`) has a crisp, fully-opaque edge — there is no
-    // softness to fake — so it keeps the color's own alpha, exactly as the inset
-    // path does for its exact ring. Only a blurred shadow is faded.
-    let alpha = if blur > 0.0 {
-        color.a * SHADOW_APPROX_ALPHA
-    } else {
-        color.a
-    };
-    let faded = Color::rgba(color.r, color.g, color.b, alpha);
-    let Some(sk_paint) = solid_paint(faded) else {
-        return;
-    };
-    pixmap.fill_path(
-        &sk_path,
-        &sk_paint,
-        tiny_skia::FillRule::Winding,
-        transform,
-        clip,
-    );
-}
-
-/// Rasterizes an **inset** `box-shadow` as an inner frame confined to the box —
-/// the software backend's blur-free approximation of a CSS inner shadow (spec §5.2).
-///
-/// The shadow darkens the inside edges of the box, so it is drawn as a rounded-rect
-/// *ring*: the border box `rect` (with `radii`) as the outer outline, and the box
-/// deflated by `spread` and shifted by `offset` as the inner hole, filled with the
-/// even-odd rule ([`Path::rounded_rect_ring`]). Because the ring lives entirely
-/// inside the border box, the shadow is naturally confined to the box (an inset
-/// shadow never bleeds outside it). With `spread > 0` and no blur this is a crisp
-/// inner ring; an `offset` makes the frame thicker on the side opposite the shift —
-/// the inner-shadow look. The `blur` radius is unavailable on this backend, so the
-/// frame is hard-edged (documented approximation); it keeps the shadow color's own
-/// alpha, since the ring geometry is exact and there is no softness to fake. A
-/// collapsed inner rect (huge `spread`) fills the whole box; a degenerate box draws
-/// nothing.
-#[allow(clippy::too_many_arguments)]
-fn draw_inset_shadow_approx(
-    pixmap: &mut tiny_skia::Pixmap,
-    rect: Rect,
-    radii: CornerRadii,
-    color: Color,
-    spread: f32,
-    offset: (f32, f32),
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-) {
-    if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
-        return;
-    }
-    let (ox, oy) = offset;
-    // The lit hole: the box deflated by `spread`, shifted by `offset`.
-    let ix = rect.origin.x + ox + spread;
-    let iy = rect.origin.y + oy + spread;
-    let iw = 2.0f32.mul_add(-spread, rect.size.width);
-    let ih = 2.0f32.mul_add(-spread, rect.size.height);
-    let Some(sk_paint) = solid_paint(color) else {
-        return;
-    };
-    // A collapsed hole → the whole box interior is shadow (fill it solid).
-    let path = if iw <= 0.0 || ih <= 0.0 {
-        Path::rounded_rect(rect, radii)
-    } else {
-        let inner = Rect::new(Point::new(ix, iy), Size::new(iw, ih));
-        // CSS Backgrounds 3 §6.1.1: an inset shadow CONTRACTS by `spread`, so its
-        // radii take `−spread` (a sharp corner stays sharp) and the lit hole stays
-        // concentric with the box's rounded corners. `spread_offset` handles the
-        // sign: a positive spread shrinks here and is a plain subtraction, while a
-        // negative authored spread grows the hole and takes §6.1.1's easing —
-        // the spec's "in the case of an inner shadow, less than the absolute value
-        // of a negative spread distance" trigger.
-        Path::rounded_rect_ring(rect, radii, inner, radii.spread_offset(-spread))
-    };
-    let Some(sk_path) = to_sk_path(&path) else {
-        return;
-    };
-    pixmap.fill_path(
-        &sk_path,
-        &sk_paint,
-        to_sk_fill_rule(path.fill_rule()),
-        transform,
-        clip,
-    );
-}
-
-/// The largest number of image copies drawn per axis for a tiled
-/// (`background-repeat`) background — a bounded-loop guard against a pathological
-/// tiny-tile / huge-region combination. The visible output is clipped to `region`
-/// regardless, so this only caps wasted work (documented limitation).
-const MAX_TILES_PER_AXIS: i32 = 8192;
-
-/// The smallest tile extent (logical px) that still tiles: a tile at or below this
-/// on an axis is treated as non-repeating on that axis, so a degenerate size can
-/// never spin the tile loop.
-const MIN_TILE_EXTENT: f32 = 0.5;
-
-/// Blits a decoded [`SceneImage`] as one copy scaled to `tile`, clipped to
-/// `region`, and optionally tiled along the `repeat_x` / `repeat_y` axes to fill
-/// `region`, honoring the active `clip` and `transform` (spec §5.16).
-///
-/// `tiny-skia` stores **premultiplied** RGBA, so a [`AlphaMode::Straight`] image is
-/// premultiplied per pixel here (a [`AlphaMode::Premultiplied`] image is used as-is)
-/// before being wrapped into a source [`tiny_skia::Pixmap`], once, and reused for
-/// every tile. Each copy is drawn with [`draw_pixmap`](tiny_skia::Pixmap::draw_pixmap)
-/// under a transform that scales the image's intrinsic `width × height` to `tile`'s
-/// size and translates it to the copy's origin (stepping by `tile`'s width/height on
-/// the repeated axes), composed with the running `transform`. When tiling — or when
-/// a single tile overflows `region` — the draw is confined to `region` by
-/// intersecting a `region` clip mask into the active `clip`. The default nearest
-/// sampling keeps the blit crisp and deterministic. A zero-sized image, tile, or
-/// region, or a source pixmap that fails to allocate, draws nothing.
-#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
-fn draw_image(
-    pixmap: &mut tiny_skia::Pixmap,
-    image: &SceneImage,
-    tile: Rect,
-    region: Rect,
-    repeat_x: bool,
-    repeat_y: bool,
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-) {
-    let (iw, ih) = (image.width(), image.height());
-    if iw == 0
-        || ih == 0
-        || tile.size.width <= 0.0
-        || tile.size.height <= 0.0
-        || region.size.width <= 0.0
-        || region.size.height <= 0.0
-    {
-        return;
-    }
-    // A tile too small to tile safely repeats as a single copy on that axis.
-    let repeat_x = repeat_x && tile.size.width > MIN_TILE_EXTENT;
-    let repeat_y = repeat_y && tile.size.height > MIN_TILE_EXTENT;
-
-    // tiny-skia stores premultiplied RGBA: premultiply a straight image, pass a
-    // premultiplied one through unchanged, so both backends show the same picture.
-    let premultiplied = match image.alpha_mode() {
-        AlphaMode::Premultiplied => image.pixels().to_vec(),
-        AlphaMode::Straight => premultiply_rgba(image.pixels()),
-    };
-    let Some(size) = tiny_skia::IntSize::from_wh(iw, ih) else {
-        return;
-    };
-    let Some(src) = tiny_skia::Pixmap::from_vec(premultiplied, size) else {
-        return;
-    };
-
-    // The single tile fully inside `region` with no tiling needs no extra clip —
-    // the exact pre-placement stretch path. Otherwise confine drawing to `region`
-    // by intersecting a `region` mask into the active clip.
-    let contained = !repeat_x
-        && !repeat_y
-        && tile.origin.x >= region.origin.x - 1e-3
-        && tile.origin.y >= region.origin.y - 1e-3
-        && tile.origin.x + tile.size.width <= region.origin.x + region.size.width + 1e-3
-        && tile.origin.y + tile.size.height <= region.origin.y + region.size.height + 1e-3;
-    let region_mask = if contained {
-        None
-    } else {
-        let Some(region_path) = to_sk_path(&Path::rect(region)) else {
-            return;
-        };
-        build_clip_mask(
-            pixmap.width(),
-            pixmap.height(),
-            &region_path,
-            tiny_skia::FillRule::Winding,
-            clip,
-            transform,
-        )
-    };
-    let effective_clip = if contained {
-        clip
-    } else {
-        region_mask.as_ref()
-    };
-
-    // Tile index ranges: `[i0, i1] × [j0, j1]` copies stepping by tile w/h from the
-    // tile origin, covering `region`. A non-repeating axis is the single index 0.
-    let (i0, i1) = tile_index_range(
-        repeat_x,
-        region.origin.x,
-        region.origin.x + region.size.width,
-        tile.origin.x,
-        tile.size.width,
-    );
-    let (j0, j1) = tile_index_range(
-        repeat_y,
-        region.origin.y,
-        region.origin.y + region.size.height,
-        tile.origin.y,
-        tile.size.height,
-    );
-
-    let paint = tiny_skia::PixmapPaint::default();
-    let (sx, sy) = (tile.size.width / iw as f32, tile.size.height / ih as f32);
-    for j in j0..=j1 {
-        for i in i0..=i1 {
-            let ox = tile.origin.x + i as f32 * tile.size.width;
-            let oy = tile.origin.y + j as f32 * tile.size.height;
-            // Intrinsic → tile: scale the natural `iw × ih` to the tile size, then
-            // translate to this copy's origin, all under the running transform.
-            let place = transform
-                .pre_concat(tiny_skia::Transform::from_translate(ox, oy))
-                .pre_concat(tiny_skia::Transform::from_scale(sx, sy));
-            pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, place, effective_clip);
-        }
-    }
-}
-
-/// Computes the inclusive tile index range `[start, end]` covering the span
-/// `[r0, r1]` with copies at `t0 + k * ts` (`ts > 0`). A non-repeating axis
-/// (`repeat == false`) is the single index `0`. The range is padded by one on each
-/// side (so a partially-visible edge tile is drawn) and clamped to
-/// [`MAX_TILES_PER_AXIS`] copies — the `region` clip trims any overdraw.
-#[allow(clippy::cast_possible_truncation)]
-fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i32) {
-    if !repeat || ts <= 0.0 {
-        return (0, 0);
-    }
-    let start_f = ((r0 - t0) / ts).floor();
-    let end_f = ((r1 - t0) / ts).ceil();
-    if !start_f.is_finite() || !end_f.is_finite() {
-        return (0, 0);
-    }
-    let start = start_f as i32 - 1;
-    let mut end = end_f as i32 + 1;
-    // Bound the loop: never draw more than MAX_TILES_PER_AXIS copies on this axis.
-    if end - start + 1 > MAX_TILES_PER_AXIS {
-        end = start + MAX_TILES_PER_AXIS - 1;
-    }
-    (start, end)
-}
-
-/// Premultiplies straight-alpha RGBA8 bytes into the premultiplied form
-/// `tiny-skia` expects: each color channel is scaled by `alpha / 255` (rounded),
-/// the alpha channel kept. The input length must be a multiple of four.
-#[allow(clippy::cast_possible_truncation)]
-fn premultiply_rgba(straight: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(straight.len());
-    for px in straight.chunks_exact(4) {
-        let a = u16::from(px[3]);
-        // Rounded `c * a / 255` per channel (a == 255 is an exact identity).
-        // The result is always `<= 255`, so the `as u8` never truncates.
-        let mul = |c: u8| -> u8 { ((u16::from(c) * a + 127) / 255) as u8 };
-        out.push(mul(px[0]));
-        out.push(mul(px[1]));
-        out.push(mul(px[2]));
-        out.push(px[3]);
-    }
-    out
-}
-
-/// Lowers a geometric [`ClipShape`] to a domain [`Path`] this backend can
-/// rasterize into a clip mask. Rectangles and rounded rectangles are expanded to
-/// their outline; a path shape is used directly.
-fn clip_shape_to_domain_path(shape: &ClipShape) -> Path {
-    match shape {
-        ClipShape::Rect(rect) => Path::rect(*rect),
-        ClipShape::RoundedRect { rect, radii } => Path::rounded_rect(*rect, *radii),
-        ClipShape::Path(path) => path.clone(),
-    }
-}
-
-/// The clip mask that admits nothing: a fresh [`tiny_skia::Mask`] is zero-filled,
-/// and zero coverage draws nothing anywhere.
-///
-/// Used for a clip whose outline encloses no area, where "nothing passes" is the
-/// answer rather than a backend limitation. Returns `None` only if the mask cannot
-/// be allocated.
-fn empty_clip_mask(width: u32, height: u32) -> Option<tiny_skia::Mask> {
-    tiny_skia::Mask::new(width, height)
-}
-
-/// Resolves a [`Clip`] against the enclosing `parent` mask into the effective
-/// clip in force for the commands it encloses.
-///
-/// Shared by [`PaintCommand::PushClip`] and by a layer's own
-/// [`clip`](obscur_scene::layer::SceneLayer::clip) so the two cannot drift: a
-/// layer clip and a clip command naming the same region confine drawing
-/// identically, as Vello resolves both through one rule (spec §5.2 requires
-/// clipping to match across backends).
-fn resolve_clip_entry(
-    clip: &Clip,
-    parent: Option<&tiny_skia::Mask>,
-    width: u32,
-    height: u32,
-    transform: tiny_skia::Transform,
-) -> Option<tiny_skia::Mask> {
-    match clip {
-        Clip::Shape(shape) => {
-            let domain_path = clip_shape_to_domain_path(shape);
-            match to_sk_path(&domain_path) {
-                Some(sk_path) => build_clip_mask(
-                    width,
-                    height,
-                    &sk_path,
-                    to_sk_fill_rule(domain_path.fill_rule()),
-                    parent,
-                    transform,
-                )
-                .or_else(|| parent.cloned()),
-                // An empty/degenerate outline encloses no area, so the clip admits
-                // nothing — an all-zero mask, NOT the parent. The extent here is
-                // known (it is empty); inheriting would paint content the author
-                // clipped away, and would disagree with Vello, whose empty outline
-                // already admits nothing. Only an allocation failure falls back to
-                // the parent.
-                None => empty_clip_mask(width, height).or_else(|| parent.cloned()),
-            }
-        }
-        // A mask carries only *how* to read coverage, never the source it comes
-        // from, so a mask clip states no extent at all (`Clip::bounds()` is `None`
-        // for exactly this reason). Unknown extent is not empty extent: inherit the
-        // enclosing clip, which asserts nothing the domain has not stated, and
-        // matches Vello. This is the §5.8 fallback, not mask support — coverage is
-        // not applied on either backend, and neither raises the diagnostic §5.8
-        // asks an explicit fallback to carry.
-        Clip::Mask(_) => parent.cloned(),
-    }
-}
-
-/// Builds the clip mask in force after pushing `sk_path` onto a `parent` clip.
-///
-/// With no parent, the mask is the path's coverage over the whole buffer. With a
-/// parent, the path is intersected into a clone of the parent's coverage. Returns
-/// `None` only if a fresh [`tiny_skia::Mask`] cannot be allocated.
-fn build_clip_mask(
-    width: u32,
-    height: u32,
-    sk_path: &tiny_skia::Path,
-    fill_rule: tiny_skia::FillRule,
-    parent: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-) -> Option<tiny_skia::Mask> {
-    if let Some(parent) = parent {
-        let mut mask = parent.clone();
-        mask.intersect_path(sk_path, fill_rule, true, transform);
-        Some(mask)
-    } else {
-        let mut mask = tiny_skia::Mask::new(width, height)?;
-        mask.fill_path(sk_path, fill_rule, true, transform);
-        Some(mask)
-    }
-}
-
-/// Rasterizes a pre-shaped [`GlyphRun`] at `origin`, drawing real glyph outlines
-/// when the run's font is registered and box-coverage cells otherwise (spec §5.2).
-///
-/// The run's glyph positions are authoritative — shaping already ran in the
-/// domain, so this never re-shapes. When [`GlyphRun::font`] names a font
-/// registered via [`CpuRenderer::register_font`] and its bytes parse as an sfnt,
-/// each glyph's outline is extracted with `skrifa`, scaled to `font_size`, placed
-/// on its baseline pen position, and filled (see [`draw_glyph_outlines`]).
-/// Otherwise — no font registered for the handle, or unparseable bytes — the run
-/// degrades to the documented box-coverage fallback (see [`draw_glyph_boxes`]) so
-/// device-free callers that register no font still get a defined, non-empty mark.
-/// With a stop-less gradient brush (no resolvable color) the whole run is skipped.
-fn draw_text_run(
-    pixmap: &mut tiny_skia::Pixmap,
-    origin: Point,
-    run: &GlyphRun,
-    brush: &Brush,
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-    fonts: &HashMap<u32, Arc<[u8]>>,
-) {
-    let Some(color) = brush_color(brush) else {
-        return;
-    };
-    let Some(sk_paint) = solid_paint(color) else {
-        return;
-    };
-    let font_size = run.font_size();
-    if font_size <= 0.0 {
-        return;
-    }
-
-    // Real outlines when the run's font is registered and its bytes are a valid
-    // sfnt; box-coverage fallback otherwise. Synthetic-style hints (spec §5.18)
-    // travel with the run: an oblique run is sheared, a bold run thickened.
-    let skew = if run.synth_oblique() {
-        FAUX_ITALIC_SKEW
-    } else {
-        0.0
-    };
-    if let Some(bytes) = fonts.get(&run.font())
-        && let Ok(font_ref) = FontRef::new(bytes)
-    {
-        draw_glyph_outlines(
-            pixmap,
-            origin,
-            run,
-            &font_ref,
-            &sk_paint,
-            clip,
-            transform,
-            skew,
-            run.synth_bold(),
-        );
-        return;
-    }
-    draw_glyph_boxes(pixmap, origin, run, &sk_paint, clip, transform, skew);
-}
-
-/// The synthetic-oblique shear factor: the standard faux-italic skew of `0.25`
-/// (`tan ≈ 14°`), applied as a rightward x-shift proportional to a point's height
-/// above the baseline (spec §5.18).
-const FAUX_ITALIC_SKEW: f32 = 0.25;
-
-/// The synthetic-bold stroke width as a fraction of the run's font size: the
-/// filled outline is additionally stroked at this width to thicken it, faking a
-/// heavier weight (spec §5.18).
-const FAUX_BOLD_STROKE_FRACTION: f32 = 0.03;
-
-/// Fills each glyph of `run` as its real outline extracted from `font` at the
-/// run's `font_size` (spec §5.2 real glyph rasterization).
-///
-/// For each glyph the outline is drawn (unhinted, no variation) into a
-/// [`GlyphPathPen`] anchored at the baseline pen position
-/// `(origin.x + glyph.x, origin.y + glyph.y)`; `skrifa` yields pixel-scaled,
-/// y-up coordinates that the pen flips into the pixmap's y-down device space. A
-/// glyph absent from the font, with no contours (whitespace, glyph 0), or whose
-/// outline `skrifa`/`tiny-skia` rejects contributes nothing.
-///
-/// `skew` shears the outline to synthesize an oblique slant (`0.0` = upright);
-/// when `bold` is set the filled outline is additionally stroked to thicken it,
-/// synthesizing a heavier weight (spec §5.18).
-#[allow(clippy::too_many_arguments)]
-fn draw_glyph_outlines(
-    pixmap: &mut tiny_skia::Pixmap,
-    origin: Point,
-    run: &GlyphRun,
-    font: &FontRef<'_>,
-    sk_paint: &tiny_skia::Paint<'_>,
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-    skew: f32,
-    bold: bool,
-) {
-    let outlines = font.outline_glyphs();
-    let size = SkrifaSize::new(run.font_size());
-    // Faux-bold: stroke the filled outline with a hairline proportional to the
-    // font size so the shape gains weight without re-shaping.
-    let bold_stroke = bold.then(|| tiny_skia::Stroke {
-        width: run.font_size() * FAUX_BOLD_STROKE_FRACTION,
-        ..Default::default()
-    });
-    for glyph in run.glyphs() {
-        let Some(outline) = outlines.get(GlyphId::new(glyph.glyph_id())) else {
-            continue;
-        };
-        let pen_x = origin.x + glyph.x();
-        let baseline_y = origin.y + glyph.y();
-        let mut pen = GlyphPathPen::with_skew(pen_x, baseline_y, skew);
-        let settings = DrawSettings::unhinted(size, LocationRef::default());
-        if outline.draw(settings, &mut pen).is_err() {
-            continue;
-        }
-        let Some(sk_path) = pen.into_path() else {
-            continue;
-        };
-        pixmap.fill_path(
-            &sk_path,
-            sk_paint,
-            tiny_skia::FillRule::Winding,
-            transform,
-            clip,
-        );
-        if let Some(stroke) = &bold_stroke {
-            pixmap.stroke_path(&sk_path, sk_paint, stroke, transform, clip);
-        }
-    }
-}
-
-/// Rasterizes `run` as one solid coverage cell per visible glyph — the fallback
-/// used when no real font is registered for the run's handle (spec §5.2
-/// rasterization approximation).
-///
-/// Each glyph fills the box whose top-left is `origin + (glyph.x, glyph.y -
-/// font_size)` (the baseline sits `font_size` below the glyph's ascent) sized
-/// `advance × font_size`, honoring `clip`. Whitespace glyphs — identified by the
-/// mock shaper's convention that a glyph id is the Unicode scalar — and
-/// non-positive cells draw nothing.
-///
-/// `skew` shears the cell into a forward-leaning parallelogram to approximate a
-/// synthetic oblique (spec §5.18): the top edge (a full `font_size` above the
-/// baseline) slides right by `skew * font_size` while the baseline edge stays
-/// put. `skew == 0.0` keeps the upright rectangle byte-identical to before.
-fn draw_glyph_boxes(
-    pixmap: &mut tiny_skia::Pixmap,
-    origin: Point,
-    run: &GlyphRun,
-    sk_paint: &tiny_skia::Paint<'_>,
-    clip: Option<&tiny_skia::Mask>,
-    transform: tiny_skia::Transform,
-    skew: f32,
-) {
-    let font_size = run.font_size();
-    for glyph in run.glyphs() {
-        // Skip whitespace: the mock shaper's glyph id is the Unicode scalar.
-        if char::from_u32(glyph.glyph_id()).is_none_or(char::is_whitespace) {
-            continue;
-        }
-        let width = glyph.advance();
-        if width <= 0.0 {
-            continue;
-        }
-        let x = origin.x + glyph.x();
-        let baseline = origin.y + glyph.y();
-        let top = baseline - font_size;
-        let sk_path = if skew == 0.0 {
-            let Some(rect) = tiny_skia::Rect::from_xywh(x, top, width, font_size) else {
-                continue;
-            };
-            tiny_skia::PathBuilder::from_rect(rect)
-        } else {
-            // Parallelogram: baseline edge unshifted, top edge slid right by
-            // `skew * font_size`.
-            let shift = skew * font_size;
-            let mut builder = tiny_skia::PathBuilder::new();
-            builder.move_to(x, baseline);
-            builder.line_to(x + width, baseline);
-            builder.line_to(x + width + shift, top);
-            builder.line_to(x + shift, top);
-            builder.close();
-            let Some(path) = builder.finish() else {
-                continue;
-            };
-            path
-        };
-        pixmap.fill_path(
-            &sk_path,
-            sk_paint,
-            tiny_skia::FillRule::Winding,
-            transform,
-            clip,
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use obscur_geometry::Point;
+    use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
     use obscur_render::frame::RenderFrame;
     use obscur_render::target::BitmapTarget;
+    use obscur_scene::clip::Clip;
+    use obscur_scene::color::{AlphaMode, Color};
     use obscur_scene::command::DisplayList;
+    use obscur_scene::paint::SceneImage;
+    use obscur_scene::path::Path;
     use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
     use obscur_scene::text::{GlyphRun, PositionedGlyph};
-
-    #[test]
-    fn radial_and_conic_brushes_flatten_to_first_stop() {
-        use obscur_scene::paint::{ConicGradient, GradientStop, RadialGradient};
-
-        let red = Color::rgba(1.0, 0.0, 0.0, 1.0);
-        let blue = Color::rgba(0.0, 0.0, 1.0, 1.0);
-        let stops = || vec![GradientStop::new(0.0, red), GradientStop::new(1.0, blue)];
-        // Both approximate to the first stop (red), per the effect-split policy.
-        let radial = Brush::Radial(RadialGradient::new(Point::new(5.0, 5.0), 10.0, stops()));
-        assert_eq!(brush_color(&radial), Some(red));
-        let conic = Brush::Conic(ConicGradient::new(Point::new(5.0, 5.0), 0.0, stops()));
-        assert_eq!(brush_color(&conic), Some(red));
-        // A stop-less gradient resolves to no color (the command is skipped).
-        let empty = Brush::Radial(RadialGradient::new(Point::ORIGIN, 1.0, Vec::new()));
-        assert_eq!(brush_color(&empty), None);
-    }
 
     /// Builds a hermetic sfnt (1000 upem, 2 glyphs) whose glyph 1 is a real
     /// filled square contour spanning font units `x∈[100,900]`, `y∈[0,700]`;

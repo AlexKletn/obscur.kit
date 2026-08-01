@@ -1,14 +1,4 @@
-//! The hexagonal port for the persistent derived-artifact cache (spec §5.20).
-//!
-//! This module defines [`CacheStore`], the port for the §5.20 persistent derived
-//! cache: a store of derived artifacts (compiled shaders, rasterised glyphs,
-//! prepared display lists) that survives across runs. Per spec §5.20 the store is
-//! **versioned** and **compatibility-aware** (a stored entry is only served when
-//! its version still matches), **content-addressed where useful** (via the
-//! [`CacheKey`] variant), and **disposable** — every entry is derived data that
-//! can be safely deleted and recomputed. Adapters back it with a real on-disk
-//! store; the colocated [`InMemoryCacheStore`] is a volatile reference
-//! implementation.
+#![doc = include_str!("cache_store.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,67 +6,42 @@ use std::sync::Arc;
 use crate::cache::CacheKey;
 use crate::state::ResourceVersion;
 
-/// The hexagonal port for the persistent derived-artifact cache (spec §5.20).
-///
-/// An adapter implements this over a real persistent backend, and the domain
-/// stores it as `Box<dyn CacheStore>`; the trait is therefore deliberately
-/// **object-safe** — no generic methods and no `Self`-returning methods. Reads
-/// take `&self` and writes take `&mut self`. Because every entry is derived data,
-/// the store is disposable: dropping or [`Self::clear`]ing it is always safe
-/// (spec §5.20).
+#[doc = include_str!("cache_store.doc/CacheStore.md")]
 pub trait CacheStore {
-    /// Returns the bytes stored under `key`, but **only if** the stored entry's
-    /// version equals `version` (spec §5.20 compatibility-awareness).
-    ///
-    /// A stored entry whose version differs from `version` is stale — derived
-    /// under an incompatible input or format revision — so it yields `None`
-    /// rather than incompatible bytes. `None` is also returned when no entry is
-    /// stored under `key` at all.
+    #[doc = include_str!("cache_store.doc/get.md")]
     #[must_use]
     fn get(&self, key: &CacheKey, version: ResourceVersion) -> Option<Arc<[u8]>>;
 
-    /// Stores `bytes` under `key`, tagged with `version` (spec §5.20 versioned).
-    ///
-    /// Any existing entry for `key` is replaced, so a re-derivation at a newer
-    /// version supersedes the stale one.
+    #[doc = include_str!("cache_store.doc/put.md")]
     fn put(&mut self, key: CacheKey, version: ResourceVersion, bytes: Arc<[u8]>);
 
-    /// Returns whether an entry is stored under `key`, regardless of its version.
+    #[doc = include_str!("cache_store.doc/contains.md")]
     #[must_use]
     fn contains(&self, key: &CacheKey) -> bool;
 
-    /// Removes the entry stored under `key`, returning whether one was present
-    /// (spec §5.20 disposable).
+    #[doc = include_str!("cache_store.doc/remove.md")]
     fn remove(&mut self, key: &CacheKey) -> bool;
 
-    /// Removes every entry (spec §5.20 disposable / safe-to-delete).
+    #[doc = include_str!("cache_store.doc/clear.md")]
     fn clear(&mut self);
 
-    /// Returns the number of stored entries.
+    #[doc = include_str!("cache_store.doc/len.md")]
     #[must_use]
     fn len(&self) -> usize;
 
-    /// Returns whether the store holds no entries.
+    #[doc = include_str!("cache_store.doc/is_empty.md")]
     #[must_use]
     fn is_empty(&self) -> bool;
 }
 
-/// A volatile in-memory reference [`CacheStore`] (spec §5.20).
-///
-/// `InMemoryCacheStore` keeps entries in a [`HashMap`] keyed by [`CacheKey`],
-/// storing each artifact's [`ResourceVersion`] alongside its bytes so
-/// [`CacheStore::get`] can enforce the §5.20 compatibility check. It is a
-/// reference implementation for tests and headless use: because it holds
-/// everything in memory, nothing survives across runs — a real *persistent*
-/// derived cache lives in an adapter. Its entries are derived data, so clearing
-/// or dropping it is always safe.
+#[doc = include_str!("cache_store.doc/InMemoryCacheStore.md")]
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryCacheStore {
     entries: HashMap<CacheKey, (ResourceVersion, Arc<[u8]>)>,
 }
 
 impl InMemoryCacheStore {
-    /// Creates an empty store.
+    #[doc = include_str!("cache_store.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()

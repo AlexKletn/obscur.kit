@@ -1,37 +1,23 @@
-//! `FixedChildMeasurer`: a deterministic [`ChildMeasurer`] for tests.
+#![doc = include_str!("fixed_child_measurer.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 
 use super::ChildMeasurer;
 
-/// A [`ChildMeasurer`] backed by a fixed natural size per child index.
-///
-/// [`ChildMeasurer`]: super::ChildMeasurer
-///
-/// This exists so layout algorithms can be exercised in isolation — without a
-/// runtime, a retained tree, or the intrinsic-measure port. Each child index is
-/// assigned one *natural* size; a measurement returns that natural size clamped
-/// into the requested constraints (via [`BoxConstraints::constrain`]). An index
-/// outside the backing vector measures as [`Size::ZERO`], so the measurer never
-/// panics regardless of the indices an algorithm asks for.
-///
-/// It is deterministic and side-effect-free: repeated calls with the same
-/// `(index, constraints)` always return the same size.
+#[doc = include_str!("fixed_child_measurer.doc/FixedChildMeasurer.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FixedChildMeasurer {
     sizes: Vec<Size>,
 }
 
 impl FixedChildMeasurer {
-    /// Creates a measurer from one natural size per child index.
-    ///
-    /// `sizes[i]` is the natural (unconstrained) size reported for child `i`.
+    #[doc = include_str!("fixed_child_measurer.doc/new.md")]
     #[must_use]
     pub fn new(sizes: Vec<Size>) -> Self {
         Self { sizes }
     }
 
-    /// The natural size registered for `index`, or [`Size::ZERO`] if out of range.
+    #[doc = include_str!("fixed_child_measurer.doc/natural.md")]
     #[must_use]
     pub fn natural(&self, index: usize) -> Size {
         self.sizes.get(index).copied().unwrap_or(Size::ZERO)
@@ -39,10 +25,7 @@ impl FixedChildMeasurer {
 }
 
 impl ChildMeasurer for FixedChildMeasurer {
-    /// Returns the natural size for `index`, clamped into `constraints`.
-    ///
-    /// Out-of-range indices measure as [`Size::ZERO`] (still clamped into
-    /// `constraints`, so a non-zero minimum is honoured).
+    #[doc = include_str!("fixed_child_measurer.doc/measure_child.md")]
     fn measure_child(&mut self, index: usize, constraints: BoxConstraints) -> Size {
         constraints.constrain(self.natural(index))
     }

@@ -1,4 +1,4 @@
-//! Windows system-service providers.
+#![doc = include_str!("lib.doc/_module.md")]
 
-/// The Windows implementations of the system-service ports.
+#[doc = include_str!("lib.doc/provider.md")]
 pub mod provider;

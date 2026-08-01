@@ -1,4 +1,4 @@
-//! `StylesheetCache`: parse each CSS source once per revision (spec §4.12).
+#![doc = include_str!("stylesheet_cache.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -6,50 +6,23 @@ use std::collections::hash_map::Entry;
 use crate::parser::{ParsedStylesheet, StylesheetParser};
 use crate::source::{CssSource, SourceId, SourceVersion};
 
-/// Caches the parse of each CSS source, keyed by its identity **and** revision
-/// (spec §4.12: "CSS parsing is cached per unique source/version and invalidated
-/// explicitly").
-///
-/// # What decides a hit
-///
-/// The `(SourceId, SourceVersion)` pair, never the text. A source whose owner has
-/// not bumped its version is the same source, and re-parsing it would be exactly
-/// the work this exists to avoid — including re-reading the very text a hash would
-/// have to walk. An [`ANONYMOUS`](SourceId::ANONYMOUS) source is deliberately
-/// **not** cached: it has no stable identity, so two unrelated anonymous sheets
-/// would collide under one key and the second would silently get the first's rules.
-///
-/// # Explicit invalidation
-///
-/// Two ways, both the owner's choice: bump the source's
-/// [`version`](CssSource::version) (the entry no longer matches), or call
-/// [`invalidate`](Self::invalidate)/[`clear`](Self::clear). Nothing here watches
-/// files or times anything out — §4.12 asks for explicit invalidation, and a cache
-/// that expires entries on its own would be neither explicit nor predictable.
+#[doc = include_str!("stylesheet_cache.doc/StylesheetCache.md")]
 #[derive(Debug, Default)]
 pub struct StylesheetCache {
-    /// One entry per identified source: the revision it was parsed at, and the
-    /// parse. A new revision replaces the entry rather than growing the map.
+    #[doc = include_str!("stylesheet_cache.doc/entries.md")]
     entries: HashMap<SourceId, (SourceVersion, ParsedStylesheet)>,
-    /// Scratch slot for the most recent ANONYMOUS parse.
-    ///
-    /// An anonymous source is re-parsed every call (it has no identity to cache
-    /// by), but [`parse`](Self::parse) hands back a reference, so the result has to
-    /// live somewhere. It is deliberately a single overwritten slot rather than a
-    /// map entry: keying anonymous sources would make two unrelated sheets collide,
-    /// and the second would silently receive the first's rules.
+    #[doc = include_str!("stylesheet_cache.doc/anonymous.md")]
     anonymous: Option<ParsedStylesheet>,
 }
 
 impl StylesheetCache {
-    /// Creates an empty cache.
+    #[doc = include_str!("stylesheet_cache.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The cached parse of `source`, or [`None`] on a miss — an unseen source, a
-    /// stale revision, or an anonymous source (never cached).
+    #[doc = include_str!("stylesheet_cache.doc/get.md")]
     #[must_use]
     pub fn get(&self, source: &CssSource) -> Option<&ParsedStylesheet> {
         if source.id() == SourceId::ANONYMOUS {
@@ -61,11 +34,7 @@ impl StylesheetCache {
             .map(|(_, parsed)| parsed)
     }
 
-    /// Returns `source`'s parse, parsing it only on a miss.
-    ///
-    /// This is the whole point of the cache, so it is the method to reach for: a
-    /// caller that parses first and inserts second has already paid the cost the
-    /// cache exists to skip.
+    #[doc = include_str!("stylesheet_cache.doc/parse.md")]
     pub fn parse(&mut self, source: &CssSource) -> &ParsedStylesheet {
         // An anonymous source is parsed every time and never stored — see the
         // type-level note on why it must not share a key.
@@ -90,26 +59,23 @@ impl StylesheetCache {
         }
     }
 
-    /// Drops `id`'s entry, if any, returning whether one was cached.
-    ///
-    /// The explicit half of §4.12's invalidation, for an owner that changed a
-    /// sheet without a new [`CssSource`] to stamp.
+    #[doc = include_str!("stylesheet_cache.doc/invalidate.md")]
     pub fn invalidate(&mut self, id: SourceId) -> bool {
         self.entries.remove(&id).is_some()
     }
 
-    /// Drops every entry.
+    #[doc = include_str!("stylesheet_cache.doc/clear.md")]
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    /// How many sources are cached.
+    #[doc = include_str!("stylesheet_cache.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Whether nothing is cached.
+    #[doc = include_str!("stylesheet_cache.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

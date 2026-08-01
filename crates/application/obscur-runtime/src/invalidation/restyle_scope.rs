@@ -1,12 +1,4 @@
-//! Turns an interaction-state change into the per-node style dirty set the style
-//! phase consumes: [`RestyleScope`] (Obscur Kit 2 specs §3.4 phase 5, §4.3).
-//!
-//! §4.3 requires that "recalculation starts at the nearest affected layout
-//! context" and propagates "downward only when constraints change". For the style
-//! phase the equivalent question is: when node `N`'s `:hover` toggles, whose
-//! *computed style* can differ? This module answers it — soundly, from the shape
-//! of the selector engine rather than from a guess — and records the answer as a
-//! [`StyleInvalidation`], the typed accumulator §4.3 asks for.
+#![doc = include_str!("restyle_scope.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_style::invalidation::{StyleInvalidation, StyleInvalidationReason};
@@ -14,69 +6,12 @@ use obscur_tree::tree::RetainedTree;
 
 use crate::orchestration::PseudoStates;
 
-/// Computes which nodes must be restyled when interaction state changes (§4.3).
-///
-/// # Why a structural reach, and why it is sound
-///
-/// The selector matcher navigates a tree **only** through
-/// [`MatchElement`](obscur_style::selector::MatchElement), whose entire
-/// navigation surface is `parent()` and `previous_sibling_element()`. So while
-/// matching node `X`, the states the matcher can read are those of `X` itself and
-/// of the nodes reachable from `X` by repeatedly taking a parent or a *preceding*
-/// sibling. Inverting that relation: node `N`'s interaction state can only be read
-/// while matching
-///
-/// * `N` itself and its descendants (they reach `N` through `parent()`), and
-/// * the siblings that **follow** `N`, and their descendants (they reach `N`
-///   through `previous_sibling_element()`, possibly after some `parent()` hops).
-///
-/// which is exactly `subtree(N) ∪ ⋃ subtree(S)` over `N`'s following siblings —
-/// what [`expand`](Self::expand) marks. The trait bound is what makes this a proof
-/// rather than an enumeration of today's combinators: no implementation of the
-/// matcher can consult a node outside that closure, because it has no method with
-/// which to reach one. The selector-list pseudo-classes `:is()`, `:where()`,
-/// `:not()` and `:nth-child(An+B of S)` are inside the closure too — each
-/// evaluates its argument through the *same* seam, against the subject itself or
-/// against a preceding sibling. `:has()` — the one selector that would reach
-/// *downward*, and so let a node's state be read from outside the closure — is
-/// modelled only for specificity:
-/// [`PseudoClassSelector::Has`](obscur_style::selector::PseudoClassSelector::Has)
-/// is answered `false` by the matcher unconditionally, as is the `of S` form of
-/// `:nth-last-child()`, which would reach forward across siblings. **Wiring
-/// either of them up invalidates the bound above and must widen this scope in
-/// the same change.**
-///
-/// # Inheritance is covered by construction
-///
-/// A restyled node can change values its descendants inherit. That needs no extra
-/// pass here because the marked set is **downward-closed**: every node it contains
-/// is marked together with its whole subtree, so a descendant of anything that can
-/// change is already in the set.
-///
-/// # What it does not narrow
-///
-/// The set is a sound **upper** bound, not a minimal one. It does not consult
-/// which pseudo-classes the installed sheets actually mention, nor
-/// [`StyleDependency`](obscur_style::invalidation::StyleDependency) — the per-node
-/// record of what a node's matching really depended on — because nothing populates
-/// that record during matching yet. Hovering a node inside a large subtree
-/// therefore still restyles that subtree even when no rule mentions `:hover`.
+#[doc = include_str!("restyle_scope.doc/RestyleScope.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RestyleScope;
 
 impl RestyleScope {
-    /// Returns the nodes whose recorded interaction state differs between
-    /// `before` and `after`.
-    ///
-    /// Both maps are canonical — a node with no entry carries
-    /// [`PseudoState::empty`](obscur_style::selector::PseudoState::empty) — so the
-    /// diff walks only the two maps' entries (the hover/focus chain, a handful of
-    /// nodes), never the tree. A node whose entry was dropped is reported just as
-    /// one whose bits changed: un-hovering must restyle too.
-    ///
-    /// The result is a set in all but type: each changed node appears exactly once,
-    /// and the order (which follows hash iteration) is not observable — [`expand`](Self::expand)
-    /// unions the reaches.
+    #[doc = include_str!("restyle_scope.doc/changed_states.md")]
     #[must_use]
     pub fn changed_states(before: &PseudoStates, after: &PseudoStates) -> Vec<NodeId> {
         let mut changed = Vec::new();
@@ -96,18 +31,7 @@ impl RestyleScope {
         changed
     }
 
-    /// Records in `out` every node whose computed style can depend on `root`'s
-    /// interaction state, returning whether the scope could be bounded at all.
-    ///
-    /// Returns `false` when the tree contradicts itself — `root`'s logical parent
-    /// does not resolve, or does not list `root` among its children — because the
-    /// following-sibling half of the reach cannot then be enumerated. A `false`
-    /// answer means "no bound was proven"; the caller must restyle everything
-    /// rather than trust a partial `out`.
-    ///
-    /// A `root` that is not in the tree marks nothing and returns `true`: no
-    /// element can navigate to a node no child list mentions, so its state reaches
-    /// nobody.
+    #[doc = include_str!("restyle_scope.doc/expand.md")]
     pub fn expand(tree: &RetainedTree, root: NodeId, out: &mut StyleInvalidation) -> bool {
         let Some(node) = tree.get(root) else {
             return true;
@@ -133,12 +57,7 @@ impl RestyleScope {
         true
     }
 
-    /// Marks `root` and every node beneath it as pending a restyle.
-    ///
-    /// `out` doubles as the visited set: a node already recorded was recorded by a
-    /// previous `mark_subtree`, which by definition also marked its whole subtree,
-    /// so skipping it skips work that is provably already done. That also makes the
-    /// walk cycle-safe — a malformed child link terminates instead of looping.
+    #[doc = include_str!("restyle_scope.doc/mark_subtree.md")]
     fn mark_subtree(tree: &RetainedTree, root: NodeId, out: &mut StyleInvalidation) {
         let mut stack = vec![root];
         while let Some(id) = stack.pop() {

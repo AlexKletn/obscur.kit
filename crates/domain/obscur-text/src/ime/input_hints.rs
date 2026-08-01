@@ -1,56 +1,28 @@
-//! The bundle of input hints describing how a text field expects to be edited
-//! (spec §5.12 IME).
+#![doc = include_str!("input_hints.doc/_module.md")]
 
 use super::InputPurpose;
 
-/// The bundle of input hints for a text field (spec §5.12).
-///
-/// These hints steer platform IME and on-screen-keyboard behaviour without
-/// dictating it: the [`purpose`](Self::purpose) names the field's semantics,
-/// while the remaining flags toggle [`autocorrect`](Self::autocorrect),
-/// [`spellcheck`](Self::spellcheck), automatic [`capitalization`](Self::capitalization),
-/// whether the field is [`multiline`](Self::multiline), whether it is treated as
-/// [`sensitive`](Self::sensitive), and an optional
-/// [`preferred_language`](Self::preferred_language) (a BCP-47 tag).
-///
-/// # Defaults
-///
-/// [`InputHints::default`] / [`new`](Self::new) describe a free-form single-line
-/// field: [`FreeForm`](InputPurpose::FreeForm) purpose, single-line, autocorrect
-/// on, [`Sentences`](Capitalization::Sentences) capitalization, spellcheck on,
-/// not sensitive, no preferred language. Note that the default capitalization is
-/// [`Sentences`](Capitalization::Sentences) even though [`Capitalization`]'s own
-/// [`Default`] is [`None`](Capitalization::None); `InputHints` sets its
-/// capitalization default explicitly rather than deriving it.
-///
-/// [`effective_sensitive`](Self::effective_sensitive) folds the explicit
-/// [`sensitive`](Self::sensitive) flag together with a sensitive
-/// [`purpose`](Self::purpose), so a [`Password`](InputPurpose::Password) field is
-/// sensitive even if the flag was never set (§5.12 sensitive/password modes are
-/// respected).
+#[doc = include_str!("input_hints.doc/InputHints.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputHints {
-    /// The semantic purpose of the field.
+    #[doc = include_str!("input_hints.doc/purpose.md")]
     purpose: InputPurpose,
-    /// Whether the field accepts multiple lines.
+    #[doc = include_str!("input_hints.doc/multiline.md")]
     multiline: bool,
-    /// Whether automatic spelling correction is enabled.
+    #[doc = include_str!("input_hints.doc/autocorrect.md")]
     autocorrect: bool,
-    /// The automatic-capitalization policy.
+    #[doc = include_str!("input_hints.doc/capitalization.md")]
     capitalization: Capitalization,
-    /// Whether spellchecking is enabled.
+    #[doc = include_str!("input_hints.doc/spellcheck.md")]
     spellcheck: bool,
-    /// Whether the field is treated as sensitive (secrets), suppressing IME
-    /// learning and suggestions.
+    #[doc = include_str!("input_hints.doc/sensitive.md")]
     sensitive: bool,
-    /// An optional BCP-47 language tag the IME should prefer.
+    #[doc = include_str!("input_hints.doc/preferred_language.md")]
     preferred_language: Option<Box<str>>,
 }
 
 impl InputHints {
-    /// Creates the default hints: a free-form single-line field with autocorrect
-    /// and spellcheck on, [`Sentences`](Capitalization::Sentences)
-    /// capitalization, not sensitive, and no preferred language (spec §5.12).
+    #[doc = include_str!("input_hints.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -64,10 +36,7 @@ impl InputHints {
         }
     }
 
-    /// Creates hints suited to a password field: [`Password`](InputPurpose::Password)
-    /// purpose, sensitive, with autocorrect, spellcheck, and automatic
-    /// capitalization all disabled (spec §5.12 sensitive/password modes are
-    /// respected).
+    #[doc = include_str!("input_hints.doc/for_password.md")]
     #[must_use]
     pub const fn for_password() -> Self {
         Self {
@@ -81,104 +50,98 @@ impl InputHints {
         }
     }
 
-    /// Returns a copy with the [`purpose`](Self::purpose) replaced.
+    #[doc = include_str!("input_hints.doc/with_purpose.md")]
     #[must_use]
     pub fn with_purpose(mut self, purpose: InputPurpose) -> Self {
         self.purpose = purpose;
         self
     }
 
-    /// Returns a copy with the [`multiline`](Self::multiline) flag set.
+    #[doc = include_str!("input_hints.doc/multiline_2.md")]
     #[must_use]
     pub fn multiline(mut self, multiline: bool) -> Self {
         self.multiline = multiline;
         self
     }
 
-    /// Returns a copy with the [`autocorrect`](Self::autocorrect) flag set.
+    #[doc = include_str!("input_hints.doc/autocorrect_2.md")]
     #[must_use]
     pub fn autocorrect(mut self, autocorrect: bool) -> Self {
         self.autocorrect = autocorrect;
         self
     }
 
-    /// Returns a copy with the [`capitalization`](Self::capitalization) policy
-    /// replaced.
+    #[doc = include_str!("input_hints.doc/with_capitalization.md")]
     #[must_use]
     pub fn with_capitalization(mut self, capitalization: Capitalization) -> Self {
         self.capitalization = capitalization;
         self
     }
 
-    /// Returns a copy with the [`spellcheck`](Self::spellcheck) flag set.
+    #[doc = include_str!("input_hints.doc/spellcheck_2.md")]
     #[must_use]
     pub fn spellcheck(mut self, spellcheck: bool) -> Self {
         self.spellcheck = spellcheck;
         self
     }
 
-    /// Returns a copy with the [`sensitive`](Self::sensitive) flag set.
+    #[doc = include_str!("input_hints.doc/sensitive_2.md")]
     #[must_use]
     pub fn sensitive(mut self, sensitive: bool) -> Self {
         self.sensitive = sensitive;
         self
     }
 
-    /// Returns a copy with the [`preferred_language`](Self::preferred_language)
-    /// (a BCP-47 tag) replaced.
+    #[doc = include_str!("input_hints.doc/with_preferred_language.md")]
     #[must_use]
     pub fn with_preferred_language(mut self, language: impl Into<Box<str>>) -> Self {
         self.preferred_language = Some(language.into());
         self
     }
 
-    /// Returns the semantic purpose of the field.
+    #[doc = include_str!("input_hints.doc/purpose_2.md")]
     #[must_use]
     pub const fn purpose(&self) -> InputPurpose {
         self.purpose
     }
 
-    /// Returns whether the field accepts multiple lines.
+    #[doc = include_str!("input_hints.doc/is_multiline.md")]
     #[must_use]
     pub const fn is_multiline(&self) -> bool {
         self.multiline
     }
 
-    /// Returns whether automatic spelling correction is enabled.
+    #[doc = include_str!("input_hints.doc/is_autocorrect.md")]
     #[must_use]
     pub const fn is_autocorrect(&self) -> bool {
         self.autocorrect
     }
 
-    /// Returns the automatic-capitalization policy.
+    #[doc = include_str!("input_hints.doc/capitalization_2.md")]
     #[must_use]
     pub const fn capitalization(&self) -> Capitalization {
         self.capitalization
     }
 
-    /// Returns whether spellchecking is enabled.
+    #[doc = include_str!("input_hints.doc/is_spellcheck.md")]
     #[must_use]
     pub const fn is_spellcheck(&self) -> bool {
         self.spellcheck
     }
 
-    /// Returns the explicit sensitive flag. Prefer
-    /// [`effective_sensitive`](Self::effective_sensitive) when deciding whether
-    /// sensitive handling applies, since a sensitive purpose implies it too.
+    #[doc = include_str!("input_hints.doc/is_sensitive.md")]
     #[must_use]
     pub const fn is_sensitive(&self) -> bool {
         self.sensitive
     }
 
-    /// Returns the preferred BCP-47 language tag, if any.
+    #[doc = include_str!("input_hints.doc/preferred_language_2.md")]
     #[must_use]
     pub fn preferred_language(&self) -> Option<&str> {
         self.preferred_language.as_deref()
     }
 
-    /// Returns whether sensitive handling applies: the explicit
-    /// [`sensitive`](Self::sensitive) flag OR a sensitive
-    /// [`purpose`](InputPurpose::is_sensitive) (spec §5.12).
+    #[doc = include_str!("input_hints.doc/effective_sensitive.md")]
     #[must_use]
     pub const fn effective_sensitive(&self) -> bool {
         self.sensitive || self.purpose.is_sensitive()
@@ -191,23 +154,17 @@ impl Default for InputHints {
     }
 }
 
-/// The automatic-capitalization policy applied as the user types (spec §5.12).
-///
-/// This mirrors the on-screen-keyboard autocapitalization hints: whether to
-/// capitalize nothing, the first letter of each sentence, the first letter of
-/// each word, or every character. Its own [`Default`] is
-/// [`None`](Self::None); [`InputHints`] overrides that with
-/// [`Sentences`](Self::Sentences) for free-form fields.
+#[doc = include_str!("input_hints.doc/Capitalization.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Capitalization {
-    /// No automatic capitalization. The enum's own default.
+    #[doc = include_str!("input_hints.doc/None.md")]
     #[default]
     None,
-    /// Capitalize the first letter of each sentence.
+    #[doc = include_str!("input_hints.doc/Sentences.md")]
     Sentences,
-    /// Capitalize the first letter of each word.
+    #[doc = include_str!("input_hints.doc/Words.md")]
     Words,
-    /// Capitalize every character.
+    #[doc = include_str!("input_hints.doc/Characters.md")]
     Characters,
 }
 

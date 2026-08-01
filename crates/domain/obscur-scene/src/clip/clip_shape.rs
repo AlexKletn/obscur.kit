@@ -1,57 +1,45 @@
-//! The geometry a clip restricts drawing to.
+#![doc = include_str!("clip_shape.doc/_module.md")]
 
 use obscur_geometry::{CornerRadii, Rect};
 
 use crate::path::Path;
 
-/// The geometric region a clip confines subsequent drawing to (spec §5.8).
-///
-/// A `ClipShape` is pure, backend-independent geometry: a plain rectangle, a
-/// rounded rectangle, or an arbitrary [`Path`]. It carries no rendering state
-/// and references no GPU or renderer types. Rectangular and rounded-rectangular
-/// shapes are cheap to apply; a path shape is more general but still describes
-/// only geometry.
+#[doc = include_str!("clip_shape.doc/ClipShape.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClipShape {
-    /// A plain axis-aligned rectangle.
+    #[doc = include_str!("clip_shape.doc/Rect.md")]
     Rect(Rect),
-    /// A rectangle with per-corner rounding.
+    #[doc = include_str!("clip_shape.doc/RoundedRect.md")]
     RoundedRect {
-        /// The rectangle being rounded.
+        #[doc = include_str!("clip_shape.doc/rect.md")]
         rect: Rect,
-        /// The per-corner radii applied to `rect`.
+        #[doc = include_str!("clip_shape.doc/radii.md")]
         radii: CornerRadii,
     },
-    /// An arbitrary vector outline.
+    #[doc = include_str!("clip_shape.doc/Path.md")]
     Path(Path),
 }
 
 impl ClipShape {
-    /// Creates a rectangular clip shape.
+    #[doc = include_str!("clip_shape.doc/rect_2.md")]
     #[must_use]
     pub const fn rect(rect: Rect) -> Self {
         Self::Rect(rect)
     }
 
-    /// Creates a rounded-rectangular clip shape from a rectangle and its
-    /// per-corner radii.
+    #[doc = include_str!("clip_shape.doc/rounded_rect.md")]
     #[must_use]
     pub const fn rounded_rect(rect: Rect, radii: CornerRadii) -> Self {
         Self::RoundedRect { rect, radii }
     }
 
-    /// Creates a clip shape from an arbitrary path outline.
+    #[doc = include_str!("clip_shape.doc/path.md")]
     #[must_use]
     pub fn path(path: Path) -> Self {
         Self::Path(path)
     }
 
-    /// The shape's axis-aligned bounding rectangle.
-    ///
-    /// For [`ClipShape::Rect`] and [`ClipShape::RoundedRect`] this is the
-    /// rectangle itself (rounding only removes area, so the outer rectangle
-    /// still bounds the shape). For [`ClipShape::Path`] this delegates to
-    /// [`Path::bounds`], which returns `None` for an empty path. Never panics.
+    #[doc = include_str!("clip_shape.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         match self {

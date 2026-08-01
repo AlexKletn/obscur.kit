@@ -1,48 +1,23 @@
-//! A layout context: an invalidation boundary anchored at a node.
+#![doc = include_str!("layout_context.doc/_module.md")]
 
 use crate::context::{LayoutContainment, LayoutContextId, LayoutDependency};
 use obscur_identity::NodeId;
 
-/// An **invalidation boundary** anchored at a node (spec §4.2, §4.3).
-///
-/// A layout context owns the child constraints and dependencies for its
-/// subtree, forms an invalidation boundary, and can stop propagation when
-/// geometry remains unchanged. What it can be invalidated by is recorded
-/// structurally in its [`LayoutDependency`], and whether inner changes escape is
-/// recorded in its [`LayoutContainment`] (§4.3).
-///
-/// # Status: nothing constructs one of these in production
-///
-/// Read the paragraph above as this type's contract, not as a description of the
-/// shipped layout phase. [`LayoutContext::new`](Self::new) has no caller outside
-/// `#[cfg(test)]` modules, so no such boundary exists at runtime and neither
-/// [`containment`](Self::containment) nor
-/// [`should_remeasure`](Self::should_remeasure) is ever consulted on a real frame.
-///
-/// The incremental layout that *does* ship takes a different route to the same
-/// §4.3 rules: `LayoutCoordinator::layout_invalidated` gates re-measurement on a
-/// per-node [`LayoutInvalidation`](crate::invalidation::LayoutInvalidation) plus a
-/// measure cache, deriving the downward rule from the cache key (a child
-/// re-measures precisely when its constraints differ) and the upward rule from
-/// whole-ancestor-chain eviction. So "recalculation starts at the nearest affected
-/// context" is not how the runtime currently gets there, and the containment stop
-/// is unimplemented: nothing narrows that eviction. This type is what would make
-/// both precise rather than conservative.
+#[doc = include_str!("layout_context.doc/LayoutContext.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LayoutContext {
-    /// Identifier of this context.
+    #[doc = include_str!("layout_context.doc/id.md")]
     id: LayoutContextId,
-    /// The node at which this boundary is anchored.
+    #[doc = include_str!("layout_context.doc/node.md")]
     node: NodeId,
-    /// Whether layout/size effects are contained at this boundary.
+    #[doc = include_str!("layout_context.doc/containment.md")]
     containment: LayoutContainment,
-    /// What this context's layout output depends on.
+    #[doc = include_str!("layout_context.doc/dependency.md")]
     dependency: LayoutDependency,
 }
 
 impl LayoutContext {
-    /// Creates a context anchored at `node` with empty containment and an empty
-    /// dependency record.
+    #[doc = include_str!("layout_context.doc/new.md")]
     #[must_use]
     pub fn new(id: LayoutContextId, node: NodeId) -> Self {
         Self {
@@ -53,59 +28,47 @@ impl LayoutContext {
         }
     }
 
-    /// The identifier of this context.
+    #[doc = include_str!("layout_context.doc/id_2.md")]
     #[must_use]
     pub const fn id(&self) -> LayoutContextId {
         self.id
     }
 
-    /// The node at which this boundary is anchored.
+    #[doc = include_str!("layout_context.doc/node_2.md")]
     #[must_use]
     pub const fn node(&self) -> NodeId {
         self.node
     }
 
-    /// The containment declaration for this boundary.
+    #[doc = include_str!("layout_context.doc/containment_2.md")]
     #[must_use]
     pub const fn containment(&self) -> LayoutContainment {
         self.containment
     }
 
-    /// The dependency record for this context.
+    #[doc = include_str!("layout_context.doc/dependency_2.md")]
     #[must_use]
     pub const fn dependency(&self) -> &LayoutDependency {
         &self.dependency
     }
 
-    /// Mutable access to the dependency record, to register constraint/child
-    /// dependencies as the subtree is built.
+    #[doc = include_str!("layout_context.doc/dependency_mut.md")]
     pub fn dependency_mut(&mut self) -> &mut LayoutDependency {
         &mut self.dependency
     }
 
-    /// Replaces the containment declaration for this boundary.
+    #[doc = include_str!("layout_context.doc/set_containment.md")]
     pub fn set_containment(&mut self, containment: LayoutContainment) {
         self.containment = containment;
     }
 
-    /// Whether this context forms a containment boundary that stops upward
-    /// invalidation propagation (delegates to
-    /// [`LayoutContainment::is_boundary`]).
+    #[doc = include_str!("layout_context.doc/is_containment_boundary.md")]
     #[must_use]
     pub const fn is_containment_boundary(&self) -> bool {
         self.containment.is_boundary()
     }
 
-    /// Whether this context must be re-measured given a possible constraint
-    /// change and/or a changed child (spec §4.3).
-    ///
-    /// Returns `true` when either:
-    /// - `constraints_changed` is set and this context's size depends on the
-    ///   incoming constraints ("propagate down only on constraint change"), or
-    /// - `changed_child` is a child whose size feeds this context's measure.
-    ///
-    /// This encodes that recomputation starts at the nearest affected context
-    /// and is driven by structural dependencies rather than dirty flags.
+    #[doc = include_str!("layout_context.doc/should_remeasure.md")]
     #[must_use]
     pub fn should_remeasure(
         &self,

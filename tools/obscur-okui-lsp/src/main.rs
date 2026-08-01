@@ -1,17 +1,4 @@
-//! `.okui` language-server binary.
-//!
-//! By default this speaks the real Language Server Protocol over stdio: a
-//! JSON-RPC 2.0 loop (LSP base protocol, `Content-Length`-framed messages) built
-//! on the transport-agnostic core in the [`obscur_okui_lsp`] library. It handles
-//! `initialize`/`shutdown`/`exit`, the `textDocument/didOpen`/`didChange`/
-//! `didClose` lifecycle (pushing `textDocument/publishDiagnostics`),
-//! `textDocument/documentSymbol` and `textDocument/hover`, delegating all
-//! analysis to the [`Analyzer`](obscur_okui_lsp::Analyzer)/[`Server`].
-//!
-//! With `--check` it instead runs a single-shot `.okui` checker: it reads source
-//! from standard input, prints the diagnostics (`line:col severity [source]
-//! message`) and the document-symbol outline, and exits non-zero when any
-//! error-severity diagnostic is found, so it is usable in a CI check.
+#![doc = include_str!("main.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::io::{self, Read, Write};
@@ -19,7 +6,7 @@ use std::process::ExitCode;
 
 use obscur_okui_lsp::{Analyzer, DocumentSymbol, LspDiagnostic, LspSeverity, Server};
 
-/// The synthetic URI used for the document read from standard input in `--check`.
+#[doc = include_str!("main.doc/STDIN_URI.md")]
 const STDIN_URI: &str = "stdin://input.okui";
 
 fn main() -> ExitCode {
@@ -29,7 +16,7 @@ fn main() -> ExitCode {
     run_server()
 }
 
-/// Runs the JSON-RPC/stdio language server over real standard input/output.
+#[doc = include_str!("main.doc/run_server.md")]
 fn run_server() -> ExitCode {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -44,7 +31,7 @@ fn run_server() -> ExitCode {
     }
 }
 
-/// Runs the single-shot `.okui` checker over standard input (the `--check` mode).
+#[doc = include_str!("main.doc/run_check.md")]
 fn run_check() -> ExitCode {
     let mut source = String::new();
     if let Err(error) = io::stdin().read_to_string(&mut source) {
@@ -69,8 +56,7 @@ fn run_check() -> ExitCode {
     }
 }
 
-/// Writes the diagnostics and symbol outline to `out`, returning whether any
-/// error-severity diagnostic was present.
+#[doc = include_str!("main.doc/report.md")]
 fn report(
     out: &mut impl Write,
     diagnostics: &[LspDiagnostic],
@@ -103,7 +89,7 @@ fn report(
     Ok(has_errors)
 }
 
-/// Writes one symbol and its children, indented by `depth` levels.
+#[doc = include_str!("main.doc/write_symbol.md")]
 fn write_symbol(out: &mut impl Write, symbol: &DocumentSymbol, depth: usize) -> io::Result<()> {
     writeln!(
         out,

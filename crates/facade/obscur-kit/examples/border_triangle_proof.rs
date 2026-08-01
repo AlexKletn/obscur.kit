@@ -1,21 +1,4 @@
-//! **Proof: the CSS border-triangle trick renders (headless CPU).**
-//!
-//! The classic trick — a `width:0;height:0` box with three transparent border
-//! sides and one colored side — draws a solid TRIANGLE (an arrow/marker glyph:
-//! select ▼, disclosure ▸▾, stepper ▲▼). It works because the scene coordinator
-//! now paints each SOLID border side as a **mitered trapezoid quad** (outer edge
-//! full, inner edge inset by the two adjacent border widths) instead of an
-//! axis-aligned rect: when a box collapses, the colored side's trapezoid folds
-//! into a triangle, and transparent sides paint nothing.
-//!
-//! This example mirrors the coordinator's `border_fills` geometry to emit the
-//! four cardinal arrows (▽ ▲ ▷ ◁) plus a normal 4-colour bordered box (whose
-//! corners are now 45°-mitered), rasterizes them through the software
-//! [`CpuRenderer`] (no GPU), verifies each triangle is filled at its centroid yet
-//! empty at an outside corner, and writes `target/border_triangle_proof.png`.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example border_triangle_proof --features render-cpu`
+#![doc = include_str!("border_triangle_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -31,9 +14,9 @@ use obscur_kit::scene::paint::Brush;
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// The output image extent.
+#[doc = include_str!("border_triangle_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(480.0, 260.0);
-/// The arrow ink (#333).
+#[doc = include_str!("border_triangle_proof.doc/INK.md")]
 const INK: Color = Color::rgba(0.2, 0.2, 0.2, 1.0);
 
 fn main() {
@@ -130,9 +113,7 @@ fn main() {
     );
 }
 
-/// Emits a node's SOLID border as mitered trapezoid quads — a faithful copy of the
-/// scene coordinator's `border_fills`. `widths`/`colors` are in top/right/bottom/
-/// left order; a zero-width or `None` (transparent) side paints nothing.
+#[doc = include_str!("border_triangle_proof.doc/emit_border.md")]
 fn emit_border(
     builder: &mut DisplayListBuilder,
     bounds: Rect,
@@ -171,7 +152,7 @@ fn emit_border(
     }
 }
 
-/// Renders `list` through the software renderer into a pixmap at [`VIEWPORT`].
+#[doc = include_str!("border_triangle_proof.doc/render.md")]
 fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -184,8 +165,7 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Asserts the arrow is INKED at `inside` (its centroid) yet EMPTY (white) at
-/// `outside` (a corner of its bounding box the triangle does not cover).
+#[doc = include_str!("border_triangle_proof.doc/verify_triangle.md")]
 fn verify_triangle(
     pixmap: &tiny_skia::Pixmap,
     name: &str,
@@ -212,7 +192,7 @@ fn verify_triangle(
     );
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("border_triangle_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

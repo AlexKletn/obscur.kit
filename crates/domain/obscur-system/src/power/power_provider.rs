@@ -1,49 +1,21 @@
-//! The replaceable port for reading platform power state (spec §7.11).
-//!
-//! [`PowerProvider`] is the hexagonal port through which the domain asks the host
-//! for the current [`PowerProfile`] and learns, via
-//! [`availability`](PowerProvider::availability), whether the platform reports
-//! power information at all. Capability is honest: a platform without power
-//! telemetry answers [`SupportLevel::Unavailable`] and reports a typed
-//! [`PowerSource::Unknown`] rather than fabricating a plugged-in reading. The
-//! colocated [`NullPowerProvider`] and [`FixedPowerProvider`] are reference
-//! implementations of that contract.
+#![doc = include_str!("power_provider.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 
 use crate::power::{PowerProfile, PowerSource};
 
-/// The replaceable port for reading the current power state (spec §7.11).
-///
-/// An adapter implements this trait once per platform and the domain holds it as
-/// `Box<dyn PowerProvider>`. The trait is deliberately **object-safe** — no
-/// generic or `Self`-returning methods — so providers can be stored
-/// polymorphically.
-///
-/// Contract: a provider reports an honest [`availability`](Self::availability)
-/// and never panics — a platform without power telemetry returns
-/// [`SupportLevel::Unavailable`] and the plugged-in baseline profile.
+#[doc = include_str!("power_provider.doc/PowerProvider.md")]
 pub trait PowerProvider {
-    /// Returns the current power state (spec §7.11).
+    #[doc = include_str!("power_provider.doc/profile.md")]
     #[must_use]
     fn profile(&self) -> PowerProfile;
 
-    /// Returns whether power information is available on this platform
-    /// (spec §7.11).
+    #[doc = include_str!("power_provider.doc/availability.md")]
     #[must_use]
     fn availability(&self) -> SupportLevel;
 }
 
-/// A reference [`PowerProvider`] for platforms without power telemetry
-/// (spec §7.11).
-///
-/// `NullPowerProvider` honestly reports [`SupportLevel::Unavailable`] and a
-/// profile whose source is the typed [`PowerSource::Unknown`] — a reading that
-/// is deliberately *distinguishable* from a genuine plugged-in ([`PowerSource::Ac`])
-/// one, so callers cannot mistake absence for a real state (§7.11 / README core
-/// principle 7: unsupported operations return typed results, not fabricated ones).
-/// Its answers are correct behavior — a documented reference for the
-/// honest-capability contract — not a stub waiting to be filled in.
+#[doc = include_str!("power_provider.doc/NullPowerProvider.md")]
 #[derive(Debug, Default, Clone)]
 pub struct NullPowerProvider;
 
@@ -60,20 +32,14 @@ impl PowerProvider for NullPowerProvider {
     }
 }
 
-/// A deterministic [`PowerProvider`] that returns a fixed profile, for tests
-/// (spec §7.11).
-///
-/// `FixedPowerProvider` holds a [`PowerProfile`] supplied at construction and
-/// always returns it from [`profile`](PowerProvider::profile), reporting
-/// [`SupportLevel::Native`]. Tests use it to drive the domain with an exact,
-/// reproducible power state.
+#[doc = include_str!("power_provider.doc/FixedPowerProvider.md")]
 #[derive(Debug, Default, Clone)]
 pub struct FixedPowerProvider {
     profile: PowerProfile,
 }
 
 impl FixedPowerProvider {
-    /// Creates a provider that always reports `profile` (spec §7.11).
+    #[doc = include_str!("power_provider.doc/new.md")]
     #[must_use]
     pub const fn new(profile: PowerProfile) -> Self {
         Self { profile }

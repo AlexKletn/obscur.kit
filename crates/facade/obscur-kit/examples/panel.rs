@@ -1,27 +1,4 @@
-//! **A desktop panel** — a `wlr-layer-shell` bar across the top of the screen
-//! (spec §6.5).
-//!
-//! This is the same toolkit as every other example: the same `View`, the same
-//! CSS, the same runtime, the same touch handling. The only thing that differs
-//! is how the surface reaches the screen — anchored to three edges of the output
-//! instead of floating as an application window, and **reserving its own
-//! height**, so a maximised window stops at the bar rather than sliding under it.
-//!
-//! ```sh
-//! cargo run -p obscur-kit --features full --example panel          # compositor picks the output
-//! cargo run -p obscur-kit --features full --example panel -- eDP-1 # pinned to a connector
-//! ```
-//!
-//! Needs a compositor that implements `wlr-layer-shell` — Sway, Hyprland, river,
-//! Wayfire, KDE. On GNOME the run ends with a stated capability error rather than
-//! a crash, which is the point of returning one.
-//!
-//! # What to try
-//!
-//! Tap or click the buttons: they carry `:hover` and `:active`, and the tap
-//! counter is ordinary application state re-rendered through the same reactive
-//! loop a window uses. The bar is translucent, so whatever the compositor does
-//! with the wallpaper behind it shows through.
+#![doc = include_str!("panel.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -38,20 +15,13 @@ use obscur_kit::windowing::layer::{
     LayerAnchor, LayerExclusiveZone, LayerOutput, LayerSurfaceConfig, Margins,
 };
 
-/// The bar's height in logical pixels. It is also what the bar reserves, which is
-/// what makes it a panel rather than a strip windows slide beneath.
+#[doc = include_str!("panel.doc/BAR_HEIGHT.md")]
 const BAR_HEIGHT: u32 = 36;
 
-/// The same height as a float, for the places a `Size` is wanted.
+#[doc = include_str!("panel.doc/BAR_HEIGHT_PX.md")]
 const BAR_HEIGHT_PX: f32 = 36.0;
 
-/// The styling. `100%` height rather than a fixed one, because the compositor —
-/// not this sheet — decides the surface's real extent.
-///
-/// No `width` at all, deliberately: a `width: 100%` beside horizontal padding
-/// makes the border box 28px wider than the surface, and the right padding ends
-/// up off-screen with the last control pressed against the edge. The root fills
-/// its surface anyway.
+#[doc = include_str!("panel.doc/CSS.md")]
 const CSS: &str = "\
 .bar    { height: 100%; \
           background-color: rgba(18, 22, 33, 0.82); \
@@ -71,25 +41,21 @@ const CSS: &str = "\
 .key:active { background-color: rgba(84, 104, 160, 1.0); }\n\
 ";
 
-/// The clock text a background thread keeps current, and the panel reads.
-///
-/// This is the point of the waker: nothing the compositor does makes a clock
-/// tick, so without a way to reach the loop from outside it, the time would only
-/// ever change when something else happened to wake it.
+#[doc = include_str!("panel.doc/Clock.md")]
 type Clock = Arc<Mutex<String>>;
 
-/// The panel's whole state.
+#[doc = include_str!("panel.doc/Panel.md")]
 struct Panel {
-    /// How many times a button has been tapped.
+    #[doc = include_str!("panel.doc/taps.md")]
     taps: u32,
-    /// Whether the bar currently reserves screen space, or floats over it.
+    #[doc = include_str!("panel.doc/reserving.md")]
     reserving: bool,
-    /// The clock, as of the last time the loop was woken.
+    #[doc = include_str!("panel.doc/clock.md")]
     clock: String,
 }
 
 impl Panel {
-    /// A panel that has seen nothing yet.
+    #[doc = include_str!("panel.doc/new.md")]
     const fn new() -> Self {
         Self {
             taps: 0,
@@ -98,22 +64,17 @@ impl Panel {
         }
     }
 
-    /// Counts one tap.
+    #[doc = include_str!("panel.doc/tap.md")]
     const fn tap(&mut self) {
         self.taps = self.taps.saturating_add(1);
     }
 
-    /// Forgets every tap.
+    #[doc = include_str!("panel.doc/reset.md")]
     const fn reset(&mut self) {
         self.taps = 0;
     }
 
-    /// Flips between reserving screen space and floating over it, and returns
-    /// the surface configuration that now applies.
-    ///
-    /// This is a live reconfiguration: no surface is destroyed and none is
-    /// created. Layer-shell's placement properties — band, anchor, exclusive
-    /// zone, margin, size — are all requests on the existing surface.
+    #[doc = include_str!("panel.doc/toggle_presentation.md")]
     fn toggle_presentation(&mut self, namespace: &str) -> LayerSurfaceConfig {
         self.reserving = !self.reserving;
         if self.reserving {
@@ -156,7 +117,7 @@ fn view(state: &Panel) -> View {
     View::single(bar)
 }
 
-/// One bar button, bound to `command`.
+#[doc = include_str!("panel.doc/key.md")]
 fn key(command: &str, label: &str) -> ViewNode {
     Button::new(label, InternedSymbol::named(command))
         .into_view_node()
@@ -233,8 +194,7 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
         .run()
 }
 
-/// The wall clock as `HH:MM:SS`, without pulling in a date library: seconds since
-/// the epoch, folded into a day.
+#[doc = include_str!("panel.doc/now.md")]
 fn now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

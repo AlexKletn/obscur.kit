@@ -1,35 +1,28 @@
-//! A typed relation from one accessibility node to another (spec §7.1).
+#![doc = include_str!("semantic_relation.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// A typed relation from one accessibility node to another (spec §7.1
-/// relations).
-///
-/// Each variant expresses an ARIA-like relationship and carries the
-/// [`NodeId`] of the related retained-tree node as its single target,
-/// retrievable via [`target`](Self::target). Platform adapters translate these
-/// into their native relation types (e.g. `aria-labelledby`,
-/// `aria-controls`).
+#[doc = include_str!("semantic_relation.doc/SemanticRelation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SemanticRelation {
-    /// The node is labelled by the target node.
+    #[doc = include_str!("semantic_relation.doc/LabelledBy.md")]
     LabelledBy(NodeId),
-    /// The node is described by the target node.
+    #[doc = include_str!("semantic_relation.doc/DescribedBy.md")]
     DescribedBy(NodeId),
-    /// The node controls the target node.
+    #[doc = include_str!("semantic_relation.doc/Controls.md")]
     Controls(NodeId),
-    /// The node owns the target node as a logical child.
+    #[doc = include_str!("semantic_relation.doc/Owns.md")]
     Owns(NodeId),
-    /// Reading flow continues to the target node.
+    #[doc = include_str!("semantic_relation.doc/FlowsTo.md")]
     FlowsTo(NodeId),
-    /// The node is a member of the group identified by the target.
+    #[doc = include_str!("semantic_relation.doc/MemberOf.md")]
     MemberOf(NodeId),
-    /// The target is the active descendant within this node.
+    #[doc = include_str!("semantic_relation.doc/ActiveDescendant.md")]
     ActiveDescendant(NodeId),
 }
 
 impl SemanticRelation {
-    /// Returns the [`NodeId`] this relation points at.
+    #[doc = include_str!("semantic_relation.doc/target.md")]
     #[must_use]
     pub const fn target(&self) -> NodeId {
         match self {
@@ -43,8 +36,7 @@ impl SemanticRelation {
         }
     }
 
-    /// Returns a stable, kebab-free name for the relation kind, suitable for
-    /// diagnostics and adapter mapping.
+    #[doc = include_str!("semantic_relation.doc/kind_name.md")]
     #[must_use]
     pub const fn kind_name(&self) -> &'static str {
         match self {

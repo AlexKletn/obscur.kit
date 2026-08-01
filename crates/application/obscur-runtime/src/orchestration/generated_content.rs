@@ -1,13 +1,4 @@
-//! Resolving §4.16 `::before` / `::after` generated content into paint-only runs.
-//!
-//! A matched pseudo-element rule (`.badge::before { content: "…" }`) paints a
-//! string before / after the originating element's own content, without the
-//! generated box ever becoming a tree node, an accessibility node, or a hit-test
-//! target.
-//!
-//! [`resolve_generated_content`] returns, per node, the runs the scene
-//! coordinator paints inside that node's own paint unit — so a `::before` run
-//! sorts before the element's real text child in paint order.
+#![doc = include_str!("generated_content.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -21,35 +12,26 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{PseudoStates, TreeElement, part_specificity_for};
 
-/// The reserved exported-part name a text control gives its placeholder hint, so
-/// `Input::part(placeholder)` (the CSS `::placeholder` analogue) can restyle it.
+#[doc = include_str!("generated_content.doc/PLACEHOLDER_PART.md")]
 const PLACEHOLDER_PART: &str = "placeholder";
 
-/// One paint-only generated run: its text and an optional resolved colour.
-///
-/// A `None` colour means "no `color` was resolved for this decoration" — the
-/// scene coordinator falls back to the owning node's own ink.
+#[doc = include_str!("generated_content.doc/GeneratedRun.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedRun {
-    /// The literal text to paint.
+    #[doc = include_str!("generated_content.doc/text.md")]
     pub text: Box<str>,
-    /// The resolved `color`, or [`None`] to inherit the node's ink.
+    #[doc = include_str!("generated_content.doc/color.md")]
     pub color: Option<StyleColor>,
 }
 
-/// The generated decoration attached to one node (§4.16): `::before` / `::after`
-/// content, plus the text control's synthetic **placeholder** part.
+#[doc = include_str!("generated_content.doc/GeneratedContent.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GeneratedContent {
-    /// `::before` content, painted before the node's own content.
+    #[doc = include_str!("generated_content.doc/before.md")]
     pub before: Option<GeneratedRun>,
-    /// `::after` content, painted after the node's own content.
+    #[doc = include_str!("generated_content.doc/after.md")]
     pub after: Option<GeneratedRun>,
-    /// The text control's **placeholder** hint (the CSS `::placeholder` analogue),
-    /// present only while the field is empty (`:placeholder-shown`). Its colour is
-    /// resolved through the exported-part selector `Component::part(placeholder)`.
-    /// This is a §4.16 synthetic part: paint-only, DevTools-visible, hit-transparent,
-    /// and never a component-tree child.
+    #[doc = include_str!("generated_content.doc/placeholder.md")]
     pub placeholder: Option<GeneratedRun>,
 }
 
@@ -59,9 +41,7 @@ impl GeneratedContent {
     }
 }
 
-/// Resolves the generated decoration for every element node in `tree` under
-/// `sheets` (in `environment`), keyed by node id. Nodes with no decoration are
-/// omitted.
+#[doc = include_str!("generated_content.doc/resolve_generated_content.md")]
 #[must_use]
 pub(crate) fn resolve_generated_content(
     tree: &RetainedTree,
@@ -87,9 +67,7 @@ pub(crate) fn resolve_generated_content(
     out
 }
 
-/// Resolves the `content` (and its `color`) of `element`'s `pseudo`
-/// (`before` / `after`) generated box, or [`None`] when no matched rule sets a
-/// `content` string.
+#[doc = include_str!("generated_content.doc/resolve_pseudo.md")]
 fn resolve_pseudo(
     sheets: &[Stylesheet],
     element: &TreeElement<'_>,
@@ -111,17 +89,7 @@ fn resolve_pseudo(
     })
 }
 
-/// Resolves the synthetic **placeholder** run for a text control (§4.16), or
-/// [`None`] when the node carries no non-empty placeholder or its value is not
-/// empty (the CSS `:placeholder-shown` rule — the hint shows only while the field
-/// is empty).
-///
-/// Unlike an ordinary component-internal part (which crosses the scope boundary
-/// only from inside a mounted component host), the placeholder's host is the field
-/// element **itself**: the exported-part selector `Component::part(placeholder)`
-/// is matched with the field as the host, so `Input::part(placeholder) { color }`
-/// recolours the hint without the field having to be a component host. Its text is
-/// the reserved `PLACEHOLDER` attribute the widget emits.
+#[doc = include_str!("generated_content.doc/resolve_placeholder.md")]
 fn resolve_placeholder(
     sheets: &[Stylesheet],
     element: &TreeElement<'_>,
@@ -149,12 +117,7 @@ fn resolve_placeholder(
     })
 }
 
-/// Cascades every declaration whose owning selector `select` accepts (returning
-/// that selector's specificity), over `sheets` in document order.
-///
-/// This mirrors [`StyleMatcher::match_element_in`](obscur_style::matching::StyleMatcher::match_element_in):
-/// `source_order` advances over every encountered declaration so document-order
-/// tie-breaks are preserved, but only accepted rules' declarations are collected.
+#[doc = include_str!("generated_content.doc/cascade_where.md")]
 fn cascade_where(
     sheets: &[Stylesheet],
     environment: &MediaEnvironment,

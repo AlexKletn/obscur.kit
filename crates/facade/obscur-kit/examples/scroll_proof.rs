@@ -1,31 +1,4 @@
-//! **Proof: a real `overflow-y: auto` vertical scroll container — clip, scroll
-//! offset, scrollbar, and a scrolled hit-test.**
-//!
-//! Reimplemented from **CSS Overflow Module Level 3** (§overflow, §scroll-container,
-//! §scrollport). A 200×120 `.scroller` with `overflow: auto` holds six 40-px rows
-//! (240 px of content), so it is a scroll container. This drives the REAL pipeline
-//! through the public facade on a live [`UiRuntime`]: reconcile → style → layout →
-//! compose, where the scene coordinator brackets the scroller's descendants with a
-//! `PushTransform(translate(0, −scroll_top))` inside its overflow clip and paints a
-//! vertical scrollbar. Two panels are rasterized headless through the software
-//! [`CpuRenderer`] (no GPU) to `target/scroll_proof.png`:
-//!
-//! - **Panel 1 — Idle.** `scroll_top = 0`: rows 0–2 fill the scrollport; rows 3–5
-//!   are CLIPPED away (they do not paint below the box). The scrollbar thumb sits
-//!   at the top.
-//! - **Panel 2 — Scrolled.** After [`UiRuntime::scroll_by`]`(scroller, 80)` the
-//!   content is translated up 80 px: row 2 now paints at the top and rows 0–1 have
-//!   scrolled out. The thumb has moved down.
-//!
-//! Before writing the image it machine-checks: (a) row 3 does NOT paint below the
-//! scrollport (the clip bites); (b) the top-of-scrollport pixel is row 0 idle and
-//! row 2 scrolled (the content scrolled up by exactly one 80-px step / two rows);
-//! (c) a scrollbar thumb paints in the right gutter and moves down when scrolled;
-//! and (d) a pointer at the same screen point hit-tests row 0 idle but row 2
-//! scrolled — the pointer mapping composes the container's `scroll_top`.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example scroll_proof --features render-cpu`
+#![doc = include_str!("scroll_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -44,14 +17,13 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The logical extent each panel is laid out and rasterized under.
+#[doc = include_str!("scroll_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(220.0, 150.0);
 
-/// One wheel step, in logical px — two rows (2 × 40).
+#[doc = include_str!("scroll_proof.doc/STEP.md")]
 const STEP: f32 = 80.0;
 
-/// The demo stylesheet: a light page, a 200×120 `overflow: auto` scroller, and six
-/// 40-px rows in distinct colors so a pixel unambiguously identifies its row.
+#[doc = include_str!("scroll_proof.doc/CSS.md")]
 const CSS: &str = "\
 .page { width: 220px; height: 150px; background-color: #dddddd; }\n\
 .scroller { width: 200px; height: 120px; overflow: auto; background-color: #ffffff; }\n\
@@ -162,7 +134,7 @@ fn main() {
     println!("[verify] OK — clip + scroll offset + scrollbar + scrolled hit-test all hold");
 }
 
-/// The view: a `.page` holding a `.scroller` that holds six `.row`s.
+#[doc = include_str!("scroll_proof.doc/scroller_view.md")]
 fn scroller_view() -> View {
     let row = |n: u64, idx: usize| {
         ViewNode::element(ComponentId::from_raw(n)).with_prop(ViewProperty::new(
@@ -180,7 +152,7 @@ fn scroller_view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![page]))
 }
 
-/// Returns `(scroller node, [row nodes])` after a frame has populated the tree.
+#[doc = include_str!("scroll_proof.doc/scroll_nodes.md")]
 fn scroll_nodes(runtime: &UiRuntime) -> (NodeId, Vec<NodeId>) {
     let root = runtime.tree().root().expect("root after a frame");
     let page = runtime.tree().get(root).unwrap().child_nodes()[0];
@@ -198,7 +170,7 @@ fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     )
 }
 
-/// Rasterizes the runtime's current committed scene into a fresh pixmap.
+#[doc = include_str!("scroll_proof.doc/capture.md")]
 fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pixmap {
     let snapshot = runtime.snapshot();
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -210,8 +182,7 @@ fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pi
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Whether a pixel roughly matches an `(r, g, b)` in 0..=255 (loose, so anti-alias
-/// and the translucent scrollbar wash do not break the check).
+#[doc = include_str!("scroll_proof.doc/near.md")]
 fn near(px: Option<tiny_skia::PremultipliedColorU8>, r: u8, g: u8, b: u8) -> bool {
     px.is_some_and(|p| {
         let d = |a: u8, b: u8| i32::from(a) - i32::from(b);
@@ -219,7 +190,7 @@ fn near(px: Option<tiny_skia::PremultipliedColorU8>, r: u8, g: u8, b: u8) -> boo
     })
 }
 
-/// Asserts the clip, the scroll offset, and the scrollbar thumb movement.
+#[doc = include_str!("scroll_proof.doc/verify.md")]
 fn verify(idle: &tiny_skia::Pixmap, scrolled: &tiny_skia::Pixmap) {
     // (a) Clip: row 3 (orange #e68c26) is entirely below the 120-px scrollport, so
     //     it must NOT paint at y = 130 (below the box) — the overflow clip bit.
@@ -273,10 +244,7 @@ fn verify(idle: &tiny_skia::Pixmap, scrolled: &tiny_skia::Pixmap) {
     println!("[verify] clip bites row 3; content scrolled row0→row2; thumb moved top→down");
 }
 
-/// Whether the scrollbar thumb covers row `y`: the gutter pixel (x≈196, inside the
-/// 8-px scrollbar) is markedly darker than the same row left of the gutter (x=100).
-/// The ~35%-black thumb drops the channel sum by ~a third; the ~6% track barely
-/// changes it, so a 40-unit margin cleanly tells thumb from track.
+#[doc = include_str!("scroll_proof.doc/thumb_at.md")]
 fn thumb_at(pixmap: &tiny_skia::Pixmap, y: u32) -> bool {
     let sum = |x: u32| {
         pixmap.pixel(x, y).map_or(0i32, |p| {
@@ -286,7 +254,7 @@ fn thumb_at(pixmap: &tiny_skia::Pixmap, y: u32) -> bool {
     sum(196) + 40 < sum(100)
 }
 
-/// Horizontally stitches `panels` with a thin divider between them.
+#[doc = include_str!("scroll_proof.doc/stitch.md")]
 fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 3u32;
     let height = panels.iter().map(|p| p.height()).max().unwrap_or(0);
@@ -310,14 +278,14 @@ fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] (author origin).
+#[doc = include_str!("scroll_proof.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("scroll_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

@@ -1,21 +1,4 @@
-//! **Proof: a multi-line `<textarea>` scrolls VERTICALLY to keep the caret's line
-//! in view** (CSS Overflow 3 §3.1 scroll-into-view + §scroll-container).
-//!
-//! Drives a focused `<textarea>` (a fixed-height `overflow: auto` box) through the
-//! real runtime editing path: it types more lines than fit, renders a CPU
-//! `target/textarea_vscroll_proof.png`, and asserts:
-//!
-//! - the field's overflow scroll container scrolled (`scroll_top > 0`);
-//! - the painted caret's LINE, offset by the container's `translate(0, −scroll_top)`,
-//!   lands INSIDE the field box (its y within `[box.top, box.bottom]`) — you can see
-//!   the line you are typing on;
-//! - the TOP lines are scrolled out above the box (their unscrolled run y, minus
-//!   `scroll_top`, sits above `box.top`) and clipped;
-//! - a scrollbar thumb (an 8-px-wide fill at the box's right edge) paints.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example textarea_vscroll_proof \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("textarea_vscroll_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -45,22 +28,20 @@ use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 
-/// The logical extent the frame is laid out and rasterized under.
+#[doc = include_str!("textarea_vscroll_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(280.0, 200.0);
 
-/// The `on-input` command the field binds (registered, never mirrored here).
+#[doc = include_str!("textarea_vscroll_proof.doc/CMD.md")]
 const CMD: InternedSymbol = InternedSymbol::from_raw(0x0001);
 
-/// A multi-line textarea: 200px wide, a fixed 80px height, `pre-wrap` (authored
-/// newlines preserved), `overflow: auto` (a VERTICAL scroll container) with an
-/// exact 20px `line-height`, so 4 lines fit the content box and more scroll.
+#[doc = include_str!("textarea_vscroll_proof.doc/CSS.md")]
 const CSS: &str = "\
 .stage { padding: 40px; background: #12141c; }\
 .field { width: 200px; height: 80px; background: #ffffff; color: #101216; \
 white-space: pre-wrap; overflow: auto; line-height: 20px; \
 border: 1px solid #5b6472; }";
 
-/// The value typed into the field — eight lines, twice the ~4 lines that fit.
+#[doc = include_str!("textarea_vscroll_proof.doc/LINES.md")]
 const LINES: &[&str] = &[
     "line one",
     "line two",
@@ -72,7 +53,7 @@ const LINES: &[&str] = &[
     "line eight",
 ];
 
-/// The scrollbar's fixed width (CSS Overflow 3 §scrollbars; see the coordinator).
+#[doc = include_str!("textarea_vscroll_proof.doc/SCROLLBAR_WIDTH.md")]
 const SCROLLBAR_WIDTH: f32 = 8.0;
 
 fn main() {
@@ -189,8 +170,7 @@ fn main() {
     );
 }
 
-/// A `.stage` holding one editable `.field` (`type=textarea`, multiline) carrying
-/// `text` and binding on-input.
+#[doc = include_str!("textarea_vscroll_proof.doc/field_view.md")]
 fn field_view(text: &str) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(1))
@@ -207,16 +187,14 @@ fn field_view(text: &str) -> View {
     ]))
 }
 
-/// The `field` node id (root → stage → field).
+#[doc = include_str!("textarea_vscroll_proof.doc/field_node.md")]
 fn field_node(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("root after a frame");
     let stage = runtime.tree().get(root).unwrap().child_nodes()[0];
     runtime.tree().get(stage).unwrap().child_nodes()[0]
 }
 
-/// The painted caret's `(top, bottom)` y: the thin (width-1) fill whose height is
-/// about the 20-px line-height — distinct from a 1-px BORDER edge, which is width-1
-/// but spans the full box height.
+#[doc = include_str!("textarea_vscroll_proof.doc/caret_y_of.md")]
 fn caret_y_of(snapshot: &SceneSnapshot) -> Option<(f32, f32)> {
     snapshot
         .display_list()
@@ -231,7 +209,7 @@ fn caret_y_of(snapshot: &SceneSnapshot) -> Option<(f32, f32)> {
         })
 }
 
-/// The smallest (topmost) `DrawText` run origin y — the first wrapped line.
+#[doc = include_str!("textarea_vscroll_proof.doc/min_text_run_y.md")]
 fn min_text_run_y(snapshot: &SceneSnapshot) -> Option<f32> {
     snapshot
         .display_list()
@@ -244,8 +222,7 @@ fn min_text_run_y(snapshot: &SceneSnapshot) -> Option<f32> {
         .fold(None, |acc, y| Some(acc.map_or(y, |a: f32| a.min(y))))
 }
 
-/// Whether a scrollbar thumb — an `≈8`-px-wide fill hugging the box's right edge —
-/// is present in the display list.
+#[doc = include_str!("textarea_vscroll_proof.doc/has_scrollbar_thumb.md")]
 fn has_scrollbar_thumb(snapshot: &SceneSnapshot, box_right: f32) -> bool {
     snapshot.display_list().commands().iter().any(|c| match c {
         PaintCommand::DrawPath { path, .. } => path.bounds().is_some_and(|r| {
@@ -256,7 +233,7 @@ fn has_scrollbar_thumb(snapshot: &SceneSnapshot, box_right: f32) -> bool {
     })
 }
 
-/// Boots a runtime + CPU renderer with the text stack wired (best-effort font).
+#[doc = include_str!("textarea_vscroll_proof.doc/boot.md")]
 fn boot() -> (UiRuntime, CpuRenderer) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
     runtime.on_text_input(CMD, |_| {});
@@ -267,7 +244,7 @@ fn boot() -> (UiRuntime, CpuRenderer) {
     (runtime, renderer)
 }
 
-/// Rasterizes a snapshot through the CPU renderer and clones the pixmap.
+#[doc = include_str!("textarea_vscroll_proof.doc/rasterize.md")]
 fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia::Pixmap {
     let frame = RenderFrame::new(snapshot.clone(), VIEWPORT);
     let submission = FrameSubmission::new(frame);
@@ -278,7 +255,7 @@ fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia:
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] at `origin`.
+#[doc = include_str!("textarea_vscroll_proof.doc/compile.md")]
 fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
@@ -288,12 +265,12 @@ fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
         .matchable
 }
 
-/// A plain (no-modifier) character key press.
+#[doc = include_str!("textarea_vscroll_proof.doc/char_press.md")]
 fn char_press(c: char) -> KeyEvent {
     KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character(c)))
 }
 
-/// A named (non-character) key press.
+#[doc = include_str!("textarea_vscroll_proof.doc/named_press.md")]
 fn named_press(named: NamedKey) -> KeyEvent {
     KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::named(named)))
 }
@@ -307,7 +284,7 @@ fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     )
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("textarea_vscroll_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -315,8 +292,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("textarea_vscroll_proof.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -334,12 +310,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("textarea_vscroll_proof.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("textarea_vscroll_proof.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

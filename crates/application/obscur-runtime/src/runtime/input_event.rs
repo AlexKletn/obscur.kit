@@ -1,34 +1,24 @@
-//! [`InputEvent`]: one platform event queued for the frame's dispatch phase.
+#![doc = include_str!("input_event.doc/_module.md")]
 
 use obscur_geometry::Point;
 use obscur_interaction::command::KeyEvent;
 use obscur_interaction::pointer::PointerEvent;
 use obscur_text::ime::CompositionEvent;
 
-/// A platform input event, queued to be dispatched by the frame pipeline rather
-/// than the instant a host hands it over (spec §3.4 phases 1 and 3).
-///
-/// # Why the four kinds are one type
-///
-/// A host receives pointer, keyboard, IME and scroll events from one place, in one
-/// order, and that order is part of what they mean: a key that arrives between two
-/// clicks was pressed between them. Four separate queues could not say that, and
-/// four separate immediate calls only say it by accident of when the host happened
-/// to call them. Sharing one queue makes the ordering the runtime's to keep rather
-/// than the host's to be careful about.
+#[doc = include_str!("input_event.doc/InputEvent.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputEvent {
-    /// A pointer moved, pressed, released, entered, left or was cancelled.
+    #[doc = include_str!("input_event.doc/Pointer.md")]
     Pointer(PointerEvent),
-    /// A key was pressed or released.
+    #[doc = include_str!("input_event.doc/Key.md")]
     Key(KeyEvent),
-    /// An IME composition was updated or committed.
+    #[doc = include_str!("input_event.doc/Composition.md")]
     Composition(CompositionEvent),
-    /// A scroll wheel/gesture moved by `delta` at `position`.
+    #[doc = include_str!("input_event.doc/Scroll.md")]
     Scroll {
-        /// The vertical scroll delta, in logical pixels.
+        #[doc = include_str!("input_event.doc/delta.md")]
         delta: f32,
-        /// Where the scroll happened, in viewport coordinates.
+        #[doc = include_str!("input_event.doc/position.md")]
         position: Point,
     },
 }

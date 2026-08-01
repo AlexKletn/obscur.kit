@@ -1,4 +1,4 @@
-//! `FlowLayout`: normal-flow (block) layout for the `Block` formatting context.
+#![doc = include_str!("flow_layout.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
@@ -9,169 +9,27 @@ use super::{
     clamp_content_measured, intrinsic_inline_size,
 };
 
-/// Normal-flow / block layout (spec §4.1, §4.2).
-///
-/// Stacks children top-to-bottom in document order, each occupying the full
-/// content width, and sizes the node to fit unless an explicit height is given.
-///
-/// # Rules
-///
-/// * **Content width** — resolves `style.width` against the containing block the
-///   caller stated ([`BoxConstraints::percent_width`], which falls back to the
-///   constraint's max width); if `Auto`, uses the available content width
-///   (`constraints.max.width` minus horizontal border + padding). Clamped to be
-///   non-negative.
-/// * **Intrinsic width (CSS Sizing 3 §4.1)** — `min-content` / `max-content` /
-///   `fit-content` are answered by *measuring* the children rather than by
-///   arithmetic: the children are re-measured under a no-space (`min-content`) or
-///   unbounded (`max-content`) inline offer, and the widest wins. See
-///   [`intrinsic_inline_size`], which also explains why these cost an extra
-///   measuring pass. In the **block** axis the two intrinsic sizes coincide with
-///   the content height, so `height: max-content` is `height: auto` for a block
-///   and needs no separate path.
-/// * **Intrinsic min/max bounds** — `min-width` / `max-width` take the same
-///   keywords, and are answered by the same probe as an intrinsic `width`, so
-///   `min-width: min-content` floors the box at its widest unbreakable run
-///   whatever its `width` resolved to. Their block-axis twins ride on the
-///   coincidence above: an intrinsic `min-height` / `max-height` is the height the
-///   children stacked to, at no extra measuring cost.
-/// * **Child stacking** — each child is measured with
-///   [`BoxConstraints::loose`] up to `(content_width − its inline margins,
-///   remaining_height)`, placed at the content-box left edge **plus its
-///   `margin-left`**, with its top at the running `y` offset. When this box's own
-///   block size is definite, that offer carries this box's **content box** as the
-///   child's percentage basis — a separate quantity from the offer, see below.
-/// * **Inline margins (CSS 2.1 §10.3.3)** — a child's *fixed* `margin-left` /
-///   `margin-right` take from the inline space it is offered, so a `width: auto`
-///   child fills what is left, and `margin-left` offsets it. An over-constrained
-///   box (definite width + both margins) drops its *end* margin — the one on the
-///   inline-end side of `style.direction`: `margin-right` under `ltr` (the child
-///   stays line-left), `margin-left` under `rtl` (the child settles line-right).
-/// * **`auto` inline margins (CSS 2.1 §10.3.3)** — an `auto` edge reserves
-///   nothing; it *absorbs* the space left over once the child's used width is
-///   known. Both edges `auto` splits the leftover evenly — `margin: 0 auto`
-///   centring; one edge `auto` takes it all, pushing the box to the other side.
-///   A `width: auto` child needs no special case: it already filled what it was
-///   offered, so the leftover is zero and its `auto` margins resolve to zero,
-///   exactly as §10.3.3 says. In the block axis `auto` is always zero
-///   (§10.6.3): a container's height *is* its content, so there is no leftover
-///   to absorb.
-/// * **Block margins + vertical margin collapsing (CSS 2.1 §8.3.1)** — each
-///   in-flow child's block-axis (`margin.top` / `margin.bottom`) margins take
-///   effect, and the bottom margin of one block collapses with the top margin
-///   of the next into a single used margin. The used value of a collapsing set
-///   is the **`{max_positive, min_negative}`** reduction: adjoin a margin by
-///   keeping the largest positive and the most-negative seen; solve the set as
-///   `max_positive + min_negative` (so two positives take the larger, two
-///   negatives take the more-negative, and a mixed pair sums — `+30` with `−20`
-///   → `+10`). The separation placed between two siblings is
-///   `gap + collapsed_margin`: `row-gap` does **not** collapse and is additive
-///   (Box Alignment), so with zero child margins the separation is exactly
-///   `gap` — byte-identical to a gap-only stack. An empty, zero-height child
-///   with no top/bottom border or padding has its own top and bottom margins
-///   *adjoining*, so it **collapses through**: the open collapsing set spans
-///   across it and a run of such empties between two siblings collapses into a
-///   single margin.
-/// * **Content height** — resolves `style.height` if set — against the containing
-///   block ([`BoxConstraints::percent_height`]), not against the space this box was
-///   offered — otherwise the last child's collapsed bottom edge (the trailing
-///   collapsing set is contained, see below). Clamped to be non-negative.
-/// * **Border box** — content size plus border and padding, then clamped into
-///   the incoming `constraints`.
-///
-/// Child boxes are positioned relative to this node's origin, already offset into
-/// the content box by border + padding.
-///
-/// # Deferred — the remaining §8.3.1 piece
-///
-/// **Parent–child / root collapse-through across the container boundary** (a
-/// first child's top margin or a last child's bottom margin protruding *out* of
-/// this box to collapse with the parent's own margin) is **not** modelled: it
-/// requires the [`LayoutOutput`] / [`LayoutAlgorithm`] contract to carry a
-/// block's *adjoining top/bottom margins* up to the parent formatting context —
-/// a protocol change touching every algorithm. For now the first child's top
-/// margin and the last child's bottom margin are **contained** within this box's
-/// content (no protrusion). Also out of scope: BFC-root collapse suppression
-/// nuances and clearance. Floats and inline formatting / line boxes are likewise
-/// not modelled. A **vertical** `writing-mode` rotates the block axis to
-/// horizontal — that path is [`layout_vertical`], and the rules above describe the
-/// default `horizontal-tb` mode.
-///
-/// # Percentage margins resolve against the *width*, on every edge
-///
-/// A `%` margin — including `margin-top` / `margin-bottom` — resolves against this
-/// container's `content_width` (CSS 2.1 §8.3). Reading that as a typo is the
-/// natural reaction; it is deliberate. A block's height usually depends on its
-/// content, so resolving a block-axis percentage against it would be circular. CSS
-/// breaks the cycle by picking one axis, and the inline one is the axis that is
-/// definite by the time children are laid out.
-///
-/// # A percentage *size* resolves against the containing block, not the space left
-///
-/// The offer a child is measured under and the basis its percentages resolve
-/// against are two different quantities, and this algorithm used to have only one.
-/// Each child was offered the block extent *remaining* below its predecessors and
-/// resolved `height: 50%` against that offer, so in a 240px-tall container the
-/// first child was right (120) and every sibling after it compounded the error —
-/// the second `50%` took half of the 120 that remained (60), the second `30%` of
-/// two came back 50, `20%`/`80%` came back 48/154, and a second `height: 100%`
-/// computed to **zero** and disappeared with nothing to say why.
-///
-/// css-sizing-3.txt:1027 is unambiguous, and it also settles what should happen
-/// instead of the clamping:
-///
-/// > Otherwise, the percentage is resolved against the containing block's size.
-/// > (The containing block's size is not re-resolved based on the resulting size of
-/// > the box; the contents might thus **overflow** or underflow the containing
-/// > block.)
-///
-/// So the remaining extent keeps its job — the room left for the next sibling, and
-/// the space an `auto`/stretch size fills — while the containing block's content box
-/// travels alongside it as [`BoxConstraints::percent_basis`]. Two children at
-/// `height: 100%` are now 240 each and the second one starts at the container's
-/// bottom edge; the container stays 240 and the overflow is the specified outcome,
-/// not a defect to clamp away.
-///
-/// The basis is attached only when this box's block size is **definite**. Against an
-/// indefinite one a percentage should compute to `auto`; it instead still resolves
-/// against the space available, which is the pre-existing (and separately recorded)
-/// gap — that behaviour is deliberately left exactly as it was rather than half-changed
-/// here.
+#[doc = include_str!("flow_layout.doc/FlowLayout.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlowLayout;
 
-/// A set of vertical margins that are *adjoining* and therefore collapse into a
-/// single used margin (CSS 2.1 §8.3.1).
-///
-/// The set is summarised by two running extremes — the largest positive margin
-/// and the most-negative margin seen — so that:
-///
-/// * two positive margins collapse to the **larger** (positives don't add),
-/// * two negative margins collapse to the **most-negative** (negatives don't
-///   add), and
-/// * a mixed set collapses to their **sum** (`max_positive + min_negative`).
-///
-/// This is the canonical `{max_positive, min_negative}` reduction; folding each
-/// margin in with [`adjoin`](Self::adjoin) and reading [`solve`](Self::solve)
-/// yields the used margin for the whole adjoining run regardless of order.
+#[doc = include_str!("flow_layout.doc/CollapsingMargins.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct CollapsingMargins {
-    /// The largest non-negative margin in the set (`0` if none).
+    #[doc = include_str!("flow_layout.doc/max_positive.md")]
     max_positive: f32,
-    /// The most-negative margin in the set (`0` if none).
+    #[doc = include_str!("flow_layout.doc/min_negative.md")]
     min_negative: f32,
 }
 
 impl CollapsingMargins {
-    /// The empty set — no margins have collapsed in yet (used margin `0`).
+    #[doc = include_str!("flow_layout.doc/EMPTY.md")]
     const EMPTY: Self = Self {
         max_positive: 0.0,
         min_negative: 0.0,
     };
 
-    /// Folds one margin into the set, keeping the running positive/negative
-    /// extremes. Order-independent, so an entire adjoining run reduces to the
-    /// same result however it is accumulated.
+    #[doc = include_str!("flow_layout.doc/adjoin.md")]
     #[must_use]
     fn adjoin(self, margin: f32) -> Self {
         if margin >= 0.0 {
@@ -187,7 +45,7 @@ impl CollapsingMargins {
         }
     }
 
-    /// The used margin for the collapsed set: `max_positive + min_negative`.
+    #[doc = include_str!("flow_layout.doc/solve.md")]
     #[must_use]
     fn solve(self) -> f32 {
         self.max_positive + self.min_negative
@@ -360,14 +218,34 @@ impl LayoutAlgorithm for FlowLayout {
         // earlier boxes used, "the contents might thus overflow or underflow the
         // containing block".
         //
-        // [`BoxConstraints::percent_basis`] is a single [`Size`], so it is attached
-        // only when the block axis is definite. Leaving it unset keeps an
-        // indefinite containing block indefinite (percentages fall back to
-        // resolving against `max`, exactly as before). The inline component is the
-        // containing block's content width either way — the offer differs from it
-        // only by the child's own inline margins, which a percentage does not
-        // subtract (CSS 2.1 §10.2).
-        let percent_basis = definite_content_height.map(|h| Size::new(content_width, h));
+        // The basis is attached ALWAYS, and an indefinite block axis is spelled
+        // [`f32::INFINITY`] rather than left unset.
+        //
+        // Leaving it unset is not neutral: [`BoxConstraints::percent_height`] then
+        // falls back to `max.height`, which is the space *offered* to the child —
+        // so `height: 50%` under an `auto`-height parent resolved against however
+        // much room the child's predecessors happened to leave. css-sizing-3
+        // §3.2.1 (`specs/w3c/css-sizing-3.txt:554`), vendored here, says what
+        // should happen instead:
+        //
+        // > To have a common term for both when width/height computes to auto and
+        // > when it is defined to behave as if auto were specified (as in the case
+        // > of **block percentage heights resolving against an indefinite size**,
+        // > see CSS2§10.5), the property is said to **behave as auto**.
+        //
+        // An infinite basis is exactly how that is spelled here, because
+        // [`Dimension::resolve`] already answers [`None`] for a percentage against
+        // a non-finite base — "no used value, fall through to the `auto` path" —
+        // and every caller already handles that `None` as `auto`. So the rule
+        // arrives through the existing door rather than through a new flag.
+        //
+        // The inline component is the containing block's content width either way
+        // — the offer differs from it only by the child's own inline margins, which
+        // a percentage does not subtract (CSS 2.1 §10.2).
+        let percent_basis = Size::new(
+            content_width,
+            definite_content_height.unwrap_or(f32::INFINITY),
+        );
 
         let mut child_boxes = Vec::with_capacity(children.len());
         // `y` is the collapsed bottom edge of the last placed *real* (non
@@ -411,13 +289,9 @@ impl LayoutAlgorithm for FlowLayout {
             // The offer is the space available; the basis (when this box has one) is
             // what a percentage resolves against. See `percent_basis` above for why
             // conflating the two made every sibling after the first wrong.
-            let child_constraints = BoxConstraints::loose(Size::new(child_width, remaining_height));
-            let child_size = measurer.measure_child(
-                index,
-                percent_basis.map_or(child_constraints, |basis| {
-                    child_constraints.with_percent_basis(basis)
-                }),
-            );
+            let child_constraints = BoxConstraints::loose(Size::new(child_width, remaining_height))
+                .with_percent_basis(percent_basis);
+            let child_size = measurer.measure_child(index, child_constraints);
             // …and the leading margin offsets it — §10.3.3's inline solve, now that
             // the child's used width is known:
             //
@@ -561,50 +435,17 @@ impl LayoutAlgorithm for FlowLayout {
     }
 }
 
-/// A child placed in the block-axis coordinate system of a vertical writing mode,
-/// before it is mapped to a physical origin.
+#[doc = include_str!("flow_layout.doc/VerticalPlacement.md")]
 struct VerticalPlacement {
-    /// Distance from the container's block-start content edge to this child's own
-    /// block-start edge, along the (horizontal) block axis.
+    #[doc = include_str!("flow_layout.doc/block_start_offset.md")]
     block_start_offset: f32,
-    /// Distance from the container's inline-start content edge (the top) to this
-    /// child's top edge, along the (vertical) inline axis.
+    #[doc = include_str!("flow_layout.doc/inline_offset.md")]
     inline_offset: f32,
-    /// The child's physical size (width along the block axis, height along inline).
+    #[doc = include_str!("flow_layout.doc/size.md")]
     size: Size,
 }
 
-/// Normal-flow block layout for a **vertical** writing mode (css-writing-modes-4
-/// §6.2): the block axis is horizontal, so in-flow children stack left/right
-/// instead of top/bottom.
-///
-/// The block axis is physical **width**; the inline axis is physical **height**.
-/// `vertical-lr` progresses left-to-right from the left content edge;
-/// `vertical-rl` progresses right-to-left from the right content edge. Children's
-/// logical block-start / block-end margins are read from the physical edges the
-/// mode maps them to (already folded from `margin-block-*` upstream by the style
-/// crate): for `vertical-rl` block-start is the right edge (`margin.right`), for
-/// `vertical-lr` it is the left edge (`margin.left`). Block-axis margin collapsing
-/// (CSS 2.1 §8.3.1) and the non-collapsing `gap` work exactly as in the horizontal
-/// path, only along the rotated axis.
-///
-/// The inline (vertical) axis carries each child's used height and its top/bottom
-/// margins, resolved as the §10.3.3 inline solve on the vertical axis.
-///
-/// Percentage *sizes* resolve against the containing block on both axes, exactly as
-/// in the horizontal path and for the same reason — see [`FlowLayout`]'s note on why
-/// that is not the remaining extent. Here the axis that used to compound across
-/// siblings is the physical **width**: two `width: 50%` children of a 480-wide
-/// `vertical-lr` container are 240 each, where the second used to read half of the
-/// 240 that remained.
-///
-/// # Modelled to the point the block-progression is correct
-///
-/// Intrinsic inline sizing along the vertical axis (`height: max-content` on a
-/// vertical container) is not probed — a vertical `auto` inline size stretches to
-/// the offer, and an intrinsic min/max-height bound degrades to `auto` — mirroring
-/// the deliberate one-axis limit of [`intrinsic_inline_size`]. The block axis
-/// (width) shrink-wraps its children when `width: auto`.
+#[doc = include_str!("flow_layout.doc/layout_vertical.md")]
 fn layout_vertical(
     style: &LayoutStyle,
     children: &[LayoutChild],
@@ -657,9 +498,11 @@ fn layout_vertical(
     // clamped into min/max-width so it is the used size, and the basis a child's
     // percentage block size resolves against (css-sizing-3.txt:1027). See the
     // horizontal path's `percent_basis`: the block axis is rotated, the defect and
-    // its fix are identical. `None` (an `auto` width that shrink-wraps its
-    // children) keeps the block size indefinite and leaves percentages resolving
-    // against the offer, exactly as before.
+    // its fix are identical — including the indefinite case. An `auto` width that
+    // shrink-wraps its children leaves the block size indefinite, and an
+    // indefinite basis is stated as [`f32::INFINITY`] so a percentage *behaves as
+    // auto* (`specs/w3c/css-sizing-3.txt:554`) instead of resolving against the
+    // offer. The physical axes are swapped here and nothing else is.
     let definite_content_block = explicit_block.map(|b| {
         clamp_content(
             b,
@@ -670,7 +513,10 @@ fn layout_vertical(
             style.box_sizing,
         )
     });
-    let percent_basis = definite_content_block.map(|b| Size::new(b, content_inline));
+    let percent_basis = Size::new(
+        definite_content_block.unwrap_or(f32::INFINITY),
+        content_inline,
+    );
 
     // Which physical edges the block-start / block-end sides map to under this
     // mode (§6.2): `vertical-rl` block-start = right, `vertical-lr` = left.
@@ -713,13 +559,9 @@ fn layout_vertical(
         // containing block's content box as the percentage basis when this box has a
         // definite block size, so a child's `width: 50%` reads half of *this* box
         // and not half of the room its predecessors left (see `percent_basis`).
-        let child_constraints = BoxConstraints::loose(Size::new(remaining_block, child_inline));
-        let size = measurer.measure_child(
-            index,
-            percent_basis.map_or(child_constraints, |basis| {
-                child_constraints.with_percent_basis(basis)
-            }),
-        );
+        let child_constraints = BoxConstraints::loose(Size::new(remaining_block, child_inline))
+            .with_percent_basis(percent_basis);
+        let size = measurer.measure_child(index, child_constraints);
 
         // Inline placement (the top offset) — §10.3.3's inline solve on the
         // vertical axis, using the top/bottom margins. An over-constrained box
@@ -1503,18 +1345,63 @@ mod tests {
         );
     }
 
-    /// An **indefinite** containing block stays indefinite, and a percentage keeps
-    /// behaving exactly as it did — the separate known gap recorded in
-    /// `docs/api/12-reality.md` ("percentages should resolve only against a
-    /// definite size"), deliberately NOT closed here.
+    /// A percentage block size against an **indefinite** containing block *behaves
+    /// as auto* — not as a percentage of whatever was offered.
     ///
-    /// The container's `height: auto` means there is no basis to state, so the
-    /// child still resolves against the space available and the old compounding is
-    /// still observable (120 then 60). Per CSS both would be `auto` — a change to
-    /// the constraint model, not to this algorithm. This test exists so that fixing
-    /// the definite case did not quietly move the indefinite one.
+    /// `specs/w3c/css-sizing-3.txt:554` (§3.2.1 "Behaving as auto"), vendored here:
+    /// "when it is defined to behave as if auto were specified (as in the case of
+    /// **block percentage heights resolving against an indefinite size**, see
+    /// CSS2§10.5), the property is said to behave as auto".
+    ///
+    /// This replaces a test that pinned the *unfixed* gap in place — it asserted
+    /// the compounding `(120, 60)` that an offer-resolved percentage produced, and
+    /// existed so that closing the definite case did not quietly move the
+    /// indefinite one. Closing the indefinite case is what moves it, on purpose.
+    ///
+    /// The assertion is an **equality against the `auto` spelling**, not a
+    /// hard-coded number, because "behaves as auto" is a statement about two
+    /// spellings agreeing. Both children carry a 30px `min-height` floor so the
+    /// agreement is not the vacuous `0 == 0`: an offer-resolved percentage would
+    /// read 120 (50% of the 240 offered), and `auto` reads the content height of an
+    /// empty block floored at 30.
     #[test]
-    fn an_indefinite_containing_block_leaves_a_percentage_as_it_was() {
+    fn a_percentage_against_an_indefinite_block_size_behaves_as_auto() {
+        let app = LayoutStyle::default(); // height: auto — an indefinite block size
+        let floored = |height: Dimension| LayoutStyle {
+            width: Dimension::Percent(100.0),
+            height,
+            min_height: Dimension::Px(30.0),
+            ..LayoutStyle::default()
+        };
+        let heights = |style: LayoutStyle| {
+            let out = FlowLayout.layout(
+                &app,
+                &[child(1), child(2)],
+                BoxConstraints::loose(Size::new(480.0, 240.0)),
+                &mut NestedBlocks(vec![style, style]),
+            );
+            let boxes = out.child_boxes();
+            (boxes[0].size().height, boxes[1].size().height)
+        };
+
+        let as_percent = heights(floored(Dimension::Percent(50.0)));
+        let as_auto = heights(floored(Dimension::Auto));
+        assert_eq!(
+            as_percent, as_auto,
+            "a percentage against an indefinite basis must be the `auto` answer"
+        );
+        // And the number is the auto one, not the offer-resolved 120 this used to
+        // produce — so the equality above is not two wrongs agreeing.
+        assert_eq!(as_percent, (30.0, 30.0));
+    }
+
+    /// The same rule with no floor: an empty block whose percentage height behaves
+    /// as `auto` has its content height, which is zero — and its sibling is no
+    /// longer a percentage of what it left over. The old behaviour was `(120, 60)`,
+    /// the compounding that made the offer-as-basis reading visible in the first
+    /// place.
+    #[test]
+    fn an_indefinite_basis_collapses_an_empty_percentage_block_to_its_content() {
         let app = LayoutStyle::default(); // height: auto
         let out = FlowLayout.layout(
             &app,
@@ -1523,10 +1410,7 @@ mod tests {
             &mut NestedBlocks(vec![percent_height_child(50.0), percent_height_child(50.0)]),
         );
         let boxes = out.child_boxes();
-        assert_eq!(
-            (boxes[0].size().height, boxes[1].size().height),
-            (120.0, 60.0)
-        );
+        assert_eq!((boxes[0].size().height, boxes[1].size().height), (0.0, 0.0));
     }
 
     /// A percentage `min-height` resolves against the containing block too: the

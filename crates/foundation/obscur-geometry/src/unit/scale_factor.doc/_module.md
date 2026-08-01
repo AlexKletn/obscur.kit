@@ -1,0 +1,1 @@
+Fractional display scale factor.

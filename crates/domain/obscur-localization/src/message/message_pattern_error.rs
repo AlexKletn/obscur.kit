@@ -1,32 +1,23 @@
-//! `MessagePatternError`: why a message pattern would not parse (spec §7.2).
+#![doc = include_str!("message_pattern_error.doc/_module.md")]
 
 use std::fmt;
 
-/// Why [`MessagePattern::parse`](crate::message::MessagePattern::parse) refused a
-/// pattern.
-///
-/// Parsing fails loudly rather than degrading, because a catalogue is *data* —
-/// often data a translator edited — and a pattern that half-parses paints its own
-/// braces on the screen. A caller checks this once at load, not once per frame.
+#[doc = include_str!("message_pattern_error.doc/MessagePatternError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessagePatternError {
-    /// A `{` was opened and never closed.
+    #[doc = include_str!("message_pattern_error.doc/UnclosedPlaceholder.md")]
     UnclosedPlaceholder,
-    /// A `}` appeared with nothing open, or a `{`/`#` appeared where a literal
-    /// must not contain one (see [`MessagePattern`](crate::message::MessagePattern)
-    /// on why there is no escape).
+    #[doc = include_str!("message_pattern_error.doc/UnexpectedBrace.md")]
     UnexpectedBrace,
-    /// A placeholder named nothing (`{}`, `{, plural, …}`).
+    #[doc = include_str!("message_pattern_error.doc/EmptyArgumentName.md")]
     EmptyArgumentName,
-    /// A placeholder's second field was neither `plural` nor `select`.
+    #[doc = include_str!("message_pattern_error.doc/UnknownSelector.md")]
     UnknownSelector(Box<str>),
-    /// A selector placeholder listed no arms.
+    #[doc = include_str!("message_pattern_error.doc/NoArms.md")]
     NoArms,
-    /// A `plural` arm was named something that is neither a CLDR plural category
-    /// nor an `=<integer>` exact match.
+    #[doc = include_str!("message_pattern_error.doc/UnknownPluralArm.md")]
     UnknownPluralArm(Box<str>),
-    /// A selector placeholder had no `other` arm. CLDR requires one of every rule
-    /// set, and it is what makes an unmatched value renderable at all.
+    #[doc = include_str!("message_pattern_error.doc/MissingOtherArm.md")]
     MissingOtherArm,
 }
 

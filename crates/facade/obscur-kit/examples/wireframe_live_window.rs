@@ -1,45 +1,4 @@
-//! **Windowed interactive Wireframe-Kit demo → Vello (GPU, live).**
-//!
-//! A live winit 0.30 + Vello/wgpu window laid out like the imported *Browser
-//! Elements Wireframe Kit* — a graph-paper page, a masthead card, and seven
-//! numbered section cards — driving **BARE** form controls that get their entire
-//! look from the kit's **UA default stylesheet**. The driver installs that sheet
-//! with `runtime.set_default_stylesheet(obscur_kit::ua_stylesheet())`, so hovering,
-//! clicking, focusing, typing, toggling, and opening the dropdown all show the
-//! wireframe base look with live CSS pseudo-classes recomputed by the runtime from
-//! the genuine input path:
-//!
-//! - **Button** — clicking fires `EVENT_CLICK` → `CMD_BTN`, bumping a click count in
-//!   the status line; `:hover` (fill shift) / `:active` (invert) / `:focus` (dashed
-//!   ring) are recomputed live. A disabled button ignores input.
-//! - **Text Field / Textarea** — clicking seats the caret + `:focus` ring; typing /
-//!   IME flows winit → converters → the runtime editing session → live text.
-//! - **Select** — the header opens the list (arrow ▲); a click while open picks the
-//!   next option and closes (arrow ▼, chosen label). A disabled select ignores input.
-//! - **Checkbox** — a plain box, a tri-state box, and a disabled box; a click runs
-//!   [`Checkbox::toggle`], and the reserved `:checked` fills the box with the `✓`.
-//! - **Radio** — a live group of three sharing one selection (filled dot), plus a
-//!   disabled one.
-//! - **Text Link** — a bare `<a>` showing the UA underline + `:hover` bold.
-//!
-//! The demo's OWN stylesheet is **layout chrome only** (masthead / cards / captions
-//! / graph-paper page) — it never restyles a control, so the UA sheet is the whole
-//! source of the control look. The status line ("last event: … · clicks: N") updates
-//! every interaction. The window is **device-scale aware**: the render scale is the
-//! display's HiDPI `scale_factor` — **not tied to the window size** — so resizing the
-//! window reflows the layout instead of zooming the whole UI up and down. The mouse
-//! wheel scrolls, and `Ctrl+=`/`Ctrl+-`/`Ctrl+0` zoom on top (the exact driver shape
-//! reused from `controls_window.rs` / `showcase_window.rs`).
-//!
-//! Run it (a display + a GPU adapter are required):
-//! `cargo run -p obscur-kit --example wireframe_live_window --features full`
-//!
-//! # Environment note
-//!
-//! Like the other windowed demos this needs a display and a usable GPU adapter; in
-//! a headless environment it compiles but exits cleanly on `resumed` when no
-//! adapter/surface can be acquired (it never panics on that path). The headless CPU
-//! proof (`wireframe_live_headless.rs`) is the display-free verification.
+#![doc = include_str!("wireframe_live_window.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -90,13 +49,12 @@ use wireframe::{
     SELECT_COUNT, WireState, radio_command,
 };
 
-/// One wheel *line* of scroll, in logical content px.
+#[doc = include_str!("wireframe_live_window.doc/WHEEL_LINE_STEP.md")]
 const WHEEL_LINE_STEP: f32 = 64.0;
-/// The initial (and layout) window size in logical pixels.
+#[doc = include_str!("wireframe_live_window.doc/INITIAL_SIZE.md")]
 const INITIAL_SIZE: Size = Size::new(1080.0, 760.0);
 
-/// The winit application: owns the window, the GPU Vello renderer, the swapchain,
-/// the embeddable [`UiRuntime`], and drives the shared [`WireState`].
+#[doc = include_str!("wireframe_live_window.doc/WireframeWindow.md")]
 struct WireframeWindow {
     window: Option<Arc<Window>>,
     surface: Option<VelloSurface>,
@@ -109,22 +67,14 @@ struct WireframeWindow {
     modifiers: ModifiersState,
     profiler: FrameProfiler,
     inspect: SharedInspectSource,
-    /// The pushed half: events this host produces for subscribed DevTools
-    /// clients. The frame thread pushes; the serving thread fans out through the
-    /// endpoint, which still decides who may hear each one.
+    #[doc = include_str!("wireframe_live_window.doc/events.md")]
     events: EventQueue,
-    /// Turns the runtime's real frame-commit and focus transitions into events on
-    /// `events`; component-failure diagnostics reach the same queue through the
-    /// `DiagnosticEventSink` installed on the runtime.
+    #[doc = include_str!("wireframe_live_window.doc/publisher.md")]
     publisher: RuntimeEventPublisher,
 }
 
 impl WireframeWindow {
-    /// Builds the app with a fresh [`UiRuntime`] wired to the shared scene: the
-    /// **installed UA default sheet** (the only thing that styles the bare
-    /// controls), the layout-chrome author sheet on top, the reactive view builder,
-    /// and a handler per interactive command. All handlers mutate the shared
-    /// [`WireState`] and refresh its status line so the events are visible.
+    #[doc = include_str!("wireframe_live_window.doc/new.md")]
     fn new() -> Self {
         let state = Rc::new(RefCell::new(WireState::default()));
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), INITIAL_SIZE);
@@ -251,14 +201,7 @@ impl WireframeWindow {
         }
     }
 
-    /// The base device-pixel scale the UI renders at: the display's HiDPI
-    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
-    ///
-    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
-    /// renders at its natural CSS size for the display density, so widening or
-    /// narrowing the window changes the logical viewport and the layout reflows,
-    /// exactly like a real application — rather than scaling the whole UI up and
-    /// down. The user `zoom` composes on top for an explicit magnify.
+    #[doc = include_str!("wireframe_live_window.doc/base_scale.md")]
     fn base_scale(&self) -> f32 {
         (self.scale_factor as f32).max(0.05)
     }
@@ -267,7 +210,7 @@ impl WireframeWindow {
         self.base_scale() * self.zoom
     }
 
-    /// Assembles a domain button [`PointerEvent`] at the tracked cursor.
+    #[doc = include_str!("wireframe_live_window.doc/pointer_button_event.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
         PointerEvent::new(
@@ -278,8 +221,7 @@ impl WireframeWindow {
         )
     }
 
-    /// Re-syncs the runtime's layout viewport and device scale to the current
-    /// swapchain extent, HiDPI factor, and user zoom.
+    #[doc = include_str!("wireframe_live_window.doc/sync_viewport.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -291,7 +233,7 @@ impl WireframeWindow {
         }
     }
 
-    /// Handles a Ctrl+zoom shortcut, returning `true` when `key` was a zoom chord.
+    #[doc = include_str!("wireframe_live_window.doc/handle_zoom_shortcut.md")]
     fn handle_zoom_shortcut(&mut self, key: &Key) -> bool {
         let Key::Character(text) = key else {
             return false;
@@ -314,9 +256,7 @@ impl WireframeWindow {
         true
     }
 
-    /// Renders one frame: run a scheduler-gated reactive frame (rebuilding the view
-    /// from the current state when one is due), read the committed scene, and
-    /// present it on-screen via Vello.
+    #[doc = include_str!("wireframe_live_window.doc/render_frame.md")]
     fn render_frame(&mut self) {
         let cpu_start = Instant::now();
         self.runtime.run_due_frame_reactive();
@@ -368,9 +308,7 @@ impl WireframeWindow {
         }
     }
 
-    /// Binds and serves a loopback, token-authed DevTools endpoint on a background
-    /// thread, so an external `obscur-devtools` client can inspect this live
-    /// window's real controls (tree/layout/styles) + frame perf (§7.6/§7.9).
+    #[doc = include_str!("wireframe_live_window.doc/start_devtools_endpoint.md")]
     fn start_devtools_endpoint(&self) {
         let listener = match SocketListener::bind_loopback() {
             Ok(listener) => listener,
@@ -392,16 +330,7 @@ impl WireframeWindow {
     }
 }
 
-/// Serves the DevTools endpoint over `listener` forever, one session at a time:
-/// each answers inspects from the shared, per-frame-refreshed `source` and is
-/// pushed whatever the frame thread put on `events`.
-///
-/// # Scopes
-///
-/// `observer()` = read + subscribe. Deliberately **not** `all()`: control and
-/// injection stay ungranted, so an attached client can watch this window but not
-/// steer it. Subscribe is granted only because this host genuinely services it
-/// (`serve_with_events` below).
+#[doc = include_str!("wireframe_live_window.doc/devtools_serve.md")]
 fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource, events: &EventQueue) {
     while let Ok(stream) = listener.accept() {
         let mut authenticator = Authenticator::new();
@@ -597,7 +526,7 @@ impl ApplicationHandler for WireframeWindow {
     }
 }
 
-/// A short word for a tri-state checkbox's current value.
+#[doc = include_str!("wireframe_live_window.doc/tri_word.md")]
 fn tri_word(tri: &obscur_kit::widgets::checkbox::Checkbox) -> &'static str {
     if tri.is_indeterminate() {
         "mixed"
@@ -608,20 +537,14 @@ fn tri_word(tri: &obscur_kit::widgets::checkbox::Checkbox) -> &'static str {
     }
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("wireframe_live_window.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Initialises a wgpu swapchain surface + device/queue for on-screen rendering.
-///
-/// # Errors
-///
-/// Returns an error if the surface cannot be created, no compatible GPU adapter is
-/// available (as in a headless environment), the device cannot be created, or the
-/// surface exposes no supported default configuration.
+#[doc = include_str!("wireframe_live_window.doc/init_gpu.md")]
 fn init_gpu(
     window: &Arc<Window>,
 ) -> Result<
@@ -648,7 +571,7 @@ fn init_gpu(
     Ok((surface, config, device, queue))
 }
 
-/// Wires the multi-font fallback stack onto the runtime and the Vello renderer.
+#[doc = include_str!("wireframe_live_window.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primary_bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let primary_id = registry.register(
@@ -676,12 +599,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primar
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (a `u32`) for a resolved [`FontId`].
+#[doc = include_str!("wireframe_live_window.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes for the text path (best effort).
+#[doc = include_str!("wireframe_live_window.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
@@ -698,7 +621,7 @@ fn load_system_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Loads a second, CJK-covering fallback font's bytes (best effort).
+#[doc = include_str!("wireframe_live_window.doc/load_fallback_font.md")]
 fn load_fallback_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -714,11 +637,7 @@ fn load_fallback_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Builds the winit event loop and runs the application to completion.
-///
-/// # Errors
-///
-/// Propagates any event-loop construction or run error.
+#[doc = include_str!("wireframe_live_window.doc/main.md")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== obscur-kit interactive Wireframe Kit → Vello (windowed) ==");
     println!("(bare controls styled ONLY by the installed UA default stylesheet)\n");

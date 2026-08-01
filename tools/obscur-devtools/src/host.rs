@@ -1,41 +1,4 @@
-//! A self-contained **demo host** the CLI can talk to (spec §7.6/§7.7).
-//!
-//! Per §7.6 DevTools is an *external* tool that attaches to a running app's
-//! diagnostics endpoint; that app is normally the process embedding a
-//! `UiRuntime`. To make the interface runnable and testable on its own, this
-//! module stands up the real server stack — an [`Authenticator`], a
-//! [`DevToolsEndpoint`] over a [`SnapshotInspectSource`], and the real
-//! [`SocketTransport`] — seeded with representative live-state so `inspect`
-//! returns non-empty snapshots.
-//!
-//! It enforces the same §7.7 security core as any host: the endpoint is enabled
-//! explicitly, every session authenticates a token, and scopes are honoured. A
-//! real deployment would register a [`SnapshotInspectSource`] refreshed from its
-//! live runtime instead of the static demo payloads here.
-//!
-//! # Why this host denies subscriptions, and refuses injection
-//!
-//! There is no runtime behind these payloads, so nothing here can *produce* an
-//! event — and rather than fabricate one, the demo serves request/reply with
-//! [`SocketTransport::serve`] and lets the endpoint deny every `Subscribe`
-//! honestly. Seeing a live subscription needs a host with something real to
-//! report: `obscur-kit`'s `DiagnosticEventSink`/`RuntimeEventPublisher` feeding
-//! a queue that
-//! [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events)
-//! fans out, as the windowed examples do.
-//!
-//! The same absence decides the *write* direction. There is no runtime to click
-//! on either, so this host installs no
-//! [`InjectionSink`](obscur_devtools_server::transport::InjectionSink) and the
-//! endpoint answers every `Inject` with
-//! [`ProtocolError::InjectionUnavailable`](obscur_devtools_protocol::error::ProtocolError::InjectionUnavailable).
-//! `obscur-devtools inject` used to print `acknowledged command #1` here for a
-//! click that reached nothing at all. A host with a runtime does the opposite:
-//! it holds an
-//! [`InjectionQueue`](obscur_devtools_server::transport::InjectionQueue), hands
-//! [`sink`](obscur_devtools_server::transport::InjectionQueue::sink) to its
-//! endpoint, and applies what it drains with
-//! `obscur_kit::devtools::apply_injected`.
+#![doc = include_str!("host.doc/_module.md")]
 
 use std::io;
 
@@ -45,8 +8,7 @@ use obscur_devtools_server::bridge::{RuntimeBridge, SnapshotInspectSource};
 use obscur_devtools_server::endpoint::DevToolsEndpoint;
 use obscur_devtools_server::transport::{SocketListener, SocketTransport};
 
-/// Builds an inspect source seeded with representative live-state for every
-/// target, so a connected client sees non-empty snapshots.
+#[doc = include_str!("host.doc/demo_source.md")]
 #[must_use]
 pub fn demo_source() -> SnapshotInspectSource {
     SnapshotInspectSource::new()
@@ -100,15 +62,7 @@ pub fn demo_source() -> SnapshotInspectSource {
         )
 }
 
-/// Accepts and serves exactly one client session, then returns.
-///
-/// A fresh [`DevToolsEndpoint`] is built for the connection (its own session
-/// state), authenticating `token` with `scopes`, enabled, and driven over the
-/// real socket by [`SocketTransport::serve`] until the client disconnects.
-///
-/// # Errors
-///
-/// Returns an [`io::Error`] on any accept/serve socket failure.
+#[doc = include_str!("host.doc/serve_one.md")]
 pub fn serve_one(
     listener: &SocketListener,
     source: SnapshotInspectSource,
@@ -123,12 +77,7 @@ pub fn serve_one(
     SocketTransport::new(stream).serve(&mut endpoint)
 }
 
-/// Serves client sessions forever (one connection at a time), each over a fresh
-/// clone of the demo source.
-///
-/// # Errors
-///
-/// Returns an [`io::Error`] on any accept/serve socket failure.
+#[doc = include_str!("host.doc/serve_forever.md")]
 pub fn serve_forever(listener: &SocketListener, token: &str, scopes: ScopeSet) -> io::Result<()> {
     loop {
         serve_one(listener, demo_source(), token, scopes)?;

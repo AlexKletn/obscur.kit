@@ -1,27 +1,4 @@
-//! **Proof: 2D `transform` interpolation via matrix decomposition
-//! (CSS Transforms §14).**
-//!
-//! Takes the two endpoints of a `transform: rotate(0deg) → rotate(90deg)`
-//! transition as [`MotionValue::Transform`] affines and blends them at the
-//! midpoint `t = 0.5` through the motion engine. The correct answer is
-//! `rotate(45°)` **at full scale** — `[cos45, sin45, −sin45, cos45, 0, 0]` ≈
-//! `[0.707, 0.707, −0.707, 0.707, 0, 0]` — NOT the naive component-wise matrix
-//! lerp `[0.5, 0.5, −0.5, 0.5]`, whose column length `hypot(0.5, 0.5) ≈ 0.707`
-//! would shrink the box 30% and shear it.
-//!
-//! It drives the interpolated affine through the REAL paint path: a
-//! `PushTransform(translate(C) · matrix · translate(−C))` bracket rotates a
-//! 100×100 square about its centre, rasterized headless through the software
-//! [`CpuRenderer`] to `target/transform_interp_proof.png`. The square becomes a
-//! **diamond** whose top vertex sits a half-diagonal `50·√2 ≈ 70.71px` above the
-//! centre — the example self-asserts that measured extent (a rotate that
-//! *preserved scale*), which a shrunk/sheared naive lerp could never reach.
-//!
-//! This is the last item of the math-port campaign; the interpolation math lives
-//! in `obscur_motion::value` (decompose → interpolate → recompose).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example transform_interp_proof --features render-cpu`
+#![doc = include_str!("transform_interp_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -38,13 +15,13 @@ use obscur_kit::scene::paint::Brush;
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// The output image extent.
+#[doc = include_str!("transform_interp_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 240.0);
-/// The square's half-side (it is `2·HALF` on a side).
+#[doc = include_str!("transform_interp_proof.doc/HALF.md")]
 const HALF: f32 = 50.0;
-/// The box centre (also the rotation origin).
+#[doc = include_str!("transform_interp_proof.doc/CENTER.md")]
 const CENTER: Point = Point::new(180.0, 120.0);
-/// The box fill colour (deep blue) — read back to measure the diamond extent.
+#[doc = include_str!("transform_interp_proof.doc/INK.md")]
 const INK: Color = Color::rgba(0.10, 0.20, 0.75, 1.0);
 
 fn main() {
@@ -103,8 +80,7 @@ fn main() {
     );
 }
 
-/// Builds the display list: white page + the filled square bracketed by the
-/// interpolated transform (rotate about the box centre).
+#[doc = include_str!("transform_interp_proof.doc/build_scene.md")]
 fn build_scene(matrix: [f32; 6]) -> DisplayList {
     let mut builder = DisplayListBuilder::new();
     builder.fill_rect(
@@ -137,7 +113,7 @@ fn build_scene(matrix: [f32; 6]) -> DisplayList {
     DisplayList::from_commands(commands)
 }
 
-/// Renders `list` through the software renderer into a pixmap at [`VIEWPORT`].
+#[doc = include_str!("transform_interp_proof.doc/render.md")]
 fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -150,12 +126,7 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Asserts the painted region is the rotate(45°) **diamond** at full scale:
-/// * the centre is inked,
-/// * the topmost inked pixel in the centre column sits ≈ `50·√2 ≈ 70.7px` above
-///   the centre (the diamond's top vertex — proving rotation AND scale
-///   preservation; a 50px axis-aligned box or a shrunk lerp could not reach it),
-/// * the un-rotated corner `C + (50, 50)` is OUTSIDE the diamond, hence clear.
+#[doc = include_str!("transform_interp_proof.doc/verify_diamond.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn verify_diamond(pixmap: &tiny_skia::Pixmap) {
     let is_ink = |x: u32, y: u32| {
@@ -192,7 +163,7 @@ fn verify_diamond(pixmap: &tiny_skia::Pixmap) {
     println!("[verify] OK — rotate(45°) diamond at full scale (not a naive-lerp shrink)");
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("transform_interp_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

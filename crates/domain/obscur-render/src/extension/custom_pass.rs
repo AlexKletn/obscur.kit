@@ -1,26 +1,17 @@
-//! A privileged custom render pass descriptor (spec §5.3).
+#![doc = include_str!("custom_pass.doc/_module.md")]
 
-/// When a [`CustomPass`] runs relative to the ordinary scene (spec §5.3).
+#[doc = include_str!("custom_pass.doc/PassStage.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassStage {
-    /// Before the ordinary scene is drawn (a background pass).
+    #[doc = include_str!("custom_pass.doc/BeforeScene.md")]
     BeforeScene,
-    /// After the ordinary scene is drawn (a foreground pass).
+    #[doc = include_str!("custom_pass.doc/AfterScene.md")]
     AfterScene,
-    /// Composited on top as an overlay, above the scene and any after-scene
-    /// passes.
+    #[doc = include_str!("custom_pass.doc/Overlay.md")]
     Overlay,
 }
 
-/// A descriptor of a privileged custom render pass a trusted extension runs
-/// (spec §5.3).
-///
-/// Trusted, privileged extensions may inject backend-specific passes — for
-/// example a GPU post-process or an overlay — scheduled by [`Self::stage`]
-/// relative to the ordinary scene. A pass is pure data describing *what* to run
-/// and *when*; it does **not** redefine ordinary Canvas semantics (spec §5.3).
-/// A pass that uses restricted user shaders sets [`Self::requires_shaders`],
-/// which gates a stricter capability check at grant time.
+#[doc = include_str!("custom_pass.doc/CustomPass.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomPass {
     name: Box<str>,
@@ -29,8 +20,7 @@ pub struct CustomPass {
 }
 
 impl CustomPass {
-    /// Creates a custom pass named `name` scheduled at `stage`, using no
-    /// restricted user shaders.
+    #[doc = include_str!("custom_pass.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, stage: PassStage) -> Self {
         Self {
@@ -40,27 +30,26 @@ impl CustomPass {
         }
     }
 
-    /// Sets whether this pass uses restricted user shaders, returning the updated
-    /// pass (spec §5.3).
+    #[doc = include_str!("custom_pass.doc/requiring_shaders.md")]
     #[must_use]
     pub fn requiring_shaders(mut self, requires_shaders: bool) -> Self {
         self.requires_shaders = requires_shaders;
         self
     }
 
-    /// The pass name, used for diagnostics.
+    #[doc = include_str!("custom_pass.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// When this pass runs relative to the ordinary scene.
+    #[doc = include_str!("custom_pass.doc/stage.md")]
     #[must_use]
     pub const fn stage(&self) -> PassStage {
         self.stage
     }
 
-    /// Whether this pass uses restricted user shaders (spec §5.3).
+    #[doc = include_str!("custom_pass.doc/requires_shaders.md")]
     #[must_use]
     pub const fn requires_shaders(&self) -> bool {
         self.requires_shaders

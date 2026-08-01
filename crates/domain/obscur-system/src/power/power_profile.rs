@@ -1,48 +1,32 @@
-//! The current power state that feeds adaptive quality (spec §7.11).
-//!
-//! [`PowerProfile`] is the pure snapshot of power conditions — mains vs battery,
-//! charge level, OS low-power mode, and thermal pressure — that the runtime reads
-//! to decide whether to lower rendering quality (spec §7.11). Its
-//! [`is_constrained`](PowerProfile::is_constrained) predicate is the single
-//! signal the runtime acts on. The colocated [`PowerSource`] and [`ThermalState`]
-//! describe where power comes from and how much thermal headroom remains.
+#![doc = include_str!("power_profile.doc/_module.md")]
 
-/// Where the device is currently drawing power (spec §7.11).
+#[doc = include_str!("power_profile.doc/PowerSource.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PowerSource {
-    /// Mains / wall power — the plugged-in baseline.
+    #[doc = include_str!("power_profile.doc/Ac.md")]
     #[default]
     Ac,
-    /// Running on battery.
+    #[doc = include_str!("power_profile.doc/Battery.md")]
     Battery,
-    /// The platform does not report a power source.
+    #[doc = include_str!("power_profile.doc/Unknown.md")]
     Unknown,
 }
 
-/// Thermal pressure on the device, ordered least → most severe (spec §7.11).
-///
-/// Ordered `Nominal < Fair < Serious < Critical` so the derived [`Ord`] supports
-/// the `>= Serious` threshold in
-/// [`PowerProfile::is_constrained`](PowerProfile::is_constrained).
+#[doc = include_str!("power_profile.doc/ThermalState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum ThermalState {
-    /// No thermal pressure.
+    #[doc = include_str!("power_profile.doc/Nominal.md")]
     #[default]
     Nominal,
-    /// Mild thermal pressure; still comfortable.
+    #[doc = include_str!("power_profile.doc/Fair.md")]
     Fair,
-    /// Serious thermal pressure; quality should be reduced.
+    #[doc = include_str!("power_profile.doc/Serious.md")]
     Serious,
-    /// Critical thermal pressure; aggressive throttling is warranted.
+    #[doc = include_str!("power_profile.doc/Critical.md")]
     Critical,
 }
 
-/// The current power state feeding adaptive quality (spec §7.11).
-///
-/// Constructed from the plugged-in baseline via [`new`](Self::new) / [`Default`]
-/// and refined with the fluent `on_source` / `with_battery_level` /
-/// `low_power_mode` / `with_thermal` setters. The runtime calls
-/// [`is_constrained`](Self::is_constrained) to decide whether to lower quality.
+#[doc = include_str!("power_profile.doc/PowerProfile.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PowerProfile {
     source: PowerSource,
@@ -52,12 +36,10 @@ pub struct PowerProfile {
 }
 
 impl PowerProfile {
-    /// The battery charge below which a battery-powered device is treated as
-    /// constrained (20%).
+    #[doc = include_str!("power_profile.doc/LOW_BATTERY_THRESHOLD.md")]
     pub const LOW_BATTERY_THRESHOLD: f32 = 0.2;
 
-    /// Creates the plugged-in baseline: on AC, no battery reading, low-power mode
-    /// off, and nominal thermal state (spec §7.11).
+    #[doc = include_str!("power_profile.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -68,42 +50,35 @@ impl PowerProfile {
         }
     }
 
-    /// Sets the power source (spec §7.11).
+    #[doc = include_str!("power_profile.doc/on_source.md")]
     #[must_use]
     pub const fn on_source(mut self, source: PowerSource) -> Self {
         self.source = source;
         self
     }
 
-    /// Sets the battery charge level, clamped to `0.0..=1.0` (spec §7.11).
+    #[doc = include_str!("power_profile.doc/with_battery_level.md")]
     #[must_use]
     pub fn with_battery_level(mut self, level: f32) -> Self {
         self.battery_level = Some(level.clamp(0.0, 1.0));
         self
     }
 
-    /// Sets whether the OS low-power / battery-saver mode is engaged
-    /// (spec §7.11).
+    #[doc = include_str!("power_profile.doc/low_power_mode.md")]
     #[must_use]
     pub const fn low_power_mode(mut self, enabled: bool) -> Self {
         self.low_power_mode = enabled;
         self
     }
 
-    /// Sets the thermal pressure state (spec §7.11).
+    #[doc = include_str!("power_profile.doc/with_thermal.md")]
     #[must_use]
     pub const fn with_thermal(mut self, thermal: ThermalState) -> Self {
         self.thermal = thermal;
         self
     }
 
-    /// Returns whether the runtime should lower quality under this profile
-    /// (spec §7.11).
-    ///
-    /// The profile is constrained when any of these hold: OS low-power mode is
-    /// engaged; the device is on battery below
-    /// [`LOW_BATTERY_THRESHOLD`](Self::LOW_BATTERY_THRESHOLD) (20%); or thermal
-    /// pressure is [`ThermalState::Serious`] or worse.
+    #[doc = include_str!("power_profile.doc/is_constrained.md")]
     #[must_use]
     pub fn is_constrained(&self) -> bool {
         let low_battery = matches!(self.source, PowerSource::Battery)
@@ -111,32 +86,31 @@ impl PowerProfile {
         self.low_power_mode || low_battery || self.thermal >= ThermalState::Serious
     }
 
-    /// Returns whether the device is running on battery (spec §7.11).
+    #[doc = include_str!("power_profile.doc/on_battery.md")]
     #[must_use]
     pub const fn on_battery(&self) -> bool {
         matches!(self.source, PowerSource::Battery)
     }
 
-    /// Returns the current power source (spec §7.11).
+    #[doc = include_str!("power_profile.doc/source.md")]
     #[must_use]
     pub const fn source(&self) -> PowerSource {
         self.source
     }
 
-    /// Returns the battery charge level in `0.0..=1.0`, or `None` if unknown or
-    /// on AC (spec §7.11).
+    #[doc = include_str!("power_profile.doc/battery_level.md")]
     #[must_use]
     pub const fn battery_level(&self) -> Option<f32> {
         self.battery_level
     }
 
-    /// Returns whether OS low-power / battery-saver mode is engaged (spec §7.11).
+    #[doc = include_str!("power_profile.doc/is_low_power_mode.md")]
     #[must_use]
     pub const fn is_low_power_mode(&self) -> bool {
         self.low_power_mode
     }
 
-    /// Returns the current thermal pressure state (spec §7.11).
+    #[doc = include_str!("power_profile.doc/thermal.md")]
     #[must_use]
     pub const fn thermal(&self) -> ThermalState {
         self.thermal

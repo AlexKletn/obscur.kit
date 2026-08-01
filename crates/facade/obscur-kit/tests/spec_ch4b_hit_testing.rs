@@ -1,21 +1,11 @@
-//! §4.7 Hit testing — spec-derived conformance cases.
-//!
-//! Expected values come from the specification text quoted on each test. They
-//! must not be edited to make a case pass.
+#![doc = include_str!("spec_ch4b_hit_testing.doc/_module.md")]
 
 mod spec_ch4b_support;
 
 use obscur_kit::primitives::Portal;
 use spec_ch4b_support::harness::{at, drive, el, hit, hit_chain, txt, view};
 
-/// §4.7: "The result is a hit chain that maps visual geometry back to the
-/// logical event tree." and "Hit testing accounts for:" / "- portals;"
-///
-/// `Trigger` holds a portal whose content `P` is projected into `Overlay` at
-/// window point (400, 300). A hit at (420, 320) must return `P`'s **logical**
-/// ancestors — `[P, Trigger, PanelA, Root]` — not the visual chain
-/// `[P, Overlay, Root]`, so a pointer event bubbles through `Trigger` and
-/// `PanelA`.
+#[doc = include_str!("spec_ch4b_hit_testing.doc/ch4_7_a_the_hit_chain_is_the_logical_tree_not_the_portal_target.md")]
 #[test]
 fn ch4_7_a_the_hit_chain_is_the_logical_tree_not_the_portal_target() {
     let css = "
@@ -69,14 +59,7 @@ fn ch4_7_a_the_hit_chain_is_the_logical_tree_not_the_portal_target() {
     );
 }
 
-/// §4.7: "Hit testing accounts for:" / "- transforms;" and "An incremental
-/// spatial index is used."
-///
-/// A 100x40 box rotated 45° about its centre (50, 20). (50, 20) hits it.
-/// (2, -28) lies inside the rotated AABB (`x ∈ [0.5, 99.5]`,
-/// `y ∈ [-29.5, 69.5]`, half-extents `(100·cos45° + 40·sin45°)/2 = 49.5`) but
-/// inverse-rotating it about the centre gives a local x of `50 − 48·√2 ≈ −17.9`
-/// — outside `[0, 100]` — so it must miss.
+#[doc = include_str!("spec_ch4b_hit_testing.doc/ch4_7_b_a_rotated_box_is_missed_inside_its_bounding_box.md")]
 #[test]
 fn ch4_7_b_a_rotated_box_is_missed_inside_its_bounding_box() {
     let css = "
@@ -100,11 +83,7 @@ fn ch4_7_b_a_rotated_box_is_missed_inside_its_bounding_box() {
     );
 }
 
-/// §4.7: "Hit testing accounts for:" / "- clipping;"
-///
-/// A 100x100 `overflow: hidden` parent holds a 300x300 child. (150, 50) is
-/// inside the child's box but outside the parent's clip, so neither Parent nor
-/// Child may appear in the chain.
+#[doc = include_str!("spec_ch4b_hit_testing.doc/ch4_7_c_a_clipped_out_child_is_not_hit.md")]
 #[test]
 fn ch4_7_c_a_clipped_out_child_is_not_hit() {
     let css = "
@@ -129,12 +108,7 @@ fn ch4_7_c_a_clipped_out_child_is_not_hit() {
     );
 }
 
-/// §4.7: "Hit testing accounts for:" / "- layers and z-order;"
-///
-/// Two absolutely-positioned siblings share the rect (0,0,100,100): A declared
-/// first with `z-index: 2`, B declared second with `z-index: 1`. A hit at
-/// (50, 50) must find A on top, not B (which merely comes last in document
-/// order).
+#[doc = include_str!("spec_ch4b_hit_testing.doc/ch4_7_d_z_index_beats_document_order.md")]
 #[test]
 fn ch4_7_d_z_index_beats_document_order() {
     let css = "
@@ -159,12 +133,7 @@ fn ch4_7_d_z_index_beats_document_order() {
     );
 }
 
-/// §4.7: "Hit testing accounts for:" / "- custom shapes;"
-///
-/// A 100x100 box with `border-radius: 50px` is a circle inscribed in its border
-/// box, over a full-window background. (50, 50) hits the circle. (5, 5) is
-/// inside the border box but `√(45² + 45²) ≈ 63.6` from the centre — beyond the
-/// 50px radius — so it misses the circle and hits the background beneath.
+#[doc = include_str!("spec_ch4b_hit_testing.doc/ch4_7_e_border_radius_shapes_the_hit_region.md")]
 #[test]
 fn ch4_7_e_border_radius_shapes_the_hit_region() {
     let css = "
@@ -199,14 +168,7 @@ fn ch4_7_e_border_radius_shapes_the_hit_region() {
     );
 }
 
-/// §4.7: "Hit testing accounts for:" / "- scrolling;" and
-/// "- pointer-event policy;"
-///
-/// A 200x200 scroll container holds 20 items of 100px (item *i* at content
-/// y `100i..100i+100`). At scroll offset 500, window point (50, 50) is content
-/// y 550 — item 5. Overlaying a `pointer-events: none` box exactly over the
-/// container must not change that: the overlay is excluded from hit testing
-/// entirely rather than becoming a target whose event is later dropped.
+#[doc = include_str!("spec_ch4b_hit_testing.doc/ch4_7_f_scrolled_content_hits_and_pointer_events_none_is_transparent.md")]
 #[test]
 fn ch4_7_f_scrolled_content_hits_and_pointer_events_none_is_transparent() {
     let css = "

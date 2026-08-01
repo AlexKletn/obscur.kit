@@ -1,19 +1,18 @@
-//! `SyntaxNode`: an interior node of the lossless syntax tree, plus the
-//! [`SyntaxElement`] child enum.
+#![doc = include_str!("syntax_node.doc/_module.md")]
 
 use crate::syntax::{SyntaxKind, SyntaxToken};
 
-/// A child of a [`SyntaxNode`]: either an interior node or a leaf token.
+#[doc = include_str!("syntax_node.doc/SyntaxElement.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyntaxElement {
-    /// An interior node.
+    #[doc = include_str!("syntax_node.doc/Node.md")]
     Node(SyntaxNode),
-    /// A leaf token.
+    #[doc = include_str!("syntax_node.doc/Token.md")]
     Token(SyntaxToken),
 }
 
 impl SyntaxElement {
-    /// Returns the exact source slice covered by this child.
+    #[doc = include_str!("syntax_node.doc/text.md")]
     #[must_use]
     pub fn text(&self) -> String {
         match self {
@@ -22,7 +21,7 @@ impl SyntaxElement {
         }
     }
 
-    /// Returns the byte offset of this child's first token, if any.
+    #[doc = include_str!("syntax_node.doc/offset.md")]
     #[must_use]
     pub fn offset(&self) -> Option<u32> {
         match self {
@@ -32,16 +31,7 @@ impl SyntaxElement {
     }
 }
 
-/// An interior node of the lossless syntax tree (spec §2.8).
-///
-/// A node is labelled with a node-valued [`SyntaxKind`] and owns an ordered
-/// list of [`SyntaxElement`] children (nodes and tokens interleaved).
-///
-/// ## Lossless invariant
-///
-/// [`SyntaxNode::text`] reconstructs the exact source substring the node
-/// covers by concatenating, in order, the text of every descendant token. For
-/// the tree's root this reproduces the whole source byte-for-byte.
+#[doc = include_str!("syntax_node.doc/SyntaxNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyntaxNode {
     kind: SyntaxKind,
@@ -49,7 +39,7 @@ pub struct SyntaxNode {
 }
 
 impl SyntaxNode {
-    /// Creates an empty node of the given (node-valued) `kind`.
+    #[doc = include_str!("syntax_node.doc/new.md")]
     #[must_use]
     pub fn new(kind: SyntaxKind) -> Self {
         Self {
@@ -58,41 +48,41 @@ impl SyntaxNode {
         }
     }
 
-    /// Builder: appends `child` and returns `self`.
+    #[doc = include_str!("syntax_node.doc/with_child.md")]
     #[must_use]
     pub fn with_child(mut self, child: SyntaxElement) -> Self {
         self.children.push(child);
         self
     }
 
-    /// Appends a child element.
+    #[doc = include_str!("syntax_node.doc/push.md")]
     pub fn push(&mut self, child: SyntaxElement) {
         self.children.push(child);
     }
 
-    /// Appends a child node.
+    #[doc = include_str!("syntax_node.doc/push_node.md")]
     pub fn push_node(&mut self, node: SyntaxNode) {
         self.children.push(SyntaxElement::Node(node));
     }
 
-    /// Appends a child token.
+    #[doc = include_str!("syntax_node.doc/push_token.md")]
     pub fn push_token(&mut self, token: SyntaxToken) {
         self.children.push(SyntaxElement::Token(token));
     }
 
-    /// Returns the node's kind.
+    #[doc = include_str!("syntax_node.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> SyntaxKind {
         self.kind
     }
 
-    /// Returns the node's children in order.
+    #[doc = include_str!("syntax_node.doc/children.md")]
     #[must_use]
     pub fn children(&self) -> &[SyntaxElement] {
         &self.children
     }
 
-    /// Iterates the node's immediate child nodes.
+    #[doc = include_str!("syntax_node.doc/child_nodes.md")]
     pub fn child_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
         self.children.iter().filter_map(|child| match child {
             SyntaxElement::Node(node) => Some(node),
@@ -100,7 +90,7 @@ impl SyntaxNode {
         })
     }
 
-    /// Iterates the node's immediate child tokens.
+    #[doc = include_str!("syntax_node.doc/tokens.md")]
     pub fn tokens(&self) -> impl Iterator<Item = &SyntaxToken> {
         self.children.iter().filter_map(|child| match child {
             SyntaxElement::Token(token) => Some(token),
@@ -108,8 +98,7 @@ impl SyntaxNode {
         })
     }
 
-    /// Reconstructs the source substring this node covers, by concatenating the
-    /// text of every descendant token in order (recursively).
+    #[doc = include_str!("syntax_node.doc/text_2.md")]
     #[must_use]
     pub fn text(&self) -> String {
         let mut out = String::new();
@@ -126,7 +115,7 @@ impl SyntaxNode {
         }
     }
 
-    /// Returns this node's first descendant token, if any.
+    #[doc = include_str!("syntax_node.doc/first_token.md")]
     #[must_use]
     pub fn first_token(&self) -> Option<&SyntaxToken> {
         for child in &self.children {
@@ -142,7 +131,7 @@ impl SyntaxNode {
         None
     }
 
-    /// Returns the byte offset of this node's first descendant token, if any.
+    #[doc = include_str!("syntax_node.doc/offset_2.md")]
     #[must_use]
     pub fn offset(&self) -> Option<u32> {
         self.first_token().map(SyntaxToken::offset)

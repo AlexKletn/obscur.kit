@@ -1,58 +1,58 @@
-//! Server→subscriber pushed events (spec §7.6/§7.8).
+#![doc = include_str!("protocol_event.doc/_module.md")]
 
 use super::{SubscriptionId, Topic};
 
-/// Severity of a diagnostic event, mirroring the runtime's severity ladder.
+#[doc = include_str!("protocol_event.doc/EventSeverity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventSeverity {
-    /// Fine-grained tracing detail.
+    #[doc = include_str!("protocol_event.doc/Trace.md")]
     Trace,
-    /// Informational message.
+    #[doc = include_str!("protocol_event.doc/Info.md")]
     Info,
-    /// A recoverable concern worth surfacing.
+    #[doc = include_str!("protocol_event.doc/Warning.md")]
     Warning,
-    /// A recoverable error handled by fallback.
+    #[doc = include_str!("protocol_event.doc/Error.md")]
     Error,
-    /// An internal invariant failure.
+    #[doc = include_str!("protocol_event.doc/Critical.md")]
     Critical,
 }
 
-/// The typed body of a pushed [`ProtocolEvent`].
+#[doc = include_str!("protocol_event.doc/EventKind.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventKind {
-    /// A structured diagnostic was emitted.
+    #[doc = include_str!("protocol_event.doc/Diagnostic.md")]
     Diagnostic {
-        /// Severity of the diagnostic.
+        #[doc = include_str!("protocol_event.doc/severity.md")]
         severity: EventSeverity,
-        /// Stable diagnostic code.
+        #[doc = include_str!("protocol_event.doc/code.md")]
         code: Box<str>,
-        /// Human-readable message.
+        #[doc = include_str!("protocol_event.doc/message.md")]
         message: Box<str>,
     },
-    /// A frame was committed to the compositor.
+    #[doc = include_str!("protocol_event.doc/FrameCommitted.md")]
     FrameCommitted {
-        /// Monotonic frame id.
+        #[doc = include_str!("protocol_event.doc/id.md")]
         id: u64,
     },
-    /// The focused element changed.
+    #[doc = include_str!("protocol_event.doc/FocusChanged.md")]
     FocusChanged,
-    /// A runtime/component lifecycle transition occurred.
+    #[doc = include_str!("protocol_event.doc/LifecycleChanged.md")]
     LifecycleChanged,
 }
 
-/// An event pushed to a subscriber over an active subscription.
+#[doc = include_str!("protocol_event.doc/ProtocolEvent.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProtocolEvent {
-    /// The subscription this event is delivered on.
+    #[doc = include_str!("protocol_event.doc/subscription.md")]
     pub subscription: SubscriptionId,
-    /// The topic the event belongs to.
+    #[doc = include_str!("protocol_event.doc/topic.md")]
     pub topic: Topic,
-    /// The typed event body.
+    #[doc = include_str!("protocol_event.doc/kind.md")]
     pub kind: EventKind,
 }
 
 impl ProtocolEvent {
-    /// Creates a protocol event.
+    #[doc = include_str!("protocol_event.doc/new.md")]
     #[must_use]
     pub fn new(subscription: SubscriptionId, topic: Topic, kind: EventKind) -> Self {
         Self {

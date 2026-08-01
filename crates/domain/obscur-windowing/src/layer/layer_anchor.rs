@@ -1,34 +1,20 @@
-//! Which screen edges a layer surface is pinned to (spec §6.5).
+#![doc = include_str!("layer_anchor.doc/_module.md")]
 
-/// The set of edges a layer surface is anchored to.
-///
-/// Anchoring does two things at once, and conflating them is the usual source of
-/// surprise:
-///
-/// 1. it decides **where** the surface sits, and
-/// 2. anchoring to two opposite edges makes the surface **stretch** between
-///    them, overriding the size requested on that axis.
-///
-/// So a bar across the top is `top | left | right` — anchored to three edges, it
-/// spans the full width and takes its height from the requested size. Anchored
-/// to `top` alone it would be centred horizontally at whatever width it asked
-/// for.
-///
-/// Anchored to nothing, the compositor centres the surface.
+#[doc = include_str!("layer_anchor.doc/LayerAnchor.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct LayerAnchor {
-    /// Pinned to the top edge.
+    #[doc = include_str!("layer_anchor.doc/top.md")]
     pub top: bool,
-    /// Pinned to the right edge.
+    #[doc = include_str!("layer_anchor.doc/right.md")]
     pub right: bool,
-    /// Pinned to the bottom edge.
+    #[doc = include_str!("layer_anchor.doc/bottom.md")]
     pub bottom: bool,
-    /// Pinned to the left edge.
+    #[doc = include_str!("layer_anchor.doc/left.md")]
     pub left: bool,
 }
 
 impl LayerAnchor {
-    /// Anchored to nothing: the compositor centres the surface.
+    #[doc = include_str!("layer_anchor.doc/NONE.md")]
     pub const NONE: Self = Self {
         top: false,
         right: false,
@@ -36,7 +22,7 @@ impl LayerAnchor {
         left: false,
     };
 
-    /// A bar across the top of the screen: full width, requested height.
+    #[doc = include_str!("layer_anchor.doc/TOP_BAR.md")]
     pub const TOP_BAR: Self = Self {
         top: true,
         right: true,
@@ -44,7 +30,7 @@ impl LayerAnchor {
         left: true,
     };
 
-    /// A bar across the bottom of the screen: full width, requested height.
+    #[doc = include_str!("layer_anchor.doc/BOTTOM_BAR.md")]
     pub const BOTTOM_BAR: Self = Self {
         top: false,
         right: true,
@@ -52,7 +38,7 @@ impl LayerAnchor {
         left: true,
     };
 
-    /// A column down the left of the screen: full height, requested width.
+    #[doc = include_str!("layer_anchor.doc/LEFT_BAR.md")]
     pub const LEFT_BAR: Self = Self {
         top: true,
         right: false,
@@ -60,7 +46,7 @@ impl LayerAnchor {
         left: true,
     };
 
-    /// A column down the right of the screen: full height, requested width.
+    #[doc = include_str!("layer_anchor.doc/RIGHT_BAR.md")]
     pub const RIGHT_BAR: Self = Self {
         top: true,
         right: true,
@@ -68,8 +54,7 @@ impl LayerAnchor {
         left: false,
     };
 
-    /// Every edge: the surface fills the output, and the requested size is
-    /// ignored on both axes.
+    #[doc = include_str!("layer_anchor.doc/ALL.md")]
     pub const ALL: Self = Self {
         top: true,
         right: true,
@@ -77,25 +62,19 @@ impl LayerAnchor {
         left: true,
     };
 
-    /// Whether the surface stretches horizontally, because it is anchored to
-    /// both the left and right edges.
-    ///
-    /// When this holds, the width in [`LayerSurfaceConfig`](super::LayerSurfaceConfig)
-    /// is not what the surface gets — the compositor decides it. Reading the
-    /// configure event, rather than the request, is the only correct way to know
-    /// the real size.
+    #[doc = include_str!("layer_anchor.doc/stretches_horizontally.md")]
     #[must_use]
     pub const fn stretches_horizontally(self) -> bool {
         self.left && self.right
     }
 
-    /// Whether the surface stretches vertically (anchored top **and** bottom).
+    #[doc = include_str!("layer_anchor.doc/stretches_vertically.md")]
     #[must_use]
     pub const fn stretches_vertically(self) -> bool {
         self.top && self.bottom
     }
 
-    /// Whether no edge is anchored, so the compositor centres the surface.
+    #[doc = include_str!("layer_anchor.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(self) -> bool {
         !(self.top || self.right || self.bottom || self.left)

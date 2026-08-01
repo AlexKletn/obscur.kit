@@ -1,0 +1,1 @@
+The resolved property value.

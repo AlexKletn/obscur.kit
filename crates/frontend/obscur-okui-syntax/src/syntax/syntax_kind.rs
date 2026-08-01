@@ -1,77 +1,69 @@
-//! `SyntaxKind`: the kind of every node or token in the lossless tree.
+#![doc = include_str!("syntax_kind.doc/_module.md")]
 
 use crate::lexer::TokenKind;
 
-/// The kind of any element in the lossless syntax tree (spec §2.8).
-///
-/// `SyntaxKind` is a superset of [`TokenKind`]: it mirrors every lexical token
-/// kind (the *leaf* kinds) and adds the *node* kinds that the parser uses to
-/// group tokens into structure (elements, tags, attributes, control flow).
-///
-/// A tree is therefore uniform — both interior nodes and leaves are labelled
-/// with a `SyntaxKind` — while [`is_token`](Self::is_token) /
-/// [`is_node`](Self::is_node) recover the distinction.
+#[doc = include_str!("syntax_kind.doc/SyntaxKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SyntaxKind {
     // ---- Token kinds (mirror `TokenKind`) ----
-    /// `<` — see [`TokenKind::LAngle`].
+    #[doc = include_str!("syntax_kind.doc/LAngle.md")]
     LAngle,
-    /// `>` — see [`TokenKind::RAngle`].
+    #[doc = include_str!("syntax_kind.doc/RAngle.md")]
     RAngle,
-    /// `/` — see [`TokenKind::Slash`].
+    #[doc = include_str!("syntax_kind.doc/Slash.md")]
     Slash,
-    /// `=` — see [`TokenKind::Equals`].
+    #[doc = include_str!("syntax_kind.doc/Equals.md")]
     Equals,
-    /// `{` — see [`TokenKind::LBrace`].
+    #[doc = include_str!("syntax_kind.doc/LBrace.md")]
     LBrace,
-    /// `}` — see [`TokenKind::RBrace`].
+    #[doc = include_str!("syntax_kind.doc/RBrace.md")]
     RBrace,
-    /// `:` — see [`TokenKind::Colon`].
+    #[doc = include_str!("syntax_kind.doc/Colon.md")]
     Colon,
-    /// An identifier — see [`TokenKind::Ident`].
+    #[doc = include_str!("syntax_kind.doc/Ident.md")]
     Ident,
-    /// A string literal — see [`TokenKind::String`].
+    #[doc = include_str!("syntax_kind.doc/String.md")]
     String,
-    /// A numeric literal — see [`TokenKind::Number`].
+    #[doc = include_str!("syntax_kind.doc/Number.md")]
     Number,
-    /// A raw text run — see [`TokenKind::Text`].
+    #[doc = include_str!("syntax_kind.doc/Text.md")]
     Text,
-    /// Whitespace trivia — see [`TokenKind::Whitespace`].
+    #[doc = include_str!("syntax_kind.doc/Whitespace.md")]
     Whitespace,
-    /// An unrecognized character — see [`TokenKind::Error`].
+    #[doc = include_str!("syntax_kind.doc/Error.md")]
     Error,
-    /// End of input — see [`TokenKind::Eof`].
+    #[doc = include_str!("syntax_kind.doc/Eof.md")]
     Eof,
 
     // ---- Node kinds ----
-    /// The root node covering the whole document.
+    #[doc = include_str!("syntax_kind.doc/Document.md")]
     Document,
-    /// A complete element: open tag, children and close tag (or self-closing).
+    #[doc = include_str!("syntax_kind.doc/Element.md")]
     Element,
-    /// An opening tag `<Name …>` or self-closing `<Name … />`.
+    #[doc = include_str!("syntax_kind.doc/OpenTag.md")]
     OpenTag,
-    /// A closing tag `</Name>`.
+    #[doc = include_str!("syntax_kind.doc/CloseTag.md")]
     CloseTag,
-    /// A single `name=value` (or bare) attribute.
+    #[doc = include_str!("syntax_kind.doc/Attribute.md")]
     Attribute,
-    /// The value side of an attribute (a literal or `{expr}`).
+    #[doc = include_str!("syntax_kind.doc/AttributeValue.md")]
     AttributeValue,
-    /// An `{expr}` expression interpolation.
+    #[doc = include_str!("syntax_kind.doc/Expression.md")]
     Expression,
-    /// An `<If cond={…}>…</If>` conditional element.
+    #[doc = include_str!("syntax_kind.doc/Conditional.md")]
     Conditional,
-    /// A `<For each={…} key={…}>…</For>` loop element.
+    #[doc = include_str!("syntax_kind.doc/ForLoop.md")]
     ForLoop,
-    /// The body/children of an element or control-flow construct.
+    #[doc = include_str!("syntax_kind.doc/Template.md")]
     Template,
-    /// A run of text content between markup.
+    #[doc = include_str!("syntax_kind.doc/TextNode.md")]
     TextNode,
-    /// A node wrapping recovered/erroneous input.
+    #[doc = include_str!("syntax_kind.doc/ErrorNode.md")]
     ErrorNode,
 }
 
 impl SyntaxKind {
-    /// Returns `true` if this is a token (leaf) kind.
+    #[doc = include_str!("syntax_kind.doc/is_token.md")]
     #[must_use]
     pub const fn is_token(&self) -> bool {
         matches!(
@@ -93,19 +85,19 @@ impl SyntaxKind {
         )
     }
 
-    /// Returns `true` if this is a node (interior) kind.
+    #[doc = include_str!("syntax_kind.doc/is_node.md")]
     #[must_use]
     pub const fn is_node(&self) -> bool {
         !self.is_token()
     }
 
-    /// Returns `true` if this kind is trivia (currently only whitespace).
+    #[doc = include_str!("syntax_kind.doc/is_trivia.md")]
     #[must_use]
     pub const fn is_trivia(&self) -> bool {
         matches!(self, Self::Whitespace)
     }
 
-    /// Maps a lexer [`TokenKind`] to its `SyntaxKind` counterpart.
+    #[doc = include_str!("syntax_kind.doc/from_token.md")]
     #[must_use]
     pub const fn from_token(kind: TokenKind) -> Self {
         match kind {

@@ -1,4 +1,4 @@
-//! A per-node cache of measure/arrange results with constraint-keyed early exit.
+#![doc = include_str!("layout_cache.doc/_module.md")]
 
 use crate::invalidation::CacheEntry;
 use crate::model::{LayoutBox, LayoutResult};
@@ -6,27 +6,7 @@ use obscur_geometry::BoxConstraints;
 use obscur_identity::{NodeId, VersionStamp};
 use std::collections::HashMap;
 
-/// Caches measure (and arranged) results per node so unchanged subtrees can
-/// **early-exit** instead of re-measuring (spec §4.3), with a per-cache disable
-/// switch for tests (spec §5.19).
-///
-/// # Constraint-keyed early exit
-///
-/// Each node's [`CacheEntry`] records the [`BoxConstraints`] it was measured
-/// under. [`get_measure`](Self::get_measure) returns a hit **only when the
-/// stored constraints exactly equal the requested constraints**; a measure
-/// under any different constraints misses and must be recomputed. This is the
-/// mechanism §4.3 calls "early exit when geometry is stable": a re-measure under
-/// identical constraints reuses the cached size. Because constraints hold `f32`,
-/// the comparison is exact (`PartialEq`) — a hit requires bitwise-identical
-/// constraint values.
-///
-/// # Disable switch
-///
-/// A cache built with [`disabled`](Self::disabled) never stores and always
-/// misses, so tests can exercise the uncached path deterministically (§5.19).
-///
-/// Because the cached results hold `f32`, this type is `PartialEq` but not `Eq`.
+#[doc = include_str!("layout_cache.doc/LayoutCache.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayoutCache {
     entries: HashMap<NodeId, CacheEntry>,
@@ -34,7 +14,7 @@ pub struct LayoutCache {
 }
 
 impl LayoutCache {
-    /// Creates an empty, **enabled** cache.
+    #[doc = include_str!("layout_cache.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -43,8 +23,7 @@ impl LayoutCache {
         }
     }
 
-    /// Creates a **disabled** cache: it never stores and every lookup misses
-    /// (§5.19). Useful to exercise the uncached layout path in tests.
+    #[doc = include_str!("layout_cache.doc/disabled.md")]
     #[must_use]
     pub fn disabled() -> Self {
         Self {
@@ -53,18 +32,13 @@ impl LayoutCache {
         }
     }
 
-    /// Whether this cache is enabled (stores and can hit). Disabled caches
-    /// always miss.
+    #[doc = include_str!("layout_cache.doc/is_enabled.md")]
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Records the measure `result` for `node` under `constraints` at `version`.
-    ///
-    /// No-op when the cache is disabled. When enabled, this replaces any prior
-    /// entry for `node` (dropping any previously arranged box, since a
-    /// re-measure supersedes it).
+    #[doc = include_str!("layout_cache.doc/insert_measure.md")]
     pub fn insert_measure(
         &mut self,
         node: NodeId,
@@ -79,12 +53,7 @@ impl LayoutCache {
             .insert(node, CacheEntry::new(constraints, result, version));
     }
 
-    /// Returns the cached measure result for `node` **iff** it was measured
-    /// under constraints that exactly equal `constraints`; otherwise `None`.
-    ///
-    /// This is the early-exit for stable geometry: identical constraints reuse
-    /// the cached size, different constraints miss. A disabled cache always
-    /// returns `None`.
+    #[doc = include_str!("layout_cache.doc/get_measure.md")]
     #[must_use]
     pub fn get_measure(&self, node: NodeId, constraints: BoxConstraints) -> Option<LayoutResult> {
         if !self.enabled {
@@ -96,9 +65,7 @@ impl LayoutCache {
             .map(CacheEntry::result)
     }
 
-    /// Records the arranged `layout_box` for `node`, if `node` has a measure
-    /// entry. No-op when disabled or when `node` has not been measured (an
-    /// arrangement without a measure has no entry to attach to).
+    #[doc = include_str!("layout_cache.doc/insert_arrange.md")]
     pub fn insert_arrange(&mut self, node: NodeId, layout_box: LayoutBox) {
         if !self.enabled {
             return;
@@ -108,8 +75,7 @@ impl LayoutCache {
         }
     }
 
-    /// Returns the cached arranged box for `node`, if one has been recorded.
-    /// A disabled cache always returns `None`.
+    #[doc = include_str!("layout_cache.doc/get_arrange.md")]
     #[must_use]
     pub fn get_arrange(&self, node: NodeId) -> Option<LayoutBox> {
         if !self.enabled {
@@ -118,29 +84,29 @@ impl LayoutCache {
         self.entries.get(&node).and_then(CacheEntry::arranged)
     }
 
-    /// Evicts any cached entry for `node`.
+    #[doc = include_str!("layout_cache.doc/invalidate.md")]
     pub fn invalidate(&mut self, node: NodeId) {
         self.entries.remove(&node);
     }
 
-    /// Clears every cached entry.
+    #[doc = include_str!("layout_cache.doc/clear.md")]
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    /// Whether `node` currently has a cached entry.
+    #[doc = include_str!("layout_cache.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.entries.contains_key(&node)
     }
 
-    /// The number of cached entries.
+    #[doc = include_str!("layout_cache.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Whether the cache holds no entries.
+    #[doc = include_str!("layout_cache.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

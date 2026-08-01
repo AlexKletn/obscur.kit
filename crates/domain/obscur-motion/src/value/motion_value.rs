@@ -1,91 +1,65 @@
-//! The `MotionValue` dynamic animatable value (spec §4.17).
+#![doc = include_str!("motion_value.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
 use super::Interpolatable;
 use super::transform_interp::{self, Matrix2D};
 
-/// A concrete presentation value the motion engine can animate (spec §4.17).
-///
-/// `MotionValue` is the dynamic, type-erased carrier for the engine's *arbitrary
-/// typed interpolation*: a single enum spanning the supported presentation value
-/// kinds so timelines, tracks and drivers can move any of them through one code
-/// path. [`Scalar`](Self::Scalar) covers every 1-D quantity (opacity, rotation,
-/// a scale factor, a single translation axis); the geometric variants carry
-/// whole points, sizes and rects for transforms and layout-affecting animation.
-///
-/// Two `MotionValue`s only blend when they hold the *same* variant. Prefer
-/// [`interpolate_checked`](Self::interpolate_checked), which reports a variant
-/// mismatch as `None`; the [`Interpolatable`] impl instead degrades gracefully
-/// to a discrete swap (see its documentation) because it must return `Self`.
+#[doc = include_str!("motion_value.doc/MotionValue.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MotionValue {
-    /// A 1-D scalar: opacity, rotation, scale, a single translation axis, etc.
+    #[doc = include_str!("motion_value.doc/Scalar.md")]
     Scalar(f32),
-    /// A 2-D point, e.g. a translation or an anchor position.
+    #[doc = include_str!("motion_value.doc/Point.md")]
     Point(Point),
-    /// A 2-D size, e.g. an animated width/height.
+    #[doc = include_str!("motion_value.doc/Size.md")]
     Size(Size),
-    /// An axis-aligned rectangle, e.g. an animated layout frame.
+    #[doc = include_str!("motion_value.doc/Rect.md")]
     Rect(Rect),
-    /// A 2D `transform`: the six affine coefficients `[a, b, c, d, e, f]` of a
-    /// `matrix(a, b, c, d, e, f)` (the lowered `<transform-function>+` list).
-    ///
-    /// Unlike the other variants this does **not** blend component-wise: it
-    /// interpolates by matrix decomposition (CSS Transforms §14), so a
-    /// `rotate(0°) → rotate(90°)` transition rotates through `rotate(45°)`
-    /// instead of shearing and shrinking the box. See
-    /// [`interpolate_checked`](Self::interpolate_checked).
+    #[doc = include_str!("motion_value.doc/Transform.md")]
     Transform(Matrix2D),
-    /// An sRGB color with straight alpha, `[r, g, b, a]`, each in `0.0..=1.0`.
-    ///
-    /// Unlike the numeric variants this does **not** blend straight component-
-    /// wise: it interpolates with **premultiplied** alpha (css-color-4 §13.3), so
-    /// a transition from an opaque color to a transparent one keeps the visible
-    /// hue full-strength instead of muddying it toward the transparent endpoint's
-    /// channels. See [`interpolate_checked`](Self::interpolate_checked).
+    #[doc = include_str!("motion_value.doc/Color.md")]
     Color([f32; 4]),
 }
 
 impl MotionValue {
-    /// Wraps a 1-D scalar (opacity, rotation, any single dimension).
+    #[doc = include_str!("motion_value.doc/scalar.md")]
     #[must_use]
     pub const fn scalar(value: f32) -> Self {
         Self::Scalar(value)
     }
 
-    /// Wraps a [`Point`].
+    #[doc = include_str!("motion_value.doc/point.md")]
     #[must_use]
     pub const fn point(value: Point) -> Self {
         Self::Point(value)
     }
 
-    /// Wraps a [`Size`].
+    #[doc = include_str!("motion_value.doc/size.md")]
     #[must_use]
     pub const fn size(value: Size) -> Self {
         Self::Size(value)
     }
 
-    /// Wraps a [`Rect`].
+    #[doc = include_str!("motion_value.doc/rect.md")]
     #[must_use]
     pub const fn rect(value: Rect) -> Self {
         Self::Rect(value)
     }
 
-    /// Wraps a 2D `transform` affine `[a, b, c, d, e, f]`.
+    #[doc = include_str!("motion_value.doc/transform.md")]
     #[must_use]
     pub const fn transform(matrix: Matrix2D) -> Self {
         Self::Transform(matrix)
     }
 
-    /// Wraps an sRGB color with straight alpha, `[r, g, b, a]`.
+    #[doc = include_str!("motion_value.doc/color.md")]
     #[must_use]
     pub const fn color(rgba: [f32; 4]) -> Self {
         Self::Color(rgba)
     }
 
-    /// Returns the wrapped scalar, or `None` if this is not a
-    /// [`Scalar`](Self::Scalar).
+    #[doc = include_str!("motion_value.doc/as_scalar.md")]
     #[must_use]
     pub const fn as_scalar(&self) -> Option<f32> {
         match self {
@@ -94,8 +68,7 @@ impl MotionValue {
         }
     }
 
-    /// Returns the wrapped point, or `None` if this is not a
-    /// [`Point`](Self::Point).
+    #[doc = include_str!("motion_value.doc/as_point.md")]
     #[must_use]
     pub const fn as_point(&self) -> Option<Point> {
         match self {
@@ -104,8 +77,7 @@ impl MotionValue {
         }
     }
 
-    /// Returns the wrapped size, or `None` if this is not a
-    /// [`Size`](Self::Size).
+    #[doc = include_str!("motion_value.doc/as_size.md")]
     #[must_use]
     pub const fn as_size(&self) -> Option<Size> {
         match self {
@@ -114,8 +86,7 @@ impl MotionValue {
         }
     }
 
-    /// Returns the wrapped rect, or `None` if this is not a
-    /// [`Rect`](Self::Rect).
+    #[doc = include_str!("motion_value.doc/as_rect.md")]
     #[must_use]
     pub const fn as_rect(&self) -> Option<Rect> {
         match self {
@@ -124,8 +95,7 @@ impl MotionValue {
         }
     }
 
-    /// Returns the wrapped transform affine `[a, b, c, d, e, f]`, or `None` if
-    /// this is not a [`Transform`](Self::Transform).
+    #[doc = include_str!("motion_value.doc/as_transform.md")]
     #[must_use]
     pub const fn as_transform(&self) -> Option<Matrix2D> {
         match self {
@@ -134,8 +104,7 @@ impl MotionValue {
         }
     }
 
-    /// Returns the wrapped sRGB color `[r, g, b, a]`, or `None` if this is not a
-    /// [`Color`](Self::Color).
+    #[doc = include_str!("motion_value.doc/as_color.md")]
     #[must_use]
     pub const fn as_color(&self) -> Option<[f32; 4]> {
         match self {
@@ -144,8 +113,7 @@ impl MotionValue {
         }
     }
 
-    /// Returns whether `self` and `other` hold the same variant (and can
-    /// therefore be blended by [`interpolate_checked`](Self::interpolate_checked)).
+    #[doc = include_str!("motion_value.doc/kind_matches.md")]
     #[must_use]
     pub const fn kind_matches(&self, other: &MotionValue) -> bool {
         matches!(
@@ -159,14 +127,7 @@ impl MotionValue {
         )
     }
 
-    /// Blends toward `other` component-wise, returning `None` on a variant
-    /// mismatch (spec §4.17).
-    ///
-    /// `t` follows the [`Interpolatable`] contract: normalized progress in
-    /// `[0, 1]`, not clamped. When both operands hold the same variant the
-    /// inner value is interpolated and wrapped back up in `Some`; when the
-    /// variants differ the two endpoints are type-incompatible and `None` is
-    /// returned rather than a nonsensical blend.
+    #[doc = include_str!("motion_value.doc/interpolate_checked.md")]
     #[must_use]
     pub fn interpolate_checked(&self, other: &MotionValue, t: f32) -> Option<MotionValue> {
         match (self, other) {
@@ -191,11 +152,7 @@ impl MotionValue {
     }
 }
 
-/// Interpolates two straight-alpha sRGB colors with premultiplied alpha
-/// (css-color-4 §13.3): premultiply rgb by alpha, lerp all four components, then
-/// un-premultiply by dividing rgb by the interpolated alpha. When the
-/// interpolated alpha is zero the un-premultiplied rgb is the premultiplied value
-/// (zero), matching the spec's zero-alpha rule.
+#[doc = include_str!("motion_value.doc/interpolate_color.md")]
 fn interpolate_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     let pa = [a[0] * a[3], a[1] * a[3], a[2] * a[3], a[3]];
     let pb = [b[0] * b[3], b[1] * b[3], b[2] * b[3], b[3]];
@@ -214,16 +171,7 @@ fn interpolate_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 }
 
 impl Interpolatable for MotionValue {
-    /// Blends toward `other`, degrading gracefully on a variant mismatch.
-    ///
-    /// When both operands hold the same variant this delegates to
-    /// [`interpolate_checked`](MotionValue::interpolate_checked) and blends the
-    /// inner value component-wise. Because this trait method must return `Self`
-    /// (not `Option`), a *mismatch* cannot be signalled; instead it performs a
-    /// discrete swap — `self` while `t < 0.5`, otherwise `other` — so the
-    /// animation still resolves to a valid endpoint. Callers that need to
-    /// detect incompatibility should use `interpolate_checked` or
-    /// [`InterpolationResult`](super::InterpolationResult) instead.
+    #[doc = include_str!("motion_value.doc/interpolate.md")]
     fn interpolate(&self, other: &Self, t: f32) -> Self {
         match self.interpolate_checked(other, t) {
             Some(value) => value,

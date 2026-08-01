@@ -1,0 +1,1 @@
+Creates a protocol event.

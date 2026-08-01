@@ -1,4 +1,4 @@
-//! Focus module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod focus_node;
 pub use focus_node::FocusNode;
 mod focus_request;

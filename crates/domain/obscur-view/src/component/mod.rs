@@ -1,4 +1,4 @@
-//! Component module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod component_contract;
 
 pub use component_contract::ComponentContract;

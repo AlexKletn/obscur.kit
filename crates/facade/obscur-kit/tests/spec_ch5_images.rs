@@ -1,9 +1,4 @@
-//! **SPECIFICATION-DERIVED** replaced-element cases for obscur.kit §5.16
-//! ("Images").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §5.16
-//! and the css-images-3 §4.3.2 / §4.5 / §4.6 text it normatively cites, with **no
-//! access to this repository's source**.
+#![doc = include_str!("spec_ch5_images.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(
     feature = "resource-fs",
@@ -28,18 +23,17 @@ use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue}
 
 use support::{at, compile, geom};
 
-/// The viewport every case renders under: wide enough that a 400×200 image
-/// escaping its 100×100 box would be visible.
+#[doc = include_str!("spec_ch5_images.doc/VW.md")]
 const VW: f32 = 400.0;
 
-/// Process-unique counter so concurrent tests never collide on a temp name.
+#[doc = include_str!("spec_ch5_images.doc/COUNTER.md")]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 // ---------------------------------------------------------------------------
 // A minimal RGB8 PNG writer, so a 400×200 asset can exist without a dependency.
 // ---------------------------------------------------------------------------
 
-/// CRC-32 (the PNG polynomial).
+#[doc = include_str!("spec_ch5_images.doc/crc32.md")]
 fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = 0xFFFF_FFFF_u32;
     for &byte in bytes {
@@ -55,7 +49,7 @@ fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
-/// Adler-32 (the zlib checksum).
+#[doc = include_str!("spec_ch5_images.doc/adler32.md")]
 fn adler32(bytes: &[u8]) -> u32 {
     let (mut a, mut b) = (1_u32, 0_u32);
     for &byte in bytes {
@@ -65,7 +59,7 @@ fn adler32(bytes: &[u8]) -> u32 {
     (b << 16) | a
 }
 
-/// A PNG chunk: length, type, payload, CRC.
+#[doc = include_str!("spec_ch5_images.doc/chunk.md")]
 fn chunk(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(payload.len() + 12);
     out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
@@ -77,8 +71,7 @@ fn chunk(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// An opaque `width × height` PNG filled with `rgb`, encoded with stored (level 0)
-/// deflate blocks so no compressor is needed.
+#[doc = include_str!("spec_ch5_images.doc/solid_png.md")]
 fn solid_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
     // Raw scanlines: one filter byte (0 = None) plus width RGB triples per row.
     let mut raw = Vec::with_capacity((height * (1 + width * 3)) as usize);
@@ -115,7 +108,7 @@ fn solid_png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
     png
 }
 
-/// A fresh temp directory holding the named assets, and its path.
+#[doc = include_str!("spec_ch5_images.doc/asset_dir.md")]
 fn asset_dir(assets: &[(&str, Vec<u8>)]) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-ch5-img-{}-{n}", std::process::id()));
@@ -126,14 +119,14 @@ fn asset_dir(assets: &[(&str, Vec<u8>)]) -> PathBuf {
     dir
 }
 
-/// A runtime with the real fs loader + image decoder, sandboxed to `dir`.
+#[doc = include_str!("spec_ch5_images.doc/runtime_at.md")]
 fn runtime_at(dir: &PathBuf) -> UiRuntime {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VW, VW));
     KitBootstrap::new().install_image_resources(&mut runtime, dir);
     runtime
 }
 
-/// The `.pic` image node plus a `.sibling` marker at (110,0).
+#[doc = include_str!("spec_ch5_images.doc/picture_view.md")]
 fn picture_view() -> View {
     let picture = Image::new("pic.png")
         .into_view_node()
@@ -145,7 +138,7 @@ fn picture_view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![picture, sibling]))
 }
 
-/// The single `DrawImage` in the last frame: its `(tile, region)`.
+#[doc = include_str!("spec_ch5_images.doc/drawn.md")]
 fn drawn(runtime: &UiRuntime) -> (Rect, Rect) {
     let list = runtime.snapshot().display_list().commands().to_vec();
     let mut found = None;
@@ -163,12 +156,7 @@ fn drawn(runtime: &UiRuntime) -> (Rect, Rect) {
     })
 }
 
-/// Renders `css` over the picture view in a runtime sandboxed to `dir`.
-///
-/// With no blocking executor the image load is deferred out of the frame phase
-/// (§3.4/§5.15), so this drives it to completion — render (which queues the
-/// load), `poll_resource_tasks` (which runs it on the frame thread, after the
-/// frame), then render again so the now-decoded image sizes and composes.
+#[doc = include_str!("spec_ch5_images.doc/render.md")]
 fn render(dir: &PathBuf, css: &str) -> UiRuntime {
     let sheet: Stylesheet = compile(css);
     let mut runtime = runtime_at(dir);
@@ -178,7 +166,7 @@ fn render(dir: &PathBuf, css: &str) -> UiRuntime {
     runtime
 }
 
-/// The layout of a rect as `(x, y, w, h)`, rounded for readable messages.
+#[doc = include_str!("spec_ch5_images.doc/quad.md")]
 fn quad(rect: Rect) -> (f32, f32, f32, f32) {
     (
         rect.origin.x,
@@ -188,10 +176,7 @@ fn quad(rect: Rect) -> (f32, f32, f32, f32) {
     )
 }
 
-/// css-images-3 §4.5 (`object-fit: none`): "The replaced content is not resized to
-/// fit inside the element's content box" and "Since replaced elements always clip
-/// their contents to the content box, the content will never overflow." Position
-/// default from §4.6: "Initial: 50% 50%". Invoked by §5.16 "- object fit/position;".
+#[doc = include_str!("spec_ch5_images.doc/im_01_object_fit_none_centres_at_natural_size_and_clips.md")]
 #[test]
 fn im_01_object_fit_none_centres_at_natural_size_and_clips() {
     let dir = asset_dir(&[("pic.png", solid_png(400, 200, [255, 0, 0]))]);
@@ -226,11 +211,7 @@ fn im_01_object_fit_none_centres_at_natural_size_and_clips() {
     );
 }
 
-/// css-images-3 §4.3.2: "A contain constraint is resolved by setting the concrete
-/// object size to the largest rectangle that has the object's natural aspect ratio
-/// and additionally has neither width nor height larger than the constraint
-/// rectangle's width and height, respectively." Position default css-images-3 §4.6
-/// "Initial: 50% 50%".
+#[doc = include_str!("spec_ch5_images.doc/im_02_object_fit_contain_geometry_and_position.md")]
 #[test]
 fn im_02_object_fit_contain_geometry_and_position() {
     let dir = asset_dir(&[("pic.png", solid_png(400, 200, [255, 0, 0]))]);
@@ -258,33 +239,7 @@ fn im_02_object_fit_contain_geometry_and_position() {
     }
 }
 
-/// §5.16 "- DPI variants;" and "- intrinsic size;", with §4.5 "- layout uses
-/// logical units; - renderer converts to physical pixels; - fractional scale and
-/// multiple DPI values are supported;".
-///
-/// An `auto`/`auto` replaced element takes its intrinsic size, and that size is
-/// in logical units and does not vary with the window's device scale.
-///
-/// WEAKENED 2026-07-19, DPI premise only. The case asserted 200×100 for a
-/// 400×200 asset, on the premise that the `@2x` in the FILENAME `pic@2x.png`
-/// declares a 2× density that halves the intrinsic logical size. §5.16 says only
-/// "- DPI variants;" — one bare bullet. It does not say that a density is
-/// carried in the filename, that `@Nx` is the suffix, that the suffix is parsed
-/// off an explicitly authored `src`, or that doing so is the mechanism by which
-/// DPI variants are selected at all (a manifest, a `srcset`-style declaration
-/// and an explicit API are all equally consistent with the text). The expected
-/// size is now the asset's own 400×200.
-///
-/// The auto-sizing half is DELIBERATELY LEFT INTACT and is expected to fail: the
-/// measured box is (400, 0), so `height: auto` on a replaced element collapses
-/// to zero and intrinsic aspect ratio is not applied. That is the registered
-/// real gap in this case, and it is now the only thing standing between it and
-/// green.
-///
-/// Candidate spec amendment: name the mechanism behind "- DPI variants;" — how a
-/// density-annotated asset is declared and how its intrinsic logical size is
-/// derived from its pixel size. Until then no test can distinguish a runtime
-/// that supports DPI variants from one that has never heard of them.
+#[doc = include_str!("spec_ch5_images.doc/im_03_a_2x_asset_has_a_halved_logical_intrinsic_size.md")]
 #[test]
 fn im_03_a_2x_asset_has_a_halved_logical_intrinsic_size() {
     let dir = asset_dir(&[("pic@2x.png", solid_png(400, 200, [255, 0, 0]))]);

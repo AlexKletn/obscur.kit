@@ -1,0 +1,1 @@
+A structured diagnostic record.

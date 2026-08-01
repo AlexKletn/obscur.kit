@@ -1,38 +1,23 @@
-//! A Tokio-backed [`Spawner`] adapter (spec §2.7 optional task ports —
-//! "Опциональные реализации task ports. Ни одна не является core dependency.").
-//!
-//! [`TokioSpawner`] implements the executor-agnostic [`Spawner`] port by
-//! forwarding each [`BoxFuture`] to a Tokio [`Handle`], the runtime the host
-//! chose to bring into its reach. The kit's core never names Tokio; this adapter
-//! is one concrete way a host wires the port.
+#![doc = include_str!("tokio_spawner.doc/_module.md")]
 
 use obscur_task::{BoxFuture, Spawner};
 use tokio::runtime::Handle;
 
-/// A [`Spawner`] that schedules `Send` futures onto a Tokio runtime through a
-/// [`Handle`] (spec §2.7 optional task ports).
-///
-/// The handle is cheap to clone and refers to a runtime the host owns; this
-/// adapter merely forwards work to it and never drives the runtime itself.
+#[doc = include_str!("tokio_spawner.doc/TokioSpawner.md")]
 #[derive(Debug, Clone)]
 pub struct TokioSpawner {
-    /// The Tokio runtime handle work is spawned onto.
+    #[doc = include_str!("tokio_spawner.doc/handle.md")]
     handle: Handle,
 }
 
 impl TokioSpawner {
-    /// Creates a spawner that schedules onto the given Tokio [`Handle`].
+    #[doc = include_str!("tokio_spawner.doc/new.md")]
     #[must_use]
     pub fn new(handle: Handle) -> Self {
         Self { handle }
     }
 
-    /// Creates a spawner bound to the Tokio runtime of the current context.
-    ///
-    /// # Panics
-    ///
-    /// Panics if called outside a Tokio runtime context, matching the standard
-    /// behavior of [`Handle::current`].
+    #[doc = include_str!("tokio_spawner.doc/current.md")]
     #[must_use]
     pub fn current() -> Self {
         Self {
@@ -40,7 +25,7 @@ impl TokioSpawner {
         }
     }
 
-    /// Returns the Tokio [`Handle`] this spawner schedules onto.
+    #[doc = include_str!("tokio_spawner.doc/handle_2.md")]
     #[must_use]
     pub fn handle(&self) -> &Handle {
         &self.handle
@@ -48,12 +33,7 @@ impl TokioSpawner {
 }
 
 impl Spawner for TokioSpawner {
-    /// Spawns `future` onto the Tokio runtime.
-    ///
-    /// [`Handle::spawn`] accepts any `Future<Output = ()> + Send + 'static`, which
-    /// [`BoxFuture`] satisfies. The returned `JoinHandle` is dropped: the port is
-    /// fire-and-forget, so the task runs detached and its completion is not
-    /// awaited here.
+    #[doc = include_str!("tokio_spawner.doc/spawn.md")]
     fn spawn(&self, future: BoxFuture) {
         self.handle.spawn(future);
     }

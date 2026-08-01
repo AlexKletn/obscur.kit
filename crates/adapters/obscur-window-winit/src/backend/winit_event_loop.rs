@@ -1,12 +1,4 @@
-//! The winit [`ApplicationHandler`] integration that bridges winit's
-//! callback-driven event loop to the pull-based [`WindowBackend`] port
-//! (spec §6.1 windowing; §2.7 "Реализует `WindowBackend` и преобразует native
-//! events в доменные события"; §3.5 frame scheduling).
-//!
-//! This module owns the three tightly-coupled pieces of that bridge: the
-//! [`UserEvent`] the frame scheduler sends to wake the loop, the shared
-//! [`BackendState`] queue both the backend handle and the handler mutate, and
-//! the [`WinitAppHandler`] that drains it inside winit callbacks.
+#![doc = include_str!("winit_event_loop.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::mem;
@@ -28,104 +20,55 @@ use crate::error::WinitBackendError;
 
 use super::winit_window::WinitWindow;
 
-/// A wake-up message sent to the winit event loop from any thread (spec §3.5).
-///
-/// The §3.5 frame scheduler runs off the event loop; when it decides a frame is
-/// due it sends a `UserEvent` through an
-/// [`EventLoopProxy`](winit::event_loop::EventLoopProxy) (wrapped by
-/// [`EventLoopWaker`](crate::wake::EventLoopWaker)) to nudge the loop awake.
-/// There is a single variant today, but the enum keeps the door open for
-/// additional cross-thread signals without changing the event-loop type
-/// parameter.
+#[doc = include_str!("winit_event_loop.doc/UserEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserEvent {
-    /// Wake the event loop so it can service a scheduled frame.
+    #[doc = include_str!("winit_event_loop.doc/WakeUp.md")]
     WakeUp,
 }
 
-/// The winit-side mutable state shared between [`WinitWindowBackend`] and the
-/// [`WinitAppHandler`] (spec §6.1).
-///
-/// This is the shared-queue half of the pull/callback bridge. The backend
-/// handle enqueues work here — window creation, property reconciliation, focus,
-/// and close requests — and the handler drains that work inside winit callbacks
-/// (where an [`ActiveEventLoop`] and the live windows are reachable), pushing
-/// converted [`WindowEvent`]s back for the backend to poll. It is deliberately
-/// *not* where the domain [`Window`](obscur_windowing::window::Window) records
-/// live: those are owned directly by the backend so `window()` can hand out a
-/// `&Window` without borrowing through a mutex guard.
-///
-/// [`WinitWindowBackend`]: super::WinitWindowBackend
+#[doc = include_str!("winit_event_loop.doc/BackendState.md")]
 #[derive(Debug, Default)]
 pub(crate) struct BackendState {
-    /// Windows requested via `create_window` but not yet materialized because no
-    /// [`ActiveEventLoop`] has been available to build them.
+    #[doc = include_str!("winit_event_loop.doc/pending_creates.md")]
     pub(crate) pending_creates: Vec<(WindowId, CreateWindow)>,
-    /// Windows requested to close; the handler drops the live winit window.
+    #[doc = include_str!("winit_event_loop.doc/pending_closes.md")]
     pub(crate) pending_closes: Vec<WindowId>,
-    /// Desired full property sets to push onto live windows (from updates,
-    /// chrome-mode changes, and presentation changes).
+    #[doc = include_str!("winit_event_loop.doc/pending_property_updates.md")]
     pub(crate) pending_property_updates: Vec<(WindowId, WindowProperties)>,
-    /// Windows requested to receive keyboard focus.
+    #[doc = include_str!("winit_event_loop.doc/pending_focus.md")]
     pub(crate) pending_focus: Vec<WindowId>,
-    /// Live winit windows keyed by the domain id that minted them.
+    #[doc = include_str!("winit_event_loop.doc/windows.md")]
     pub(crate) windows: HashMap<WindowId, WinitWindow>,
-    /// Reverse map from winit's own window id to the domain id, for routing
-    /// native events back to the right window.
+    #[doc = include_str!("winit_event_loop.doc/winit_to_domain.md")]
     pub(crate) winit_to_domain: HashMap<WinitWindowId, WindowId>,
-    /// Converted window events awaiting the next `poll_window_events` drain.
+    #[doc = include_str!("winit_event_loop.doc/window_events.md")]
     pub(crate) window_events: Vec<(WindowId, WindowEvent)>,
-    /// The window the compositor last told us holds keyboard focus, tracked from
-    /// the native `Focused` events. This is the only *observed* activation state
-    /// the backend has: winit grants focus asynchronously, so `activate` reads
-    /// this rather than assuming its request was honored (spec §6.3).
+    #[doc = include_str!("winit_event_loop.doc/focused.md")]
     pub(crate) focused: Option<WindowId>,
-    /// Window-creation failures recorded by the handler for later inspection;
-    /// creation is deferred, so its errors cannot be returned from
-    /// `create_window` and are surfaced here instead.
+    #[doc = include_str!("winit_event_loop.doc/creation_errors.md")]
     pub(crate) creation_errors: Vec<WinitBackendError>,
-    /// The display topology as of the last enumeration, which is what the
-    /// backend's `displays()` hands out. Monitors, like windows, are only
-    /// reachable through an [`ActiveEventLoop`], so the pull-based port reads
-    /// this snapshot rather than the platform (spec §6.6).
+    #[doc = include_str!("winit_event_loop.doc/displays.md")]
     pub(crate) displays: Vec<Display>,
-    /// Display hotplug/configuration events awaiting the next
-    /// `poll_display_events` drain.
+    #[doc = include_str!("winit_event_loop.doc/display_events.md")]
     pub(crate) display_events: Vec<DisplayEvent>,
-    /// The [`DisplayId`] minted for each monitor identity, so an id stays
-    /// attached to one monitor across re-enumerations.
+    #[doc = include_str!("winit_event_loop.doc/display_ids.md")]
     display_ids: HashMap<MonitorKey, DisplayId>,
-    /// The source of fresh display identities.
+    #[doc = include_str!("winit_event_loop.doc/next_display_id.md")]
     next_display_id: u64,
 }
 
-/// The identity by which a monitor is recognized across enumerations (spec
-/// §6.6).
-///
-/// winit exposes no stable monitor identifier — only a name, which is the
-/// connector on X11/Wayland and the adapter path on Windows (unique in both),
-/// but which macOS repeats for two identical panels. The ordinal disambiguates
-/// those by enumeration order.
-///
-/// Geometry is deliberately **not** part of the key: a monitor whose mode,
-/// scale, or position changed is the same monitor and must keep its id, or
-/// every reconfiguration would report as a disconnect followed by a connect.
+#[doc = include_str!("winit_event_loop.doc/MonitorKey.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct MonitorKey {
-    /// The monitor name winit reports, or `None` when it reports none.
+    #[doc = include_str!("winit_event_loop.doc/name.md")]
     name: Option<String>,
-    /// Position among the same-named monitors of one enumeration.
+    #[doc = include_str!("winit_event_loop.doc/ordinal.md")]
     ordinal: usize,
 }
 
 impl BackendState {
-    /// Buffers a converted `event` for `id`, keeping [`BackendState::focused`] in
-    /// step with the compositor's focus verdict (spec §6.3).
-    ///
-    /// Focus tracking lives here rather than inline in the handler so it is
-    /// reachable without an [`ActiveEventLoop`]: the handler's callback can only
-    /// run inside a real winit loop, but this — the part with a decision in it —
-    /// is what `activate` depends on.
+    #[doc = include_str!("winit_event_loop.doc/record_window_event.md")]
     pub(crate) fn record_window_event(&mut self, id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::FocusGained => self.focused = Some(id),
@@ -135,14 +78,7 @@ impl BackendState {
         self.window_events.push((id, event));
     }
 
-    /// Replaces the display topology with a fresh enumeration, reporting what
-    /// changed as [`DisplayEvent`]s (spec §6.6 "hotplug/configuration events").
-    ///
-    /// winit 0.30 delivers no monitor notification of any kind, so the events
-    /// §6.6 requires can only be *derived*, by diffing one enumeration against
-    /// the last. That diff is the decision in this subsystem, and it lives here
-    /// rather than in the handler for the same reason focus tracking does: the
-    /// handler's callbacks only run inside a real winit loop.
+    #[doc = include_str!("winit_event_loop.doc/record_displays.md")]
     pub(crate) fn record_displays(&mut self, displays: Vec<Display>) {
         for previous in &self.displays {
             if !displays.iter().any(|display| display.id() == previous.id()) {
@@ -177,13 +113,7 @@ impl BackendState {
         self.displays = displays;
     }
 
-    /// Returns the [`DisplayId`] for a monitor named `name` appearing at
-    /// `ordinal` among its same-named peers, minting one on first sight.
-    ///
-    /// Ids are retained forever, not cleared when a monitor disappears: a
-    /// monitor unplugged and plugged back in is the same monitor to the user,
-    /// and a caller holding its id across the gap should find it again rather
-    /// than meet a stranger.
+    #[doc = include_str!("winit_event_loop.doc/display_id_for.md")]
     pub(crate) fn display_id_for(&mut self, name: Option<String>, ordinal: usize) -> DisplayId {
         let key = MonitorKey { name, ordinal };
         if let Some(&id) = self.display_ids.get(&key) {
@@ -196,7 +126,7 @@ impl BackendState {
     }
 }
 
-/// Returns the id of the primary display in `displays`, if one is marked.
+#[doc = include_str!("winit_event_loop.doc/primary_of.md")]
 fn primary_of(displays: &[Display]) -> Option<DisplayId> {
     displays
         .iter()
@@ -204,16 +134,7 @@ fn primary_of(displays: &[Display]) -> Option<DisplayId> {
         .map(Display::id)
 }
 
-/// Returns whether `current` reports a different configuration than `previous`
-/// for the same display (spec §6.6).
-///
-/// The comparison is exactly what [`DisplayEvent::ConfigurationChanged`]
-/// documents — mode, scale, or bounds — plus the work area, which is the
-/// reserved-region half of bounds. Primacy is excluded because it has its own
-/// [`DisplayEvent::PrimaryChanged`], and reporting a primary flip twice would
-/// make a consumer that re-lays-out on a configuration change do so for a change
-/// that moved no geometry. The name is excluded because it is the identity this
-/// display was matched by in the first place.
+#[doc = include_str!("winit_event_loop.doc/configuration_changed.md")]
 fn configuration_changed(previous: &Display, current: &Display) -> bool {
     previous.current_mode() != current.current_mode()
         || previous.available_modes() != current.available_modes()
@@ -223,26 +144,17 @@ fn configuration_changed(previous: &Display, current: &Display) -> bool {
         || previous.work_area() != current.work_area()
 }
 
-/// The winit [`ApplicationHandler`] that services the shared [`BackendState`]
-/// inside the event loop (spec §6.1, §2.7).
-///
-/// A host builds one via [`WinitWindowBackend::app_handler`] so it shares the
-/// exact same [`BackendState`] as the backend handle, then hands it to
-/// [`run_app`](winit::event_loop::EventLoop::run_app). On each turn the handler
-/// materializes any deferred windows, applies queued property/focus/close
-/// operations, and converts native window events into domain [`WindowEvent`]s.
-///
-/// [`WinitWindowBackend::app_handler`]: super::WinitWindowBackend::app_handler
+#[doc = include_str!("winit_event_loop.doc/WinitAppHandler.md")]
 #[derive(Debug)]
 pub struct WinitAppHandler {
-    /// The shared winit-side state, cloned from the backend handle.
+    #[doc = include_str!("winit_event_loop.doc/state.md")]
     state: Arc<Mutex<BackendState>>,
-    /// The pure native→domain window-event converter.
+    #[doc = include_str!("winit_event_loop.doc/window_events_2.md")]
     window_events: WindowEventConverter,
 }
 
 impl WinitAppHandler {
-    /// Builds a handler sharing `state` with its originating backend handle.
+    #[doc = include_str!("winit_event_loop.doc/new.md")]
     pub(crate) fn new(state: Arc<Mutex<BackendState>>) -> Self {
         Self {
             state,
@@ -250,13 +162,7 @@ impl WinitAppHandler {
         }
     }
 
-    /// Materializes deferred windows, applies queued operations, and refreshes
-    /// the display topology (spec §6.1, §6.6).
-    ///
-    /// Runs on every loop turn that has an [`ActiveEventLoop`]: it re-enumerates
-    /// the monitors, drains the pending-create queue (building each real winit
-    /// window and emitting a [`WindowEvent::Created`]), pushes queued property
-    /// sets onto live windows, grants queued focus, and drops closed windows.
+    #[doc = include_str!("winit_event_loop.doc/pump.md")]
     fn pump(&self, event_loop: &ActiveEventLoop) {
         let mut state = self.lock();
         pump_displays(event_loop, &mut state);
@@ -301,32 +207,19 @@ impl WinitAppHandler {
         }
     }
 
-    /// Locks the shared state, treating a poisoned mutex as an unrecoverable bug.
+    #[doc = include_str!("winit_event_loop.doc/lock.md")]
     fn lock(&self) -> std::sync::MutexGuard<'_, BackendState> {
         self.state.lock().expect("backend state mutex poisoned")
     }
 }
 
 impl ApplicationHandler<UserEvent> for WinitAppHandler {
-    /// Materializes deferred windows once the platform is ready to create them.
-    ///
-    /// Some platforms (notably Android/Web) forbid window creation before the
-    /// first `resumed`; deferring creation until here — and re-pumping on every
-    /// `about_to_wait` — is what lets `create_window` return an id synchronously
-    /// yet still produce a real window.
+    #[doc = include_str!("winit_event_loop.doc/resumed.md")]
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.pump(event_loop);
     }
 
-    /// Routes a native window event to its domain window, converting it.
-    ///
-    /// Only lifecycle/geometry/focus/scale/occlusion events convert to a domain
-    /// [`WindowEvent`]; keyboard and pointer input are the interaction crate's
-    /// concern and out of this port's `poll_window_events`, so they are not
-    /// buffered here (the [`KeyboardConverter`](crate::conversion::KeyboardConverter)
-    /// / [`PointerConverter`](crate::conversion::PointerConverter) feed a separate
-    /// input path in a later sub-step). An event for an unknown winit window is
-    /// dropped.
+    #[doc = include_str!("winit_event_loop.doc/window_event.md")]
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
@@ -342,21 +235,12 @@ impl ApplicationHandler<UserEvent> for WinitAppHandler {
         }
     }
 
-    /// Services queued backend operations before the loop blocks for input.
-    ///
-    /// Property/focus/close requests (and any late `create_window` calls) are
-    /// enqueued by the backend between loop turns; re-pumping here applies them
-    /// promptly without waiting for the next OS event.
+    #[doc = include_str!("winit_event_loop.doc/about_to_wait.md")]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.pump(event_loop);
     }
 
-    /// Handles a cross-thread wake-up by requesting a redraw of every live
-    /// window (spec §3.5).
-    ///
-    /// The frame scheduler sends [`UserEvent::WakeUp`] purely to break the loop
-    /// out of its wait; translating it into redraw requests is the honest way to
-    /// turn "a frame is due" into winit's redraw-driven rendering model.
+    #[doc = include_str!("winit_event_loop.doc/user_event.md")]
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::WakeUp => {
@@ -369,18 +253,7 @@ impl ApplicationHandler<UserEvent> for WinitAppHandler {
     }
 }
 
-/// Re-enumerates the platform's monitors into `state` (spec §6.6).
-///
-/// This is the only place a [`MonitorHandle`](winit::monitor::MonitorHandle) is
-/// reachable, so the pull-based `displays()` is served from what this leaves
-/// behind. It runs on every loop turn rather than once at startup because winit
-/// 0.30 has no monitor notification to run on instead — a topology refreshed
-/// only at `resumed` would still describe an unplugged monitor. The re-read is
-/// what it costs to not be stale, and the cost is platform-shaped: X11 and
-/// Wayland answer from winit's own cached output list, while Windows
-/// re-enumerates through `EnumDisplayMonitors` on every call.
-/// [`BackendState::record_displays`] makes the write idempotent, so an unchanged
-/// topology enqueues nothing.
+#[doc = include_str!("winit_event_loop.doc/pump_displays.md")]
 fn pump_displays(event_loop: &ActiveEventLoop, state: &mut BackendState) {
     let monitors: Vec<_> = event_loop.available_monitors().collect();
     let converter = if global_coordinates_are_published(&monitors) {
@@ -408,25 +281,7 @@ fn pump_displays(event_loop: &ActiveEventLoop, state: &mut BackendState) {
     state.record_displays(displays);
 }
 
-/// Returns whether `monitors` carry where each one sits in a global coordinate
-/// space (spec §6.6: "On Wayland, *unavailable* global coordinates are
-/// represented honestly").
-///
-/// The spec's condition is unavailability, not a platform, and the two are not
-/// the same: a Wayland compositor publishes each output's logical position
-/// through **xdg-output**, and winit reports it (`wayland/output.rs`'s
-/// `position()` reads `logical_position`, falling back to `wl_output.geometry`'s
-/// `location` — neither is hardcoded). Mutter, KWin and wlroots all implement it.
-/// Withholding is a *may* in the protocol, not a rule, so keying off `is_wayland()`
-/// blanks a topology the compositor published in full — which is the §6.6 rule
-/// inverted on the one platform §6.6 names.
-///
-/// What is genuinely undetectable is a compositor that withholds by reporting
-/// `(0, 0)` for everything: winit cannot distinguish that from a real origin. But
-/// that ambiguity only exists when **every** monitor claims the origin, which no
-/// real multi-monitor topology does — two monitors cannot both start at `(0, 0)`.
-/// A single monitor at the origin is simply where it is. So the absence is
-/// detected from the positions themselves and needs no `cfg`.
+#[doc = include_str!("winit_event_loop.doc/global_coordinates_are_published.md")]
 fn global_coordinates_are_published(monitors: &[MonitorHandle]) -> bool {
     let positions: Vec<_> = monitors
         .iter()
@@ -438,34 +293,12 @@ fn global_coordinates_are_published(monitors: &[MonitorHandle]) -> bool {
     positions_carry_a_topology(&positions)
 }
 
-/// The decision behind [`global_coordinates_are_published`], over plain positions
-/// so it is reachable without an event loop (a `MonitorHandle` needs one, which is
-/// why the rule this replaced was never tested).
+#[doc = include_str!("winit_event_loop.doc/positions_carry_a_topology.md")]
 fn positions_carry_a_topology(positions: &[(i32, i32)]) -> bool {
     positions.len() < 2 || !positions.iter().all(|&position| position == (0, 0))
 }
 
-/// Builds winit [`WindowAttributes`] from a domain [`CreateWindow`] request
-/// (spec §6.1, §6.2).
-///
-/// The whole request is mapped, not just its [`WindowProperties`]: the §6.2
-/// min/max [`WindowConstraints`](obscur_windowing::window::WindowConstraints)
-/// are creation-time attributes in winit too, so they are pushed here rather
-/// than dropped. Mapped: title, inner size, min/max inner size, resizability,
-/// decorations, transparency, always-on-top level, and an explicit position when
-/// one is requested. Post-creation-only concerns (state toggles) are applied
-/// afterwards via [`WinitWindow::apply_properties`].
-///
-/// The request's [`WindowRelation`](obscur_windowing::window::WindowRelation) is
-/// deliberately **not** mapped. winit's only ownership primitive is
-/// `WindowAttributes::with_parent_window`, which builds a *child* window clipped
-/// into the parent's client area (`WS_CHILD` on Windows, a child on X11) — not
-/// the floating owned dialog §6.1 means — and winit has no modality primitive at
-/// all. Rather than materialize a window that lies about its relation,
-/// [`WinitWindowBackend`]'s `create_window` rejects any request carrying an owner
-/// or a modality before it ever reaches this function.
-///
-/// [`WinitWindowBackend`]: super::WinitWindowBackend
+#[doc = include_str!("winit_event_loop.doc/window_attributes.md")]
 fn window_attributes(request: &CreateWindow) -> WindowAttributes {
     let properties = request.properties();
     let mut attributes = WindowAttributes::default()

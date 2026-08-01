@@ -1,31 +1,22 @@
-//! Server→client snapshot response to an `Inspect` command (§7.6/§7.8).
+#![doc = include_str!("snapshot_message.doc/_module.md")]
 
 use super::{CommandId, Inspectable};
 
-/// A structured, typed summary of an inspected target.
-///
-/// This crate cannot serialize the live runtime, so the payload is a typed
-/// container the server fills from its runtime bridge: a human-readable
-/// `description` plus coarse counts and ids. It is deliberately typed and
-/// structured rather than free-form log text (spec §7.8).
+#[doc = include_str!("snapshot_message.doc/SnapshotPayload.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SnapshotPayload {
-    /// A short, human-readable description of the snapshot.
+    #[doc = include_str!("snapshot_message.doc/description.md")]
     pub description: Box<str>,
-    /// The number of entities summarized (e.g. nodes, styles, resources).
+    #[doc = include_str!("snapshot_message.doc/entity_count.md")]
     pub entity_count: u64,
-    /// Stable ids of the summarized entities, when the server enumerates them
-    /// (may be empty).
+    #[doc = include_str!("snapshot_message.doc/entity_ids.md")]
     pub entity_ids: Vec<u64>,
-    /// An optional detailed, structured rendering of the target (e.g. the whole
-    /// tree with per-node geometry and styles) — empty by default. Lets a rich
-    /// host carry a full inspection an external agent can read, while the counts
-    /// above stay a cheap summary (spec §7.6/§7.8).
+    #[doc = include_str!("snapshot_message.doc/detail.md")]
     pub detail: Box<str>,
 }
 
 impl SnapshotPayload {
-    /// Creates a snapshot payload with no detail.
+    #[doc = include_str!("snapshot_message.doc/new.md")]
     #[must_use]
     pub fn new(description: impl Into<Box<str>>, entity_count: u64, entity_ids: Vec<u64>) -> Self {
         Self {
@@ -36,7 +27,7 @@ impl SnapshotPayload {
         }
     }
 
-    /// Creates a payload carrying only a description.
+    #[doc = include_str!("snapshot_message.doc/summary.md")]
     #[must_use]
     pub fn summary(description: impl Into<Box<str>>) -> Self {
         Self {
@@ -47,7 +38,7 @@ impl SnapshotPayload {
         }
     }
 
-    /// Attaches a detailed structured rendering, returning the payload (fluent).
+    #[doc = include_str!("snapshot_message.doc/with_detail.md")]
     #[must_use]
     pub fn with_detail(mut self, detail: impl Into<Box<str>>) -> Self {
         self.detail = detail.into();
@@ -55,19 +46,19 @@ impl SnapshotPayload {
     }
 }
 
-/// A server→client response carrying a snapshot of an inspected target.
+#[doc = include_str!("snapshot_message.doc/SnapshotMessage.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotMessage {
-    /// The [`CommandId`] of the `Inspect` command this answers.
+    #[doc = include_str!("snapshot_message.doc/command.md")]
     pub command: CommandId,
-    /// Which target was inspected.
+    #[doc = include_str!("snapshot_message.doc/target.md")]
     pub target: Inspectable,
-    /// The structured snapshot payload.
+    #[doc = include_str!("snapshot_message.doc/payload.md")]
     pub payload: SnapshotPayload,
 }
 
 impl SnapshotMessage {
-    /// Creates a snapshot message.
+    #[doc = include_str!("snapshot_message.doc/new_2.md")]
     #[must_use]
     pub fn new(command: CommandId, target: Inspectable, payload: SnapshotPayload) -> Self {
         Self {

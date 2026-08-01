@@ -1,19 +1,4 @@
-//! `SnapshotInspectSource`: a real, non-`Null` [`InspectSource`] backed by
-//! host-provided snapshots (spec §7.6/§7.8).
-//!
-//! Where [`NullInspectSource`](crate::bridge::NullInspectSource) answers every
-//! target with an empty placeholder, this source returns *live-ish* state: the
-//! host (a `UiRuntime`, a headless test harness, or any inspectable owner)
-//! registers a [`SnapshotPayload`] per [`Inspectable`] target it can describe,
-//! and the bridge serves those back verbatim. Targets the host has not described
-//! fall back to a typed default carrying a zero-count summary — never arbitrary
-//! runtime access (spec §7.7).
-//!
-//! It is deliberately snapshot-backed rather than holding a live runtime
-//! reference: the host refreshes the registered payloads whenever its state
-//! changes and hands the source to the bridge, mirroring the
-//! host-provides-device pattern used across the kit. This keeps the source
-//! `Send`-able onto the socket serving thread without borrowing the runtime.
+#![doc = include_str!("snapshot_inspect_source.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
@@ -21,18 +6,14 @@ use obscur_devtools_protocol::message::{Inspectable, SnapshotPayload};
 
 use crate::bridge::InspectSource;
 
-/// An [`InspectSource`] serving host-registered snapshots per target.
+#[doc = include_str!("snapshot_inspect_source.doc/SnapshotInspectSource.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotInspectSource {
     snapshots: BTreeMap<InspectableKey, SnapshotPayload>,
 }
 
 impl SnapshotInspectSource {
-    /// Creates a source with no registered snapshots.
-    ///
-    /// Until a payload is registered with [`with_snapshot`](Self::with_snapshot)
-    /// or [`set_snapshot`](Self::set_snapshot), every target resolves to the
-    /// typed [`default_payload`] rather than to `Null`'s placeholder.
+    #[doc = include_str!("snapshot_inspect_source.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -40,20 +21,19 @@ impl SnapshotInspectSource {
         }
     }
 
-    /// Registers `payload` for `target`, returning the updated source (builder
-    /// form).
+    #[doc = include_str!("snapshot_inspect_source.doc/with_snapshot.md")]
     #[must_use]
     pub fn with_snapshot(mut self, target: Inspectable, payload: SnapshotPayload) -> Self {
         self.set_snapshot(target, payload);
         self
     }
 
-    /// Registers or replaces the payload the host reports for `target`.
+    #[doc = include_str!("snapshot_inspect_source.doc/set_snapshot.md")]
     pub fn set_snapshot(&mut self, target: Inspectable, payload: SnapshotPayload) {
         self.snapshots.insert(InspectableKey::from(target), payload);
     }
 
-    /// Returns the registered payload for `target`, if the host described it.
+    #[doc = include_str!("snapshot_inspect_source.doc/registered.md")]
     #[must_use]
     pub fn registered(&self, target: Inspectable) -> Option<&SnapshotPayload> {
         self.snapshots.get(&InspectableKey::from(target))
@@ -68,18 +48,13 @@ impl InspectSource for SnapshotInspectSource {
     }
 }
 
-/// The typed fallback payload for a target the host has not described.
-///
-/// Distinct from `Null`'s "no source" wording: it names the target and reports a
-/// zero-count summary, signalling a live source with nothing registered yet.
+#[doc = include_str!("snapshot_inspect_source.doc/default_payload.md")]
 #[must_use]
 pub fn default_payload(target: Inspectable) -> SnapshotPayload {
     SnapshotPayload::summary(format!("no snapshot registered for {target:?}"))
 }
 
-/// A hashable/orderable key for [`Inspectable`], which is `Copy` + `Eq` but not
-/// `Ord`; keying a [`BTreeMap`] on its stable discriminant avoids requiring the
-/// protocol enum to derive `Ord`.
+#[doc = include_str!("snapshot_inspect_source.doc/InspectableKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct InspectableKey(u8);
 

@@ -1,4 +1,4 @@
-//! Message module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod message_key;
 pub use message_key::MessageKey;
 mod grammatical_gender;

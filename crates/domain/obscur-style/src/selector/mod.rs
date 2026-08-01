@@ -1,4 +1,4 @@
-//! Selector module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod complex_selector;
 pub use complex_selector::{Combinator, ComplexSelector};
 mod compound_selector;

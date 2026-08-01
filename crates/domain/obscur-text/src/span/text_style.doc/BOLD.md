@@ -1,0 +1,1 @@
+Bold weight (`700`).

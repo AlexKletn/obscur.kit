@@ -1,23 +1,9 @@
-//! A style scope: the boundary that scopes a component's or module's CSS.
-//!
-//! Per §4.15, global stylesheets are allowed but component stylesheets are
-//! scoped by default. The one substantive rule this type encodes is the
-//! boundary-crossing rule: an isolated scope lets *inherited* and *custom*
-//! properties cross its boundary and contains everything else. Custom
-//! properties always cross because they always inherit; inherited properties
-//! cross because inheritance flows through the tree regardless of scope; other
-//! (non-inherited) properties are contained by an isolated scope.
-//!
-//! Scope-aware selector matching and module rewriting happen elsewhere (in the
-//! matcher / `obscur-css`); this type only models scope identity and the
-//! visibility of a property across the boundary.
+#![doc = include_str!("style_scope.doc/_module.md")]
 
 use crate::property::{InheritedProperty, PropertyId};
 use crate::scope::{ScopeId, ScopeKind};
 
-/// A style scope, pairing its identity with its isolation behaviour (§4.15).
-///
-/// `Copy + Eq + Hash` so it can be stored and compared cheaply.
+#[doc = include_str!("style_scope.doc/StyleScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StyleScope {
     id: ScopeId,
@@ -25,55 +11,37 @@ pub struct StyleScope {
 }
 
 impl StyleScope {
-    /// Creates a style scope with the given identity and behaviour.
+    #[doc = include_str!("style_scope.doc/new.md")]
     #[must_use]
     pub const fn new(id: ScopeId, kind: ScopeKind) -> Self {
         Self { id, kind }
     }
 
-    /// Returns this scope's identifier.
+    #[doc = include_str!("style_scope.doc/id.md")]
     #[must_use]
     pub const fn id(self) -> ScopeId {
         self.id
     }
 
-    /// Returns this scope's behaviour classification.
+    #[doc = include_str!("style_scope.doc/kind.md")]
     #[must_use]
     pub const fn kind(self) -> ScopeKind {
         self.kind
     }
 
-    /// Returns `true` when this scope isolates non-inherited properties at its
-    /// boundary (delegates to [`ScopeKind::is_isolated`]).
-    ///
-    /// `Global` and `Open` scopes are not isolated; `Component` and `Module`
-    /// scopes are (§4.15).
+    #[doc = include_str!("style_scope.doc/is_isolated.md")]
     #[must_use]
     pub const fn is_isolated(self) -> bool {
         self.kind.is_isolated()
     }
 
-    /// Returns `true` when a property is of a kind that crosses a scope
-    /// boundary — i.e. it inherits by default (§4.15).
-    ///
-    /// This is independent of this scope's kind: it classifies the *property*.
-    /// Inherited properties cross because inheritance flows through the tree
-    /// regardless of scope. Custom properties always inherit, so they always
-    /// cross (they are represented among the inherited properties).
-    /// Non-inherited properties do not cross and are contained by an isolated
-    /// scope.
+    #[doc = include_str!("style_scope.doc/property_crosses_boundary.md")]
     #[must_use]
     pub fn property_crosses_boundary(property: PropertyId) -> bool {
         InheritedProperty::of(property).is_inherited()
     }
 
-    /// Returns `true` when this scope *contains* the given property — i.e. the
-    /// property does not escape the boundary.
-    ///
-    /// A `Global` or `Open` scope contains nothing: it performs no isolation, so
-    /// every property is visible outside it. An isolated (`Component` /
-    /// `Module`) scope contains exactly the properties that do not cross the
-    /// boundary — every non-inherited, non-custom property (§4.15).
+    #[doc = include_str!("style_scope.doc/contains_property.md")]
     #[must_use]
     pub fn contains_property(self, property: PropertyId) -> bool {
         self.is_isolated() && !Self::property_crosses_boundary(property)

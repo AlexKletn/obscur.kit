@@ -1,34 +1,21 @@
-//! Converts an obscur-scene [`Path`] into a kurbo [`BezPath`].
-//!
-//! Pure, backend-local geometry conversion (spec §2.7). The domain's
-//! backend-agnostic path segments are translated one-for-one into kurbo path
-//! elements, preserving the scene geometry exactly (spec §5.2 — only
-//! rasterization is Vello's; geometry is authoritative).
+#![doc = include_str!("path_converter.doc/_module.md")]
 
 use obscur_scene::path::{FillRule, Path, PathSegment};
 use vello::kurbo::BezPath;
 use vello::peniko;
 
-/// A stateless converter from an obscur-scene [`Path`] to a kurbo [`BezPath`].
-///
-/// obscur-scene coordinates are `f32` in logical-pixel space; kurbo works in
-/// `f64`, so each coordinate is widened. Each [`PathSegment`] maps to exactly one
-/// kurbo path element, so segment order and count are preserved.
+#[doc = include_str!("path_converter.doc/PathConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PathConverter;
 
 impl PathConverter {
-    /// Creates a path converter.
+    #[doc = include_str!("path_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Converts an obscur-scene [`Path`] into a kurbo [`BezPath`].
-    ///
-    /// Segments are emitted in order: `MoveTo`/`LineTo`/`QuadTo`/`CubicTo`/`Close`
-    /// become the corresponding kurbo `move_to`/`line_to`/`quad_to`/`curve_to`/
-    /// `close_path` elements. The element count equals the segment count.
+    #[doc = include_str!("path_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, path: &Path) -> BezPath {
         let mut bez = BezPath::new();
@@ -55,7 +42,7 @@ impl PathConverter {
         bez
     }
 
-    /// Maps an obscur-scene [`FillRule`] to a [`peniko::Fill`].
+    #[doc = include_str!("path_converter.doc/fill_rule.md")]
     #[must_use]
     pub fn fill_rule(&self, rule: FillRule) -> peniko::Fill {
         match rule {

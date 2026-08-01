@@ -1,31 +1,22 @@
-//! Caret hit-testing: mapping between points and source byte offsets (spec §5.10).
+#![doc = include_str!("text_hit_test.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
 use super::TextLayout;
 
-/// The resolved caret position produced by hitting a [`TextLayout`] with a point
-/// (spec §5.10 caret).
-///
-/// It names which [`line_index`](Self::line_index) the point fell on, the source
-/// [`byte_offset`](Self::byte_offset) of the nearest cluster boundary, and whether
-/// the point landed on the *trailing* half of a glyph
-/// ([`is_trailing`](Self::is_trailing)) — in which case the caret belongs *after*
-/// that cluster. It carries only integer/boolean fields, so it derives `Eq` and
-/// `Hash`.
+#[doc = include_str!("text_hit_test.doc/TextHitTest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextHitTest {
-    /// The index of the line the point resolved to.
+    #[doc = include_str!("text_hit_test.doc/line_index.md")]
     line_index: usize,
-    /// The source byte offset of the nearest cluster boundary.
+    #[doc = include_str!("text_hit_test.doc/byte_offset.md")]
     byte_offset: usize,
-    /// Whether the point fell on the trailing half of the glyph.
+    #[doc = include_str!("text_hit_test.doc/is_trailing.md")]
     is_trailing: bool,
 }
 
 impl TextHitTest {
-    /// Creates a hit result naming `line_index`, the source `byte_offset`, and the
-    /// `is_trailing` flag.
+    #[doc = include_str!("text_hit_test.doc/new.md")]
     #[must_use]
     pub const fn new(line_index: usize, byte_offset: usize, is_trailing: bool) -> Self {
         Self {
@@ -35,37 +26,25 @@ impl TextHitTest {
         }
     }
 
-    /// Returns the index of the line the point resolved to.
+    #[doc = include_str!("text_hit_test.doc/line_index_2.md")]
     #[must_use]
     pub const fn line_index(&self) -> usize {
         self.line_index
     }
 
-    /// Returns the source byte offset of the nearest cluster boundary.
+    #[doc = include_str!("text_hit_test.doc/byte_offset_2.md")]
     #[must_use]
     pub const fn byte_offset(&self) -> usize {
         self.byte_offset
     }
 
-    /// Returns whether the point fell on the trailing half of the glyph (the
-    /// caret then belongs after this cluster).
+    #[doc = include_str!("text_hit_test.doc/is_trailing_2.md")]
     #[must_use]
     pub const fn is_trailing(&self) -> bool {
         self.is_trailing
     }
 
-    /// Resolves `point` to a caret position within `layout` (spec §5.10 caret).
-    ///
-    /// The line is chosen as the one whose vertical box `[top, top + height)`
-    /// contains `point.y`, clamped to the first line above the paragraph and the
-    /// last line below it. Within the line the glyph advances are accumulated from
-    /// the line's `x_offset`; the glyph whose horizontal span contains `point.x`
-    /// gives the [`byte_offset`](Self::byte_offset) (its cluster) and the
-    /// [`is_trailing`](Self::is_trailing) flag (whether `point.x` is past the
-    /// glyph's midpoint). A point left of the first glyph clamps to the line's
-    /// start offset (not trailing); a point past the last glyph clamps to the
-    /// line's end offset (not trailing). An empty layout resolves to the origin
-    /// caret.
+    #[doc = include_str!("text_hit_test.doc/hit.md")]
     #[must_use]
     pub fn hit(layout: &TextLayout, point: Point) -> Self {
         let lines = layout.lines();
@@ -105,15 +84,7 @@ impl TextHitTest {
         Self::new(line_index, line.range().end, false)
     }
 
-    /// Computes the caret geometry for the cluster boundary at `byte_offset` on
-    /// line `line_index` (spec §5.10 caret).
-    ///
-    /// Returns a thin `caret_width`-wide [`Rect`] spanning the line's vertical box,
-    /// positioned at the x of the boundary: the pen position just before the first
-    /// glyph whose cluster is `>= byte_offset`, or the line's trailing edge when no
-    /// such glyph exists. Returns `None` when `line_index` is out of range. This is
-    /// the inverse of [`hit`](Self::hit) and is used to place the §5.12
-    /// candidate window.
+    #[doc = include_str!("text_hit_test.doc/caret_rect.md")]
     #[must_use]
     pub fn caret_rect(
         layout: &TextLayout,

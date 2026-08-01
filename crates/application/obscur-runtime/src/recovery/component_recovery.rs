@@ -1,44 +1,21 @@
-//! `ComponentRecovery`: applies the §1.7 component error-boundary policy.
+#![doc = include_str!("component_recovery.doc/_module.md")]
 
 use obscur_view::boundary::{ComponentFailure, ErrorBoundary};
 
 use crate::recovery::RecoveryResult;
 
-/// Applies the component error-boundary policy (spec §1.7).
-///
-/// Every component is an error boundary by default: a failure in view
-/// generation, reconciliation, or a local lifecycle hook is *contained* within
-/// the component subtree, may be *retried* according to policy, and otherwise
-/// the subtree is replaced with fallback UI — unless the boundary is disabled,
-/// in which case the failure *propagates* to the nearest enclosing boundary.
-///
-/// This coordinator is stateless: it sequences the §1.7
-/// *contain → (retry | fallback) | propagate* decision, delegating the
-/// contain/retry policy itself to `obscur-view`'s [`ErrorBoundary`]. The runtime
-/// only orders the decision and (later) reports it to diagnostics and reruns or
-/// replaces the subtree; it does not reimplement the boundary here.
+#[doc = include_str!("component_recovery.doc/ComponentRecovery.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ComponentRecovery;
 
 impl ComponentRecovery {
-    /// Creates a component-recovery coordinator.
+    #[doc = include_str!("component_recovery.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Applies the §1.7 error-boundary decision for `failure` against
-    /// `boundary`, returning the [`RecoveryResult`].
-    ///
-    /// The sequence is:
-    /// 1. Record the failure in the boundary. It is *always* recorded — even a
-    ///    disabled boundary stores it — so it can be reported to diagnostics.
-    /// 2. If the boundary did not contain it (disabled), the failure escapes:
-    ///    [`RecoveryResult::Propagated`].
-    /// 3. Otherwise, if the boundary still has retry budget, retry:
-    ///    [`RecoveryResult::Retried`].
-    /// 4. Otherwise the fallback UI is kept in place of the failed subtree:
-    ///    [`RecoveryResult::FellBack`].
+    #[doc = include_str!("component_recovery.doc/recover.md")]
     #[must_use]
     pub fn recover(
         &self,

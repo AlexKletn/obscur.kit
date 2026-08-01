@@ -1,4 +1,4 @@
-//! Deterministic module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod deterministic_clock;
 
 pub use deterministic_clock::DeterministicClock;

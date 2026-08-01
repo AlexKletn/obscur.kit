@@ -1,30 +1,22 @@
-//! Main-axis distribution of items and free space in a flex container.
+#![doc = include_str!("justify_content.doc/_module.md")]
 
-/// How a flex container distributes its items and free space along the main
-/// axis (spec §4.1).
+#[doc = include_str!("justify_content.doc/JustifyContent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum JustifyContent {
-    /// Pack items toward the main-axis start (the default).
+    #[doc = include_str!("justify_content.doc/FlexStart.md")]
     #[default]
     FlexStart,
-    /// Pack items toward the main-axis end.
+    #[doc = include_str!("justify_content.doc/FlexEnd.md")]
     FlexEnd,
-    /// Center items along the main axis.
+    #[doc = include_str!("justify_content.doc/Center.md")]
     Center,
-    /// Distribute items with the first at the start, the last at the end, and
-    /// equal space between adjacent items.
+    #[doc = include_str!("justify_content.doc/SpaceBetween.md")]
     SpaceBetween,
-    /// Distribute items with equal space around each item (half-size gaps at
-    /// the container edges).
+    #[doc = include_str!("justify_content.doc/SpaceAround.md")]
     SpaceAround,
-    /// Distribute items with equal space between items and at the container
-    /// edges.
+    #[doc = include_str!("justify_content.doc/SpaceEvenly.md")]
     SpaceEvenly,
-    /// Distribute any positive free space by growing the items/lines/tracks
-    /// equally (`stretch`). For a flex container's `align-content` this grows each
-    /// flex line's cross size by an equal share of the leftover cross space
-    /// (css-flexbox-1 §8.4); for main-axis `justify-content` on a flex container it
-    /// has no distinct effect and behaves as [`FlexStart`](Self::FlexStart).
+    #[doc = include_str!("justify_content.doc/Stretch.md")]
     Stretch,
 }
 

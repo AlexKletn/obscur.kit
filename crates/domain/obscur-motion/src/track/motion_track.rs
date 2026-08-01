@@ -1,66 +1,30 @@
-//! The [`MotionTrack`] track port and the shared [`Easing`] helper (spec §4.17).
-//!
-//! A *track* turns a normalized timeline progress `t` into a presentation
-//! [`MotionValue`]. The timeline upstream produces only raw linear progress;
-//! tracks are where easing curves and value interpolation are applied, so the
-//! track is the compile target for CSS `transition` / `@keyframes` / spring
-//! `animation` once the timeline has been separated out. [`Easing`] lives here
-//! because it is shared by both the transition and keyframe tracks.
+#![doc = include_str!("motion_track.doc/_module.md")]
 
 use crate::value::MotionValue;
 
-/// A source of presentation values sampled by normalized progress (spec §4.17).
-///
-/// Every track — [`TransitionTrack`](super::TransitionTrack),
-/// [`KeyframeTrack`](super::KeyframeTrack),
-/// [`SpringTrack`](super::SpringTrack) — implements this one method: given a
-/// normalized progress `t`, produce the [`MotionValue`] to present. The trait is
-/// deliberately **object-safe** (no generics, no `Self`-returning methods) so a
-/// heterogeneous set of tracks can be held as `Box<dyn MotionTrack>`.
-///
-/// `t` is normalized progress in `[0, 1]`. Implementations that shape `t`
-/// through a bounded easing curve clamp it to `[0, 1]` first (documented on each
-/// impl); spring-shaped tracks intentionally do *not* clamp, because a spring
-/// overshoots past its target before settling.
+#[doc = include_str!("motion_track.doc/MotionTrack.md")]
 pub trait MotionTrack {
-    /// Samples the presentation value at normalized progress `t` (spec §4.17).
-    ///
-    /// `t == 0.0` yields the start value and `t == 1.0` the end value.
-    /// Bounded-easing tracks clamp `t` into `[0, 1]`; spring tracks pass it
-    /// through so overshoot is preserved. Pure and deterministic: sampling the
-    /// same track at the same `t` always yields the same value.
+    #[doc = include_str!("motion_track.doc/sample.md")]
     #[must_use]
     fn sample(&self, t: f32) -> MotionValue;
 }
 
-/// A bounded easing curve applied to normalized progress (spec §4.17).
-///
-/// These are the native compile targets of the common CSS timing functions:
-/// `linear`, `ease-in`, `ease-out` and `ease-in-out`. Each maps normalized
-/// progress `t ∈ [0, 1]` to eased progress in `[0, 1]` with `apply(0) == 0` and
-/// `apply(1) == 1`. Full arbitrary `cubic-bezier(...)` / `steps(...)` timing
-/// functions are an *adapter* concern: a compiler lowers them onto this enum (or
-/// a keyframe sampling of the curve) rather than the domain modeling every
-/// bezier directly.
+#[doc = include_str!("motion_track.doc/Easing.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Easing {
-    /// Constant rate: `apply(t) == t` (CSS `linear`).
+    #[doc = include_str!("motion_track.doc/Linear.md")]
     #[default]
     Linear,
-    /// Accelerating from zero: `t²` (CSS `ease-in`).
+    #[doc = include_str!("motion_track.doc/EaseIn.md")]
     EaseIn,
-    /// Decelerating to the end: `t·(2 − t)` (CSS `ease-out`).
+    #[doc = include_str!("motion_track.doc/EaseOut.md")]
     EaseOut,
-    /// Accelerate then decelerate: the standard piecewise curve (CSS
-    /// `ease-in-out`).
+    #[doc = include_str!("motion_track.doc/EaseInOut.md")]
     EaseInOut,
 }
 
 impl Easing {
-    /// Maps normalized progress `t` through this easing curve (spec §4.17).
-    ///
-    /// `t` is clamped to `[0, 1]` first, so every variant satisfies
-    /// `apply(0) == 0` and `apply(1) == 1` and stays within `[0, 1]` in between.
+    #[doc = include_str!("motion_track.doc/apply.md")]
     #[must_use]
     pub fn apply(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);

@@ -1,15 +1,4 @@
-//! **SPECIFICATION-DERIVED** failure-model cases for obscur.kit §1.6.
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §1
-//! (Architecture & boundaries) with **no access to this repository's source**.
-//! The cases are a statement of what the implementation owes the spec, not a
-//! record of what it currently does. A failure here is a defect report about the
-//! toolkit (or, occasionally, about the spec), and must not be "corrected" by
-//! editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch1_failure_model.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch1_support/mod.rs"]
@@ -26,10 +15,10 @@ use support::{
     Collected, approx, at, compile, el, geom, install_missing_resources, runtime_with_id, txt, view,
 };
 
-/// The viewport every case in this file renders under.
+#[doc = include_str!("spec_ch1_failure_model.doc/VP.md")]
 const VP: f32 = 1000.0;
 
-/// A view holding one `Image` primitive classed `img`, sourced at `src`.
+#[doc = include_str!("spec_ch1_failure_model.doc/image_view.md")]
 fn image_view(src: &str) -> View {
     let node = Image::new(src)
         .into_view_node()
@@ -37,8 +26,7 @@ fn image_view(src: &str) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![node]))
 }
 
-/// §1.6: "panic is not normal control flow" and "failures should be localized to
-/// the smallest safe scope".
+#[doc = include_str!("spec_ch1_failure_model.doc/arch_16_a_malformed_declaration_kills_neither_its_rule_nor_the_sheet.md")]
 #[test]
 fn arch_16_a_malformed_declaration_kills_neither_its_rule_nor_the_sheet() {
     let css = ".a { width: 10px } \
@@ -74,8 +62,7 @@ fn arch_16_a_malformed_declaration_kills_neither_its_rule_nor_the_sheet() {
     );
 }
 
-/// §1.6: "diagnostics include severity, subsystem, stable code,
-/// node/resource/window context and recovery action."
+#[doc = include_str!("spec_ch1_failure_model.doc/arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields.md")]
 #[test]
 fn arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields() {
     let mut rt = runtime_with_id(1, VP, VP);
@@ -133,8 +120,7 @@ fn arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields() {
     );
 }
 
-/// §1.6: "diagnostics include ... stable code ..." — the code must not be
-/// derived from the (localized) human message, nor from the call site.
+#[doc = include_str!("spec_ch1_failure_model.doc/arch_18_the_stable_code_survives_locale_and_call_site.md")]
 #[test]
 fn arch_18_the_stable_code_survives_locale_and_call_site() {
     let sheet = compile(".img { width: 50px; height: 50px }");
@@ -196,8 +182,7 @@ fn arch_18_the_stable_code_survives_locale_and_call_site() {
     );
 }
 
-/// §1.6: "fallback and recovery are preferred where correctness can be
-/// maintained."
+#[doc = include_str!("spec_ch1_failure_model.doc/arch_20_a_missing_image_falls_back_without_disturbing_the_column.md")]
 #[test]
 fn arch_20_a_missing_image_falls_back_without_disturbing_the_column() {
     let mut rt = runtime_with_id(1, VP, VP);

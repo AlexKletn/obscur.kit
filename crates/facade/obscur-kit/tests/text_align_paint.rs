@@ -1,15 +1,4 @@
-//! End-to-end: **`text-align` moves the text** (CSS Text 3 §7.1, spec §5.10).
-//!
-//! It did not, for a reason worth stating: a text node's box is shrink-wrapped to
-//! its longest line, and the alignment offset was computed inside *that* box —
-//! where there is no slack to distribute, so the offset was always `0` however
-//! the property was set. The property parsed, cascaded and computed the whole
-//! way; only the width it aligned against was wrong. CSS aligns line boxes
-//! within the **containing block**, which is the parent's content box.
-//!
-//! Each test authors real CSS, runs one real frame, and reads the *published*
-//! display list, so anything from the CSS compiler to the scene coordinator
-//! failing shows up here.
+#![doc = include_str!("text_align_paint.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -27,8 +16,7 @@ const VIEWPORT: Size = Size {
     height: 200.0,
 };
 
-/// A 300px-wide box holding one short line, so there is 300 − (line width) of
-/// slack for alignment to distribute.
+#[doc = include_str!("text_align_paint.doc/sheet.md")]
 fn sheet(align: &str) -> Stylesheet {
     let css =
         format!(".box {{ width: 300px; height: 40px; font-size: 16px; text-align: {align} }}");
@@ -44,7 +32,7 @@ fn view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![node]))
 }
 
-/// The x the one painted run starts at, and its advance.
+#[doc = include_str!("text_align_paint.doc/painted.md")]
 fn painted(rt: &mut UiRuntime, align: &str) -> (f32, f32) {
     let sheet = sheet(align);
     let result = rt.render_now(&view(), std::slice::from_ref(&sheet));
@@ -97,8 +85,7 @@ fn centred_text_has_equal_slack_on_both_sides() {
     assert!(x > 0.0, "and it actually moved");
 }
 
-/// The three sit in order, which no single case can show: a bug that moved text
-/// by a constant would satisfy any one of them alone.
+#[doc = include_str!("text_align_paint.doc/the_three_alignments_are_ordered.md")]
 #[test]
 fn the_three_alignments_are_ordered() {
     let (left, _) = painted(&mut runtime(), "left");
@@ -110,14 +97,7 @@ fn the_three_alignments_are_ordered() {
     );
 }
 
-/// Alignment distributes the **content** box's slack, not the border box's: a
-/// padded container aligns its text to the inside of the padding.
-///
-/// This is the case that says which width is actually being used. `width` is the
-/// *content* width here (content-box sizing), so a 300px box with 20px of padding
-/// either side has its content spanning 20..320 and a right-aligned line ends at
-/// **320**. Were the padding not subtracted from the border box the alignment
-/// width would be 340 and the line would end at 360, well outside the box.
+#[doc = include_str!("text_align_paint.doc/alignment_stops_at_the_padding_not_the_border.md")]
 #[test]
 fn alignment_stops_at_the_padding_not_the_border() {
     let css = ".box { width: 300px; height: 40px; font-size: 16px; \

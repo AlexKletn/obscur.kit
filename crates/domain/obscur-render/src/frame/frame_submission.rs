@@ -1,42 +1,30 @@
-//! How a rendered frame is submitted for presentation (spec §5.2).
+#![doc = include_str!("frame_submission.doc/_module.md")]
 
 use obscur_scene::scene::SceneGeneration;
 
 use crate::frame::RenderFrame;
 
-/// How a submitted frame is scheduled onto the display (spec §5.2).
-///
-/// This mirrors the presentation modes a swapchain exposes: whether presentation
-/// blocks on the vertical blank (vsync) and how intermediate frames are queued.
+#[doc = include_str!("frame_submission.doc/PresentMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PresentMode {
-    /// Present on the vertical blank, blocking until the previous frame is
-    /// consumed (vsync). The default.
+    #[doc = include_str!("frame_submission.doc/Fifo.md")]
     #[default]
     Fifo,
-    /// Present immediately without waiting for vsync, allowing tearing.
+    #[doc = include_str!("frame_submission.doc/Immediate.md")]
     Immediate,
-    /// Triple-buffered: present on the vertical blank but replace any queued
-    /// frame rather than block.
+    #[doc = include_str!("frame_submission.doc/Mailbox.md")]
     Mailbox,
 }
 
 impl PresentMode {
-    /// Whether this mode waits for the vertical blank before presenting.
-    ///
-    /// True for [`PresentMode::Fifo`] and [`PresentMode::Mailbox`]; false for
-    /// [`PresentMode::Immediate`], which tears.
+    #[doc = include_str!("frame_submission.doc/waits_for_vsync.md")]
     #[must_use]
     pub const fn waits_for_vsync(&self) -> bool {
         matches!(self, Self::Fifo | Self::Mailbox)
     }
 }
 
-/// A [`RenderFrame`] together with the [`PresentMode`] it should be presented
-/// with (spec §5.2).
-///
-/// This is the unit handed to the renderer for presentation: the frame to draw
-/// and the scheduling policy for putting it on screen.
+#[doc = include_str!("frame_submission.doc/FrameSubmission.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameSubmission {
     frame: RenderFrame,
@@ -44,8 +32,7 @@ pub struct FrameSubmission {
 }
 
 impl FrameSubmission {
-    /// Submits `frame` for presentation using the default
-    /// [`PresentMode::Fifo`] (vsync).
+    #[doc = include_str!("frame_submission.doc/new.md")]
     #[must_use]
     pub fn new(frame: RenderFrame) -> Self {
         Self {
@@ -54,26 +41,26 @@ impl FrameSubmission {
         }
     }
 
-    /// Sets the presentation mode, returning the updated submission.
+    #[doc = include_str!("frame_submission.doc/with_present_mode.md")]
     #[must_use]
     pub fn with_present_mode(mut self, present_mode: PresentMode) -> Self {
         self.present_mode = present_mode;
         self
     }
 
-    /// The frame to be presented.
+    #[doc = include_str!("frame_submission.doc/frame.md")]
     #[must_use]
     pub const fn frame(&self) -> &RenderFrame {
         &self.frame
     }
 
-    /// The presentation mode this frame is submitted with.
+    #[doc = include_str!("frame_submission.doc/present_mode.md")]
     #[must_use]
     pub const fn present_mode(&self) -> PresentMode {
         self.present_mode
     }
 
-    /// The generation of the scene carried by this submission's frame.
+    #[doc = include_str!("frame_submission.doc/generation.md")]
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.frame.generation()

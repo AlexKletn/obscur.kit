@@ -1,15 +1,4 @@
-//! **SPECIFICATION-DERIVED** threading-model cases for obscur.kit §1.5.
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §1
-//! (Architecture & boundaries) with **no access to this repository's source**.
-//! The cases are a statement of what the implementation owes the spec, not a
-//! record of what it currently does. A failure here is a defect report about the
-//! toolkit (or, occasionally, about the spec), and must not be "corrected" by
-//! editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch1_threading.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(feature = "resource-fs", feature = "resource-decode"))]
 
@@ -34,10 +23,10 @@ use support::{
     view,
 };
 
-/// The viewport every case in this file renders under.
+#[doc = include_str!("spec_ch1_threading.doc/VP.md")]
 const VP: f32 = 1000.0;
 
-/// A real 2×2 opaque-red PNG, so the decode is real work.
+#[doc = include_str!("spec_ch1_threading.doc/RED_2X2_PNG.md")]
 const RED_2X2_PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
     0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 218, 99, 248, 207, 192, 0, 68, 12,
@@ -46,7 +35,7 @@ const RED_2X2_PNG: &[u8] = &[
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A fresh temp directory holding `a.png`, `b.png` and `c.png`.
+#[doc = include_str!("spec_ch1_threading.doc/temp_asset_dir.md")]
 fn temp_asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-ch1-{}-{n}", std::process::id()));
@@ -57,15 +46,14 @@ fn temp_asset_dir() -> PathBuf {
     dir
 }
 
-/// An `Image` node classed `img`, sourced at `src`.
+#[doc = include_str!("spec_ch1_threading.doc/img.md")]
 fn img(src: &str) -> ViewNode {
     Image::new(src)
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("img".into())))
 }
 
-/// The §1.5 scenario: 3 text runs needing shaping, 2 image decodes, 1
-/// stylesheet parse.
+#[doc = include_str!("spec_ch1_threading.doc/scenario_view.md")]
 fn scenario_view() -> View {
     view(vec![el(
         10,
@@ -80,8 +68,7 @@ fn scenario_view() -> View {
     )])
 }
 
-/// Every arranged node's absolute rect, in tree order — the geometry two runs
-/// must agree on byte for byte.
+#[doc = include_str!("spec_ch1_threading.doc/geometry.md")]
 fn geometry(rt: &UiRuntime) -> Vec<(u64, [u32; 4])> {
     let mut out: Vec<(u64, [u32; 4])> = rt
         .tree()
@@ -103,12 +90,12 @@ fn geometry(rt: &UiRuntime) -> Vec<(u64, [u32; 4])> {
     out
 }
 
-/// The scene snapshot rendered as a comparable string.
+#[doc = include_str!("spec_ch1_threading.doc/scene_text.md")]
 fn scene_text(snapshot: &SceneSnapshot) -> String {
     format!("{:?}", snapshot.display_list().commands())
 }
 
-/// §1.5: "Immutable scene snapshots separate UI state from renderer execution."
+#[doc = include_str!("spec_ch1_threading.doc/arch_13_a_retained_scene_snapshot_never_changes_under_the_renderer.md")]
 #[test]
 fn arch_13_a_retained_scene_snapshot_never_changes_under_the_renderer() {
     let mut rt = runtime_with_id(1, VP, VP);
@@ -159,7 +146,7 @@ fn arch_13_a_retained_scene_snapshot_never_changes_under_the_renderer() {
     );
 }
 
-/// The bounds of every painted path in a snapshot.
+#[doc = include_str!("spec_ch1_threading.doc/fill_rects.md")]
 fn fill_rects(snapshot: &SceneSnapshot) -> Vec<Rect> {
     snapshot
         .display_list()
@@ -172,8 +159,7 @@ fn fill_rects(snapshot: &SceneSnapshot) -> Vec<Rect> {
         .collect()
 }
 
-/// §1.5: "The platform adapter decides whether actual parallelism is available,
-/// including WASM workers."
+#[doc = include_str!("spec_ch1_threading.doc/arch_14_a_serial_adapter_and_a_parallel_one_produce_identical_output.md")]
 #[test]
 fn arch_14_a_serial_adapter_and_a_parallel_one_produce_identical_output() {
     let dir = temp_asset_dir();
@@ -215,8 +201,7 @@ fn arch_14_a_serial_adapter_and_a_parallel_one_produce_identical_output() {
     );
 }
 
-/// §1.5: "Cross-thread results return as typed messages and are committed at
-/// deterministic synchronization points."
+#[doc = include_str!("spec_ch1_threading.doc/arch_15_async_completions_commit_deterministically_at_frame_boundaries.md")]
 #[test]
 fn arch_15_async_completions_commit_deterministically_at_frame_boundaries() {
     let dir = temp_asset_dir();
@@ -279,5 +264,5 @@ fn arch_15_async_completions_commit_deterministically_at_frame_boundaries() {
     }
 }
 
-/// Keeps `NodeId` in scope for the geometry key type.
+#[doc = include_str!("spec_ch1_threading.doc/_.md")]
 const _: fn(NodeId) -> u64 = NodeId::raw;

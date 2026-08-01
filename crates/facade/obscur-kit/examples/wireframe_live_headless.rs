@@ -1,31 +1,4 @@
-//! **Headless proof: the interactive Wireframe-Kit demo WORKS — and the bare
-//! controls get their look entirely from the installed UA default stylesheet.**
-//!
-//! The deterministic, display-free sibling of `wireframe_live_window.rs`. It boots
-//! the shared [`wireframe`] scene on a real [`UiRuntime`] with the kit's **UA
-//! default stylesheet installed** (`runtime.set_default_stylesheet(
-//! obscur_kit::ua_stylesheet())`) — the ONLY thing that styles the bare controls —
-//! plus the demo's LAYOUT-CHROME author sheet on top, then drives every interaction
-//! **programmatically through the real input path** ([`handle_pointer`] for hover /
-//! press / release / click, [`handle_key`] for typing) and rasterizes two stitched
-//! panels to `target/wireframe_live_proof.png`:
-//!
-//! - **Panel 1 — Idle.** The spec sheet at rest: masthead, seven section cards, and
-//!   the footer, every bare control showing its neutral UA base look.
-//! - **Panel 2 — Interacted.** The button hovered + pressed (`:hover` + `:active`
-//!   + `:focus` all biting from the live pointer/press/focus targets), the field
-//!   focused with typed text, the checkbox toggled `:checked` (box + `✓`), the
-//!   tri-state advanced, one radio selected (filled dot), and the select opened +
-//!   picked (arrow flip + chosen label).
-//!
-//! Each interaction is located by hit-testing the runtime's own layout boxes (no
-//! pixel positions are hard-coded), driven through the pointer/keyboard API, and
-//! **asserted**, so a regression fails the run rather than producing a wrong image.
-//! The disabled button is clicked and shown to be a genuine no-op.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example wireframe_live_headless \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("wireframe_live_headless.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -57,15 +30,12 @@ use wireframe::{
     SELECT_COUNT, WireState, radio_command,
 };
 
-/// The logical extent each panel is laid out and rasterized under. Tall enough for
-/// the whole spec sheet (masthead + 7 cards + footer) plus the select's open list.
+#[doc = include_str!("wireframe_live_headless.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1240.0, 1560.0);
 
-/// A long single-line value typed into the text field — wider than the field's
-/// definite 220px, so it proves an `<input>` is single-line (clips, never wraps).
+#[doc = include_str!("wireframe_live_headless.doc/FIELD_TEXT.md")]
 const FIELD_TEXT: &str = "The quick brown fox jumped over";
-/// A long value typed into the textarea — long enough to wrap onto several lines
-/// within the definite 360px box (proving the wrap width is the box, not min-content).
+#[doc = include_str!("wireframe_live_headless.doc/AREA_TEXT.md")]
 const AREA_TEXT: &str = "The quick brown fox jumps over the lazy dog and then it runs far away again today while the sun sets slowly behind the distant hills";
 
 fn main() {
@@ -270,16 +240,10 @@ fn main() {
     println!("== all interaction assertions held; exiting 0 ==");
 }
 
-/// The window-sized viewport the scroll check lays the sheet out under: shorter
-/// than the ~1560-px sheet, so `#app` (`height: 100%; overflow: auto`) becomes a
-/// real scroll container the wheel drives — the same rewire the windowed demo uses
-/// (CSS Overflow Module Level 3 §scroll-container).
+#[doc = include_str!("wireframe_live_headless.doc/SCROLL_VIEWPORT.md")]
 const SCROLL_VIEWPORT: Size = Size::new(1080.0, 720.0);
 
-/// Proves the demo's `#app` page is a genuine vertical scroll container: it clips +
-/// scrolls its content (the `.wf-col` sheet) via `scroll_by`, exactly as the
-/// windowed driver's mouse wheel does, and paints a scrollbar. Rasterizes an
-/// idle|scrolled pair of the window-sized sheet to `target/wireframe_scroll_proof.png`.
+#[doc = include_str!("wireframe_live_headless.doc/verify_demo_scrolls.md")]
 fn verify_demo_scrolls() {
     let sheets = vec![compile(wireframe::stylesheet())];
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(3), SCROLL_VIEWPORT);
@@ -342,7 +306,7 @@ fn verify_demo_scrolls() {
     );
 }
 
-/// Rasterizes the runtime's committed scene into a fresh pixmap sized to `size`.
+#[doc = include_str!("wireframe_live_headless.doc/capture_at.md")]
 fn capture_at(
     runtime: &mut UiRuntime,
     renderer: &mut CpuRenderer,
@@ -362,9 +326,7 @@ fn capture_at(
 // Command handlers — identical semantics to the windowed driver.
 // ---------------------------------------------------------------------------
 
-/// Registers a handler per interactive command, all mutating the shared state and
-/// refreshing its status line (the disabled controls' commands are deliberately
-/// left unregistered so they are no-ops).
+#[doc = include_str!("wireframe_live_headless.doc/register_handlers.md")]
 fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>) {
     {
         let s = state.clone();
@@ -446,17 +408,13 @@ fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>) {
 // Interaction + rendering helpers.
 // ---------------------------------------------------------------------------
 
-/// Rebuilds the view from the current state and runs one real frame through the
-/// runtime (reconcile → match → layout → compose), refreshing the retained tree,
-/// layout boxes, and spatial index so the next hit-test sees the current state.
+#[doc = include_str!("wireframe_live_headless.doc/refresh.md")]
 fn refresh(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>, sheets: &[Stylesheet]) {
     let view = wireframe::view(&state.borrow());
     runtime.render_now(&view, sheets);
 }
 
-/// Clicks the control identified by `id`: a full press + release just inside its
-/// left edge (so the control element itself is the hit target, not its text child),
-/// then a refresh so the mutated state is laid out.
+#[doc = include_str!("wireframe_live_headless.doc/click.md")]
 fn click(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>, sheets: &[Stylesheet], id: &str) {
     let p = center(runtime, id).unwrap_or_else(|| panic!("control {id:?} is laid out"));
     runtime.handle_pointer(pointer(PointerEventKind::Down, p));
@@ -464,14 +422,12 @@ fn click(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>, sheets: &[Styl
     refresh(runtime, state, sheets);
 }
 
-/// Builds a mouse [`PointerEvent`] of `kind` at content-space point `p`.
+#[doc = include_str!("wireframe_live_headless.doc/pointer.md")]
 fn pointer(kind: PointerEventKind, p: Point) -> PointerEvent {
     PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, p)
 }
 
-/// Types `text` into the focused editable, one printable character at a time
-/// through the real keyboard path (press + release), so the runtime's editing
-/// session inserts each character and fires the field's `on-input` handler.
+#[doc = include_str!("wireframe_live_headless.doc/type_text.md")]
 fn type_text(runtime: &mut UiRuntime, text: &str) {
     for ch in text.chars() {
         let physical = physical_for(ch);
@@ -481,8 +437,7 @@ fn type_text(runtime: &mut UiRuntime, text: &str) {
     }
 }
 
-/// A plausible physical key position for a typed character (only the scan position;
-/// the inserted character comes from the logical key). Falls back to `KeyA`.
+#[doc = include_str!("wireframe_live_headless.doc/physical_for.md")]
 fn physical_for(ch: char) -> PhysicalKey {
     match ch.to_ascii_lowercase() {
         'b' => PhysicalKey::KeyB,
@@ -493,7 +448,7 @@ fn physical_for(ch: char) -> PhysicalKey {
     }
 }
 
-/// Finds the [`NodeId`] of the element carrying the reserved `id` attribute `id`.
+#[doc = include_str!("wireframe_live_headless.doc/node_by_id.md")]
 fn node_by_id(runtime: &UiRuntime, id: &str) -> Option<NodeId> {
     runtime
         .tree()
@@ -502,9 +457,7 @@ fn node_by_id(runtime: &UiRuntime, id: &str) -> Option<NodeId> {
         .map(|(node_id, _)| node_id)
 }
 
-/// The click point for the control `id`: a point just inside its left edge (in the
-/// padding, left of the label text) at the vertical centre, so the control element
-/// itself is the topmost hit rather than its text child.
+#[doc = include_str!("wireframe_live_headless.doc/center.md")]
 fn center(runtime: &UiRuntime, id: &str) -> Option<Point> {
     let node = node_by_id(runtime, id)?;
     let layout = runtime.layout_boxes().get(&node)?;
@@ -513,16 +466,14 @@ fn center(runtime: &UiRuntime, id: &str) -> Option<Point> {
     Some(Point::new(origin.x + 6.0, origin.y + size.height / 2.0))
 }
 
-/// The layout box (origin, size) of the control carrying reserved `id`.
+#[doc = include_str!("wireframe_live_headless.doc/box_of.md")]
 fn box_of(runtime: &UiRuntime, id: &str) -> Option<(Point, Size)> {
     let node = node_by_id(runtime, id)?;
     let lb = runtime.layout_boxes().get(&node)?;
     Some((lb.origin(), lb.size()))
 }
 
-/// The layout box of the first direct **Text** child of the control `id` (an
-/// input/textarea renders its value as a single Text child; when it wraps, that
-/// box spans multiple lines — width = widest line, height = total).
+#[doc = include_str!("wireframe_live_headless.doc/text_child_box.md")]
 fn text_child_box(runtime: &UiRuntime, id: &str) -> Option<(Point, Size)> {
     let parent = node_by_id(runtime, id)?;
     let node = runtime.tree().get(parent)?;
@@ -536,7 +487,7 @@ fn text_child_box(runtime: &UiRuntime, id: &str) -> Option<(Point, Size)> {
     None
 }
 
-/// Every node carrying the CSS `class`, in tree order.
+#[doc = include_str!("wireframe_live_headless.doc/nodes_by_class.md")]
 fn nodes_by_class(runtime: &UiRuntime, class: &str) -> Vec<NodeId> {
     runtime
         .tree()
@@ -546,9 +497,7 @@ fn nodes_by_class(runtime: &UiRuntime, class: &str) -> Vec<NodeId> {
         .collect()
 }
 
-/// Asserts the OPEN select's popup renders as a real dropdown: a `.select-list`
-/// container positioned directly BELOW the header, holding a vertical stack of
-/// `.select-option` rows (one per option), the selected row carrying `selected`.
+#[doc = include_str!("wireframe_live_headless.doc/assert_select_popup.md")]
 fn assert_select_popup(runtime: &UiRuntime) {
     let header = *nodes_by_class(runtime, "select-header")
         .first()
@@ -639,7 +588,7 @@ fn assert_select_popup(runtime: &UiRuntime) {
     );
 }
 
-/// Rasterizes the runtime's current committed scene into a fresh pixmap.
+#[doc = include_str!("wireframe_live_headless.doc/capture.md")]
 fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pixmap {
     let snapshot = runtime.snapshot();
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -651,7 +600,7 @@ fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pi
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Horizontally stitches `panels` left-to-right with thin dividers between them.
+#[doc = include_str!("wireframe_live_headless.doc/stitch.md")]
 fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 3u32;
     let height = panels.iter().map(|p| p.height()).max().unwrap_or(0);
@@ -675,14 +624,14 @@ fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] (author origin).
+#[doc = include_str!("wireframe_live_headless.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("wireframe_live_headless.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -690,8 +639,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("wireframe_live_headless.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -709,12 +657,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("wireframe_live_headless.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("wireframe_live_headless.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

@@ -1,141 +1,115 @@
-//! Reserved interned-symbol handles for layout keyword values.
-//!
-//! A handful of layout properties (`display`, `flex-direction`,
-//! `justify-content`, `align-items`) take their values from a small, *closed*
-//! set of CSS keywords. Those keywords are carried through the style system as
-//! [`PropertyValue::Keyword`](crate::property::PropertyValue::Keyword) values —
-//! i.e. as [`InternedSymbol`] identities, never as strings.
-//!
-//! The problem is that the CSS compiler and the runtime layout bridge live in
-//! different crates and would ordinarily intern the same keyword text into
-//! *different* symbol tables, so their `InternedSymbol`s could never be compared
-//! for identity. To make the keyword handles agree across crates without sharing
-//! an interner, this module reserves a fixed block of symbol values — one per
-//! keyword — that both sides use directly. The CSS compiler resolves a keyword
-//! *string* to its reserved symbol via the `*_from_name` helpers here; the
-//! layout bridge compares a computed `Keyword(sym)` against the `pub const`s
-//! below. These constants are the canonical cross-crate handles for layout
-//! keyword values.
-//!
-//! The reserved values occupy the `0x0000_1xxx` namespace (extended into
-//! `0x0000_2xxx` once the `1xxx` category nibbles were exhausted). This is distinct
-//! from `obscur-view`'s element-attribute reservations (`CLASS`/`ID`/`TYPE` in
-//! `0x0000_000x`) and from the component/primitive prop namespaces (e.g.
-//! `0x00C1_xxxx`), so a reserved layout keyword can never collide with either.
+#![doc = include_str!("layout_keyword.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
 // ---- `display` keyword values ----
 
-/// The `display: block` keyword.
+#[doc = include_str!("layout_keyword.doc/DISPLAY_BLOCK.md")]
 pub const DISPLAY_BLOCK: InternedSymbol = InternedSymbol::from_raw(0x0000_1001);
-/// The `display: flex` keyword.
+#[doc = include_str!("layout_keyword.doc/DISPLAY_FLEX.md")]
 pub const DISPLAY_FLEX: InternedSymbol = InternedSymbol::from_raw(0x0000_1002);
-/// The `display: grid` keyword.
+#[doc = include_str!("layout_keyword.doc/DISPLAY_GRID.md")]
 pub const DISPLAY_GRID: InternedSymbol = InternedSymbol::from_raw(0x0000_1003);
-/// The `display: none` keyword.
+#[doc = include_str!("layout_keyword.doc/DISPLAY_NONE.md")]
 pub const DISPLAY_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1004);
-/// The `display: contents` keyword.
+#[doc = include_str!("layout_keyword.doc/DISPLAY_CONTENTS.md")]
 pub const DISPLAY_CONTENTS: InternedSymbol = InternedSymbol::from_raw(0x0000_1005);
 
 // ---- `flex-direction` keyword values ----
 
-/// The `flex-direction: row` keyword.
+#[doc = include_str!("layout_keyword.doc/FLEX_ROW.md")]
 pub const FLEX_ROW: InternedSymbol = InternedSymbol::from_raw(0x0000_1101);
-/// The `flex-direction: row-reverse` keyword.
+#[doc = include_str!("layout_keyword.doc/FLEX_ROW_REVERSE.md")]
 pub const FLEX_ROW_REVERSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1102);
-/// The `flex-direction: column` keyword.
+#[doc = include_str!("layout_keyword.doc/FLEX_COLUMN.md")]
 pub const FLEX_COLUMN: InternedSymbol = InternedSymbol::from_raw(0x0000_1103);
-/// The `flex-direction: column-reverse` keyword.
+#[doc = include_str!("layout_keyword.doc/FLEX_COLUMN_REVERSE.md")]
 pub const FLEX_COLUMN_REVERSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1104);
 
 // ---- `flex-wrap` keyword values ----
 
-/// The `flex-wrap: nowrap` keyword (the initial; single-line).
+#[doc = include_str!("layout_keyword.doc/FLEX_WRAP_NOWRAP.md")]
 pub const FLEX_WRAP_NOWRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_1F01);
-/// The `flex-wrap: wrap` keyword (multi-line, lines stacked start-to-end).
+#[doc = include_str!("layout_keyword.doc/FLEX_WRAP_WRAP.md")]
 pub const FLEX_WRAP_WRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_1F02);
-/// The `flex-wrap: wrap-reverse` keyword (multi-line, lines stacked end-to-start).
+#[doc = include_str!("layout_keyword.doc/FLEX_WRAP_WRAP_REVERSE.md")]
 pub const FLEX_WRAP_WRAP_REVERSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1F03);
 
 // ---- `justify-content` keyword values ----
 
-/// The `justify-content: flex-start` keyword.
+#[doc = include_str!("layout_keyword.doc/JUSTIFY_START.md")]
 pub const JUSTIFY_START: InternedSymbol = InternedSymbol::from_raw(0x0000_1201);
-/// The `justify-content: center` keyword.
+#[doc = include_str!("layout_keyword.doc/JUSTIFY_CENTER.md")]
 pub const JUSTIFY_CENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1202);
-/// The `justify-content: flex-end` keyword.
+#[doc = include_str!("layout_keyword.doc/JUSTIFY_END.md")]
 pub const JUSTIFY_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1203);
-/// The `justify-content: space-between` keyword.
+#[doc = include_str!("layout_keyword.doc/JUSTIFY_SPACE_BETWEEN.md")]
 pub const JUSTIFY_SPACE_BETWEEN: InternedSymbol = InternedSymbol::from_raw(0x0000_1204);
-/// The `justify-content: space-around` keyword.
+#[doc = include_str!("layout_keyword.doc/JUSTIFY_SPACE_AROUND.md")]
 pub const JUSTIFY_SPACE_AROUND: InternedSymbol = InternedSymbol::from_raw(0x0000_1205);
-/// The `justify-content` / `align-content: space-evenly` keyword.
+#[doc = include_str!("layout_keyword.doc/JUSTIFY_SPACE_EVENLY.md")]
 pub const JUSTIFY_SPACE_EVENLY: InternedSymbol = InternedSymbol::from_raw(0x0000_1206);
-/// The `align-content: stretch` keyword (grow lines/tracks to fill leftover
-/// space). Distinct from [`ALIGN_STRETCH`] (the `align-items` per-item stretch).
+#[doc = include_str!("layout_keyword.doc/JUSTIFY_STRETCH.md")]
 pub const JUSTIFY_STRETCH: InternedSymbol = InternedSymbol::from_raw(0x0000_1207);
 
 // ---- `align-items` keyword values ----
 
-/// The `align-items: flex-start` keyword.
+#[doc = include_str!("layout_keyword.doc/ALIGN_START.md")]
 pub const ALIGN_START: InternedSymbol = InternedSymbol::from_raw(0x0000_1301);
-/// The `align-items: center` keyword.
+#[doc = include_str!("layout_keyword.doc/ALIGN_CENTER.md")]
 pub const ALIGN_CENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1302);
-/// The `align-items: flex-end` keyword.
+#[doc = include_str!("layout_keyword.doc/ALIGN_END.md")]
 pub const ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1303);
-/// The `align-items: stretch` keyword.
+#[doc = include_str!("layout_keyword.doc/ALIGN_STRETCH.md")]
 pub const ALIGN_STRETCH: InternedSymbol = InternedSymbol::from_raw(0x0000_1304);
-/// The `justify-self` / `align-self: auto` keyword (inherit the container's
-/// items default). Only the *-self properties accept it; `justify-items` /
-/// `align-items` do not.
+#[doc = include_str!("layout_keyword.doc/ALIGN_AUTO.md")]
 pub const ALIGN_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1305);
 
 // ---- `direction` keyword values ----
 
-/// The `direction: ltr` (left-to-right) keyword.
+#[doc = include_str!("layout_keyword.doc/DIRECTION_LTR.md")]
 pub const DIRECTION_LTR: InternedSymbol = InternedSymbol::from_raw(0x0000_1401);
-/// The `direction: rtl` (right-to-left) keyword.
+#[doc = include_str!("layout_keyword.doc/DIRECTION_RTL.md")]
 pub const DIRECTION_RTL: InternedSymbol = InternedSymbol::from_raw(0x0000_1402);
 
 // ---- `writing-mode` keyword values ----
 
-/// The `writing-mode: horizontal-tb` keyword (the CSS initial).
+#[doc = include_str!("layout_keyword.doc/WRITING_MODE_HORIZONTAL_TB.md")]
 pub const WRITING_MODE_HORIZONTAL_TB: InternedSymbol = InternedSymbol::from_raw(0x0000_2601);
-/// The `writing-mode: vertical-rl` keyword.
+#[doc = include_str!("layout_keyword.doc/WRITING_MODE_VERTICAL_RL.md")]
 pub const WRITING_MODE_VERTICAL_RL: InternedSymbol = InternedSymbol::from_raw(0x0000_2602);
-/// The `writing-mode: vertical-lr` keyword.
+#[doc = include_str!("layout_keyword.doc/WRITING_MODE_VERTICAL_LR.md")]
 pub const WRITING_MODE_VERTICAL_LR: InternedSymbol = InternedSymbol::from_raw(0x0000_2603);
 
 // ---- `font-style` keyword values ----
 
-/// The `font-style: normal` keyword.
+#[doc = include_str!("layout_keyword.doc/FONT_STYLE_NORMAL.md")]
 pub const FONT_STYLE_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_1501);
-/// The `font-style: italic` keyword.
+#[doc = include_str!("layout_keyword.doc/FONT_STYLE_ITALIC.md")]
 pub const FONT_STYLE_ITALIC: InternedSymbol = InternedSymbol::from_raw(0x0000_1502);
-/// The `font-style: oblique` keyword.
+#[doc = include_str!("layout_keyword.doc/FONT_STYLE_OBLIQUE.md")]
 pub const FONT_STYLE_OBLIQUE: InternedSymbol = InternedSymbol::from_raw(0x0000_1503);
 
 // ---- `text-align` keyword values ----
 
-/// The `text-align: left` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_LEFT.md")]
 pub const TEXT_ALIGN_LEFT: InternedSymbol = InternedSymbol::from_raw(0x0000_1601);
-/// The `text-align: right` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_RIGHT.md")]
 pub const TEXT_ALIGN_RIGHT: InternedSymbol = InternedSymbol::from_raw(0x0000_1602);
-/// The `text-align: center` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_CENTER.md")]
 pub const TEXT_ALIGN_CENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1603);
-/// The `text-align: justify` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_JUSTIFY.md")]
 pub const TEXT_ALIGN_JUSTIFY: InternedSymbol = InternedSymbol::from_raw(0x0000_1604);
-/// The `text-align: start` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_START.md")]
 pub const TEXT_ALIGN_START: InternedSymbol = InternedSymbol::from_raw(0x0000_1605);
-/// The `text-align: end` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_END.md")]
 pub const TEXT_ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1606);
 
 // ---- `text-overflow` keyword values ----
 
-/// The `text-overflow: clip` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_OVERFLOW_CLIP.md")]
 pub const TEXT_OVERFLOW_CLIP: InternedSymbol = InternedSymbol::from_raw(0x0000_1701);
-/// The `text-overflow: ellipsis` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_OVERFLOW_ELLIPSIS.md")]
 pub const TEXT_OVERFLOW_ELLIPSIS: InternedSymbol = InternedSymbol::from_raw(0x0000_1702);
 
 // ---- `text-transform` keyword values (CSS Text 3 §2.1) ----
@@ -144,52 +118,44 @@ pub const TEXT_OVERFLOW_ELLIPSIS: InternedSymbol = InternedSymbol::from_raw(0x00
 // opens the adjacent `0x0000_2xxx` reservation block (still disjoint from the CSS
 // interner's `0x00C1_xxxx` and the element-attribute `0x0000_000x` ranges).
 
-/// The `text-transform: none` keyword (the initial; no case mapping).
+#[doc = include_str!("layout_keyword.doc/TEXT_TRANSFORM_NONE.md")]
 pub const TEXT_TRANSFORM_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_2001);
-/// The `text-transform: uppercase` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_TRANSFORM_UPPERCASE.md")]
 pub const TEXT_TRANSFORM_UPPERCASE: InternedSymbol = InternedSymbol::from_raw(0x0000_2002);
-/// The `text-transform: lowercase` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_TRANSFORM_LOWERCASE.md")]
 pub const TEXT_TRANSFORM_LOWERCASE: InternedSymbol = InternedSymbol::from_raw(0x0000_2003);
-/// The `text-transform: capitalize` keyword.
+#[doc = include_str!("layout_keyword.doc/TEXT_TRANSFORM_CAPITALIZE.md")]
 pub const TEXT_TRANSFORM_CAPITALIZE: InternedSymbol = InternedSymbol::from_raw(0x0000_2004);
 
 // ---- `white-space` keyword values (CSS Text 3 §3) ----
 
-/// The `white-space: normal` keyword (the initial): collapse whitespace, collapse
-/// segment breaks to a space, soft-wrap.
+#[doc = include_str!("layout_keyword.doc/WHITE_SPACE_NORMAL.md")]
 pub const WHITE_SPACE_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2101);
-/// The `white-space: nowrap` keyword: collapse like `normal` but never soft-wrap.
+#[doc = include_str!("layout_keyword.doc/WHITE_SPACE_NOWRAP.md")]
 pub const WHITE_SPACE_NOWRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_2102);
-/// The `white-space: pre` keyword: preserve spaces/tabs/segment breaks, no wrap.
+#[doc = include_str!("layout_keyword.doc/WHITE_SPACE_PRE.md")]
 pub const WHITE_SPACE_PRE: InternedSymbol = InternedSymbol::from_raw(0x0000_2103);
-/// The `white-space: pre-wrap` keyword: preserve whitespace, and soft-wrap.
+#[doc = include_str!("layout_keyword.doc/WHITE_SPACE_PRE_WRAP.md")]
 pub const WHITE_SPACE_PRE_WRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_2104);
-/// The `white-space: pre-line` keyword: collapse spaces but preserve segment
-/// breaks, and soft-wrap.
+#[doc = include_str!("layout_keyword.doc/WHITE_SPACE_PRE_LINE.md")]
 pub const WHITE_SPACE_PRE_LINE: InternedSymbol = InternedSymbol::from_raw(0x0000_2105);
 
 // ---- `overflow-wrap` keyword values (CSS Text 3 §5.2) ----
 
-/// The `overflow-wrap: normal` keyword (the initial): break only at ordinary
-/// opportunities; an over-wide unbreakable word overflows.
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_WRAP_NORMAL.md")]
 pub const OVERFLOW_WRAP_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2201);
-/// The `overflow-wrap: break-word` keyword: last-resort grapheme-cluster break of
-/// a word that does not fit its own line.
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_WRAP_BREAK_WORD.md")]
 pub const OVERFLOW_WRAP_BREAK_WORD: InternedSymbol = InternedSymbol::from_raw(0x0000_2202);
-/// The `overflow-wrap: anywhere` keyword: like `break-word` for the greedy line
-/// breaker (differs only in min-content intrinsic sizing).
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_WRAP_ANYWHERE.md")]
 pub const OVERFLOW_WRAP_ANYWHERE: InternedSymbol = InternedSymbol::from_raw(0x0000_2203);
 
 // ---- `word-break` keyword values (CSS Text 3 §5.2) ----
 
-/// The `word-break: normal` keyword (the initial): ordinary word / CJK-ideograph
-/// break points only.
+#[doc = include_str!("layout_keyword.doc/WORD_BREAK_NORMAL.md")]
 pub const WORD_BREAK_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2301);
-/// The `word-break: break-all` keyword: a break is allowed between any two
-/// typographic units (greedy mid-word breaking).
+#[doc = include_str!("layout_keyword.doc/WORD_BREAK_BREAK_ALL.md")]
 pub const WORD_BREAK_BREAK_ALL: InternedSymbol = InternedSymbol::from_raw(0x0000_2302);
-/// The `word-break: keep-all` keyword: no break between the letters of
-/// CJK-context text (suppresses inter-ideograph opportunities).
+#[doc = include_str!("layout_keyword.doc/WORD_BREAK_KEEP_ALL.md")]
 pub const WORD_BREAK_KEEP_ALL: InternedSymbol = InternedSymbol::from_raw(0x0000_2303);
 
 // ---- intrinsic sizing keyword values (CSS Sizing 3 §4.1) ----
@@ -201,28 +167,18 @@ pub const WORD_BREAK_KEEP_ALL: InternedSymbol = InternedSymbol::from_raw(0x0000_
 // which question was asked; `obscur_layout::model::Dimension` is where they
 // become sizes.
 
-/// The `min-content` keyword: the smallest size the content can take without
-/// overflowing — in the inline axis, the widest run it cannot break.
+#[doc = include_str!("layout_keyword.doc/SIZING_MIN_CONTENT.md")]
 pub const SIZING_MIN_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2401);
-/// The `max-content` keyword: the size the content wants given unbounded space —
-/// in the inline axis, everything on one line.
+#[doc = include_str!("layout_keyword.doc/SIZING_MAX_CONTENT.md")]
 pub const SIZING_MAX_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2402);
-/// The `fit-content` keyword: `min(max-content, max(min-content, stretch))` — the
-/// classic shrink-to-fit (CSS 2.1 §10.3.5).
-///
-/// This is the bare keyword only. The `fit-content(<length-percentage>)`
-/// *function* form is a different value that clamps against an authored limit; it
-/// is not modelled, and lowers to no sizing keyword at all.
+#[doc = include_str!("layout_keyword.doc/SIZING_FIT_CONTENT.md")]
 pub const SIZING_FIT_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2403);
 
 // ---- relative `font-weight` keyword values ----
 
-/// The `font-weight: bolder` keyword. Unlike the absolute weights (which lower
-/// to numbers), this is carried as a reserved handle so the computed-value step
-/// can resolve it *relative* to the parent's computed weight (§4.14).
+#[doc = include_str!("layout_keyword.doc/FONT_WEIGHT_BOLDER.md")]
 pub const FONT_WEIGHT_BOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_1801);
-/// The `font-weight: lighter` keyword, resolved relative to the parent's
-/// computed weight (§4.14).
+#[doc = include_str!("layout_keyword.doc/FONT_WEIGHT_LIGHTER.md")]
 pub const FONT_WEIGHT_LIGHTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1802);
 
 // ---- `grid-auto-flow` keyword values ----
@@ -232,37 +188,31 @@ pub const FONT_WEIGHT_LIGHTER: InternedSymbol = InternedSymbol::from_raw(0x0000_
 // Rather than carry two symbols, each authored combination folds to ONE reserved
 // handle, so the runtime reads a single keyword identity.
 
-/// The `grid-auto-flow: row` value (row-major, sparse). The default.
+#[doc = include_str!("layout_keyword.doc/GRID_AUTO_FLOW_ROW.md")]
 pub const GRID_AUTO_FLOW_ROW: InternedSymbol = InternedSymbol::from_raw(0x0000_1901);
-/// The `grid-auto-flow: column` value (column-major, sparse).
+#[doc = include_str!("layout_keyword.doc/GRID_AUTO_FLOW_COLUMN.md")]
 pub const GRID_AUTO_FLOW_COLUMN: InternedSymbol = InternedSymbol::from_raw(0x0000_1902);
-/// The `grid-auto-flow: row dense` (or bare `dense`) value (row-major, dense).
+#[doc = include_str!("layout_keyword.doc/GRID_AUTO_FLOW_ROW_DENSE.md")]
 pub const GRID_AUTO_FLOW_ROW_DENSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1903);
-/// The `grid-auto-flow: column dense` value (column-major, dense).
+#[doc = include_str!("layout_keyword.doc/GRID_AUTO_FLOW_COLUMN_DENSE.md")]
 pub const GRID_AUTO_FLOW_COLUMN_DENSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1904);
 
 // ---- `position` keyword values ----
 
-/// The `position: static` keyword (the default; laid out in normal flow).
+#[doc = include_str!("layout_keyword.doc/POSITION_STATIC.md")]
 pub const POSITION_STATIC: InternedSymbol = InternedSymbol::from_raw(0x0000_1A01);
-/// The `position: relative` keyword (in flow, then offset by its insets).
+#[doc = include_str!("layout_keyword.doc/POSITION_RELATIVE.md")]
 pub const POSITION_RELATIVE: InternedSymbol = InternedSymbol::from_raw(0x0000_1A02);
-/// The `position: absolute` keyword. Out-of-flow; treated as `static` for layout
-/// until out-of-flow positioning lands.
+#[doc = include_str!("layout_keyword.doc/POSITION_ABSOLUTE.md")]
 pub const POSITION_ABSOLUTE: InternedSymbol = InternedSymbol::from_raw(0x0000_1A03);
-/// The `position: fixed` keyword. Out-of-flow; treated as `static` for layout
-/// until out-of-flow positioning lands.
+#[doc = include_str!("layout_keyword.doc/POSITION_FIXED.md")]
 pub const POSITION_FIXED: InternedSymbol = InternedSymbol::from_raw(0x0000_1A04);
-/// The `position: sticky` keyword (in flow like `relative`, but its used position
-/// is scroll-clamped to the scrollport edge within its containing block).
+#[doc = include_str!("layout_keyword.doc/POSITION_STICKY.md")]
 pub const POSITION_STICKY: InternedSymbol = InternedSymbol::from_raw(0x0000_1A05);
 
 // ---- `z-index` keyword values ----
 
-/// The `z-index: auto` keyword (the default; the element does not establish its
-/// own stacking level and stacks with its parent). The `<integer>` form of
-/// `z-index` lowers to a [`PropertyValue::Number`](crate::property::PropertyValue::Number)
-/// instead, so this reserved handle carries only the `auto` case across crates.
+#[doc = include_str!("layout_keyword.doc/Z_INDEX_AUTO.md")]
 pub const Z_INDEX_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1B01);
 
 // ---- `border-*-style` keyword values ----
@@ -272,24 +222,18 @@ pub const Z_INDEX_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1B01);
 // every visible style folds to the single `solid` handle (a documented
 // simplification), while `none` / `hidden` fold to `none` (no border painted).
 
-/// The `border-*-style: none` value (also covers `hidden`): the border is not
-/// painted and, when it is the used style, its width paints nothing.
+#[doc = include_str!("layout_keyword.doc/BORDER_STYLE_NONE.md")]
 pub const BORDER_STYLE_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1C01);
-/// The `border-*-style: solid` value. The remaining continuous line styles
-/// (`double` / `groove` / `ridge` / `inset` / `outset`) fold here.
+#[doc = include_str!("layout_keyword.doc/BORDER_STYLE_SOLID.md")]
 pub const BORDER_STYLE_SOLID: InternedSymbol = InternedSymbol::from_raw(0x0000_1C02);
-/// The `border-*-style: dashed` value: painted as a dashed stroke. `dotted`
-/// folds here too (rendered as a dash rather than a distinct dot pattern — a
-/// documented simplification).
+#[doc = include_str!("layout_keyword.doc/BORDER_STYLE_DASHED.md")]
 pub const BORDER_STYLE_DASHED: InternedSymbol = InternedSymbol::from_raw(0x0000_1C03);
 
 // ---- `box-sizing` keyword values ----
 
-/// The `box-sizing: content-box` value (the initial): an explicit `width` /
-/// `height` sizes the content box.
+#[doc = include_str!("layout_keyword.doc/BOX_SIZING_CONTENT_BOX.md")]
 pub const BOX_SIZING_CONTENT_BOX: InternedSymbol = InternedSymbol::from_raw(0x0000_1D01);
-/// The `box-sizing: border-box` value: an explicit `width` / `height` sizes the
-/// border box.
+#[doc = include_str!("layout_keyword.doc/BOX_SIZING_BORDER_BOX.md")]
 pub const BOX_SIZING_BORDER_BOX: InternedSymbol = InternedSymbol::from_raw(0x0000_1D02);
 
 // ---- `overflow` keyword values ----
@@ -298,25 +242,18 @@ pub const BOX_SIZING_BORDER_BOX: InternedSymbol = InternedSymbol::from_raw(0x000
 // and `auto` are carried as distinct handles for fidelity but currently clip
 // like `hidden` — no scrollbars are synthesised (a documented simplification).
 
-/// The `overflow: visible` value (the initial): content is not clipped.
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_VISIBLE.md")]
 pub const OVERFLOW_VISIBLE: InternedSymbol = InternedSymbol::from_raw(0x0000_1E01);
-/// The `overflow: hidden` value: the subtree is clipped to the element's box.
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_HIDDEN.md")]
 pub const OVERFLOW_HIDDEN: InternedSymbol = InternedSymbol::from_raw(0x0000_1E02);
-/// The `overflow: clip` value: like `hidden` for painting (the subtree is
-/// clipped to the box), without a scroll container.
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_CLIP.md")]
 pub const OVERFLOW_CLIP: InternedSymbol = InternedSymbol::from_raw(0x0000_1E03);
-/// The `overflow: scroll` value. Clips the subtree like `hidden`; no scrollbar
-/// is synthesised yet (a documented simplification).
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_SCROLL.md")]
 pub const OVERFLOW_SCROLL: InternedSymbol = InternedSymbol::from_raw(0x0000_1E04);
-/// The `overflow: auto` value. Clips the subtree like `hidden`; no scrollbar is
-/// synthesised yet (a documented simplification).
+#[doc = include_str!("layout_keyword.doc/OVERFLOW_AUTO.md")]
 pub const OVERFLOW_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1E05);
 
-/// Maps a `display` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching, so callers may pass authored
-/// casing directly. Returns [`None`] for any keyword outside the closed set
-/// modelled here.
+#[doc = include_str!("layout_keyword.doc/display_from_name.md")]
 #[must_use]
 pub fn display_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -329,11 +266,7 @@ pub fn display_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `position` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `static` / `relative` / `absolute` / `fixed` /
-/// `sticky` set.
+#[doc = include_str!("layout_keyword.doc/position_from_name.md")]
 #[must_use]
 pub fn position_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -346,11 +279,7 @@ pub fn position_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `z-index` keyword string to its reserved [`InternedSymbol`].
-///
-/// The only keyword `z-index` accepts is `auto` (mapped to [`Z_INDEX_AUTO`]); the
-/// `<integer>` form lowers to a number, not a keyword. The input is
-/// ASCII-lowercased before matching. Returns [`None`] for any other keyword.
+#[doc = include_str!("layout_keyword.doc/z_index_from_name.md")]
 #[must_use]
 pub fn z_index_from_name(name: &str) -> Option<InternedSymbol> {
     if name.eq_ignore_ascii_case("auto") {
@@ -360,14 +289,7 @@ pub fn z_index_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `border-*-style` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. `none` and `hidden` map to
-/// [`BORDER_STYLE_NONE`]; `dashed` and `dotted` map to [`BORDER_STYLE_DASHED`]
-/// (both painted as a dashed stroke); the remaining continuous styles (`solid` /
-/// `double` / `groove` / `ridge` / `inset` / `outset`) fold to the single
-/// [`BORDER_STYLE_SOLID`] handle, a documented simplification (a solid stroke is
-/// painted). Returns [`None`] for any other keyword.
+#[doc = include_str!("layout_keyword.doc/border_style_from_name.md")]
 #[must_use]
 pub fn border_style_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -378,10 +300,7 @@ pub fn border_style_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `box-sizing` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `content-box` / `border-box` set.
+#[doc = include_str!("layout_keyword.doc/box_sizing_from_name.md")]
 #[must_use]
 pub fn box_sizing_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -391,10 +310,7 @@ pub fn box_sizing_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `flex-direction` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed set modelled here.
+#[doc = include_str!("layout_keyword.doc/flex_direction_from_name.md")]
 #[must_use]
 pub fn flex_direction_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -406,10 +322,7 @@ pub fn flex_direction_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `flex-wrap` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `nowrap` / `wrap` / `wrap-reverse` set.
+#[doc = include_str!("layout_keyword.doc/flex_wrap_from_name.md")]
 #[must_use]
 pub fn flex_wrap_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -420,12 +333,7 @@ pub fn flex_wrap_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `justify-content` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Both the modern (`start` /
-/// `end`) and the flexbox (`flex-start` / `flex-end`) spellings resolve to the
-/// same reserved handle. Returns [`None`] for any keyword outside the closed set
-/// modelled here.
+#[doc = include_str!("layout_keyword.doc/justify_content_from_name.md")]
 #[must_use]
 pub fn justify_content_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -439,14 +347,7 @@ pub fn justify_content_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps an `align-content` keyword string to its reserved [`InternedSymbol`].
-///
-/// `align-content` (the grid container's block-axis track distribution) shares
-/// the exact `justify-content` value grammar (`start` / `end` / `center` /
-/// `space-between` / `space-around` / `space-evenly`, plus the flexbox
-/// `flex-start` / `flex-end` spellings), so this simply delegates to
-/// [`justify_content_from_name`]. Returns [`None`] for any keyword outside that
-/// closed set.
+#[doc = include_str!("layout_keyword.doc/align_content_from_name.md")]
 #[must_use]
 pub fn align_content_from_name(name: &str) -> Option<InternedSymbol> {
     // `align-content` shares `justify-content`'s distribution grammar but adds
@@ -457,12 +358,7 @@ pub fn align_content_from_name(name: &str) -> Option<InternedSymbol> {
     justify_content_from_name(name)
 }
 
-/// Maps an `align-items` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Both the modern (`start` /
-/// `end`) and the flexbox (`flex-start` / `flex-end`) spellings resolve to the
-/// same reserved handle. Returns [`None`] for any keyword outside the closed set
-/// modelled here.
+#[doc = include_str!("layout_keyword.doc/align_items_from_name.md")]
 #[must_use]
 pub fn align_items_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -474,14 +370,7 @@ pub fn align_items_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `justify-self` / `align-self` keyword string to its reserved
-/// [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. This accepts everything
-/// [`align_items_from_name`] does (`start` / `end` / `center` / `stretch`, plus
-/// the flexbox `flex-start` / `flex-end` spellings) and additionally `auto`
-/// (mapped to [`ALIGN_AUTO`]), the per-item value that inherits the container's
-/// items default. Returns [`None`] for any keyword outside that set.
+#[doc = include_str!("layout_keyword.doc/align_self_from_name.md")]
 #[must_use]
 pub fn align_self_from_name(name: &str) -> Option<InternedSymbol> {
     if name.eq_ignore_ascii_case("auto") {
@@ -490,10 +379,7 @@ pub fn align_self_from_name(name: &str) -> Option<InternedSymbol> {
     align_items_from_name(name)
 }
 
-/// Maps a `direction` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `ltr` / `rtl` set.
+#[doc = include_str!("layout_keyword.doc/direction_from_name.md")]
 #[must_use]
 pub fn direction_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -503,10 +389,7 @@ pub fn direction_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `writing-mode` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `horizontal-tb` / `vertical-rl` / `vertical-lr` set.
+#[doc = include_str!("layout_keyword.doc/writing_mode_from_name.md")]
 #[must_use]
 pub fn writing_mode_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -517,10 +400,7 @@ pub fn writing_mode_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `font-style` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `normal` / `italic` / `oblique` set.
+#[doc = include_str!("layout_keyword.doc/font_style_from_name.md")]
 #[must_use]
 pub fn font_style_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -531,11 +411,7 @@ pub fn font_style_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `text-align` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `left` / `right` / `center` / `justify` / `start` /
-/// `end` set.
+#[doc = include_str!("layout_keyword.doc/text_align_from_name.md")]
 #[must_use]
 pub fn text_align_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -549,10 +425,7 @@ pub fn text_align_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `text-overflow` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `clip` / `ellipsis` set.
+#[doc = include_str!("layout_keyword.doc/text_overflow_from_name.md")]
 #[must_use]
 pub fn text_overflow_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -562,12 +435,7 @@ pub fn text_overflow_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `text-transform` keyword string to its reserved [`InternedSymbol`]
-/// (CSS Text 3 §2.1).
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `none` / `uppercase` / `lowercase` / `capitalize`
-/// set (`full-width` / `full-size-kana` are not modelled).
+#[doc = include_str!("layout_keyword.doc/text_transform_from_name.md")]
 #[must_use]
 pub fn text_transform_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -579,12 +447,7 @@ pub fn text_transform_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `white-space` keyword string to its reserved [`InternedSymbol`]
-/// (CSS Text 3 §3).
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `normal` / `nowrap` / `pre` / `pre-wrap` /
-/// `pre-line` set (`break-spaces` is not modelled).
+#[doc = include_str!("layout_keyword.doc/white_space_from_name.md")]
 #[must_use]
 pub fn white_space_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -597,11 +460,7 @@ pub fn white_space_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps an `overflow-wrap` (a.k.a. legacy `word-wrap`) keyword string to its
-/// reserved [`InternedSymbol`] (CSS Text 3 §5.2).
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `normal` / `break-word` / `anywhere` set.
+#[doc = include_str!("layout_keyword.doc/overflow_wrap_from_name.md")]
 #[must_use]
 pub fn overflow_wrap_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -612,12 +471,7 @@ pub fn overflow_wrap_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `word-break` keyword string to its reserved [`InternedSymbol`]
-/// (CSS Text 3 §5.2).
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `normal` / `break-all` / `keep-all` set
-/// (`break-word`, a deprecated `word-break` value, is not modelled here).
+#[doc = include_str!("layout_keyword.doc/word_break_from_name.md")]
 #[must_use]
 pub fn word_break_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -628,12 +482,7 @@ pub fn word_break_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps an intrinsic sizing keyword string to its reserved [`InternedSymbol`].
-///
-/// `auto` is deliberately **not** here: it is a length keyword
-/// ([`Length::Auto`](crate::property::Length::Auto)), not a sizing question, and
-/// the CSS layer lowers it before reaching this table. Adding it here would
-/// re-route `width: auto` through the keyword path and change its computed value.
+#[doc = include_str!("layout_keyword.doc/sizing_from_name.md")]
 #[must_use]
 pub fn sizing_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -644,11 +493,7 @@ pub fn sizing_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps an `overflow` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `visible` / `hidden` / `clip` / `scroll` / `auto`
-/// set (e.g. `overlay`).
+#[doc = include_str!("layout_keyword.doc/overflow_from_name.md")]
 #[must_use]
 pub fn overflow_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -668,35 +513,32 @@ pub fn overflow_from_name(name: &str) -> Option<InternedSymbol> {
 // (compositing-1 §5). The non-separable modes (`hue`/`saturation`/`color`/
 // `luminosity`) are not modelled yet.
 
-/// `mix-blend-mode: normal` (the initial): source-over compositing.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_NORMAL.md")]
 pub const MIX_BLEND_MODE_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2501);
-/// `mix-blend-mode: multiply`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_MULTIPLY.md")]
 pub const MIX_BLEND_MODE_MULTIPLY: InternedSymbol = InternedSymbol::from_raw(0x0000_2502);
-/// `mix-blend-mode: screen`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_SCREEN.md")]
 pub const MIX_BLEND_MODE_SCREEN: InternedSymbol = InternedSymbol::from_raw(0x0000_2503);
-/// `mix-blend-mode: overlay`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_OVERLAY.md")]
 pub const MIX_BLEND_MODE_OVERLAY: InternedSymbol = InternedSymbol::from_raw(0x0000_2504);
-/// `mix-blend-mode: darken`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_DARKEN.md")]
 pub const MIX_BLEND_MODE_DARKEN: InternedSymbol = InternedSymbol::from_raw(0x0000_2505);
-/// `mix-blend-mode: lighten`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_LIGHTEN.md")]
 pub const MIX_BLEND_MODE_LIGHTEN: InternedSymbol = InternedSymbol::from_raw(0x0000_2506);
-/// `mix-blend-mode: color-dodge`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_COLOR_DODGE.md")]
 pub const MIX_BLEND_MODE_COLOR_DODGE: InternedSymbol = InternedSymbol::from_raw(0x0000_2507);
-/// `mix-blend-mode: color-burn`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_COLOR_BURN.md")]
 pub const MIX_BLEND_MODE_COLOR_BURN: InternedSymbol = InternedSymbol::from_raw(0x0000_2508);
-/// `mix-blend-mode: hard-light`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_HARD_LIGHT.md")]
 pub const MIX_BLEND_MODE_HARD_LIGHT: InternedSymbol = InternedSymbol::from_raw(0x0000_2509);
-/// `mix-blend-mode: soft-light`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_SOFT_LIGHT.md")]
 pub const MIX_BLEND_MODE_SOFT_LIGHT: InternedSymbol = InternedSymbol::from_raw(0x0000_250A);
-/// `mix-blend-mode: difference`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_DIFFERENCE.md")]
 pub const MIX_BLEND_MODE_DIFFERENCE: InternedSymbol = InternedSymbol::from_raw(0x0000_250B);
-/// `mix-blend-mode: exclusion`.
+#[doc = include_str!("layout_keyword.doc/MIX_BLEND_MODE_EXCLUSION.md")]
 pub const MIX_BLEND_MODE_EXCLUSION: InternedSymbol = InternedSymbol::from_raw(0x0000_250C);
 
-/// Maps a `mix-blend-mode` keyword string to its reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any keyword
-/// outside the separable set modelled here (`normal` plus the separable modes).
+#[doc = include_str!("layout_keyword.doc/mix_blend_mode_from_name.md")]
 #[must_use]
 pub fn mix_blend_mode_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -716,12 +558,7 @@ pub fn mix_blend_mode_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a relative `font-weight` keyword string (`bolder` / `lighter`) to its
-/// reserved [`InternedSymbol`].
-///
-/// The input is ASCII-lowercased before matching. Returns [`None`] for any other
-/// keyword — including the absolute `normal` / `bold` spellings, which lower to
-/// numeric weights rather than reserved handles.
+#[doc = include_str!("layout_keyword.doc/font_weight_relative_from_name.md")]
 #[must_use]
 pub fn font_weight_relative_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -731,20 +568,7 @@ pub fn font_weight_relative_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Maps a `grid-auto-flow` value to its reserved [`InternedSymbol`].
-///
-/// This is a *multi-keyword* property: the axis (`row` / `column`) and the
-/// optional `dense` packing keyword may appear together in either order. The
-/// input is ASCII-lowercased and split on whitespace, then each accepted
-/// combination folds to a single reserved handle:
-///
-/// * `row` → [`GRID_AUTO_FLOW_ROW`] (the default)
-/// * `column` → [`GRID_AUTO_FLOW_COLUMN`]
-/// * `dense` (bare) → [`GRID_AUTO_FLOW_ROW_DENSE`] (`row` is the implied axis)
-/// * `row dense` / `dense row` → [`GRID_AUTO_FLOW_ROW_DENSE`]
-/// * `column dense` / `dense column` → [`GRID_AUTO_FLOW_COLUMN_DENSE`]
-///
-/// Returns [`None`] for any other combination.
+#[doc = include_str!("layout_keyword.doc/grid_auto_flow_from_name.md")]
 #[must_use]
 pub fn grid_auto_flow_from_name(name: &str) -> Option<InternedSymbol> {
     let lowered = name.to_ascii_lowercase();
@@ -759,12 +583,7 @@ pub fn grid_auto_flow_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
-/// Returns the canonical CSS keyword string for a reserved layout symbol.
-///
-/// This is the reverse of the `*_from_name` helpers, intended for diagnostics
-/// and `DevTools`. It returns the canonical spelling (the flexbox spelling for
-/// the `justify-content` / `align-items` start/end values). Returns [`None`] for
-/// any symbol that is not one of the reserved layout keyword handles.
+#[doc = include_str!("layout_keyword.doc/name_of.md")]
 // The `justify-content` and `align-items` start/center/end handles share their
 // canonical spelling but are kept as distinct arms, grouped by property, so the
 // reverse mapping reads one property at a time.

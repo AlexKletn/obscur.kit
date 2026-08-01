@@ -1,24 +1,4 @@
-//! §2.3's event model, reached the way an application reaches it.
-//!
-//! The model §2.3 specifies — four propagation phases, and an event API carrying
-//! `target`, `current_target`, `stop_propagation`, `stop_immediate_propagation`,
-//! `prevent_default` and a trusted/untrusted origin — was fully implemented in
-//! `obscur-interaction` and **called by nothing**: outside its own crate,
-//! `UiEvent` and `EventDispatcher` appeared in exactly two places, this facade's
-//! prelude re-export and the §2.3 spec test. An application's handler was an
-//! `impl FnMut()` given nothing, so none of it was reachable however correct it
-//! was.
-//!
-//! These cases are written from the *consumer's* side — only `obscur_kit`'s public
-//! API, no crate internals — because the gap was a delivery gap, and a delivery
-//! gap is only closed if it is closed at the boundary an application stands on.
-//! They deliberately overlap the runtime's own unit tests: those prove the walk is
-//! correct, these prove it is *reachable*.
-//!
-//! Not a `spec_*` file: the spec-derived suites are an oracle written without
-//! reading this repository, and these cases were written against a change to it.
-//! The §2.3 conformance statements live in `spec_ch2_interaction.rs` and are not
-//! touched here.
+#![doc = include_str!("event_model_delivery.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::{Cell, RefCell};
@@ -37,12 +17,10 @@ use obscur_kit::view::view::{
     CLASS, EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
-/// The one command symbol both rows bind — the shape that used to be
-/// inexpressible.
+#[doc = include_str!("event_model_delivery.doc/PICK.md")]
 const PICK: InternedSymbol = InternedSymbol::from_raw(0x7C01);
 
-/// What the phase-walk case records per step: the phase, `current_target`, and
-/// `target` — the last of which must never move.
+#[doc = include_str!("event_model_delivery.doc/PhaseLog.md")]
 type PhaseLog = Rc<RefCell<Vec<(EventPhase, Option<NodeId>, Option<NodeId>)>>>;
 
 fn compile(css: &str) -> Stylesheet {
@@ -51,8 +29,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A `panel` holding two rows, `a` (y∈[0,50)) and `b` (y∈[50,100)), both bound to
-/// [`PICK`].
+#[doc = include_str!("event_model_delivery.doc/view.md")]
 fn view() -> View {
     let row = |id: u64, class: &str| {
         ViewNode::element(ComponentId::from_raw(id))
@@ -73,7 +50,7 @@ const CSS: &str = ".panel{width:100px;height:100px} \
                   .a{width:100px;height:50px} \
                   .b{width:100px;height:50px}";
 
-/// A runtime with one frame of [`view`] committed; returns it with `(panel, a, b)`.
+#[doc = include_str!("event_model_delivery.doc/committed.md")]
 fn committed() -> (UiRuntime, NodeId, NodeId, NodeId) {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
     let sheet = compile(CSS);
@@ -94,8 +71,7 @@ fn committed() -> (UiRuntime, NodeId, NodeId, NodeId) {
     (rt, panel, rows[0], rows[1])
 }
 
-/// A trusted press and release at `(x, y)` — a real click, as a platform adapter
-/// would deliver it.
+#[doc = include_str!("event_model_delivery.doc/click.md")]
 fn click(rt: &mut UiRuntime, x: f32, y: f32) {
     for kind in [PointerEventKind::Down, PointerEventKind::Up] {
         rt.handle_pointer(
@@ -110,13 +86,7 @@ fn click(rt: &mut UiRuntime, x: f32, y: f32) {
     }
 }
 
-/// **The case that was impossible.** One symbol, two nodes, one handler — and the
-/// handler is told which node the user hit.
-///
-/// This is the generalisation of `on_row_click`'s own argument: a per-row
-/// `on:click` "cannot carry this, because every row a builder emits shares one
-/// command symbol". That reasoning applies to every event, and one bespoke
-/// signature per case was the only answer available.
+#[doc = include_str!("event_model_delivery.doc/a_handler_learns_which_of_two_nodes_sharing_one_symbol_was_hit.md")]
 #[test]
 fn a_handler_learns_which_of_two_nodes_sharing_one_symbol_was_hit() {
     let (mut rt, _panel, a, b) = committed();
@@ -140,8 +110,7 @@ fn a_handler_learns_which_of_two_nodes_sharing_one_symbol_was_hit() {
     );
 }
 
-/// §2.4's payload reaches the handler: pointer id, device, position, pressure,
-/// primary-pointer status and hover capability, plus §2.3's trust.
+#[doc = include_str!("event_model_delivery.doc/the_pointer_payload_reaches_the_handler.md")]
 #[test]
 fn the_pointer_payload_reaches_the_handler() {
     let (mut rt, _panel, _a, _b) = committed();
@@ -172,9 +141,7 @@ fn the_pointer_payload_reaches_the_handler() {
     );
 }
 
-/// §2.3's four phases, observed from application code: capture outermost-first,
-/// the target, bubble innermost-first — with `current_target` moving and `target`
-/// standing still.
+#[doc = include_str!("event_model_delivery.doc/an_application_can_observe_the_capture_target_bubble_walk.md")]
 #[test]
 fn an_application_can_observe_the_capture_target_bubble_walk() {
     let (mut rt, panel, a, _b) = committed();
@@ -210,9 +177,7 @@ fn an_application_can_observe_the_capture_target_bubble_walk() {
     );
 }
 
-/// §2.3's steering, from application code: a `prevent_default` suppresses the
-/// default action (the bound command's handler) while the propagation continues,
-/// and a `stop_propagation` ends the propagation instead.
+#[doc = include_str!("event_model_delivery.doc/an_application_can_steer_the_propagation.md")]
 #[test]
 fn an_application_can_steer_the_propagation() {
     // prevent_default: the ancestor still hears about it, the handler does not run.
@@ -260,9 +225,7 @@ fn an_application_can_steer_the_propagation() {
     );
 }
 
-/// The zero-argument handler is still the convenience it always was: an
-/// application that needs nothing from the event writes nothing, and both shapes
-/// coexist on the same runtime.
+#[doc = include_str!("event_model_delivery.doc/the_zero_argument_handler_shape_is_unchanged.md")]
 #[test]
 fn the_zero_argument_handler_shape_is_unchanged() {
     let (mut rt, panel, a, _b) = committed();

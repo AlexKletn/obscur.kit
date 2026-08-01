@@ -1,34 +1,29 @@
-//! `ParseError`: a single diagnostic emitted by the [`Parser`](crate::parser::Parser),
-//! plus the colocated [`ParseErrorKind`] classification.
+#![doc = include_str!("parse_error.doc/_module.md")]
 
 use std::error::Error;
 use std::fmt;
 
-/// The classification of a [`ParseError`] (spec §2.9).
-///
-/// The parser is *error-tolerant*: it never hard-fails, so each recoverable
-/// problem is recorded as one of these kinds and parsing continues over a
-/// lossless tree.
+#[doc = include_str!("parse_error.doc/ParseErrorKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParseErrorKind {
-    /// A token appeared where the grammar did not allow it.
+    #[doc = include_str!("parse_error.doc/UnexpectedToken.md")]
     UnexpectedToken,
-    /// Input ended while a construct was still open.
+    #[doc = include_str!("parse_error.doc/UnexpectedEof.md")]
     UnexpectedEof,
-    /// A `<` was not followed by a tag-name identifier.
+    #[doc = include_str!("parse_error.doc/ExpectedTagName.md")]
     ExpectedTagName,
-    /// An element's open tag was never closed (`>` / `/>` missing).
+    #[doc = include_str!("parse_error.doc/ExpectedClose.md")]
     ExpectedClose,
-    /// A close tag's name did not match its open tag.
+    #[doc = include_str!("parse_error.doc/MismatchedCloseTag.md")]
     MismatchedCloseTag,
-    /// An attribute's `=` was not followed by a value.
+    #[doc = include_str!("parse_error.doc/ExpectedAttributeValue.md")]
     ExpectedAttributeValue,
-    /// A `{` expression interpolation was never closed by a matching `}`.
+    #[doc = include_str!("parse_error.doc/UnterminatedExpression.md")]
     UnterminatedExpression,
 }
 
 impl ParseErrorKind {
-    /// Returns a short, human-readable label for this kind.
+    #[doc = include_str!("parse_error.doc/label.md")]
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -49,13 +44,7 @@ impl fmt::Display for ParseErrorKind {
     }
 }
 
-/// A single recoverable diagnostic produced while parsing `.okui` source
-/// (spec §2.9).
-///
-/// A `ParseError` records *what* went wrong ([`ParseErrorKind`]), a
-/// human-readable `message`, and the byte `offset` in the source where the
-/// problem was detected. Errors never abort the parse: they are collected
-/// alongside a lossless tree so tooling can report every problem at once.
+#[doc = include_str!("parse_error.doc/ParseError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
     kind: ParseErrorKind,
@@ -64,8 +53,7 @@ pub struct ParseError {
 }
 
 impl ParseError {
-    /// Creates a diagnostic of `kind` with `message`, detected at byte
-    /// `offset`.
+    #[doc = include_str!("parse_error.doc/new.md")]
     #[must_use]
     pub fn new(kind: ParseErrorKind, message: impl Into<Box<str>>, offset: u32) -> Self {
         Self {
@@ -75,19 +63,19 @@ impl ParseError {
         }
     }
 
-    /// Returns the error's classification.
+    #[doc = include_str!("parse_error.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> ParseErrorKind {
         self.kind
     }
 
-    /// Returns the human-readable message.
+    #[doc = include_str!("parse_error.doc/message.md")]
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
 
-    /// Returns the byte offset in the source where the problem was detected.
+    #[doc = include_str!("parse_error.doc/offset.md")]
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset

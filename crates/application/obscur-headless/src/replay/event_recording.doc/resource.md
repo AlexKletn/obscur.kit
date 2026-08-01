@@ -1,0 +1,1 @@
+The raw resource id.

@@ -1,66 +1,46 @@
-//! A copy/cut/paste/clear command addressed to the clipboard (spec §6.20 data
-//! transfer — clipboard).
+#![doc = include_str!("clipboard_request.doc/_module.md")]
 
 use crate::offer::MimeType;
 use crate::transfer::TransferPayload;
 
-/// How a write places content on the clipboard (spec §6.20 COPY/CUT).
-///
-/// The two modes store identical bytes; they differ only in what the *source*
-/// does afterward. [`Copy`](ClipboardWriteMode::Copy) leaves the source content
-/// in place, while [`Cut`](ClipboardWriteMode::Cut) asks the source to delete
-/// its content once the clipboard has been read (a move). Enforcing the deletion
-/// is the source's concern — this value only records the intent.
+#[doc = include_str!("clipboard_request.doc/ClipboardWriteMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipboardWriteMode {
-    /// Copy: the source keeps its content (spec §6.20 COPY).
+    #[doc = include_str!("clipboard_request.doc/Copy.md")]
     Copy,
-    /// Cut: the source should delete its content after a successful read
-    /// (spec §6.20 CUT).
+    #[doc = include_str!("clipboard_request.doc/Cut.md")]
     Cut,
 }
 
 impl ClipboardWriteMode {
-    /// Returns whether this is [`ClipboardWriteMode::Cut`] (spec §6.20 CUT).
+    #[doc = include_str!("clipboard_request.doc/is_cut.md")]
     #[must_use]
     pub const fn is_cut(self) -> bool {
         matches!(self, Self::Cut)
     }
 }
 
-/// A single clipboard command: copy/cut *to* the clipboard, paste *from* it, or
-/// clear it (spec §6.20 data transfer — clipboard).
-///
-/// The clipboard and drag-and-drop share the data-transfer subsystem; this type
-/// models the clipboard's three verbs as one value driven through the
-/// [`ClipboardProvider`](super::ClipboardProvider) port. A
-/// [`Write`](ClipboardRequest::Write) carries the [`TransferPayload`] to store
-/// and its [`ClipboardWriteMode`]; a [`Read`](ClipboardRequest::Read) requests a
-/// paste, optionally narrowing to specific [`MimeType`]s (an empty list means
-/// "any/all available"); [`Clear`](ClipboardRequest::Clear) empties the
-/// clipboard. The command is a pure, deterministic value carrying no I/O.
+#[doc = include_str!("clipboard_request.doc/ClipboardRequest.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClipboardRequest {
-    /// Copy or cut a payload onto the clipboard (spec §6.20 COPY/CUT).
+    #[doc = include_str!("clipboard_request.doc/Write.md")]
     Write {
-        /// The content to place on the clipboard.
+        #[doc = include_str!("clipboard_request.doc/payload.md")]
         payload: TransferPayload,
-        /// Whether this is a copy or a cut.
+        #[doc = include_str!("clipboard_request.doc/mode.md")]
         mode: ClipboardWriteMode,
     },
-    /// Paste from the clipboard, requesting these formats (empty = any/all
-    /// available) (spec §6.20 PASTE).
+    #[doc = include_str!("clipboard_request.doc/Read.md")]
     Read {
-        /// The requested formats; an empty list accepts any available format.
+        #[doc = include_str!("clipboard_request.doc/mimes.md")]
         mimes: Vec<MimeType>,
     },
-    /// Empty the clipboard (spec §6.20).
+    #[doc = include_str!("clipboard_request.doc/Clear.md")]
     Clear,
 }
 
 impl ClipboardRequest {
-    /// Creates a copy request placing `payload` on the clipboard (spec §6.20
-    /// COPY).
+    #[doc = include_str!("clipboard_request.doc/copy.md")]
     #[must_use]
     pub const fn copy(payload: TransferPayload) -> Self {
         Self::Write {
@@ -69,8 +49,7 @@ impl ClipboardRequest {
         }
     }
 
-    /// Creates a cut request placing `payload` on the clipboard (spec §6.20
-    /// CUT).
+    #[doc = include_str!("clipboard_request.doc/cut.md")]
     #[must_use]
     pub const fn cut(payload: TransferPayload) -> Self {
         Self::Write {
@@ -79,42 +58,37 @@ impl ClipboardRequest {
         }
     }
 
-    /// Creates a paste request narrowed to `mimes` (empty = any/all available)
-    /// (spec §6.20 PASTE).
+    #[doc = include_str!("clipboard_request.doc/read.md")]
     #[must_use]
     pub const fn read(mimes: Vec<MimeType>) -> Self {
         Self::Read { mimes }
     }
 
-    /// Creates a paste request accepting any available format (spec §6.20
-    /// PASTE).
+    #[doc = include_str!("clipboard_request.doc/read_any.md")]
     #[must_use]
     pub const fn read_any() -> Self {
         Self::Read { mimes: Vec::new() }
     }
 
-    /// Creates a clear request (spec §6.20).
+    #[doc = include_str!("clipboard_request.doc/clear.md")]
     #[must_use]
     pub const fn clear() -> Self {
         Self::Clear
     }
 
-    /// Returns whether this is a [`Write`](ClipboardRequest::Write) (copy or
-    /// cut) (spec §6.20).
+    #[doc = include_str!("clipboard_request.doc/is_write.md")]
     #[must_use]
     pub const fn is_write(&self) -> bool {
         matches!(self, Self::Write { .. })
     }
 
-    /// Returns whether this is a [`Read`](ClipboardRequest::Read) (paste)
-    /// (spec §6.20).
+    #[doc = include_str!("clipboard_request.doc/is_read.md")]
     #[must_use]
     pub const fn is_read(&self) -> bool {
         matches!(self, Self::Read { .. })
     }
 
-    /// Returns the [`ClipboardWriteMode`] of a write request, or `None` for a
-    /// read or clear (spec §6.20).
+    #[doc = include_str!("clipboard_request.doc/write_mode.md")]
     #[must_use]
     pub const fn write_mode(&self) -> Option<ClipboardWriteMode> {
         match self {

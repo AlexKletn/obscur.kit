@@ -1,34 +1,21 @@
-//! The depth band a layer surface occupies (spec §6.5).
+#![doc = include_str!("layer_kind.doc/_module.md")]
 
-/// Which of the compositor's four stacking bands a layer surface sits in.
-///
-/// The bands are ordered, and the order is the whole point: a compositor stacks
-/// every surface in [`Background`](LayerKind::Background) below every surface in
-/// [`Bottom`](LayerKind::Bottom), and so on up. Ordinary application windows sit
-/// **between `Bottom` and `Top`**, which is what makes a panel in `Top` stay
-/// above them and a wallpaper in `Background` stay below.
-///
-/// Choosing one is a policy decision, not a hint: a compositor honours it
-/// exactly, and there is no negotiation.
+#[doc = include_str!("layer_kind.doc/LayerKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerKind {
-    /// Below everything, including application windows. Wallpapers.
+    #[doc = include_str!("layer_kind.doc/Background.md")]
     Background,
-    /// Below application windows but above the background.
+    #[doc = include_str!("layer_kind.doc/Bottom.md")]
     Bottom,
-    /// Above application windows. Panels, bars, docks.
+    #[doc = include_str!("layer_kind.doc/Top.md")]
     #[default]
     Top,
-    /// Above everything, including fullscreen windows. Notifications, on-screen
-    /// keyboards, lock screens.
+    #[doc = include_str!("layer_kind.doc/Overlay.md")]
     Overlay,
 }
 
 impl LayerKind {
-    /// Whether this band sits above ordinary application windows.
-    ///
-    /// The dividing line the model draws: application windows live between
-    /// `Bottom` and `Top`, so this is `true` for exactly `Top` and `Overlay`.
+    #[doc = include_str!("layer_kind.doc/is_above_windows.md")]
     #[must_use]
     pub const fn is_above_windows(self) -> bool {
         matches!(self, Self::Top | Self::Overlay)

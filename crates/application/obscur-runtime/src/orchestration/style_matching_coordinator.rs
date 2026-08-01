@@ -1,5 +1,4 @@
-//! Matches authored stylesheets against the retained tree to build the
-//! per-node cascade inputs: [`StyleMatchingCoordinator`].
+#![doc = include_str!("style_matching_coordinator.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_style::cascade::{Cascade, CascadeOrigin, Declaration, ResolvedDeclarations};
@@ -12,38 +11,18 @@ use super::{
     PseudoStates, StyleInputs, TreeElement, component_host, part_specificity_for, subject_part_name,
 };
 
-/// The orchestration glue that turns authored [`Stylesheet`]s plus the retained
-/// tree into the [`StyleInputs`] the [`StyleCoordinator`](super::StyleCoordinator)
-/// threads into the style resolver.
-///
-/// This is the seam that finally lets authored CSS reach paint: it walks every
-/// element node in the tree, wraps it in a [`TreeElement`] cursor, runs the
-/// `obscur-style` [`StyleMatcher`] to cascade the matching rules into that
-/// node's winning per-property values, and records any non-empty result under
-/// the node's id. Non-element nodes (text, synthetic parts, the root grouping
-/// node) carry no CSS identity and are skipped.
-///
-/// The coordinator is zero-sized and stateless: it reimplements no matching or
-/// cascade logic — both live entirely in `obscur-style`.
+#[doc = include_str!("style_matching_coordinator.doc/StyleMatchingCoordinator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StyleMatchingCoordinator;
 
 impl StyleMatchingCoordinator {
-    /// Creates a style-matching coordinator.
+    #[doc = include_str!("style_matching_coordinator.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Matches `sheets` against every element node in `tree` and returns the
-    /// resulting [`StyleInputs`].
-    ///
-    /// `sheets` must be ordered by ascending cascade origin (system-default
-    /// first, inline last), the order [`StyleMatcher::match_element`] expects.
-    /// For each element node, the matched-and-cascaded
-    /// [`ResolvedDeclarations`](obscur_style::cascade::ResolvedDeclarations) is
-    /// recorded under the node's id only when it is non-empty, so nodes that
-    /// match no rule add no entry and resolve to their default/inherited style.
+    #[doc = include_str!("style_matching_coordinator.doc/build_inputs.md")]
     #[must_use]
     pub fn build_inputs(&self, tree: &RetainedTree, sheets: &[Stylesheet]) -> StyleInputs {
         // The stateless path: no interaction state, so `:hover`/`:focus` never
@@ -53,13 +32,7 @@ impl StyleMatchingCoordinator {
         self.build_inputs_with_pseudo(tree, sheets, &PseudoStates::new())
     }
 
-    /// Matches `sheets` against every element node in `tree` in `environment`,
-    /// gating each `@media`/`@container` rule by whether its condition holds.
-    ///
-    /// The stateless (no-interaction) counterpart of
-    /// [`build_inputs_with_pseudo_env`](Self::build_inputs_with_pseudo_env): only
-    /// the media/container environment participates, so `:hover`/`:focus` still
-    /// never match.
+    #[doc = include_str!("style_matching_coordinator.doc/build_inputs_env.md")]
     #[must_use]
     pub fn build_inputs_env(
         &self,
@@ -70,19 +43,7 @@ impl StyleMatchingCoordinator {
         self.build_inputs_with_pseudo_env(tree, sheets, &PseudoStates::new(), environment)
     }
 
-    /// Matches `sheets` against every element node in `tree`, sourcing each
-    /// node's interaction state from `pseudo`, and returns the resulting
-    /// [`StyleInputs`].
-    ///
-    /// This is the pseudo-state-aware counterpart of
-    /// [`build_inputs`](Self::build_inputs): each element is wrapped in a
-    /// [`TreeElement::with_pseudo`] cursor so the matcher can honour
-    /// interaction-driven pseudo-classes (`:hover`, `:focus`, `:active`, …)
-    /// against the state the runtime recorded in `pseudo`. Passing an empty
-    /// [`PseudoStates`] is exactly equivalent to
-    /// [`build_inputs`](Self::build_inputs). `sheets` ordering and the
-    /// non-empty-only recording rule are identical to
-    /// [`build_inputs`](Self::build_inputs).
+    #[doc = include_str!("style_matching_coordinator.doc/build_inputs_with_pseudo.md")]
     #[must_use]
     pub fn build_inputs_with_pseudo(
         &self,
@@ -93,15 +54,7 @@ impl StyleMatchingCoordinator {
         self.build_inputs_with_pseudo_env(tree, sheets, pseudo, &MediaEnvironment::unbounded())
     }
 
-    /// Matches `sheets` against every element node in `tree`, honouring both the
-    /// interaction state in `pseudo` and the media/container `environment`.
-    ///
-    /// This is the fully-parameterised worker the runtime frame path uses: each
-    /// element is matched with [`StyleMatcher::match_element_in`], so a rule that
-    /// was authored inside an `@media`/`@container` group contributes only when
-    /// its condition holds against `environment` (§4.13), while `:hover`/`:focus`
-    /// are honoured against `pseudo`. Passing [`MediaEnvironment::unbounded`] is
-    /// exactly equivalent to [`build_inputs_with_pseudo`](Self::build_inputs_with_pseudo).
+    #[doc = include_str!("style_matching_coordinator.doc/build_inputs_with_pseudo_env.md")]
     #[must_use]
     pub fn build_inputs_with_pseudo_env(
         &self,
@@ -124,25 +77,7 @@ impl StyleMatchingCoordinator {
         inputs
     }
 
-    /// Re-matches **only** the nodes `dirty` records, updating `inputs` in place
-    /// (spec §3.4 phase 5, §4.3).
-    ///
-    /// This is the incremental counterpart of
-    /// [`build_inputs_with_pseudo_env`](Self::build_inputs_with_pseudo_env): where
-    /// that runs every rule against every element, this runs them against the
-    /// invalidated elements and leaves every other node's retained entry alone.
-    /// The caller owes the precondition — `inputs` must be what the *same* sheets
-    /// and `environment` produced over the *same* tree, so that a node outside
-    /// `dirty` provably still matches what it matched then. That is the whole
-    /// contract: the accumulator says what changed, and only that is recomputed.
-    ///
-    /// The re-match is a full re-match of each dirty node, not a patch: a node that
-    /// matched a rule last frame and matches none now has its entry
-    /// [cleared](StyleInputs::clear_cascaded), so a stale cascade cannot survive a
-    /// `:hover` ending.
-    ///
-    /// Returns the number of elements re-matched. Non-element and stale nodes carry
-    /// no CSS identity, so they are skipped exactly as the full pass skips them.
+    #[doc = include_str!("style_matching_coordinator.doc/rematch_into.md")]
     pub fn rematch_into(
         &self,
         inputs: &mut StyleInputs,
@@ -169,26 +104,13 @@ impl StyleMatchingCoordinator {
         matched
     }
 
-    /// Matches a single `sheet` against `tree`, a convenience over
-    /// [`build_inputs`](Self::build_inputs) for the one-origin case.
+    #[doc = include_str!("style_matching_coordinator.doc/match_single.md")]
     #[must_use]
     pub fn match_single(&self, tree: &RetainedTree, sheet: &Stylesheet) -> StyleInputs {
         self.build_inputs(tree, std::slice::from_ref(sheet))
     }
 
-    /// Collects the per-node "invalid value" style faults for this match: for
-    /// every element node that matches a rule carrying
-    /// [`invalid_values`](obscur_style::matching::StyleRule::invalid_values),
-    /// one entry per dropped declaration, attributed to that node (§4.13).
-    ///
-    /// This is the render-phase counterpart of the host-side CSS parse/compile
-    /// diagnostics: a `width: not-a-length` never reaches the cascade, but the
-    /// node whose matched rule authored it is the one a tool must point at, and
-    /// that node is only known here — where selectors meet the tree. Only rules
-    /// that actually recorded a dropped value are examined, so a clean sheet
-    /// costs one skipped check per rule and produces nothing. Component-internal
-    /// nodes are scoped out (an ordinary rule's declarations never reach them),
-    /// exactly as [`resolved_for_node`] contains them.
+    #[doc = include_str!("style_matching_coordinator.doc/collect_invalid_value_faults.md")]
     #[must_use]
     pub fn collect_invalid_value_faults(
         &self,
@@ -224,23 +146,7 @@ impl StyleMatchingCoordinator {
     }
 }
 
-/// Resolves `node`'s cascaded declarations, honouring the component-scope
-/// boundary (§4.15).
-///
-/// A **top-level** node (not inside any component's render output) matches the
-/// authored sheets exactly as before — the pure matcher already treats a
-/// `::part()` selector as inert, so nothing about the ordinary path changes. A
-/// **component-internal** node is *scoped by default*: the outside sheets' plain
-/// selectors do not reach it, and only an exported style part
-/// (`Component::part(name)` targeting a class the internal element carries, with
-/// the `Component` half matching the host) crosses the boundary — plus the
-/// system default sheet, which is not an author sheet and is never scoped (see
-/// [`scoped_internal_declarations`]).
-///
-/// "Component-internal" is [`component_host`]'s answer, and a component that
-/// declared [`StyleScope::Open`](obscur_view::component::StyleScope::Open)
-/// (§4.15) is not a boundary to it: everything such a component renders takes
-/// the top-level path above, which is what makes its output stylable at all.
+#[doc = include_str!("style_matching_coordinator.doc/resolved_for_node.md")]
 fn resolved_for_node(
     matcher: &StyleMatcher,
     sheets: &[Stylesheet],
@@ -256,27 +162,7 @@ fn resolved_for_node(
     }
 }
 
-/// The cascade for a component-internal `node`: the system default (UA) sheet
-/// applies in full, only `::part()` rules the host exports cross from any other
-/// origin, and every other ordinary selector is contained.
-///
-/// # Why [`CascadeOrigin::SystemDefault`] is not scoped
-///
-/// §4.15 scopes *stylesheets an author wrote* — that is what "internal classes
-/// do not need global uniqueness" and "components may export style parts" are
-/// about. The system default sheet is not one of those: it is the built-in
-/// definition of what a `<button>`, an `<input>` or an `<a>` **is**, and it sits
-/// at the lowest cascade origin (§4.14), below every author declaration. Scoping
-/// it out does not encapsulate anything — nothing outside authored it, so
-/// nothing outside can be leaking in — it merely means a base element rendered
-/// by a component is not that element any more. The external consumer audit's
-/// finding 2-1 caught exactly this shape: a `<button>` inside a component
-/// computed `color: rgb(0,0,0)`, the initial value, where the same `<button>`
-/// outside got the UA sheet's ink.
-///
-/// The `source_order` counter advances over **every** encountered declaration
-/// (matching or not), exactly as [`StyleMatcher::match_element_in`] does, so
-/// document-order tie-breaks are identical for the declarations that do cross.
+#[doc = include_str!("style_matching_coordinator.doc/scoped_internal_declarations.md")]
 fn scoped_internal_declarations(
     sheets: &[Stylesheet],
     tree: &RetainedTree,

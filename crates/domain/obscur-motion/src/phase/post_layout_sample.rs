@@ -1,44 +1,25 @@
-//! The [`PostLayoutSample`] post-layout phase sample (spec §4.17 "motion
-//! engine", post-layout phase / after-layout geometry).
+#![doc = include_str!("post_layout_sample.doc/_module.md")]
 
 use obscur_geometry::Rect;
 
 use crate::timeline::TimelineId;
 use crate::value::MotionValue;
 
-/// A motion value sampled in the **post-layout** phase (spec §4.17).
-///
-/// The counterpart to [`PreLayoutSample`](super::PreLayoutSample): a
-/// `PostLayoutSample` carries a *presentation-only* animated value — a transform
-/// or an opacity — that is applied **after** the layout pass and does **not**
-/// change geometry (spec §4.17 "after-layout geometry"). Because it runs after
-/// layout, the element's final laid-out box is available: an optional
-/// [`post_layout_bounds`](Self::post_layout_bounds) captures that box for
-/// post-layout transforms and shared-element work, and is `None` when no bounds
-/// were captured.
-///
-/// The sample records which [`Timeline`](crate::timeline::Timeline) produced it,
-/// the timeline [`progress`](Self::progress) at the moment of sampling, the
-/// resolved [`MotionValue`](Self::value), and the optional captured bounds.
+#[doc = include_str!("post_layout_sample.doc/PostLayoutSample.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PostLayoutSample {
-    /// The timeline that produced this sample.
+    #[doc = include_str!("post_layout_sample.doc/timeline.md")]
     timeline: TimelineId,
-    /// The timeline progress at the moment of sampling (normalized `0..=1`).
+    #[doc = include_str!("post_layout_sample.doc/progress.md")]
     progress: f32,
-    /// The sampled presentation-only value (e.g. an animated transform/opacity).
+    #[doc = include_str!("post_layout_sample.doc/value.md")]
     value: MotionValue,
-    /// The element's final laid-out box, captured after layout; `None` when it
-    /// was not captured.
+    #[doc = include_str!("post_layout_sample.doc/post_layout_bounds.md")]
     post_layout_bounds: Option<Rect>,
 }
 
 impl PostLayoutSample {
-    /// Creates a post-layout sample tagging `value` (sampled at `progress`) to
-    /// the `timeline` that produced it, with no captured bounds.
-    ///
-    /// Use [`with_bounds`](Self::with_bounds) to attach the element's laid-out
-    /// box once layout has run.
+    #[doc = include_str!("post_layout_sample.doc/new.md")]
     #[must_use]
     pub const fn new(timeline: TimelineId, progress: f32, value: MotionValue) -> Self {
         Self {
@@ -49,48 +30,38 @@ impl PostLayoutSample {
         }
     }
 
-    /// Returns this sample with `bounds` recorded as the element's captured
-    /// post-layout box.
-    ///
-    /// Fluent builder: consumes and returns `self` so it can be chained after
-    /// [`new`](Self::new).
+    #[doc = include_str!("post_layout_sample.doc/with_bounds.md")]
     #[must_use]
     pub const fn with_bounds(mut self, bounds: Rect) -> Self {
         self.post_layout_bounds = Some(bounds);
         self
     }
 
-    /// Returns the timeline that produced this sample.
+    #[doc = include_str!("post_layout_sample.doc/timeline_2.md")]
     #[must_use]
     pub const fn timeline(&self) -> TimelineId {
         self.timeline
     }
 
-    /// Returns the timeline progress at the moment of sampling.
+    #[doc = include_str!("post_layout_sample.doc/progress_2.md")]
     #[must_use]
     pub const fn progress(&self) -> f32 {
         self.progress
     }
 
-    /// Returns the sampled presentation-only value.
+    #[doc = include_str!("post_layout_sample.doc/value_2.md")]
     #[must_use]
     pub const fn value(&self) -> MotionValue {
         self.value
     }
 
-    /// Returns the element's captured post-layout box, or `None` if none was
-    /// captured.
+    #[doc = include_str!("post_layout_sample.doc/post_layout_bounds_2.md")]
     #[must_use]
     pub const fn post_layout_bounds(&self) -> Option<Rect> {
         self.post_layout_bounds
     }
 
-    /// Returns whether this sample affects layout — always `false`.
-    ///
-    /// A post-layout sample is a presentation-only value applied after layout
-    /// (spec §4.17); it never changes geometry. Mirrors
-    /// [`PreLayoutSample::affects_layout`](super::PreLayoutSample::affects_layout),
-    /// which is always `true`.
+    #[doc = include_str!("post_layout_sample.doc/affects_layout.md")]
     #[must_use]
     pub const fn affects_layout(&self) -> bool {
         false

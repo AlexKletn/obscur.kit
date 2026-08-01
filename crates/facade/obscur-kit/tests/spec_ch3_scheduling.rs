@@ -1,10 +1,4 @@
-//! **SPECIFICATION-DERIVED** scheduler cases for obscur.kit §3.5 ("Rules") and
-//! §3.6 ("Priority order", "starvation prevention for background work").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §3
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the runtime, and must not be "corrected" by editing the expected
-//! value.
+#![doc = include_str!("spec_ch3_scheduling.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch3_support/mod.rs"]
@@ -29,7 +23,7 @@ fn static_view() -> View {
     view(vec![el(1, "page", vec![el(2, "row", vec![])])])
 }
 
-/// Five stacked 12px rows: row *i* covers y `12i .. 12i+12`.
+#[doc = include_str!("spec_ch3_scheduling.doc/strip_view.md")]
 fn strip_view() -> View {
     view(vec![el(
         1,
@@ -62,11 +56,7 @@ fn commit(ops: Vec<UiOperation>, version: u64) -> TransactionCommit {
     TransactionCommit::new(tx.into_operations(), VersionStamp::from_raw(version))
 }
 
-/// §3.5 Rules — "no busy loop".
-///
-/// After the first frame is presented, advancing the deterministic clock by
-/// 10 000 ms in 16 ms steps with no input, commit or resource event must present
-/// **zero** further frames.
+#[doc = include_str!("spec_ch3_scheduling.doc/an_idle_runtime_presents_no_frames_while_the_clock_advances.md")]
 #[test]
 fn an_idle_runtime_presents_no_frames_while_the_clock_advances() {
     let sheet = support::compile(CSS);
@@ -92,11 +82,7 @@ fn an_idle_runtime_presents_no_frames_while_the_clock_advances() {
     );
 }
 
-/// §3.5 Rules — "updates are coalesced".
-///
-/// Three external frame requests and two committed transactions between two
-/// frame boundaries must produce **exactly one** frame, and that frame must show
-/// the *later* transaction's state.
+#[doc = include_str!("spec_ch3_scheduling.doc/three_requests_and_two_commits_coalesce_into_one_frame.md")]
 #[test]
 fn three_requests_and_two_commits_coalesce_into_one_frame() {
     let sheet = support::compile(CSS);
@@ -130,10 +116,7 @@ fn three_requests_and_two_commits_coalesce_into_one_frame() {
     );
 }
 
-/// §3.5 Rules — "stale intermediate frames may be skipped".
-///
-/// The clause permits skipping *frames*, never *input*. Five queued pointer
-/// moves are dispatched as five events by one frame.
+#[doc = include_str!("spec_ch3_scheduling.doc/five_queued_pointer_moves_are_five_dispatches_in_one_frame.md")]
 #[test]
 fn five_queued_pointer_moves_are_five_dispatches_in_one_frame() {
     let sheet = support::compile(CSS);
@@ -182,11 +165,7 @@ fn five_queued_pointer_moves_are_five_dispatches_in_one_frame() {
     );
 }
 
-/// §3.6 Priority order — "1. input, focus, pointer and IME; ... 4. resource
-/// completion;".
-///
-/// With a key/pointer event and a resource completion both pending in one tick,
-/// the log is `["input", "resource"]` — input first — in that single frame.
+#[doc = include_str!("spec_ch3_scheduling.doc/input_is_serviced_before_resource_completion_in_one_frame.md")]
 #[test]
 fn input_is_serviced_before_resource_completion_in_one_frame() {
     let sheet = support::compile(CSS);
@@ -220,11 +199,7 @@ fn input_is_serviced_before_resource_completion_in_one_frame() {
     );
 }
 
-/// §3.6 The scheduler supports — "starvation prevention for background work".
-///
-/// Under 300 consecutive frames of input saturation, queued background work must
-/// still complete. The spec gives no bound, so the discriminator is
-/// finite-vs-never.
+#[doc = include_str!("spec_ch3_scheduling.doc/background_work_completes_under_sustained_input_saturation.md")]
 #[test]
 fn background_work_completes_under_sustained_input_saturation() {
     let sheet = support::compile(CSS);
@@ -260,10 +235,7 @@ fn background_work_completes_under_sustained_input_saturation() {
     );
 }
 
-/// §3.4 Conceptual pipeline — "2. choose frame reasons;" (with §3.5 "Frame
-/// reasons include: input; UI commit; animation; ...").
-///
-/// Three reasons pending at once is **one** frame, not three.
+#[doc = include_str!("spec_ch3_scheduling.doc/three_pending_reasons_produce_exactly_one_frame.md")]
 #[test]
 fn three_pending_reasons_produce_exactly_one_frame() {
     let sheet = support::compile(CSS);
@@ -286,6 +258,6 @@ fn three_pending_reasons_produce_exactly_one_frame() {
     );
 }
 
-/// Keeps the unused-import lint honest about the shared `Stylesheet` alias.
+#[doc = include_str!("spec_ch3_scheduling.doc/_sheet_type_is_used.md")]
 #[allow(dead_code)]
 fn _sheet_type_is_used(_: &Stylesheet) {}

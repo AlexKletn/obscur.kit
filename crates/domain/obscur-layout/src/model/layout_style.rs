@@ -1,4 +1,4 @@
-//! Layout's own per-node input style.
+#![doc = include_str!("layout_style.doc/_module.md")]
 
 use crate::algorithm::{GridAutoFlow, GridPlacement};
 use crate::model::{
@@ -7,192 +7,93 @@ use crate::model::{
 };
 use obscur_geometry::Insets;
 
-/// The computed layout input for a single node (spec §2.3, §4.1).
-///
-/// This is layout's own vocabulary, mapped from the style crate's computed style
-/// by the runtime; the layout crate does not depend on `obscur-style`. All
-/// lengths are fractional logical pixels and are preserved without rounding
-/// (spec §4.6).
-///
-/// Grid, positioning, docking, and other formatting contexts are out of scope
-/// for Phase 1 and are not represented here.
+#[doc = include_str!("layout_style.doc/LayoutStyle.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutStyle {
-    /// The formatting context this node establishes.
+    #[doc = include_str!("layout_style.doc/display.md")]
     pub display: LayoutDisplay,
 
-    /// The inline base direction this box lays its in-flow content along
-    /// (`direction`).
-    ///
-    /// This is the box's own value when it acts as a **containing block** for its
-    /// in-flow children: css-writing-modes-4 §7.2 resolves flow-relative
-    /// directions "with respect to the writing mode of the containing block", and
-    /// names the over-constrained-margin case as its worked example — "the margin
-    /// that is dropped when a box's inline dimension is over-constrained is the end
-    /// margin as determined by the writing mode of the containing block"
-    /// (css-writing-modes-4.txt:1988-1990). [`FlowLayout`](crate::algorithm::FlowLayout)
-    /// reads this to decide which physical edge an over-constrained in-flow child
-    /// settles against: [`Direction::Ltr`] (the default) keeps the child's
-    /// line-left (`margin-left`) edge, [`Direction::Rtl`] keeps its line-right
-    /// (`margin-right`) edge so the child lands against the content box's right
-    /// side. Logical box-model properties (`margin-inline-start` etc.) are already
-    /// mapped to their physical longhands upstream in the style crate; this field
-    /// carries only the geometric half the style crate cannot express.
+    #[doc = include_str!("layout_style.doc/direction.md")]
     pub direction: Direction,
 
-    /// The block-flow / line orientation this box lays its in-flow content under
-    /// (`writing-mode`).
-    ///
-    /// Like [`direction`](Self::direction) this is the box's own value as a
-    /// **containing block** for its in-flow children: css-writing-modes-4 §7.2
-    /// resolves flow-relative directions "with respect to the writing mode of the
-    /// containing block". [`FlowLayout`](crate::algorithm::FlowLayout) reads it to
-    /// decide which physical axis and origin it stacks children along:
-    /// [`WritingMode::HorizontalTb`] (the default) stacks top-to-bottom exactly as
-    /// before, [`WritingMode::VerticalRl`] stacks from the right edge leftward, and
-    /// [`WritingMode::VerticalLr`] stacks from the left edge rightward. Logical
-    /// box-model longhands (`margin-block-start` etc.) are already mapped to their
-    /// physical longhands upstream in the style crate under this same value.
+    #[doc = include_str!("layout_style.doc/writing_mode.md")]
     pub writing_mode: WritingMode,
 
-    /// The node's positioning scheme (`position`).
-    ///
-    /// [`Position::Static`] (the default) lays the node out in normal flow and
-    /// ignores [`inset`](Self::inset). [`Position::Relative`] keeps the node in
-    /// flow but offsets its final position (and its whole subtree) by
-    /// [`inset`](Self::inset). [`Position::Absolute`] / [`Position::Fixed`] take
-    /// the node **out of flow** and position it by [`inset`](Self::inset) within
-    /// its containing block (the nearest positioned ancestor's padding box, or the
-    /// viewport for `fixed`).
+    #[doc = include_str!("layout_style.doc/position.md")]
     pub position: Position,
 
-    /// The node's positioning insets (`top` / `right` / `bottom` / `left`).
-    ///
-    /// Only consulted for a [`Position::Relative`] (later, out-of-flow) node;
-    /// the default is all-`auto` ([`Inset::AUTO`]), which contributes no offset.
+    #[doc = include_str!("layout_style.doc/inset.md")]
     pub inset: Inset,
 
-    /// Preferred width.
+    #[doc = include_str!("layout_style.doc/width.md")]
     pub width: Dimension,
-    /// Preferred height.
+    #[doc = include_str!("layout_style.doc/height.md")]
     pub height: Dimension,
-    /// Lower bound on the resolved width.
+    #[doc = include_str!("layout_style.doc/min_width.md")]
     pub min_width: Dimension,
-    /// Lower bound on the resolved height.
+    #[doc = include_str!("layout_style.doc/min_height.md")]
     pub min_height: Dimension,
-    /// Upper bound on the resolved width.
+    #[doc = include_str!("layout_style.doc/max_width.md")]
     pub max_width: Dimension,
-    /// Upper bound on the resolved height.
+    #[doc = include_str!("layout_style.doc/max_height.md")]
     pub max_height: Dimension,
 
-    /// How an explicit [`width`](Self::width) / [`height`](Self::height) is
-    /// interpreted against the box model (`box-sizing`).
-    ///
-    /// [`BoxSizing::ContentBox`] (the CSS default) treats an explicit size as the
-    /// content extent (border box = size + border + padding);
-    /// [`BoxSizing::BorderBox`] treats it as the border box (content extent =
-    /// size − border − padding, floored at `0`). An `Auto` size is unaffected.
+    #[doc = include_str!("layout_style.doc/box_sizing.md")]
     pub box_sizing: BoxSizing,
 
-    /// Space reserved outside the border box (margin edges). Each edge may be
-    /// `auto`, which absorbs leftover space rather than reserving a fixed amount
-    /// — the `margin: 0 auto` centring rule (CSS 2.1 §10.3.3).
+    #[doc = include_str!("layout_style.doc/margin.md")]
     pub margin: MarginEdges,
-    /// Space reserved between the border box and the content box (padding edges).
+    #[doc = include_str!("layout_style.doc/padding.md")]
     pub padding: Insets,
-    /// Border thickness on each edge.
+    #[doc = include_str!("layout_style.doc/border.md")]
     pub border: Insets,
 
-    /// Flex container: the main-axis direction.
+    #[doc = include_str!("layout_style.doc/flex_direction.md")]
     pub flex_direction: FlexDirection,
-    /// Flex container: whether items are confined to a single line or wrap onto
-    /// multiple lines along the cross axis (`flex-wrap`). Default
-    /// [`FlexWrap::NoWrap`] (single-line), so a container that never sets it is
-    /// byte-for-byte identical to before wrapping existed. Ignored by non-flex
-    /// formatting contexts.
+    #[doc = include_str!("layout_style.doc/flex_wrap.md")]
     pub flex_wrap: FlexWrap,
-    /// Flex container: main-axis distribution of items and free space. Also the
-    /// grid container's *inline-axis* (column) distribution of leftover track
-    /// space (`justify-content`): when the columns' total size is smaller than
-    /// the content width the free space is distributed per this value.
+    #[doc = include_str!("layout_style.doc/justify_content.md")]
     pub justify_content: JustifyContent,
-    /// Grid container: *block-axis* (row) distribution of leftover track space
-    /// (`align-content`): when the rows' total size is smaller than the content
-    /// height the free space is distributed per this value. Ignored by flex.
-    /// Defaults to [`JustifyContent::FlexStart`] (no distribution), so a default
-    /// grid packs its rows at the top exactly as before.
+    #[doc = include_str!("layout_style.doc/align_content.md")]
     pub align_content: JustifyContent,
-    /// Flex container: cross-axis alignment of items. Also the grid container's
-    /// default *block-axis* (`align-items`) alignment of each item within its
-    /// cell.
+    #[doc = include_str!("layout_style.doc/align_items.md")]
     pub align_items: AlignItems,
-    /// Grid container: default *inline-axis* (`justify-items`) alignment of each
-    /// item within its cell. Ignored by flex. Default [`AlignItems::Stretch`].
+    #[doc = include_str!("layout_style.doc/justify_items.md")]
     pub justify_items: AlignItems,
-    /// Grid item: per-item *block-axis* (`align-self`) alignment override.
-    /// [`AlignSelf::Auto`] (the default) inherits the container's `align-items`.
+    #[doc = include_str!("layout_style.doc/align_self.md")]
     pub align_self: AlignSelf,
-    /// Grid item: per-item *inline-axis* (`justify-self`) alignment override.
-    /// [`AlignSelf::Auto`] (the default) inherits the container's `justify-items`.
+    #[doc = include_str!("layout_style.doc/justify_self.md")]
     pub justify_self: AlignSelf,
-    /// Flex container: gap between adjacent items, in logical pixels.
+    #[doc = include_str!("layout_style.doc/gap.md")]
     pub gap: f32,
 
-    /// Flex item: growth factor for distributing positive free space.
+    #[doc = include_str!("layout_style.doc/flex_grow.md")]
     pub flex_grow: f32,
-    /// Flex item: shrink factor for absorbing negative free space.
+    #[doc = include_str!("layout_style.doc/flex_shrink.md")]
     pub flex_shrink: f32,
-    /// Flex item: base size along the main axis before grow/shrink.
+    #[doc = include_str!("layout_style.doc/flex_basis.md")]
     pub flex_basis: Dimension,
 
-    /// The node's font size in logical pixels, used to shape and wrap a text
-    /// leaf during the measure/arrange pass (spec §5.10).
-    ///
-    /// Only meaningful for a text node: the coordinator populates it from the
-    /// node's computed `font-size` so the constraint-aware measure can shape and
-    /// wrap the run to its available width. It defaults to
-    /// [`DEFAULT_FONT_SIZE`](Self::DEFAULT_FONT_SIZE) and is ignored by every
-    /// box (non-text) algorithm.
+    #[doc = include_str!("layout_style.doc/font_size.md")]
     pub font_size: f32,
 
-    /// Grid item: explicit line-based placement (`grid-column` / `grid-row`).
-    ///
-    /// Only meaningful for a child of a grid container. The default is all
-    /// [`GridLine::Auto`](crate::algorithm::GridLine), i.e. pure row-major
-    /// auto-placement — the grid's historical behaviour — so a default style
-    /// never perturbs a non-grid layout.
+    #[doc = include_str!("layout_style.doc/grid_placement.md")]
     pub grid_placement: GridPlacement,
 
-    /// Grid container: the auto-placement flow mode (`grid-auto-flow`).
-    ///
-    /// Only meaningful for a grid container. The default is
-    /// [`GridAutoFlow::Row`] (row-major, sparse) — the grid's historical
-    /// behaviour — so a default style auto-places exactly as before.
+    #[doc = include_str!("layout_style.doc/grid_auto_flow.md")]
     pub grid_auto_flow: GridAutoFlow,
 
-    /// Whether this box is a **scroll container** — its computed `overflow` is
-    /// `scroll` / `auto` / `hidden` (anything but `visible` / `clip` / absent).
-    ///
-    /// css-flexbox-1 §4.5 makes this decide a flex item's automatic minimum size:
-    /// a non-scrollable item's `min-*: auto` resolves to its content-based
-    /// minimum, but a scroll container's resolves to **zero** ("for scroll
-    /// containers the automatic minimum size is zero", css-flexbox-1.txt:1084-1085).
-    /// Default `false` (the initial `overflow: visible`), so a box that never
-    /// scrolls keeps its content-based automatic minimum unchanged.
+    #[doc = include_str!("layout_style.doc/scroll_container.md")]
     pub scroll_container: bool,
 }
 
 impl LayoutStyle {
-    /// The initial `font-size` (the CSS default), used for a text leaf whose
-    /// [`font_size`](Self::font_size) is not otherwise set.
+    #[doc = include_str!("layout_style.doc/DEFAULT_FONT_SIZE.md")]
     pub const DEFAULT_FONT_SIZE: f32 = 16.0;
 }
 
 impl Default for LayoutStyle {
-    /// CSS-like defaults: `Block` display, all sizes `Auto`, zero insets and gap,
-    /// `Row` direction, `FlexStart` justification, `Stretch` alignment,
-    /// `flex_grow: 0.0`, `flex_shrink: 1.0`, `Auto` flex basis, and the initial
-    /// `16px` font size.
+    #[doc = include_str!("layout_style.doc/default.md")]
     fn default() -> Self {
         Self {
             display: LayoutDisplay::Block,
@@ -231,64 +132,49 @@ impl Default for LayoutStyle {
 }
 
 impl LayoutStyle {
-    /// Returns a copy with `display` replaced.
+    #[doc = include_str!("layout_style.doc/with_display.md")]
     #[must_use]
     pub const fn with_display(mut self, display: LayoutDisplay) -> Self {
         self.display = display;
         self
     }
 
-    /// Returns a copy with `width` replaced.
+    #[doc = include_str!("layout_style.doc/with_width.md")]
     #[must_use]
     pub const fn with_width(mut self, width: Dimension) -> Self {
         self.width = width;
         self
     }
 
-    /// Returns a copy with `height` replaced.
+    #[doc = include_str!("layout_style.doc/with_height.md")]
     #[must_use]
     pub const fn with_height(mut self, height: Dimension) -> Self {
         self.height = height;
         self
     }
 
-    /// Returns a copy with `font_size` replaced.
+    #[doc = include_str!("layout_style.doc/with_font_size.md")]
     #[must_use]
     pub const fn with_font_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size;
         self
     }
 
-    /// Returns a copy with the positioning scheme `position` replaced.
+    #[doc = include_str!("layout_style.doc/with_position.md")]
     #[must_use]
     pub const fn with_position(mut self, position: Position) -> Self {
         self.position = position;
         self
     }
 
-    /// Returns a copy with the positioning `inset` replaced.
+    #[doc = include_str!("layout_style.doc/with_inset.md")]
     #[must_use]
     pub const fn with_inset(mut self, inset: Inset) -> Self {
         self.inset = inset;
         self
     }
 
-    /// The offset a [`Position::Relative`] node adds to its final in-flow
-    /// position (and to its whole subtree), in logical pixels (spec §4.1).
-    ///
-    /// Returns `(dx, dy)`, computed from the node's [`inset`](Self::inset)
-    /// against the containing block size (`containing_width` / `containing_height`,
-    /// the parent content box). Per CSS `left` wins over `right` and `top` over
-    /// `bottom`:
-    ///
-    /// * `dx` = `left` if definite, else `-right` if definite, else `0`.
-    /// * `dy` = `top` if definite, else `-bottom` if definite, else `0`.
-    ///
-    /// A positive `left` moves the node right; a positive `right` moves it left
-    /// (and likewise for `top` / `bottom` on the y axis). Any non-[`Relative`]
-    /// scheme — including the [`Position::Absolute`] / [`Position::Fixed`]
-    /// placeholders, which are treated as [`Position::Static`] this step —
-    /// returns `(0.0, 0.0)`, so a default node is never perturbed.
+    #[doc = include_str!("layout_style.doc/relative_offset.md")]
     #[must_use]
     pub fn relative_offset(&self, containing_width: f32, containing_height: f32) -> (f32, f32) {
         if !self.position.is_relative() {
@@ -309,54 +195,54 @@ impl LayoutStyle {
         (dx.unwrap_or(0.0), dy.unwrap_or(0.0))
     }
 
-    /// Returns a copy with the grid item `grid_placement` replaced.
+    #[doc = include_str!("layout_style.doc/with_grid_placement.md")]
     #[must_use]
     pub const fn with_grid_placement(mut self, grid_placement: GridPlacement) -> Self {
         self.grid_placement = grid_placement;
         self
     }
 
-    /// The grid item's explicit line-based placement.
+    #[doc = include_str!("layout_style.doc/grid_placement_2.md")]
     #[must_use]
     pub const fn grid_placement(&self) -> GridPlacement {
         self.grid_placement
     }
 
-    /// Returns a copy with the grid container `grid_auto_flow` replaced.
+    #[doc = include_str!("layout_style.doc/with_grid_auto_flow.md")]
     #[must_use]
     pub const fn with_grid_auto_flow(mut self, grid_auto_flow: GridAutoFlow) -> Self {
         self.grid_auto_flow = grid_auto_flow;
         self
     }
 
-    /// The grid container's auto-placement flow mode.
+    #[doc = include_str!("layout_style.doc/grid_auto_flow_2.md")]
     #[must_use]
     pub const fn grid_auto_flow(&self) -> GridAutoFlow {
         self.grid_auto_flow
     }
 
-    /// Returns a copy with the grid container `justify_items` default replaced.
+    #[doc = include_str!("layout_style.doc/with_justify_items.md")]
     #[must_use]
     pub const fn with_justify_items(mut self, justify_items: AlignItems) -> Self {
         self.justify_items = justify_items;
         self
     }
 
-    /// Returns a copy with the grid container `align_items` default replaced.
+    #[doc = include_str!("layout_style.doc/with_align_items.md")]
     #[must_use]
     pub const fn with_align_items(mut self, align_items: AlignItems) -> Self {
         self.align_items = align_items;
         self
     }
 
-    /// Returns a copy with the grid item `align_self` override replaced.
+    #[doc = include_str!("layout_style.doc/with_align_self.md")]
     #[must_use]
     pub const fn with_align_self(mut self, align_self: AlignSelf) -> Self {
         self.align_self = align_self;
         self
     }
 
-    /// Returns a copy with the grid item `justify_self` override replaced.
+    #[doc = include_str!("layout_style.doc/with_justify_self.md")]
     #[must_use]
     pub const fn with_justify_self(mut self, justify_self: AlignSelf) -> Self {
         self.justify_self = justify_self;

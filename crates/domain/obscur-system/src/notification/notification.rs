@@ -1,42 +1,26 @@
-//! A system notification the app asks the host to present (spec §6.12).
+#![doc = include_str!("notification.doc/_module.md")]
 
 use crate::notification::NotificationAction;
 
-/// A system notification (spec §6.12 — notifications).
-///
-/// A notification is a pure value describing what the app wants shown: a
-/// [`title`](Self::title) and [`body`](Self::body), an optional app-icon
-/// [`badge`](Self::badge) count, optional determinate [`progress`](Self::progress),
-/// a set of actionable [`actions`](Self::actions), and whether it should
-/// [request attention](Self::request_attention) (bounce/flash). Whether any of
-/// this is honored is the host's decision — permission and presentation policy are
-/// explicit and live behind the
-/// [`NotificationProvider`](crate::notification::NotificationProvider) port
-/// (spec §6.12).
-///
-/// Build one with [`new`](Self::new) and layer on optional facets with the fluent
-/// `with_*` / `requesting_attention` methods.
+#[doc = include_str!("notification.doc/Notification.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Notification {
-    /// The notification's headline text.
+    #[doc = include_str!("notification.doc/title.md")]
     title: Box<str>,
-    /// The notification's body / detail text.
+    #[doc = include_str!("notification.doc/body.md")]
     body: Box<str>,
-    /// Optional app-icon badge count to display alongside this notification.
+    #[doc = include_str!("notification.doc/badge.md")]
     badge: Option<u32>,
-    /// Optional determinate progress in `0.0..=1.0`; `None` is no/indeterminate
-    /// progress.
+    #[doc = include_str!("notification.doc/progress.md")]
     progress: Option<f32>,
-    /// Actionable buttons offered on the notification.
+    #[doc = include_str!("notification.doc/actions.md")]
     actions: Vec<NotificationAction>,
-    /// Whether to request user attention (bounce the dock icon / flash the task
-    /// entry).
+    #[doc = include_str!("notification.doc/request_attention.md")]
     request_attention: bool,
 }
 
 impl Notification {
-    /// Creates a notification with `title` and `body`; badge, progress, and
-    /// actions start empty and attention is not requested (spec §6.12).
+    #[doc = include_str!("notification.doc/new.md")]
     #[must_use]
     pub fn new(title: impl Into<Box<str>>, body: impl Into<Box<str>>) -> Self {
         Self {
@@ -49,74 +33,71 @@ impl Notification {
         }
     }
 
-    /// Returns this notification with the app-icon badge `count` set (spec §6.12).
+    #[doc = include_str!("notification.doc/with_badge.md")]
     #[must_use]
     pub fn with_badge(mut self, count: u32) -> Self {
         self.badge = Some(count);
         self
     }
 
-    /// Returns this notification with determinate `progress`, clamped into
-    /// `0.0..=1.0` (spec §6.12).
+    #[doc = include_str!("notification.doc/with_progress.md")]
     #[must_use]
     pub fn with_progress(mut self, progress: f32) -> Self {
         self.progress = Some(progress.clamp(0.0, 1.0));
         self
     }
 
-    /// Returns this notification with `action` appended to its actions
-    /// (spec §6.12).
+    #[doc = include_str!("notification.doc/with_action.md")]
     #[must_use]
     pub fn with_action(mut self, action: NotificationAction) -> Self {
         self.actions.push(action);
         self
     }
 
-    /// Returns this notification with the request-attention flag set to
-    /// `request` (spec §6.12).
+    #[doc = include_str!("notification.doc/requesting_attention.md")]
     #[must_use]
     pub fn requesting_attention(mut self, request: bool) -> Self {
         self.request_attention = request;
         self
     }
 
-    /// Returns the headline text (spec §6.12).
+    #[doc = include_str!("notification.doc/title_2.md")]
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    /// Returns the body / detail text (spec §6.12).
+    #[doc = include_str!("notification.doc/body_2.md")]
     #[must_use]
     pub fn body(&self) -> &str {
         &self.body
     }
 
-    /// Returns the app-icon badge count, if any (spec §6.12).
+    #[doc = include_str!("notification.doc/badge_2.md")]
     #[must_use]
     pub const fn badge(&self) -> Option<u32> {
         self.badge
     }
 
-    /// Returns the determinate progress in `0.0..=1.0`, if any (spec §6.12).
+    #[doc = include_str!("notification.doc/progress_2.md")]
     #[must_use]
     pub const fn progress(&self) -> Option<f32> {
         self.progress
     }
 
-    /// Returns the actionable buttons offered on this notification (spec §6.12).
+    #[doc = include_str!("notification.doc/actions_2.md")]
     #[must_use]
     pub fn actions(&self) -> &[NotificationAction] {
         &self.actions
     }
 
-    /// Returns whether this notification requests user attention (spec §6.12).
+    #[doc = include_str!("notification.doc/request_attention_2.md")]
     #[must_use]
     pub const fn request_attention(&self) -> bool {
         self.request_attention
     }
 
-    /// Returns whether this notification carries any actions (spec §6.12).
+    #[doc = include_str!("notification.doc/has_actions.md")]
     #[must_use]
     pub fn has_actions(&self) -> bool {
         !self.actions.is_empty()

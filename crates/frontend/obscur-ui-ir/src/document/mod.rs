@@ -1,6 +1,4 @@
-//! The IR document model: the [`UiIrDocument`] tree of [`UiIrNode`]s carrying
-//! [`UiIrProperty`]/[`UiIrEvent`] bindings and [`UiIrExpression`] values
-//! (spec §2.5).
+#![doc = include_str!("mod.doc/_module.md")]
 mod ui_ir_document;
 pub use ui_ir_document::UiIrDocument;
 mod ui_ir_event;

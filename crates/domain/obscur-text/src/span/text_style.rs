@@ -1,37 +1,30 @@
-//! The typography of a rich text span (spec §5.10).
+#![doc = include_str!("text_style.doc/_module.md")]
 
-/// A CSS-like font weight on the `1..=1000` axis (spec §5.10).
-///
-/// This is a small, self-contained value type; the text domain models
-/// typography without depending on the CSS/style domain. The named constants
-/// mirror the common CSS keyword weights (`THIN`, `NORMAL`, `BOLD`, `BLACK`).
+#[doc = include_str!("text_style.doc/FontWeight.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FontWeight(u16);
 
 impl FontWeight {
-    /// Thin weight (`100`).
+    #[doc = include_str!("text_style.doc/THIN.md")]
     pub const THIN: FontWeight = FontWeight(100);
-    /// Extra-light weight (`200`).
+    #[doc = include_str!("text_style.doc/EXTRA_LIGHT.md")]
     pub const EXTRA_LIGHT: FontWeight = FontWeight(200);
-    /// Light weight (`300`).
+    #[doc = include_str!("text_style.doc/LIGHT.md")]
     pub const LIGHT: FontWeight = FontWeight(300);
-    /// Normal (regular) weight (`400`); the default.
+    #[doc = include_str!("text_style.doc/NORMAL.md")]
     pub const NORMAL: FontWeight = FontWeight(400);
-    /// Medium weight (`500`).
+    #[doc = include_str!("text_style.doc/MEDIUM.md")]
     pub const MEDIUM: FontWeight = FontWeight(500);
-    /// Semi-bold weight (`600`).
+    #[doc = include_str!("text_style.doc/SEMI_BOLD.md")]
     pub const SEMI_BOLD: FontWeight = FontWeight(600);
-    /// Bold weight (`700`).
+    #[doc = include_str!("text_style.doc/BOLD.md")]
     pub const BOLD: FontWeight = FontWeight(700);
-    /// Extra-bold weight (`800`).
+    #[doc = include_str!("text_style.doc/EXTRA_BOLD.md")]
     pub const EXTRA_BOLD: FontWeight = FontWeight(800);
-    /// Black (heavy) weight (`900`).
+    #[doc = include_str!("text_style.doc/BLACK.md")]
     pub const BLACK: FontWeight = FontWeight(900);
 
-    /// Creates a weight from a raw value, clamped to the valid `1..=1000` axis.
-    ///
-    /// Values of `0` or above `1000` are clamped rather than rejected, so this
-    /// never panics.
+    #[doc = include_str!("text_style.doc/new.md")]
     #[must_use]
     pub const fn new(value: u16) -> Self {
         let clamped = if value < 1 {
@@ -44,7 +37,7 @@ impl FontWeight {
         FontWeight(clamped)
     }
 
-    /// Returns the raw weight value on the `1..=1000` axis.
+    #[doc = include_str!("text_style.doc/value.md")]
     #[must_use]
     pub const fn value(self) -> u16 {
         self.0
@@ -52,67 +45,57 @@ impl FontWeight {
 }
 
 impl Default for FontWeight {
-    /// The default weight is [`FontWeight::NORMAL`].
+    #[doc = include_str!("text_style.doc/default.md")]
     fn default() -> Self {
         Self::NORMAL
     }
 }
 
-/// The slant (posture) of a font (spec §5.10).
+#[doc = include_str!("text_style.doc/FontSlant.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FontSlant {
-    /// Upright glyphs.
+    #[doc = include_str!("text_style.doc/Normal.md")]
     Normal,
-    /// A true italic design (distinct glyph shapes).
+    #[doc = include_str!("text_style.doc/Italic.md")]
     Italic,
-    /// A slanted (obliqued) rendering of the upright design.
+    #[doc = include_str!("text_style.doc/Oblique.md")]
     Oblique,
 }
 
 impl Default for FontSlant {
-    /// The default slant is [`FontSlant::Normal`].
+    #[doc = include_str!("text_style.doc/default_2.md")]
     fn default() -> Self {
         Self::Normal
     }
 }
 
-/// The typography of a rich text span (spec §5.10).
-///
-/// A `TextStyle` describes how a run of text is drawn: its font family, size,
-/// weight, slant, spacing, and line height. It is a pure, backend-agnostic value
-/// type independent of the CSS/style domain; the spec's CSS typography
-/// integration lives in an adapter that maps a computed style onto this type,
-/// not the other way around.
-///
-/// Because it holds `f32` fields it derives only `Debug`, `Clone`, and
-/// `PartialEq` (floats preclude `Eq`).
+#[doc = include_str!("text_style.doc/TextStyle.md")]
 //
 // Color is intentionally NOT modeled here: text color is applied at paint time
 // via the scene, keeping text layout color-agnostic.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
-    /// The primary font family name; the fallback list lives in the font module.
+    #[doc = include_str!("text_style.doc/font_family.md")]
     pub font_family: Box<str>,
-    /// The font size in logical pixels (default `16.0`).
+    #[doc = include_str!("text_style.doc/font_size.md")]
     pub font_size: f32,
-    /// The font weight (default [`FontWeight::NORMAL`]).
+    #[doc = include_str!("text_style.doc/weight.md")]
     pub weight: FontWeight,
-    /// The font slant (default [`FontSlant::Normal`]).
+    #[doc = include_str!("text_style.doc/slant.md")]
     pub slant: FontSlant,
-    /// Extra spacing added between characters in logical pixels (default `0.0`).
+    #[doc = include_str!("text_style.doc/letter_spacing.md")]
     pub letter_spacing: f32,
-    /// Extra spacing added between words in logical pixels (default `0.0`).
+    #[doc = include_str!("text_style.doc/word_spacing.md")]
     pub word_spacing: f32,
-    /// The line height in logical pixels, or `None` to use the font's own
-    /// metrics.
+    #[doc = include_str!("text_style.doc/line_height.md")]
     pub line_height: Option<f32>,
 }
 
 impl TextStyle {
-    /// The default font size in logical pixels.
+    #[doc = include_str!("text_style.doc/DEFAULT_FONT_SIZE.md")]
     pub const DEFAULT_FONT_SIZE: f32 = 16.0;
 
-    /// Creates a style for `font_family` with every other field at its default.
+    #[doc = include_str!("text_style.doc/new_2.md")]
     #[must_use]
     pub fn new(font_family: impl Into<Box<str>>) -> Self {
         Self {
@@ -126,86 +109,85 @@ impl TextStyle {
         }
     }
 
-    /// Returns this style with its font size set, in logical pixels.
+    #[doc = include_str!("text_style.doc/with_size.md")]
     #[must_use]
     pub fn with_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size;
         self
     }
 
-    /// Returns this style with its font weight set.
+    #[doc = include_str!("text_style.doc/with_weight.md")]
     #[must_use]
     pub fn with_weight(mut self, weight: FontWeight) -> Self {
         self.weight = weight;
         self
     }
 
-    /// Returns this style with its font slant set.
+    #[doc = include_str!("text_style.doc/with_slant.md")]
     #[must_use]
     pub fn with_slant(mut self, slant: FontSlant) -> Self {
         self.slant = slant;
         self
     }
 
-    /// Returns this style with its letter spacing set, in logical pixels.
+    #[doc = include_str!("text_style.doc/with_letter_spacing.md")]
     #[must_use]
     pub fn with_letter_spacing(mut self, letter_spacing: f32) -> Self {
         self.letter_spacing = letter_spacing;
         self
     }
 
-    /// Returns this style with its word spacing set, in logical pixels.
+    #[doc = include_str!("text_style.doc/with_word_spacing.md")]
     #[must_use]
     pub fn with_word_spacing(mut self, word_spacing: f32) -> Self {
         self.word_spacing = word_spacing;
         self
     }
 
-    /// Returns this style with an explicit line height set, in logical pixels.
+    #[doc = include_str!("text_style.doc/with_line_height.md")]
     #[must_use]
     pub fn with_line_height(mut self, line_height: f32) -> Self {
         self.line_height = Some(line_height);
         self
     }
 
-    /// Returns the primary font family name.
+    #[doc = include_str!("text_style.doc/font_family_2.md")]
     #[must_use]
     pub fn font_family(&self) -> &str {
         &self.font_family
     }
 
-    /// Returns the font size in logical pixels.
+    #[doc = include_str!("text_style.doc/font_size_2.md")]
     #[must_use]
     pub const fn font_size(&self) -> f32 {
         self.font_size
     }
 
-    /// Returns the font weight.
+    #[doc = include_str!("text_style.doc/weight_2.md")]
     #[must_use]
     pub const fn weight(&self) -> FontWeight {
         self.weight
     }
 
-    /// Returns the font slant.
+    #[doc = include_str!("text_style.doc/slant_2.md")]
     #[must_use]
     pub const fn slant(&self) -> FontSlant {
         self.slant
     }
 
-    /// Returns the letter spacing in logical pixels.
+    #[doc = include_str!("text_style.doc/letter_spacing_2.md")]
     #[must_use]
     pub const fn letter_spacing(&self) -> f32 {
         self.letter_spacing
     }
 
-    /// Returns the word spacing in logical pixels.
+    #[doc = include_str!("text_style.doc/word_spacing_2.md")]
     #[must_use]
     pub const fn word_spacing(&self) -> f32 {
         self.word_spacing
     }
 
-    /// Returns the explicit line height in logical pixels, or `None` to use the
-    /// font's own metrics.
+    #[doc = include_str!("text_style.doc/line_height_2.md")]
     #[must_use]
     pub const fn line_height(&self) -> Option<f32> {
         self.line_height
@@ -213,8 +195,7 @@ impl TextStyle {
 }
 
 impl Default for TextStyle {
-    /// The default style: the `"sans-serif"` family at the default size, normal
-    /// weight and slant, no extra spacing, and font-metric line height.
+    #[doc = include_str!("text_style.doc/default_3.md")]
     fn default() -> Self {
         Self::new("sans-serif")
     }

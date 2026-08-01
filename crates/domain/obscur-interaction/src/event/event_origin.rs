@@ -1,43 +1,32 @@
-//! Where an input event originated before entering the event model (spec §4.7).
+#![doc = include_str!("event_origin.doc/_module.md")]
 
-/// The source that produced an event entering the routing model (spec §4.7).
-///
-/// Every event — whether from a real device, an assistive technology, or a test
-/// harness — flows through the same propagation path. Recording its origin lets
-/// handlers distinguish direct device input from accessibility actions
-/// ([`Accessibility`](Self::Accessibility)) and from test-injected inputs
-/// ([`Synthetic`](Self::Synthetic), spec §7.4), which are otherwise
-/// indistinguishable at the routing layer.
+#[doc = include_str!("event_origin.doc/EventOrigin.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventOrigin {
-    /// A pointing device (mouse, pen, trackpad).
+    #[doc = include_str!("event_origin.doc/Pointer.md")]
     Pointer,
-    /// A physical or virtual keyboard.
+    #[doc = include_str!("event_origin.doc/Keyboard.md")]
     Keyboard,
-    /// A touchscreen contact.
+    #[doc = include_str!("event_origin.doc/Touch.md")]
     Touch,
-    /// A recognized higher-level gesture (pinch, swipe, rotate).
+    #[doc = include_str!("event_origin.doc/Gesture.md")]
     Gesture,
-    /// A gamepad or game controller.
+    #[doc = include_str!("event_origin.doc/Gamepad.md")]
     Gamepad,
-    /// An accessibility action requested by assistive technology.
+    #[doc = include_str!("event_origin.doc/Accessibility.md")]
     Accessibility,
-    /// A test-injected synthetic input (spec §7.4).
+    #[doc = include_str!("event_origin.doc/Synthetic.md")]
     Synthetic,
 }
 
 impl EventOrigin {
-    /// Returns whether this event was injected synthetically for testing
-    /// (spec §7.4).
+    #[doc = include_str!("event_origin.doc/is_synthetic.md")]
     #[must_use]
     pub const fn is_synthetic(self) -> bool {
         matches!(self, Self::Synthetic)
     }
 
-    /// Returns whether this event came directly from a physical input device
-    /// ([`Pointer`](Self::Pointer), [`Keyboard`](Self::Keyboard),
-    /// [`Touch`](Self::Touch), or [`Gamepad`](Self::Gamepad)) rather than from a
-    /// recognizer, assistive technology, or a test harness.
+    #[doc = include_str!("event_origin.doc/is_direct_input.md")]
     #[must_use]
     pub const fn is_direct_input(self) -> bool {
         matches!(

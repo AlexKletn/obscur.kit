@@ -1,43 +1,36 @@
-//! The typed brush that paints a shape.
+#![doc = include_str!("brush.doc/_module.md")]
 
 use crate::color::Color;
 
 use super::{ConicGradient, LinearGradient, RadialGradient, SolidBrush};
 
-/// The typed source of color used to paint a shape (spec §5.1).
-///
-/// A `Brush` is one of the concrete paint sources: a flat [`SolidBrush`] or one
-/// of the gradient brushes. It carries only backend-independent data; a
-/// renderer interprets it into device pixels.
-///
-/// Image and pattern brushes are a later addition.
+#[doc = include_str!("brush.doc/Brush.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Brush {
-    /// A flat, single-color fill.
+    #[doc = include_str!("brush.doc/Solid.md")]
     Solid(SolidBrush),
-    /// A linear (axial) gradient.
+    #[doc = include_str!("brush.doc/Linear.md")]
     Linear(LinearGradient),
-    /// A radial (concentric) gradient.
+    #[doc = include_str!("brush.doc/Radial.md")]
     Radial(RadialGradient),
-    /// A conic (angular / sweep) gradient.
+    #[doc = include_str!("brush.doc/Conic.md")]
     Conic(ConicGradient),
 }
 
 impl Brush {
-    /// Creates a solid-color brush painting with `color`.
+    #[doc = include_str!("brush.doc/solid.md")]
     #[must_use]
     pub const fn solid(color: Color) -> Self {
         Self::Solid(SolidBrush::new(color))
     }
 
-    /// Returns whether this brush is a [`Brush::Solid`] brush.
+    #[doc = include_str!("brush.doc/is_solid.md")]
     #[must_use]
     pub const fn is_solid(&self) -> bool {
         matches!(self, Self::Solid(_))
     }
 
-    /// Returns the inner [`SolidBrush`] if this is a [`Brush::Solid`] brush,
-    /// otherwise `None`.
+    #[doc = include_str!("brush.doc/as_solid.md")]
     #[must_use]
     pub const fn as_solid(&self) -> Option<&SolidBrush> {
         match self {

@@ -1,16 +1,4 @@
-//! The replaceable port for optional language services (spec §5.13).
-//!
-//! This module defines [`TextServiceProvider`], the hexagonal port through which
-//! the text domain requests optional language analyses — spellcheck, grammar,
-//! autocorrect, language detection, and user-dictionary lookups (spec §5.13).
-//! Interface adapters wrap a real linguistic engine behind it; the domain never
-//! depends on one, so the honest default ([`NullTextServiceProvider`]) supplies
-//! nothing and no engine ships in the core package.
-//!
-//! Two reference implementations are colocated: [`NullTextServiceProvider`], the
-//! no-op honest default, and [`MockTextServiceProvider`], a deterministic
-//! in-memory spellchecker used to exercise the port in tests. Neither is a real
-//! linguistic engine.
+#![doc = include_str!("text_service_provider.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
@@ -19,63 +7,27 @@ use crate::span::TextRange;
 use super::language_service_request::{LanguageServiceRequest, ServiceKind};
 use super::text_diagnostic::{DiagnosticKind, DiagnosticSeverity, TextDiagnostic};
 
-/// The replaceable port for optional language services (spec §5.13).
-///
-/// A provider may supply any subset of the §5.13 services — spellcheck, grammar,
-/// autocorrect, language detection, and user-dictionary lookups — and reports
-/// what it offers through [`supports`](Self::supports). Multiple providers may be
-/// installed; the engine coordinating them is the caller's concern.
-///
-/// The trait is deliberately **object-safe** — no generic or `Self`-returning
-/// methods — so adapters can be held as `Box<dyn TextServiceProvider>`.
-///
-/// The domain contract is a **pure function** from a
-/// [`LanguageServiceRequest`] to a [`Vec<TextDiagnostic>`]: given a request,
-/// [`analyze`](Self::analyze) returns the diagnostics for it. The §5.13
-/// *asynchronous* and *incremental* delivery of those diagnostics — running the
-/// engine off-thread, streaming partial results, coalescing versions — is the
-/// adapter's responsibility and lives outside this pure-domain port.
+#[doc = include_str!("text_service_provider.doc/TextServiceProvider.md")]
 pub trait TextServiceProvider {
-    /// Returns whether this provider offers the `kind` service (spec §5.13).
+    #[doc = include_str!("text_service_provider.doc/supports.md")]
     #[must_use]
     fn supports(&self, kind: ServiceKind) -> bool;
 
-    /// Analyzes `request` and returns its diagnostics (spec §5.13).
-    ///
-    /// The returned [`TextDiagnostic`]s are typed, ranged (in **document** byte
-    /// offsets), and stamped with [`request.version()`](LanguageServiceRequest::version).
-    /// An implementation MUST:
-    ///
-    /// - only run a service the request asks for
-    ///   ([`request.wants`](LanguageServiceRequest::wants)); and
-    /// - skip any issue whose position falls in an ignored / sensitive range
-    ///   ([`request.is_ignored`](LanguageServiceRequest::is_ignored)).
-    ///
-    /// Asynchronous and incremental delivery is an adapter concern; here the
-    /// contract is the pure mapping request → diagnostics.
+    #[doc = include_str!("text_service_provider.doc/analyze.md")]
     #[must_use]
     fn analyze(&self, request: &LanguageServiceRequest) -> Vec<TextDiagnostic>;
 
-    /// Detects the language of `text`, returning a best-effort BCP-47 tag (e.g.
-    /// `"en"`, `"pt-BR"`) or `None` when undetermined (spec §5.13).
+    #[doc = include_str!("text_service_provider.doc/detect_language.md")]
     #[must_use]
     fn detect_language(&self, text: &str) -> Option<Box<str>>;
 }
 
-/// A reference, no-op [`TextServiceProvider`] that supplies nothing — the honest
-/// default (spec §5.13).
-///
-/// Per §5.13 no linguistic engine is required in the core package, so the default
-/// provider offers no service: [`supports`](TextServiceProvider::supports) is
-/// `false` for every kind, [`analyze`](TextServiceProvider::analyze) returns an
-/// empty [`Vec`], and [`detect_language`](TextServiceProvider::detect_language)
-/// returns `None`. Its "nothing" answers are correct behavior, not stubs waiting
-/// to be filled in; a real adapter replaces it.
+#[doc = include_str!("text_service_provider.doc/NullTextServiceProvider.md")]
 #[derive(Debug, Default, Clone)]
 pub struct NullTextServiceProvider;
 
 impl NullTextServiceProvider {
-    /// Creates the no-op provider.
+    #[doc = include_str!("text_service_provider.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self
@@ -96,37 +48,22 @@ impl TextServiceProvider for NullTextServiceProvider {
     }
 }
 
-/// A deterministic, in-memory spellchecking [`TextServiceProvider`] for tests and
-/// reference use (spec §5.13).
-///
-/// This is a **test / reference stub, not a real linguistic engine**. It supports
-/// only [`ServiceKind::Spellcheck`], checking each whitespace-delimited token of
-/// the request text against an in-memory [`known`](Self::known) dictionary
-/// (case-insensitive). Any token absent from the dictionary is flagged with a
-/// [`DiagnosticKind::Spelling`] / [`DiagnosticSeverity::Warning`] diagnostic whose
-/// range is the token's **document** byte range (its offset within the request
-/// text, translated by [`request.range().start`](LanguageServiceRequest::range)).
-///
-/// It is fully deterministic: the dictionary is a [`BTreeSet`] and tokens are
-/// scanned left to right, so a given request always yields the same ordered
-/// diagnostics. [`detect_language`](TextServiceProvider::detect_language) returns
-/// `Some("en")` when any dictionary word appears, else `None`.
+#[doc = include_str!("text_service_provider.doc/MockTextServiceProvider.md")]
 #[derive(Debug, Clone)]
 pub struct MockTextServiceProvider {
-    /// The known-word dictionary, stored lowercased for case-insensitive lookup.
+    #[doc = include_str!("text_service_provider.doc/known.md")]
     known: BTreeSet<Box<str>>,
 }
 
 impl Default for MockTextServiceProvider {
-    /// Same as [`MockTextServiceProvider::new`]: a provider seeded with the
-    /// built-in word set, so the mock is usable out of the box.
+    #[doc = include_str!("text_service_provider.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl MockTextServiceProvider {
-    /// Creates a provider seeded with a tiny built-in English word set.
+    #[doc = include_str!("text_service_provider.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         let mut known = BTreeSet::new();
@@ -136,7 +73,7 @@ impl MockTextServiceProvider {
         Self { known }
     }
 
-    /// Adds `word` to the dictionary (lowercased), returning the updated provider.
+    #[doc = include_str!("text_service_provider.doc/with_word.md")]
     #[must_use]
     pub fn with_word(mut self, word: impl Into<Box<str>>) -> Self {
         let word = word.into();
@@ -145,18 +82,13 @@ impl MockTextServiceProvider {
         self
     }
 
-    /// Returns whether `token` is in the dictionary, ignoring ASCII case.
+    #[doc = include_str!("text_service_provider.doc/is_known.md")]
     fn is_known(&self, token: &str) -> bool {
         self.known.contains(token.to_ascii_lowercase().as_str())
     }
 }
 
-/// Splits `text` into whitespace-delimited tokens, pairing each with its byte
-/// offset within `text`.
-///
-/// Tokens are runs of non-[`char::is_ascii_whitespace`] characters; the offset is
-/// the byte position where the run starts. The scan is left-to-right, so the
-/// order is deterministic.
+#[doc = include_str!("text_service_provider.doc/tokens.md")]
 fn tokens(text: &str) -> Vec<(usize, &str)> {
     let mut out = Vec::new();
     let mut start: Option<usize> = None;

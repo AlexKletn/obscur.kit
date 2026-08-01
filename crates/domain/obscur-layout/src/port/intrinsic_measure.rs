@@ -1,4 +1,4 @@
-//! `IntrinsicMeasure`: the narrow port through which layout measures content.
+#![doc = include_str!("intrinsic_measure.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 use obscur_identity::NodeId;
@@ -7,31 +7,12 @@ use crate::model::IntrinsicSize;
 
 use super::LayoutEnvironment;
 
-/// The narrow **port** layout calls to measure content it cannot size itself —
-/// text runs and replaced elements such as images or canvases (spec §2.3).
-///
-/// Layout never shapes text or decodes images; instead it asks a provider
-/// behind this port. That keeps the layout engine independent of text and
-/// image-decoding internals: the real text engine lives in `obscur-text` (added
-/// in a later phase) and provides an adapter implementing this trait, while a
-/// deterministic mock — [`MockIntrinsicMeasure`](super::MockIntrinsicMeasure) —
-/// serves the Phase-1 headless slice (spec §5.13).
-///
-/// Implementations **must** be deterministic and side-effect-free: the same
-/// `(node, constraints, env)` inputs must always yield the same size, and a
-/// measurement must never mutate observable state. This lets layout cache and
-/// re-run measurement freely.
+#[doc = include_str!("intrinsic_measure.doc/IntrinsicMeasure.md")]
 pub trait IntrinsicMeasure {
-    /// Measures the preferred size of `node`'s content under `constraints`,
-    /// within the ambient [`LayoutEnvironment`].
-    ///
-    /// The returned size should already lie within `constraints`; layout will
-    /// nonetheless [`BoxConstraints::constrain`] it defensively, so a provider
-    /// need not treat the bounds as an exact contract.
+    #[doc = include_str!("intrinsic_measure.doc/measure.md")]
     fn measure(&self, node: NodeId, constraints: BoxConstraints, env: &LayoutEnvironment) -> Size;
 
-    /// Returns the min-content / max-content [`IntrinsicSize`] of `node`'s
-    /// content (spec §4.1), used by intrinsic sizing.
+    #[doc = include_str!("intrinsic_measure.doc/intrinsic_size.md")]
     fn intrinsic_size(&self, node: NodeId, env: &LayoutEnvironment) -> IntrinsicSize;
 }
 

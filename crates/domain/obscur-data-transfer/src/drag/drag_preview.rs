@@ -1,20 +1,8 @@
-//! The visual drag-image placement descriptor (spec §6.21 drag and drop —
-//! previews).
+#![doc = include_str!("drag_preview.doc/_module.md")]
 
 use obscur_geometry::{Point, Size};
 
-/// The placement descriptor for a drag's visual image (spec §6.21 previews).
-///
-/// While a drag is in flight the toolkit shows a preview that follows the
-/// cursor. This value is only the *placement* description: its [`size`] in
-/// logical pixels, the [`cursor_offset`] hotspot (where within the preview the
-/// pointer sits, so the preview tracks the cursor correctly), and its
-/// [`opacity`]. The actual pixels are produced by the scene; this descriptor
-/// carries no image data.
-///
-/// [`size`]: DragPreview::size
-/// [`cursor_offset`]: DragPreview::cursor_offset
-/// [`opacity`]: DragPreview::opacity
+#[doc = include_str!("drag_preview.doc/DragPreview.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DragPreview {
     size: Size,
@@ -23,8 +11,7 @@ pub struct DragPreview {
 }
 
 impl DragPreview {
-    /// Creates a preview of `size` with the hotspot at its origin and full
-    /// opacity (spec §6.21).
+    #[doc = include_str!("drag_preview.doc/new.md")]
     #[must_use]
     pub const fn new(size: Size) -> Self {
         Self {
@@ -34,34 +21,33 @@ impl DragPreview {
         }
     }
 
-    /// Returns this preview with the pointer hotspot set to `cursor_offset`
-    /// (spec §6.21).
+    #[doc = include_str!("drag_preview.doc/with_cursor_offset.md")]
     #[must_use]
     pub const fn with_cursor_offset(mut self, cursor_offset: Point) -> Self {
         self.cursor_offset = cursor_offset;
         self
     }
 
-    /// Returns this preview with `opacity` clamped to `[0.0, 1.0]` (spec §6.21).
+    #[doc = include_str!("drag_preview.doc/with_opacity.md")]
     #[must_use]
     pub fn with_opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
-    /// Returns the preview's logical-pixel size (spec §6.21).
+    #[doc = include_str!("drag_preview.doc/size.md")]
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    /// Returns the pointer hotspot within the preview (spec §6.21).
+    #[doc = include_str!("drag_preview.doc/cursor_offset.md")]
     #[must_use]
     pub const fn cursor_offset(&self) -> Point {
         self.cursor_offset
     }
 
-    /// Returns the preview's opacity, in `[0.0, 1.0]` (spec §6.21).
+    #[doc = include_str!("drag_preview.doc/opacity.md")]
     #[must_use]
     pub const fn opacity(&self) -> f32 {
         self.opacity

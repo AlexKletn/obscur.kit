@@ -1,21 +1,8 @@
-//! `ReadSignal`: a read-only value source. Values flow down; there is no setter.
+#![doc = include_str!("read_signal.doc/_module.md")]
 
 use crate::state::StateGeneration;
 
-/// Read-only snapshot of a value together with the [`StateGeneration`] at which
-/// it was produced.
-///
-/// `ReadSignal<T>` is the "values flow down" half of the data-flow model: it
-/// hands consumers the current value and a change token, but exposes **no**
-/// mutation API, so there is no magic two-way binding. A component obtains one
-/// from its own [`LocalState`](crate::state::LocalState) (or, later, from an
-/// upstream source) and passes it down as a prop.
-///
-/// Because there is no reactive runtime yet, a `ReadSignal` is a lightweight,
-/// self-contained snapshot rather than a live handle: it carries the value by
-/// ownership and its generation by value. Re-reading an updated source means
-/// producing a fresh snapshot with a newer generation; a consumer detects the
-/// change with [`ReadSignal::changed_since`].
+#[doc = include_str!("read_signal.doc/ReadSignal.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct ReadSignal<T> {
     value: T,
@@ -23,35 +10,31 @@ pub struct ReadSignal<T> {
 }
 
 impl<T> ReadSignal<T> {
-    /// Builds a read-only signal snapshot from a value and the generation that
-    /// produced it.
+    #[doc = include_str!("read_signal.doc/new.md")]
     #[must_use]
     pub const fn new(value: T, generation: StateGeneration) -> Self {
         Self { value, generation }
     }
 
-    /// Borrows the current value.
+    #[doc = include_str!("read_signal.doc/get.md")]
     #[must_use]
     pub const fn get(&self) -> &T {
         &self.value
     }
 
-    /// Returns the generation this snapshot was taken at.
+    #[doc = include_str!("read_signal.doc/generation.md")]
     #[must_use]
     pub const fn generation(&self) -> StateGeneration {
         self.generation
     }
 
-    /// Returns `true` if this snapshot is newer than the generation the consumer
-    /// last observed, i.e. the value changed since `last_seen`.
-    ///
-    /// Equal generations report `false`, so unchanged sources trigger no work.
+    #[doc = include_str!("read_signal.doc/changed_since.md")]
     #[must_use]
     pub fn changed_since(&self, last_seen: StateGeneration) -> bool {
         self.generation.is_newer_than(last_seen)
     }
 
-    /// Consumes the snapshot and returns the owned value.
+    #[doc = include_str!("read_signal.doc/into_value.md")]
     #[must_use]
     pub fn into_value(self) -> T {
         self.value

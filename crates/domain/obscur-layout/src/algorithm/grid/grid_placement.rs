@@ -1,49 +1,22 @@
-//! `GridPlacement`: an item's line-based placement on both grid axes.
+#![doc = include_str!("grid_placement.doc/_module.md")]
 
 use super::GridLine;
 
-/// A grid item's explicit line-based placement (spec §4.13, a subset).
-///
-/// Each axis is a `start / end` [`GridLine`] pair — the CSS `grid-column`
-/// (`column_start / column_end`) and `grid-row` (`row_start / row_end`). The
-/// [`Default`] is all [`GridLine::Auto`], i.e. pure row-major auto-placement (the
-/// grid's historical behaviour), so a default `GridPlacement` never perturbs an
-/// existing layout.
-///
-/// # Resolution
-///
-/// [`resolve_axis`](GridPlacement::resolve_column) turns one axis pair into a
-/// concrete `(start, span)`:
-///
-/// * `Line(a) / Line(b)` → definite start `a - 1`, span `max(b - a, 1)`.
-/// * `Line(a) / Span(n)` → definite start `a - 1`, span `n`.
-/// * `Line(a) / Auto`    → definite start `a - 1`, span `1`.
-/// * `Span(n) / Line(b)` → definite start `(b - 1) - n`, span `n` (end-anchored).
-/// * `Auto / Line(b)`    → definite start `b - 2`, span `1` (end-anchored).
-/// * `Auto / Span(n)`    → auto-placed (start `None`), span `n`.
-/// * `Auto / Auto`       → auto-placed (start `None`), span `1`.
-///
-/// A `None` start means the axis is auto-flowed; a `Some(i)` start is a definite
-/// 0-based track index. Spans are always `≥ 1`.
-///
-/// # Determinism
-///
-/// `GridPlacement` is a `Copy` value with no interior mutability; placement
-/// resolves deterministically from the item styles alone.
+#[doc = include_str!("grid_placement.doc/GridPlacement.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GridPlacement {
-    /// The `grid-column` start edge.
+    #[doc = include_str!("grid_placement.doc/column_start.md")]
     pub column_start: GridLine,
-    /// The `grid-column` end edge.
+    #[doc = include_str!("grid_placement.doc/column_end.md")]
     pub column_end: GridLine,
-    /// The `grid-row` start edge.
+    #[doc = include_str!("grid_placement.doc/row_start.md")]
     pub row_start: GridLine,
-    /// The `grid-row` end edge.
+    #[doc = include_str!("grid_placement.doc/row_end.md")]
     pub row_end: GridLine,
 }
 
 impl GridPlacement {
-    /// Builds a placement from the four edges.
+    #[doc = include_str!("grid_placement.doc/new.md")]
     #[must_use]
     pub fn new(
         column_start: GridLine,
@@ -59,7 +32,7 @@ impl GridPlacement {
         }
     }
 
-    /// A column-only placement (`grid-column: start / end`), rows auto.
+    #[doc = include_str!("grid_placement.doc/column.md")]
     #[must_use]
     pub fn column(start: GridLine, end: GridLine) -> Self {
         Self {
@@ -69,7 +42,7 @@ impl GridPlacement {
         }
     }
 
-    /// A row-only placement (`grid-row: start / end`), columns auto.
+    #[doc = include_str!("grid_placement.doc/row.md")]
     #[must_use]
     pub fn row(start: GridLine, end: GridLine) -> Self {
         Self {
@@ -79,64 +52,44 @@ impl GridPlacement {
         }
     }
 
-    /// The `grid-column` start edge.
+    #[doc = include_str!("grid_placement.doc/column_start_2.md")]
     #[must_use]
     pub const fn column_start(&self) -> GridLine {
         self.column_start
     }
 
-    /// The `grid-column` end edge.
+    #[doc = include_str!("grid_placement.doc/column_end_2.md")]
     #[must_use]
     pub const fn column_end(&self) -> GridLine {
         self.column_end
     }
 
-    /// The `grid-row` start edge.
+    #[doc = include_str!("grid_placement.doc/row_start_2.md")]
     #[must_use]
     pub const fn row_start(&self) -> GridLine {
         self.row_start
     }
 
-    /// The `grid-row` end edge.
+    #[doc = include_str!("grid_placement.doc/row_end_2.md")]
     #[must_use]
     pub const fn row_end(&self) -> GridLine {
         self.row_end
     }
 
-    /// Resolves the **column** axis to `(start, span)` — see the type docs.
-    ///
-    /// `num_tracks` is the number of explicit tracks on the axis; it is the basis a
-    /// negative (from-end) line resolves against (`-1` is the last line) and bounds
-    /// a from-end block into the grid. Positive-line placements ignore it.
+    #[doc = include_str!("grid_placement.doc/resolve_column.md")]
     #[must_use]
     pub fn resolve_column(&self, num_tracks: usize) -> (Option<usize>, usize) {
         resolve_axis(self.column_start, self.column_end, num_tracks)
     }
 
-    /// Resolves the **row** axis to `(start, span)` — see the type docs.
+    #[doc = include_str!("grid_placement.doc/resolve_row.md")]
     #[must_use]
     pub fn resolve_row(&self, num_tracks: usize) -> (Option<usize>, usize) {
         resolve_axis(self.row_start, self.row_end, num_tracks)
     }
 }
 
-/// Resolves one `start / end` axis pair into a concrete `(start, span)`.
-///
-/// `start` is `None` when the axis must be auto-flowed, `Some(i)` for a definite
-/// 0-based track index; `span` is always `≥ 1`.
-///
-/// # Negative (from-end) lines
-///
-/// A [`Line`](GridLine::Line) with a **negative** index counts back from the end
-/// of the explicit grid: `-1` is the *last* line (1-based line `num_tracks + 1`),
-/// `-2` the line before it, i.e. `Line(-k)` → 1-based line `num_tracks + 2 - k`.
-/// Each negative edge is first normalised to that positive line against
-/// `num_tracks`, then resolved by the same rules as a positive line — so
-/// `1 / -1` spans the whole row and a bare `-1` lands on the last track. When any
-/// edge was negative the resolved block is finally clamped to stay inside the
-/// grid (`start ≥ 0`, `start + span ≤ num_tracks`); positive-only placements are
-/// left byte-identical (never clamped, so definite positive lines past the
-/// template still open implicit tracks).
+#[doc = include_str!("grid_placement.doc/resolve_axis.md")]
 fn resolve_axis(start: GridLine, end: GridLine, num_tracks: usize) -> (Option<usize>, usize) {
     let tracks_i32 = i32::try_from(num_tracks).unwrap_or(i32::MAX);
     let has_negative =

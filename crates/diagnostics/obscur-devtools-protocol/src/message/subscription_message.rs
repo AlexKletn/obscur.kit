@@ -1,71 +1,61 @@
-//! Subscribe/unsubscribe envelope, subscription record, and limits (§7.7).
+#![doc = include_str!("subscription_message.doc/_module.md")]
 
 use super::{CommandId, Topic};
 
-/// Maximum number of concurrent subscriptions a single endpoint may hold
-/// (spec §7.7 subscription limits).
+#[doc = include_str!("subscription_message.doc/SUBSCRIPTION_LIMIT.md")]
 pub const SUBSCRIPTION_LIMIT: usize = 64;
 
-/// Maximum number of in-flight/queued messages permitted for an endpoint
-/// before the server applies backpressure or disconnects (spec §7.7).
+#[doc = include_str!("subscription_message.doc/MESSAGE_LIMIT.md")]
 pub const MESSAGE_LIMIT: usize = 1024;
 
-/// A server-assigned identifier for an active subscription.
+#[doc = include_str!("subscription_message.doc/SubscriptionId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SubscriptionId(pub u64);
 
 impl SubscriptionId {
-    /// Creates a subscription id from a raw value.
+    #[doc = include_str!("subscription_message.doc/new.md")]
     #[must_use]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw identifier value.
+    #[doc = include_str!("subscription_message.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// A request to subscribe to an event stream.
+#[doc = include_str!("subscription_message.doc/SubscribeRequest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubscribeRequest {
-    /// Correlation id of the issuing command.
+    #[doc = include_str!("subscription_message.doc/command.md")]
     pub command: CommandId,
-    /// The topic to subscribe to.
+    #[doc = include_str!("subscription_message.doc/topic.md")]
     pub topic: Topic,
 }
 
 impl SubscribeRequest {
-    /// Creates a subscribe request.
+    #[doc = include_str!("subscription_message.doc/new_2.md")]
     #[must_use]
     pub const fn new(command: CommandId, topic: Topic) -> Self {
         Self { command, topic }
     }
 }
 
-/// A subscription record returned to (and retained by) the client.
+#[doc = include_str!("subscription_message.doc/Subscription.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Subscription {
-    /// Server-assigned subscription id.
+    #[doc = include_str!("subscription_message.doc/id.md")]
     pub id: SubscriptionId,
-    /// The topic this subscription delivers.
+    #[doc = include_str!("subscription_message.doc/topic_2.md")]
     pub topic: Topic,
-    /// Whether the subscription was actually granted.
-    ///
-    /// `false` means no event will ever arrive on it and the client should not
-    /// wait for one: the server denies rather than accepting a subscription it
-    /// cannot honour — today, when the session is being served request/reply and
-    /// nothing will push. A missing `Subscribe` scope and an exceeded
-    /// [`SUBSCRIPTION_LIMIT`] are refused earlier still, as a
-    /// [`ProtocolError`](crate::error::ProtocolError), so they never reach this
-    /// record.
+    #[doc = include_str!("subscription_message.doc/granted.md")]
     pub granted: bool,
 }
 
 impl Subscription {
-    /// Creates a granted subscription record.
+    #[doc = include_str!("subscription_message.doc/granted_2.md")]
     #[must_use]
     pub const fn granted(id: SubscriptionId, topic: Topic) -> Self {
         Self {
@@ -75,11 +65,7 @@ impl Subscription {
         }
     }
 
-    /// Creates a denied subscription record.
-    ///
-    /// A denial carries no live subscription, so `id` is conventionally
-    /// [`SubscriptionId::default`] — the server mints live ids from 1, so a zero
-    /// id can never collide with one.
+    #[doc = include_str!("subscription_message.doc/denied.md")]
     #[must_use]
     pub const fn denied(id: SubscriptionId, topic: Topic) -> Self {
         Self {
@@ -90,17 +76,17 @@ impl Subscription {
     }
 }
 
-/// The server's response to a [`SubscribeRequest`].
+#[doc = include_str!("subscription_message.doc/SubscribeResponse.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubscribeResponse {
-    /// Correlation id of the originating command.
+    #[doc = include_str!("subscription_message.doc/command_2.md")]
     pub command: CommandId,
-    /// The resulting subscription record.
+    #[doc = include_str!("subscription_message.doc/subscription.md")]
     pub subscription: Subscription,
 }
 
 impl SubscribeResponse {
-    /// Creates a subscribe response.
+    #[doc = include_str!("subscription_message.doc/new_3.md")]
     #[must_use]
     pub const fn new(command: CommandId, subscription: Subscription) -> Self {
         Self {

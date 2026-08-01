@@ -1,17 +1,4 @@
-//! Selector-associated motion: [`CompiledMotionRule`] and [`CompiledAnimation`].
-//!
-//! A CSS `transition` or `animation` is a property *of the elements a rule
-//! matches* — a `transition` says "when **my** property changes, ease it", and
-//! an `animation` plays a named `@keyframes` on the elements the rule selects.
-//! The flat [`transitions`](super::CompiledStylesheet::transitions) and
-//! [`keyframes`](super::CompiledStylesheet::keyframes) outputs lose that
-//! association, so the runtime cannot know *which* nodes a transition/animation
-//! applies to.
-//!
-//! [`CompiledMotionRule`] restores it: it pairs a rule's authored
-//! [`SelectorList`] with the transition templates and resolved keyframe
-//! animations that rule declares, so the runtime can match the selector against
-//! the retained tree and drive the motion on exactly the matched nodes (§4.17).
+#![doc = include_str!("motion_rule.doc/_module.md")]
 
 use obscur_motion::timeline::{FillMode, PlaybackDirection, RepeatCount};
 use obscur_motion::track::KeyframeTrack;
@@ -20,41 +7,32 @@ use obscur_style::selector::SelectorList;
 
 use super::transition_compiler::CompiledTransition;
 
-/// A resolved `animation` on a rule: the `@keyframes` tracks to play, the
-/// duration to play them over, and the playback controls the `animation-*`
-/// longhands set.
-///
-/// Produced by resolving an `animation-name` reference against the stylesheet's
-/// compiled `@keyframes`; an unknown name contributes no [`CompiledAnimation`].
+#[doc = include_str!("motion_rule.doc/CompiledAnimation.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledAnimation {
-    /// The per-property keyframe tracks (cloned from the referenced
-    /// `@keyframes`), in first-seen property order.
+    #[doc = include_str!("motion_rule.doc/tracks.md")]
     pub tracks: Vec<(PropertyId, KeyframeTrack)>,
-    /// The duration to play the tracks over, in seconds.
+    #[doc = include_str!("motion_rule.doc/duration_secs.md")]
     pub duration_secs: f32,
-    /// `animation-delay`, in seconds (negative seeks into the playback).
+    #[doc = include_str!("motion_rule.doc/delay_secs.md")]
     pub delay_secs: f32,
-    /// `animation-iteration-count`.
+    #[doc = include_str!("motion_rule.doc/repeat.md")]
     pub repeat: RepeatCount,
-    /// The direction iteration 1 plays in.
+    #[doc = include_str!("motion_rule.doc/direction.md")]
     pub direction: PlaybackDirection,
-    /// Whether iterations alternate direction.
+    #[doc = include_str!("motion_rule.doc/alternates.md")]
     pub alternates: bool,
-    /// `animation-fill-mode`.
+    #[doc = include_str!("motion_rule.doc/fill.md")]
     pub fill: FillMode,
 }
 
-/// A style rule's motion, keyed by the selector list the rule matched.
-///
-/// Only rules that declare at least one `transition` or a resolvable `animation`
-/// produce a [`CompiledMotionRule`]; a plain style rule contributes none.
+#[doc = include_str!("motion_rule.doc/CompiledMotionRule.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledMotionRule {
-    /// The authored selector list the transitions/animations apply to.
+    #[doc = include_str!("motion_rule.doc/selectors.md")]
     pub selectors: SelectorList,
-    /// The `transition` templates declared on the rule.
+    #[doc = include_str!("motion_rule.doc/transitions.md")]
     pub transitions: Vec<CompiledTransition>,
-    /// The resolved keyframe animations the rule plays.
+    #[doc = include_str!("motion_rule.doc/animations.md")]
     pub animations: Vec<CompiledAnimation>,
 }

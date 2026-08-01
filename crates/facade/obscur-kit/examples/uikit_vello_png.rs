@@ -1,46 +1,4 @@
-//! **Headless imported-UI-Kit → PNG (faithful GPU render via Vello).**
-//!
-//! The GPU sibling of `uikit_png.rs`: it renders the *very same* shared [`uikit`]
-//! scene and the *very same* per-theme stylesheet, but through **Vello/wgpu** into
-//! an offscreen texture that is then **read back** to CPU pixels and encoded to a
-//! PNG — with no window on screen. This is the *faithful* render: the GPU-class
-//! effects the CPU backend only approximates paint for real here.
-//!
-//! Concretely, for the gradient/shadow-heavy **Skeuomorphic** theme (the default,
-//! index 4):
-//!
-//! - every `linear-gradient(#light,#dark)` face paints a real smooth vertical ramp
-//!   (the CPU PNG shows only the first, light, stop — a flat fill);
-//! - every `box-shadow` — the `inset 0 1px 0 rgba(255,255,255,…)` gloss highlights
-//!   AND the `0 2px 5px rgba(0,0,0,…)` cast shadows, combined in one comma list —
-//!   paints a real Gaussian-blurred shadow (the CPU PNG paints a flat offset rect);
-//! - bevel borders, radius, and shaped text render as on the CPU, but at full GPU
-//!   fidelity.
-//!
-//! Select the theme with the `UIKIT_THEME` env var (0-based index into
-//! [`uikit::themes`], default 4 = Skeuomorphic); e.g. `UIKIT_THEME=1` renders
-//! Material for comparison. The output is `target/uikit_<slug>_vello.png`.
-//!
-//! # Wiring
-//!
-//! A thin driver over the shared scene and the existing runtime + Vello APIs: it
-//! adds no rendering logic of its own. It acquires a **headless** wgpu device (no
-//! surface — `request_adapter` with `compatible_surface: None`), builds a
-//! [`VelloDevice`] + [`VelloRenderer`], wires the same host text stack as
-//! `uikit_png.rs`, runs one frame through [`UiRuntime`], and calls the adapter's
-//! [`VelloRenderer::render_to_image`] read-back helper to obtain `(w, h, rgba8)`,
-//! which is encoded with `tiny_skia` (the bytes are premultiplied RGBA8, exactly
-//! what `Pixmap::from_vec` expects).
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter (a display is available here). In a truly headless
-//! environment with no adapter it prints a diagnostic and exits cleanly (no panic);
-//! it never fabricates a device.
-//!
-//! Run it (Skeuomorphic):
-//! `cargo run -p obscur-kit --example uikit_vello_png \
-//!   --features "render-vello resource-fs resource-decode text-harfrust text-unicode"`
+#![doc = include_str!("uikit_vello_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -62,8 +20,7 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "uikit/scene.rs"]
 mod uikit;
 
-/// The layout + rasterization viewport: identical to `uikit_png.rs` so the two
-/// renders (CPU approximation vs faithful Vello) frame the exact same scene.
+#[doc = include_str!("uikit_vello_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1280.0, 2080.0);
 
 fn main() {
@@ -160,9 +117,7 @@ fn main() {
     );
 }
 
-/// The theme index to render: the `UIKIT_THEME` env var as a 0-based index into
-/// [`uikit::themes`], clamped to a valid slot, defaulting to the **Skeuomorphic**
-/// theme (index 4) — the toughest, gradient/shadow-heavy stress test.
+#[doc = include_str!("uikit_vello_png.doc/theme_index.md")]
 fn theme_index() -> usize {
     const SKEUOMORPHIC_INDEX: usize = 4;
     let count = uikit::themes().len();
@@ -173,9 +128,7 @@ fn theme_index() -> usize {
         .unwrap_or(SKEUOMORPHIC_INDEX)
 }
 
-/// The supersample render scale: the `UIKIT_SCALE` env var parsed as a float and
-/// clamped to `1.0..=4.0`, defaulting to `2.0` for a crisp PNG. `1.0` reproduces
-/// the historical logical-1:1 output.
+#[doc = include_str!("uikit_vello_png.doc/render_scale.md")]
 fn render_scale() -> f32 {
     std::env::var("UIKIT_SCALE")
         .ok()
@@ -184,8 +137,7 @@ fn render_scale() -> f32 {
         .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
-/// A short filename slug for a theme name: `Skeuomorphic` → `skeuo`, otherwise the
-/// lowercased name with spaces folded to underscores (`Dark SaaS` → `dark_saas`).
+#[doc = include_str!("uikit_vello_png.doc/theme_slug.md")]
 fn theme_slug(name: &str) -> String {
     match name {
         "Skeuomorphic" => "skeuo".to_owned(),
@@ -193,10 +145,7 @@ fn theme_slug(name: &str) -> String {
     }
 }
 
-/// Acquires a **headless** wgpu device + queue (no surface), driving the async
-/// `request_adapter` / `request_device` to completion with `pollster`. Returns
-/// [`None`] when no compatible adapter or device is available (a headless box with
-/// no GPU), so the caller can exit cleanly rather than panic.
+#[doc = include_str!("uikit_vello_png.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -208,15 +157,14 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`] through the
-/// real `obscur-css` frontend (identical to `uikit_png.rs`).
+#[doc = include_str!("uikit_vello_png.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("uikit_vello_png.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -224,9 +172,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the full text stack and registers `bytes` under the `sans-serif` generic
-/// family on both the resolver and the Vello renderer (identical id↔bytes mapping
-/// so scene font handles line up with rasterized outlines).
+#[doc = include_str!("uikit_vello_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -244,12 +190,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes:
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("uikit_vello_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("uikit_vello_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

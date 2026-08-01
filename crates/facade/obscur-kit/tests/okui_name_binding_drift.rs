@@ -1,11 +1,4 @@
-//! Drift guard: the frontend `name_binding` registry mirrors the raw handle
-//! values of their canonical sources.
-//!
-//! `obscur-ui-ir::name_binding` must not depend on the component tier, so it
-//! hard-codes the reserved `obscur-view` symbols and the widget/primitive
-//! `COMPONENT_ID`s. This facade test — which *can* see every crate — pins each
-//! mirrored constant to its real source, so a change to any canonical id fails
-//! here instead of silently desynchronising the two `.okui` lowering paths.
+#![doc = include_str!("okui_name_binding_drift.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::ui_ir::name_binding::{self, TagPosition};
@@ -250,12 +243,11 @@ fn contracted_events_use_the_reserved_event_symbols() {
 
 #[derive(Debug, obscur_kit::ui_macros::Contract)]
 struct ProbeProps {
-    /// A reserved attribute name: must resolve to `view::DISABLED`, not a hash.
+    #[doc = include_str!("okui_name_binding_drift.doc/disabled.md")]
     disabled: bool,
-    /// A non-reserved name whose FNV hash does NOT already carry the top bit,
-    /// so a bare hash and the real fallback symbol genuinely differ.
+    #[doc = include_str!("okui_name_binding_drift.doc/placeholder.md")]
     placeholder: String,
-    /// Optional → a defaulted (non-required) prop.
+    #[doc = include_str!("okui_name_binding_drift.doc/label.md")]
     label: Option<String>,
 }
 

@@ -1,5 +1,4 @@
-//! `ComponentRegistry`: the static-default store of component registrations
-//! (spec §2.14).
+#![doc = include_str!("component_registry.doc/_module.md")]
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,44 +11,7 @@ use crate::component::{
 };
 use crate::contract::CapabilityRequirement;
 
-/// Maps each [`ComponentId`] to its [`ComponentRegistration`] (spec §2.14).
-///
-/// Per §2.14, **static registration is the default**, and this type *is* that
-/// static-default store: it is a plain owned value that holds the component
-/// kinds a runtime knows about. Dynamic registration (from packages/plugins) is
-/// an extension the plugin system layers on top by calling [`register`] at
-/// runtime; the registry itself imposes no such policy.
-///
-/// # No global singleton
-///
-/// A registry is an ordinary owned value — construct one with [`new`] or
-/// [`Default`]. Multiple runtimes may each own their own registry; there is no
-/// process-wide instance (see the architecture's "avoid global singletons").
-///
-/// # Erased render is deferred
-///
-/// [`create_instance`] mints the plain runtime [`ComponentInstance`] record in
-/// [`LifecycleState::Created`](crate::lifecycle::LifecycleState::Created) via the
-/// registered factory. It does **not** drive an erased render — decoding
-/// `ViewProperty` inputs into each component's typed `Props` and invoking
-/// `render` is a later runtime concern (see [`ComponentFactory`](crate::component::ComponentFactory)).
-///
-/// [`register`]: ComponentRegistry::register
-/// [`new`]: ComponentRegistry::new
-/// [`create_instance`]: ComponentRegistry::create_instance
-///
-/// # Capability enforcement
-///
-/// The registry holds a set of **granted capabilities** (spec §1.8, §2.13,
-/// §2.14). It starts **empty** — a fresh registry grants nothing. A component
-/// whose contract declares a [`CapabilityRequirement::Required`] capability that
-/// is not in this set does not instantiate: [`create_instance`] returns `None`.
-/// This is the seam through which the host controls what untrusted components
-/// may do (§9 forbids weakening host control over plugin capabilities). Grant
-/// capabilities with [`grant`]; a component that requires none is unaffected and
-/// instantiates exactly as before.
-///
-/// [`grant`]: ComponentRegistry::grant
+#[doc = include_str!("component_registry.doc/ComponentRegistry.md")]
 #[derive(Debug, Default)]
 pub struct ComponentRegistry {
     entries: HashMap<ComponentId, ComponentRegistration>,
@@ -57,7 +19,7 @@ pub struct ComponentRegistry {
 }
 
 impl ComponentRegistry {
-    /// Creates an empty registry with **no capabilities granted**.
+    #[doc = include_str!("component_registry.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -66,24 +28,18 @@ impl ComponentRegistry {
         }
     }
 
-    /// Grants `capability`, so a component that requires it may instantiate.
-    ///
-    /// The default grant set is empty; this is how a host authorizes a
-    /// capability boundary (spec §1.8). Granting an already-granted capability
-    /// is a no-op.
+    #[doc = include_str!("component_registry.doc/grant.md")]
     pub fn grant(&mut self, capability: CapabilityId) {
         self.granted.insert(capability);
     }
 
-    /// Returns whether `capability` has been granted on this registry.
+    #[doc = include_str!("component_registry.doc/is_granted.md")]
     #[must_use]
     pub fn is_granted(&self, capability: &CapabilityId) -> bool {
         self.granted.contains(capability)
     }
 
-    /// Returns whether every [`CapabilityRequirement::Required`] capability in
-    /// `contract` has been granted — the gate [`create_instance`](Self::create_instance)
-    /// applies before minting an instance.
+    #[doc = include_str!("component_registry.doc/required_capabilities_satisfied.md")]
     #[must_use]
     fn required_capabilities_satisfied(&self, contract: &ComponentContract) -> bool {
         contract
@@ -93,13 +49,7 @@ impl ComponentRegistry {
             .all(|c| self.granted.contains(&c.capability))
     }
 
-    /// Registers a component kind.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RegistryError::DuplicateComponent`] (carrying the offending
-    /// [`ComponentId`]) if a registration with the same id already exists; the
-    /// existing entry is left untouched. This never panics.
+    #[doc = include_str!("component_registry.doc/register.md")]
     pub fn register(&mut self, registration: ComponentRegistration) -> Result<(), RegistryError> {
         let id = registration.id();
         if self.entries.contains_key(&id) {
@@ -109,26 +59,19 @@ impl ComponentRegistry {
         Ok(())
     }
 
-    /// Returns the registration for `id`, if any.
+    #[doc = include_str!("component_registry.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: ComponentId) -> Option<&ComponentRegistration> {
         self.entries.get(&id)
     }
 
-    /// Returns the contract for the component registered under `id`, if any.
+    #[doc = include_str!("component_registry.doc/contract.md")]
     #[must_use]
     pub fn contract(&self, id: ComponentId) -> Option<&ComponentContract> {
         self.entries.get(&id).map(ComponentRegistration::contract)
     }
 
-    /// Mints a fresh runtime instance of the component registered under `id`.
-    ///
-    /// Returns `None` if `id` is not registered, **or** if the component's
-    /// contract declares a [`CapabilityRequirement::Required`] capability that
-    /// has not been [`grant`](Self::grant)ed on this registry (spec §2.13,
-    /// §2.14) — an ungranted required capability refuses instantiation, so no
-    /// factory runs and no record is minted. The minted [`ComponentInstance`] is
-    /// in [`LifecycleState::Created`](crate::lifecycle::LifecycleState::Created).
+    #[doc = include_str!("component_registry.doc/create_instance.md")]
     #[must_use]
     pub fn create_instance(
         &self,
@@ -142,12 +85,7 @@ impl ComponentRegistry {
         Some(registration.create_instance(instance))
     }
 
-    /// Mints a fresh renderable component value for `id`, or [`None`] when no
-    /// component is registered under it.
-    ///
-    /// The [`create_instance`](Self::create_instance) counterpart: that returns
-    /// the bookkeeping record, this returns the value the runtime renders through
-    /// and which owns the component's local state.
+    #[doc = include_str!("component_registry.doc/create_component.md")]
     #[must_use]
     pub fn create_component(&self, id: ComponentId) -> Option<Box<dyn ErasedComponent>> {
         self.entries
@@ -155,19 +93,19 @@ impl ComponentRegistry {
             .map(ComponentRegistration::create_component)
     }
 
-    /// Returns whether a component is registered under `id`.
+    #[doc = include_str!("component_registry.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, id: ComponentId) -> bool {
         self.entries.contains_key(&id)
     }
 
-    /// The number of registered component kinds.
+    #[doc = include_str!("component_registry.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns whether the registry holds no registrations.
+    #[doc = include_str!("component_registry.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

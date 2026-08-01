@@ -1,113 +1,55 @@
-//! CSS length values.
-//!
-//! [`Length`] models a single CSS length term: absolute pixels, a percentage
-//! (of some base resolved later during layout), the `auto` keyword, and the
-//! font-relative (`em`, `rem`, `ch`) and viewport-relative (`vw`, `vh`, `vmin`,
-//! `vmax`) units (spec §4.5). The relative units carry no absolute value on
-//! their own; a [`LengthContext`] supplies the bases they fold against.
-//! `calc()` / `min()` / `max()` / `clamp()` combine several such terms and are
-//! modelled by [`LengthExpr`](crate::property::LengthExpr).
-//!
-//! # Two folds, for two different jobs
-//!
-//! * [`Length::absolutize`] runs **once**, at the computed-value step, and is
-//!   what CSS means by "the computed value of a `<length>` is absolute": it turns
-//!   the font- and viewport-relative units into `Px` and leaves everything that
-//!   genuinely cannot be absolute yet (`%`, `auto`, an unmeasured `ch`) alone. A
-//!   consumer downstream of that step reads `Px` and needs no context.
-//! * [`Length::resolve_px`] folds a length **all the way to a number**, including
-//!   a `%` when the caller states its basis. That is a *use*-time operation: only
-//!   layout knows the containing block a percentage resolves against.
+#![doc = include_str!("length.doc/_module.md")]
 
 use crate::property::{EnvVar, LengthContext};
 use obscur_geometry::LogicalPx;
 
-/// A CSS length value.
-///
-/// Absolute (`Px`) and percentage (`Percent`) terms are self-contained; the
-/// font-relative (`Em` / `Rem` / `Ch`) and viewport-relative (`Vw` / `Vh` /
-/// `Vmin` / `Vmax`) terms carry their coefficient and only become a concrete
-/// number once resolved against a [`LengthContext`] via [`Length::resolve_px`].
-///
-/// Because the variants carry `f32` data, this type derives [`PartialEq`] but
-/// not [`Eq`]/[`Hash`].
+#[doc = include_str!("length.doc/Length.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
-    /// An absolute length in logical pixels.
+    #[doc = include_str!("length.doc/Px.md")]
     Px(LogicalPx),
-    /// A percentage of some base dimension, expressed as a percentage value
-    /// (for example `50.0` for `50%`). The base is resolved later, during
-    /// layout, because it depends on context.
+    #[doc = include_str!("length.doc/Percent.md")]
     Percent(f32),
-    /// The `auto` keyword; its used value is resolved later, during layout.
+    #[doc = include_str!("length.doc/Auto.md")]
     Auto,
-    /// A font-relative `em` length: this many times the element's own
-    /// `font-size` (`LengthContext::font_size`).
+    #[doc = include_str!("length.doc/Em.md")]
     Em(f32),
-    /// A font-relative `rem` length: this many times the document root's
-    /// `font-size` (`LengthContext::root_font_size`).
+    #[doc = include_str!("length.doc/Rem.md")]
     Rem(f32),
-    /// A font-relative `ch` length: this many times the advance of the `0`
-    /// (ZERO, U+0030) glyph in the element's own font
-    /// ([`LengthContext::ch_base`]).
-    ///
-    /// Unlike `em`, this depends on the *face*, not just the size: it is how a
-    /// column is sized by character count (`width: 60ch`), which is exact in a
-    /// monospace face and approximate in a proportional one. See
-    /// [`LengthContext::ch_base`] for what happens when the glyph cannot be
-    /// measured.
+    #[doc = include_str!("length.doc/Ch.md")]
     Ch(f32),
-    /// A viewport-relative `vw` length: this many percent of the viewport width.
+    #[doc = include_str!("length.doc/Vw.md")]
     Vw(f32),
-    /// A viewport-relative `vh` length: this many percent of the viewport
-    /// height.
+    #[doc = include_str!("length.doc/Vh.md")]
     Vh(f32),
-    /// A viewport-relative `vmin` length: this many percent of the smaller
-    /// viewport dimension.
+    #[doc = include_str!("length.doc/Vmin.md")]
     Vmin(f32),
-    /// A viewport-relative `vmax` length: this many percent of the larger
-    /// viewport dimension.
+    #[doc = include_str!("length.doc/Vmax.md")]
     Vmax(f32),
-    /// A container-relative `cqw` length: this many percent of the query
-    /// container's width. See [`LengthContext::container_width`] for what it
-    /// resolves against here.
-    ///
-    /// [`LengthContext::container_width`]: crate::property::LengthContext::container_width
+    #[doc = include_str!("length.doc/Cqw.md")]
     Cqw(f32),
-    /// A container-relative `cqh` length: this many percent of the query
-    /// container's height.
+    #[doc = include_str!("length.doc/Cqh.md")]
     Cqh(f32),
-    /// A container-relative `cqi` length: this many percent of the query
-    /// container's inline size.
+    #[doc = include_str!("length.doc/Cqi.md")]
     Cqi(f32),
-    /// A container-relative `cqb` length: this many percent of the query
-    /// container's block size.
+    #[doc = include_str!("length.doc/Cqb.md")]
     Cqb(f32),
-    /// A container-relative `cqmin` length: this many percent of the smaller of
-    /// the `cqi` and `cqb` bases.
+    #[doc = include_str!("length.doc/Cqmin.md")]
     Cqmin(f32),
-    /// A container-relative `cqmax` length: this many percent of the larger of
-    /// the `cqi` and `cqb` bases.
+    #[doc = include_str!("length.doc/Cqmax.md")]
     Cqmax(f32),
-    /// A CSS environment value — `env(safe-area-inset-top)` and friends — in
-    /// logical pixels (spec §6.15).
-    ///
-    /// Unlike every other term here it is not a coefficient times a base: the
-    /// host reports a distance, and the declaration *is* that distance. It
-    /// resolves from [`LengthContext::environment`], which is all zeroes for a
-    /// host that reports nothing — the correct answer for a screen with no
-    /// cutout and no on-screen keyboard.
+    #[doc = include_str!("length.doc/Env.md")]
     Env(EnvVar),
 }
 
 impl Length {
-    /// Convenience constructor for an absolute pixel length.
+    #[doc = include_str!("length.doc/px.md")]
     #[must_use]
     pub const fn px(value: f32) -> Self {
         Self::Px(LogicalPx(value))
     }
 
-    /// Returns the absolute pixel length if this is a [`Length::Px`].
+    #[doc = include_str!("length.doc/as_px.md")]
     #[must_use]
     pub const fn as_px(self) -> Option<LogicalPx> {
         match self {
@@ -116,42 +58,19 @@ impl Length {
         }
     }
 
-    /// Returns `true` when this length is the `auto` keyword.
+    #[doc = include_str!("length.doc/is_auto.md")]
     #[must_use]
     pub const fn is_auto(self) -> bool {
         matches!(self, Self::Auto)
     }
 
-    /// Returns `true` when this length is a `ch` term.
-    ///
-    /// Every other unit resolves from numbers a caller already holds; `ch` alone
-    /// needs the `0` glyph *shaped* to answer. This predicate lets a caller find
-    /// out whether that measurement is worth taking before taking it — see
-    /// [`LengthContext::ch_base`](crate::property::LengthContext::ch_base).
+    #[doc = include_str!("length.doc/is_ch.md")]
     #[must_use]
     pub const fn is_ch(self) -> bool {
         matches!(self, Self::Ch(_))
     }
 
-    /// Folds this length's **absolutizable** units to [`Length::Px`], leaving
-    /// every other term symbolic (CSS Values 4 §5: the computed value of a
-    /// `<length>` is absolute).
-    ///
-    /// `em` / `rem` / `vw` / `vh` / `vmin` / `vmax` all resolve from numbers a
-    /// computed-value pass already holds, so they fold here and no downstream
-    /// consumer needs a [`LengthContext`] to read them. Three terms do not fold:
-    ///
-    /// * `Percent` resolves against a containing block that layout has not
-    ///   produced yet, so it stays a percentage. (`ctx.percent_basis` is ignored
-    ///   deliberately: a caller that knows the basis — `font-size: 150%` against
-    ///   the parent's size — folds it with [`resolve_px`](Self::resolve_px)
-    ///   instead, where the basis is a stated input rather than a silent one.)
-    /// * `Auto` has no numeric value at all.
-    /// * `Ch` folds **only** when `ctx` carries a measured `ch_width`. Without
-    ///   one, folding it here would bake in [`LengthContext::ch_base`]'s `0.5em`
-    ///   substitute and permanently mis-size the monospace column `ch` exists
-    ///   for; leaving it symbolic routes it to a consumer that *can* shape the
-    ///   `0` glyph.
+    #[doc = include_str!("length.doc/absolutize.md")]
     #[must_use]
     pub fn absolutize(self, ctx: &LengthContext) -> Self {
         match self {
@@ -161,16 +80,7 @@ impl Length {
         }
     }
 
-    /// Resolves this length to concrete logical pixels against `ctx`.
-    ///
-    /// * `Px` returns its value directly; the font- and viewport-relative units
-    ///   multiply their coefficient by the matching base from `ctx` — `Ch`
-    ///   against [`LengthContext::ch_base`], which substitutes `0.5em` when the
-    ///   `0` glyph was not measurable.
-    /// * `Percent` resolves only when `ctx.percent_basis` is known (it usually
-    ///   is not here — bare percentages are resolved later by layout against the
-    ///   containing block), otherwise it returns [`None`].
-    /// * `Auto` has no numeric value and returns [`None`].
+    #[doc = include_str!("length.doc/resolve_px.md")]
     #[must_use]
     pub fn resolve_px(self, ctx: &LengthContext) -> Option<f32> {
         match self {

@@ -1,0 +1,1 @@
+Whether spellchecking is enabled.

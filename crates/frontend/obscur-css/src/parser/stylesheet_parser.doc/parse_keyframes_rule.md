@@ -1,0 +1,1 @@
+Parses an `@keyframes` rule.

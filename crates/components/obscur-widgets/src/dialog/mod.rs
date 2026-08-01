@@ -1,4 +1,4 @@
-//! Dialog control (spec §2.6, §6.9).
+#![doc = include_str!("mod.doc/_module.md")]
 
 mod dialog;
 pub use dialog::Dialog;

@@ -1,4 +1,4 @@
-//! Property module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod background_layer;
 pub use background_layer::BackgroundLayer;
 mod background_position;
@@ -44,8 +44,12 @@ mod linear_gradient;
 pub use linear_gradient::{Corner, LinearGradient};
 mod object_fit;
 pub use object_fit::ObjectFit;
+mod logical_property;
+mod paint_only;
 mod property_id;
-pub use property_id::{PropertyId, WritingMode};
+pub use property_id::PropertyId;
+mod writing_mode;
+pub use writing_mode::WritingMode;
 mod property_value;
 pub use property_value::PropertyValue;
 mod radial_gradient;

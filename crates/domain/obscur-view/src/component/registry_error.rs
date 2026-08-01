@@ -1,18 +1,12 @@
-//! `RegistryError`: typed failures from [`ComponentRegistry`](crate::component::ComponentRegistry)
-//! operations.
+#![doc = include_str!("registry_error.doc/_module.md")]
 
 use obscur_identity::ComponentId;
 
-/// A typed error returned by fallible [`ComponentRegistry`](crate::component::ComponentRegistry)
-/// operations.
-///
-/// The registry never panics on a caller error; it returns one of these
-/// variants instead.
+#[doc = include_str!("registry_error.doc/RegistryError.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RegistryError {
-    /// A registration was rejected because its [`ComponentId`] is already
-    /// registered. Carries the conflicting id.
+    #[doc = include_str!("registry_error.doc/DuplicateComponent.md")]
     DuplicateComponent(ComponentId),
 }
 

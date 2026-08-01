@@ -1,25 +1,11 @@
-//! The per-node computed-style cache: [`StyleCache`] (§4.3, §5.19).
-//!
-//! [`StyleCache`] memoises each node's [`ComputedStyle`] keyed by [`NodeId`], so
-//! startup and subsequent frames can reuse an unchanged node's style instead of
-//! recomputing it. Entries are version-stamped: a lookup that supplies a newer
-//! version than the stored entry misses, keeping stale styles out of the results
-//! (§4.3). Per §5.19 the whole cache has a disable switch — a
-//! [`disabled`](StyleCache::disabled) cache never stores and always misses — so
-//! correctness tests can run the resolver with caching transparently turned off.
+#![doc = include_str!("style_cache.doc/_module.md")]
 
 use crate::computed::ComputedStyle;
 use crate::invalidation::CacheEntry;
 use obscur_identity::{NodeId, VersionStamp};
 use std::collections::HashMap;
 
-/// A cache of computed styles keyed by [`NodeId`] (§4.3, §5.19).
-///
-/// When enabled it stores one [`CacheEntry`] per node and serves hits from it.
-/// When disabled every store is a no-op and every lookup misses, which is the
-/// per-cache disable switch §5.19 requires for correctness tests. Because
-/// [`ComputedStyle`] carries `f32` data, this derives [`PartialEq`] but not
-/// [`Eq`].
+#[doc = include_str!("style_cache.doc/StyleCache.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleCache {
     entries: HashMap<NodeId, CacheEntry>,
@@ -27,7 +13,7 @@ pub struct StyleCache {
 }
 
 impl StyleCache {
-    /// Creates an empty, enabled cache.
+    #[doc = include_str!("style_cache.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -36,10 +22,7 @@ impl StyleCache {
         }
     }
 
-    /// Creates a disabled cache that never stores and always misses (§5.19).
-    ///
-    /// Use this in correctness tests to run resolution as if the cache were not
-    /// present, without changing any call site.
+    #[doc = include_str!("style_cache.doc/disabled.md")]
     #[must_use]
     pub fn disabled() -> Self {
         Self {
@@ -48,16 +31,13 @@ impl StyleCache {
         }
     }
 
-    /// Returns whether the cache is enabled.
+    #[doc = include_str!("style_cache.doc/is_enabled.md")]
     #[must_use]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Stores `style` for `node`, tagged with `version`, replacing any existing
-    /// entry.
-    ///
-    /// A no-op when the cache is disabled (§5.19).
+    #[doc = include_str!("style_cache.doc/insert.md")]
     pub fn insert(&mut self, node: NodeId, version: VersionStamp, style: ComputedStyle) {
         if !self.enabled {
             return;
@@ -65,9 +45,7 @@ impl StyleCache {
         self.entries.insert(node, CacheEntry::new(version, style));
     }
 
-    /// Returns the cached style for `node`, ignoring version.
-    ///
-    /// Always `None` when the cache is disabled.
+    #[doc = include_str!("style_cache.doc/get.md")]
     #[must_use]
     pub fn get(&self, node: NodeId) -> Option<&ComputedStyle> {
         if !self.enabled {
@@ -76,10 +54,7 @@ impl StyleCache {
         self.entries.get(&node).map(CacheEntry::style)
     }
 
-    /// Returns the cached style for `node` only if it was computed at exactly
-    /// `version`; a stale (older or newer) stored version misses (§4.3).
-    ///
-    /// Always `None` when the cache is disabled.
+    #[doc = include_str!("style_cache.doc/get_versioned.md")]
     #[must_use]
     pub fn get_versioned(&self, node: NodeId, version: VersionStamp) -> Option<&ComputedStyle> {
         if !self.enabled {
@@ -91,31 +66,29 @@ impl StyleCache {
             .map(CacheEntry::style)
     }
 
-    /// Evicts the entry for `node`, if any.
+    #[doc = include_str!("style_cache.doc/invalidate.md")]
     pub fn invalidate(&mut self, node: NodeId) {
         self.entries.remove(&node);
     }
 
-    /// Evicts every entry.
+    #[doc = include_str!("style_cache.doc/clear.md")]
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    /// Returns whether an entry for `node` is stored.
-    ///
-    /// Always `false` when the cache is disabled.
+    #[doc = include_str!("style_cache.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.enabled && self.entries.contains_key(&node)
     }
 
-    /// Returns the number of stored entries.
+    #[doc = include_str!("style_cache.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns whether the cache holds no entries.
+    #[doc = include_str!("style_cache.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

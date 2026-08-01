@@ -1,4 +1,4 @@
-//! Ime module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod composition;
 pub use composition::{Composition, CompositionState};
 mod composition_event;

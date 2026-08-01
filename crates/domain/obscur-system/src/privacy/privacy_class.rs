@@ -1,52 +1,33 @@
-//! The sensitivity classification of a piece of UI or data (spec §6.17, §7.12).
-//!
-//! [`PrivacyClass`] tags a region, field, or value with how sensitive it is, so
-//! the runtime can decide whether to exclude it from screen capture / sharing
-//! (§6.17) and whether to redact it from diagnostic snapshots (§7.12). Variants
-//! are ordered least → most sensitive, so the derived [`Ord`] ranks sensitivity
-//! and the predicates below are monotone in it.
+#![doc = include_str!("privacy_class.doc/_module.md")]
 
-/// How sensitive a piece of UI or data is (spec §6.17, §7.12).
-///
-/// Ordered least → most sensitive so the derived [`Ord`] ranks sensitivity:
-/// `Public < Sensitive < CaptureProtected < Secret`. The predicates
-/// [`redact_in_diagnostics`](Self::redact_in_diagnostics) and
-/// [`exclude_from_capture`](Self::exclude_from_capture) are monotone in that
-/// order.
+#[doc = include_str!("privacy_class.doc/PrivacyClass.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum PrivacyClass {
-    /// Non-sensitive: safe to capture and to include in diagnostics (§6.17).
+    #[doc = include_str!("privacy_class.doc/Public.md")]
     #[default]
     Public,
-    /// Personally identifying information: redacted from diagnostic snapshots by
-    /// default, but not excluded from capture (spec §7.12).
+    #[doc = include_str!("privacy_class.doc/Sensitive.md")]
     Sensitive,
-    /// Must be excluded from screenshots, screen recording, and screen sharing,
-    /// and redacted from diagnostics (spec §6.17).
+    #[doc = include_str!("privacy_class.doc/CaptureProtected.md")]
     CaptureProtected,
-    /// Passwords and secrets: never captured and never placed in diagnostics
-    /// (spec §6.17, §7.12).
+    #[doc = include_str!("privacy_class.doc/Secret.md")]
     Secret,
 }
 
 impl PrivacyClass {
-    /// Returns whether this class is [`Public`](Self::Public) — non-sensitive
-    /// data with no capture or diagnostic restrictions (spec §6.17).
+    #[doc = include_str!("privacy_class.doc/is_public.md")]
     #[must_use]
     pub const fn is_public(&self) -> bool {
         matches!(self, Self::Public)
     }
 
-    /// Returns whether data of this class must be redacted from diagnostic
-    /// snapshots — anything above [`Public`](Self::Public) (spec §7.12).
+    #[doc = include_str!("privacy_class.doc/redact_in_diagnostics.md")]
     #[must_use]
     pub const fn redact_in_diagnostics(&self) -> bool {
         !self.is_public()
     }
 
-    /// Returns whether data of this class must be excluded from screen capture
-    /// and sharing — [`CaptureProtected`](Self::CaptureProtected) and
-    /// [`Secret`](Self::Secret) (spec §6.17).
+    #[doc = include_str!("privacy_class.doc/exclude_from_capture.md")]
     #[must_use]
     pub const fn exclude_from_capture(&self) -> bool {
         matches!(self, Self::CaptureProtected | Self::Secret)

@@ -1,5 +1,4 @@
-//! `Analyzer`: the language-server core that turns open documents into LSP
-//! diagnostics, document symbols and hover results.
+#![doc = include_str!("analyzer.doc/_module.md")]
 
 use obscur_okui_compiler::compile::{CompileDiagnostic, Compiler, ContractRegistry};
 use obscur_okui_compiler::lowering::LoweringError;
@@ -11,47 +10,12 @@ use crate::analysis::{DocumentSymbol, Hover, SymbolKind};
 use crate::diagnostics::{LspDiagnostic, LspSeverity, Position, Range};
 use crate::document::{DocumentStore, LineIndex};
 
-/// Converts a `usize` length to `u32`, saturating at [`u32::MAX`].
+#[doc = include_str!("analyzer.doc/to_u32.md")]
 fn to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-/// The analysis core of the `.okui` language server.
-///
-/// The `Analyzer` owns a [`DocumentStore`] (mutate it via [`store_mut`](Self::store_mut)
-/// to drive the `didOpen`/`didChange`/`didClose` lifecycle) and a
-/// [`ContractRegistry`] used by the compiler's §2.13 contract checks. It is
-/// transport-agnostic: a JSON-RPC/stdio wrapper feeds documents into the store
-/// and calls [`analyze`](Self::analyze), [`document_symbols`](Self::document_symbols)
-/// and [`hover`](Self::hover), then serializes the results onto the wire.
-///
-/// # Diagnostics
-///
-/// [`analyze`](Self::analyze) parses the document with the okui
-/// [`Parser`], mapping each parse error (a byte offset) to a one-character
-/// [`LspDiagnostic`] via a [`LineIndex`]. When the source parses cleanly it is
-/// cast to a [`Document`] and run through the okui [`Compiler`]; every
-/// [`CompileDiagnostic`] is likewise mapped from its byte offset to an
-/// [`LspDiagnostic`].
-///
-/// # Why the default registry is [`ContractRegistry::builtins`]
-///
-/// It used to be `ContractRegistry::default()` — **empty** — and that made this
-/// server, the one tool an author actually points at a `.okui` file, enforce
-/// §2.13 for *nothing*. `Compiler::new` seeds the built-in primitive and widget
-/// contracts precisely so a default compile rejects `<Button laebl="Save"/>`;
-/// [`analyze`](Self::analyze) then called `.with_registry(…)`, which **replaces**
-/// that seed wholesale, and handed it the empty default straight back. So
-/// `obscur-okui-lsp --check` reported `diagnostics: none` and exited zero on a
-/// document the very same `Compiler` rejects in `obscur-kit`'s `build.rs` and the
-/// `okui!` macro rejects at the author's own token.
-///
-/// Seeding the same registry `Compiler::new` does makes the editor and the build
-/// agree by construction. [`with_registry`](Self::with_registry) still replaces
-/// it wholesale — a host wiring its own components in wants
-/// `ContractRegistry::builtins().with_surface(&MyProps::contract_surface())`, not
-/// `ContractRegistry::new()`, or it will silently drop the built-ins exactly as
-/// this did.
+#[doc = include_str!("analyzer.doc/Analyzer.md")]
 #[derive(Debug, Clone)]
 pub struct Analyzer {
     store: DocumentStore,
@@ -68,43 +32,31 @@ impl Default for Analyzer {
 }
 
 impl Analyzer {
-    /// Creates an analyzer with an empty document store and the built-in
-    /// primitive/widget contracts registered — the same set `Compiler::new`
-    /// seeds, so the editor's verdict matches the build's.
+    #[doc = include_str!("analyzer.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the contract registry the compiler consults (fluent), **replacing**
-    /// the built-in set [`new`](Self::new) seeded.
-    ///
-    /// Pass `ContractRegistry::builtins().with_surface(&MyProps::contract_surface())`
-    /// to add a user component's §2.13 surface while keeping the built-ins;
-    /// `ContractRegistry::new()` drops them.
+    #[doc = include_str!("analyzer.doc/with_registry.md")]
     #[must_use]
     pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
         self.registry = registry;
         self
     }
 
-    /// Returns a shared reference to the document store.
+    #[doc = include_str!("analyzer.doc/store.md")]
     #[must_use]
     pub const fn store(&self) -> &DocumentStore {
         &self.store
     }
 
-    /// Returns a mutable reference to the document store, for driving the
-    /// `didOpen`/`didChange`/`didClose` lifecycle.
+    #[doc = include_str!("analyzer.doc/store_mut.md")]
     pub const fn store_mut(&mut self) -> &mut DocumentStore {
         &mut self.store
     }
 
-    /// Analyzes the document at `uri`, returning every diagnostic in LSP shape.
-    ///
-    /// Returns an empty vector if no document is open at `uri`. Parse errors are
-    /// reported first; only when the source parses cleanly is it compiled and
-    /// the compiler's diagnostics appended.
+    #[doc = include_str!("analyzer.doc/analyze.md")]
     #[must_use]
     pub fn analyze(&self, uri: &str) -> Vec<LspDiagnostic> {
         let Some(document) = self.store.get(uri) else {
@@ -143,8 +95,7 @@ impl Analyzer {
         diagnostics
     }
 
-    /// Returns the hierarchical outline of elements/components in the document at
-    /// `uri` (empty if no document is open).
+    #[doc = include_str!("analyzer.doc/document_symbols.md")]
     #[must_use]
     pub fn document_symbols(&self, uri: &str) -> Vec<DocumentSymbol> {
         let Some(document) = self.store.get(uri) else {
@@ -160,8 +111,7 @@ impl Analyzer {
             .collect()
     }
 
-    /// Returns hover information for the innermost element/component containing
-    /// `position`, if any.
+    #[doc = include_str!("analyzer.doc/hover.md")]
     #[must_use]
     pub fn hover(&self, uri: &str, position: Position) -> Option<Hover> {
         let symbols = self.document_symbols(uri);
@@ -173,26 +123,7 @@ impl Analyzer {
     }
 }
 
-/// Maps a [`CompileDiagnostic`] to its byte offset, message and LSP severity.
-///
-/// Resolution, type and validation failures are errors; a missing `<For>` key is
-/// the one deliberate warning (see below).
-///
-/// # Why a validation failure is an error
-///
-/// It was a warning, and `--check`'s gate only reads error severity, so the
-/// check ran every rule, printed every verdict, and exited **zero** on all of
-/// them. `<Button laebl="Save"/>` (§2.13), `<VirtualFor>` (§2.11), a malformed
-/// `<slot>` (§2.12) and `{std::fs::read(p)}` (§2.10) each printed a warning and
-/// passed CI. The two front ends that are not this one both treat exactly these
-/// as fatal — the `okui!` macro raises a `syn::Error` at the author's token, and
-/// `obscur-kit`'s `build.rs` panics on `CompileResult::has_errors()`, which
-/// counts every diagnostic irrespective of the severity this function invents.
-/// So the editor was the only place where a document that cannot build was green.
-///
-/// §2.13 settles it in its own words: "Unknown attributes, events and string
-/// method names are **compile errors**." Warning was not a lenient reading of
-/// the spec, it was a different one.
+#[doc = include_str!("analyzer.doc/map_compile_diagnostic.md")]
 fn map_compile_diagnostic(diagnostic: &CompileDiagnostic) -> (u32, String, LspSeverity) {
     match diagnostic {
         CompileDiagnostic::Resolution(error) => {
@@ -217,15 +148,14 @@ fn map_compile_diagnostic(diagnostic: &CompileDiagnostic) -> (u32, String, LspSe
     }
 }
 
-/// Builds a one-character [`Range`] anchored at `offset` (an empty range at the
-/// end of the document), mapping byte offsets through `index`.
+#[doc = include_str!("analyzer.doc/point_range.md")]
 fn point_range(index: &LineIndex, offset: u32) -> Range {
     let start = index.offset_to_position(offset);
     let end = index.offset_to_position(offset.saturating_add(1));
     Range::new(start, end)
 }
 
-/// Builds a [`Range`] covering the full source span of `node`.
+#[doc = include_str!("analyzer.doc/node_range.md")]
 fn node_range(index: &LineIndex, node: &SyntaxNode) -> Range {
     let start_offset = node.offset().unwrap_or(0);
     let end_offset = start_offset.saturating_add(to_u32(node.text().len()));
@@ -235,8 +165,7 @@ fn node_range(index: &LineIndex, node: &SyntaxNode) -> Range {
     )
 }
 
-/// Builds a [`DocumentSymbol`] for `element` and its element-shaped children,
-/// or `None` for a nameless element.
+#[doc = include_str!("analyzer.doc/symbol_of.md")]
 fn symbol_of(index: &LineIndex, element: &Element) -> Option<DocumentSymbol> {
     let name = element.tag_name()?;
     let kind = SymbolKind::of_tag(&name);
@@ -249,7 +178,7 @@ fn symbol_of(index: &LineIndex, element: &Element) -> Option<DocumentSymbol> {
     Some(DocumentSymbol::new(name, kind, range).with_children(children))
 }
 
-/// Finds the deepest symbol whose range contains `position`.
+#[doc = include_str!("analyzer.doc/deepest_containing.md")]
 fn deepest_containing(symbols: &[DocumentSymbol], position: Position) -> Option<&DocumentSymbol> {
     for symbol in symbols {
         if symbol.range.contains(position) {

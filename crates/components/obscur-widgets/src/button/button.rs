@@ -1,4 +1,4 @@
-//! `Button`: a headless push-button control (spec §2.6).
+#![doc = include_str!("button.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -8,21 +8,7 @@ use obscur_view::view::{
     ViewProperty, ViewValue,
 };
 
-/// A headless push-button control (spec §2.6).
-///
-/// `Button` owns its interactive state — whether it is currently
-/// [`pressed`](Self::is_pressed) and whether it is
-/// [`disabled`](Self::is_disabled) — plus the `command` it fires when
-/// activated. It bakes in **no** visual theme: [`view`](Self::view) derives a
-/// semantic [`ViewNode`] tree (a [`SemanticRole::Button`] element carrying its
-/// state as properties, a click event bound to `command`, and a single
-/// [`Text`] label child) that the style layer renders keyed on
-/// [`COMPONENT_ID`](Self::COMPONENT_ID).
-///
-/// The state machine is a plain press/release cycle: [`press`](Self::press)
-/// arms the button and [`release`](Self::release) reports whether that cycle
-/// *activated* it (pressed while enabled). A disabled button neither arms nor
-/// activates.
+#[doc = include_str!("button.doc/Button.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Button {
     label: Box<str>,
@@ -32,26 +18,17 @@ pub struct Button {
 }
 
 impl Button {
-    /// Stable component id for the button widget.
-    ///
-    /// Widgets share the `0x00D0_00NN` id space, one fixed value per widget so
-    /// the style/reconcile layer can map them without a name lookup:
-    /// button=`..01`, input=`..02`, checkbox=`..03`, select=`..04`.
+    #[doc = include_str!("button.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0001);
 
-    /// Interned name of the semantic-role property (`role`).
-    ///
-    /// Widget property names share the `0x00D1_NNXX` symbol space, where `NN`
-    /// matches the widget's `COMPONENT_ID` suffix and `XX` numbers the property:
-    /// role=`00`, disabled=`01`, pressed=`02`.
+    #[doc = include_str!("button.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0100);
-    /// Interned name of the `disabled` state property.
+    #[doc = include_str!("button.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0101);
-    /// Interned name of the `pressed` state property.
+    #[doc = include_str!("button.doc/PROP_PRESSED.md")]
     const PROP_PRESSED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0102);
 
-    /// Creates an enabled, un-pressed button showing `label` that fires
-    /// `command` on activation.
+    #[doc = include_str!("button.doc/new.md")]
     #[must_use]
     pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -62,68 +39,63 @@ impl Button {
         }
     }
 
-    /// Sets the disabled state, returning the updated button (fluent builder).
+    #[doc = include_str!("button.doc/disabled.md")]
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Arms the button. A no-op while [`disabled`](Self::is_disabled).
+    #[doc = include_str!("button.doc/press.md")]
     pub fn press(&mut self) {
         if !self.disabled {
             self.pressed = true;
         }
     }
 
-    /// Ends a press cycle, clearing the pressed state and returning whether the
-    /// button was *activated* — i.e. it had been pressed and is enabled.
+    #[doc = include_str!("button.doc/release.md")]
     pub fn release(&mut self) -> bool {
         let activated = self.pressed && !self.disabled;
         self.pressed = false;
         activated
     }
 
-    /// Returns the command fired when the button is activated.
+    #[doc = include_str!("button.doc/command.md")]
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    /// Returns the button label.
+    #[doc = include_str!("button.doc/label.md")]
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
-    /// Returns whether the button is currently armed.
+    #[doc = include_str!("button.doc/is_pressed.md")]
     #[must_use]
     pub const fn is_pressed(&self) -> bool {
         self.pressed
     }
 
-    /// Returns whether the button is disabled.
+    #[doc = include_str!("button.doc/is_disabled.md")]
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    /// Sets the disabled state in place.
+    #[doc = include_str!("button.doc/set_disabled.md")]
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    /// Returns the accessible role of this control.
+    #[doc = include_str!("button.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Button
     }
 
-    /// Derives the semantic view for this button: a [`COMPONENT_ID`] element
-    /// carrying the role, disabled, and pressed state as properties, a click
-    /// event bound to `command`, and the label as a single [`Text`] child.
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[doc = include_str!("button.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let mut node = ViewNode::element(Self::COMPONENT_ID)
@@ -157,20 +129,7 @@ impl Button {
         View::single(node)
     }
 
-    /// The button's semantic node, ready to place and style — [`view`](Self::view)
-    /// reduced to its single root [`ViewNode`].
-    ///
-    /// A button always renders exactly one node, so this is infallible where the
-    /// general [`View::into_single_node`] is not: it asserts that invariant here,
-    /// once, and hands callers a bare node instead of making each of them unwrap a
-    /// `View`. Use it wherever the surrounding tree wants a node rather than a
-    /// `View` — e.g. `Button::new(label, cmd).into_view_node().class("bar")`.
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: [`view`](Self::view) is a `View::single`, so it always
-    /// has exactly one root node. The internal `expect` guards that invariant and
-    /// would only fire if `view` were changed to emit zero or many roots.
+    #[doc = include_str!("button.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(&self) -> ViewNode {
         self.view()

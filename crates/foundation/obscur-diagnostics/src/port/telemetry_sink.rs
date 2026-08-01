@@ -1,24 +1,20 @@
-//! Telemetry sink port.
+#![doc = include_str!("telemetry_sink.doc/_module.md")]
 
 use crate::performance::{BudgetViolation, PerformanceCounter, PerformanceSpan};
 
-/// A destination for performance telemetry. A host or DevTools backend
-/// implements this to receive spans, counters and budget violations as the
-/// engine measures them (spec §7.9).
-///
-/// The trait is object-safe so it can be stored behind `&mut dyn TelemetrySink`.
+#[doc = include_str!("telemetry_sink.doc/TelemetrySink.md")]
 pub trait TelemetrySink {
-    /// Records a completed performance span.
+    #[doc = include_str!("telemetry_sink.doc/record_span.md")]
     fn record_span(&mut self, span: &PerformanceSpan);
 
-    /// Records the current state of a performance counter.
+    #[doc = include_str!("telemetry_sink.doc/record_counter.md")]
     fn record_counter(&mut self, counter: &PerformanceCounter);
 
-    /// Records a budget violation.
+    #[doc = include_str!("telemetry_sink.doc/record_violation.md")]
     fn record_violation(&mut self, violation: &BudgetViolation);
 }
 
-/// A telemetry sink that discards everything it receives.
+#[doc = include_str!("telemetry_sink.doc/NullTelemetrySink.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NullTelemetrySink;
 
@@ -28,26 +24,25 @@ impl TelemetrySink for NullTelemetrySink {
     fn record_violation(&mut self, _violation: &BudgetViolation) {}
 }
 
-/// A telemetry sink that retains everything it receives, for tests and
-/// DevTools-style inspection.
+#[doc = include_str!("telemetry_sink.doc/CollectingTelemetrySink.md")]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CollectingTelemetrySink {
-    /// Spans recorded, in order.
+    #[doc = include_str!("telemetry_sink.doc/spans.md")]
     pub spans: Vec<PerformanceSpan>,
-    /// Counters recorded, in order.
+    #[doc = include_str!("telemetry_sink.doc/counters.md")]
     pub counters: Vec<PerformanceCounter>,
-    /// Budget violations recorded, in order.
+    #[doc = include_str!("telemetry_sink.doc/violations.md")]
     pub violations: Vec<BudgetViolation>,
 }
 
 impl CollectingTelemetrySink {
-    /// Creates an empty collecting sink.
+    #[doc = include_str!("telemetry_sink.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Clears all recorded telemetry.
+    #[doc = include_str!("telemetry_sink.doc/clear.md")]
     pub fn clear(&mut self) {
         self.spans.clear();
         self.counters.clear();

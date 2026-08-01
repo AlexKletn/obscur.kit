@@ -1,18 +1,4 @@
-//! **SPECIFICATION-DERIVED** transition and animation cases for obscur.kit §4.17
-//! ("CSS `transition`, `@keyframes` and `animation-*` are parsed as a
-//! compatibility/declarative frontend and compiled into native timelines";
-//! "time-driven motion"; "interruption; reversal"; "style interpolation").
-//!
-//! Every expected number below was produced by an agent reading the specification
-//! — obscur.kit §4 and the W3C css-transitions-1 / css-animations-1 /
-//! css-cascade-5 / css-color-4 text it normatively cites — with **no access to
-//! this repository's source**. A failure here is a defect report about the
-//! engine, and must not be "corrected" by editing the expected value.
-//!
-//! Translation note: the deriver triggers each transition by "adding class `on`".
-//! Here the trigger is `:hover` via [`UiRuntime::set_pseudo_state`], which is the
-//! style-change mechanism this workspace exposes. Nothing in any case depends on
-//! *which* style change fires the transition.
+#![doc = include_str!("spec_ch4_motion.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch4_support/mod.rs"]
@@ -28,7 +14,7 @@ use support::{approx, at, el, geom, runtime, view};
 
 const VW: f32 = 1000.0;
 
-/// A runtime with `css` installed through the real CSS pipeline, plus the view.
+#[doc = include_str!("spec_ch4_motion.doc/Host.md")]
 struct Host {
     rt: UiRuntime,
     css: CssPipeline,
@@ -82,9 +68,7 @@ fn one_box() -> View {
     view(vec![el(10, "box", vec![])])
 }
 
-/// css-cascade-5 §6.1: "The precedence of the various origins is, in descending
-/// order: / Transition declarations [css-transitions-1] / Important user agent
-/// declarations / Important user declarations / Important author declarations".
+#[doc = include_str!("spec_ch4_motion.doc/transitions_outrank_important_author_declarations.md")]
 #[test]
 fn transitions_outrank_important_author_declarations() {
     let mut h = Host::new(
@@ -104,13 +88,7 @@ fn transitions_outrank_important_author_declarations() {
     approx(h.width(&[0]), 100.0, "t=1s: settled");
 }
 
-/// css-transitions-1 §4: "reversing shortening factor is the absolute value,
-/// clamped to the range [0, 1], of the sum of: the output of the timing function
-/// of the old transition at the time of the style change event, times the
-/// reversing shortening factor of the old transition / 1 minus the reversing
-/// shortening factor of the old transition." and "end time is the start time plus
-/// the product of the matching transition duration and the new transition's
-/// reversing shortening factor".
+#[doc = include_str!("spec_ch4_motion.doc/a_reversed_transition_is_shortened_by_its_progress.md")]
 #[test]
 fn a_reversed_transition_is_shortened_by_its_progress() {
     let mut h = Host::new(
@@ -138,10 +116,7 @@ fn a_reversed_transition_is_shortened_by_its_progress() {
     );
 }
 
-/// css-transitions-1 §2.4: "If the value for transition-delay is a negative time
-/// offset then the transition will execute the moment the property is changed, but
-/// will appear to have begun execution at the specified offset. That is, the
-/// transition will appear to begin part-way through its play cycle."
+#[doc = include_str!("spec_ch4_motion.doc/a_negative_transition_delay_starts_part_way_through.md")]
 #[test]
 fn a_negative_transition_delay_starts_part_way_through() {
     let mut h = Host::new(
@@ -161,12 +136,7 @@ fn a_negative_transition_delay_starts_part_way_through() {
     approx(h.width(&[0]), 100.0, "the transition completed at t=1.5s");
 }
 
-/// css-animations-1 §3.9: "backwards / During the period defined by
-/// animation-delay, the animation will apply the property values defined in the
-/// keyframe that will start the first iteration of the animation. These are either
-/// the values of the from keyframe (when animation-direction is normal or
-/// alternate) or those of the to keyframe (when animation-direction is reverse or
-/// alternate-reverse)."
+#[doc = include_str!("spec_ch4_motion.doc/backwards_fill_uses_the_to_keyframe_when_the_direction_is_reversed.md")]
 #[test]
 fn backwards_fill_uses_the_to_keyframe_when_the_direction_is_reversed() {
     let mut h = Host::new(
@@ -183,11 +153,7 @@ fn backwards_fill_uses_the_to_keyframe_when_the_direction_is_reversed() {
     );
 }
 
-/// css-animations-1 §3.6: "alternate / The animation cycle iterations that are odd
-/// counts are played in the normal direction, and the animation cycle iterations
-/// that are even counts are played in a reverse direction." and "Note: For the
-/// purpose of determining whether an iteration is even or odd, iterations start
-/// counting from 1."
+#[doc = include_str!("spec_ch4_motion.doc/alternate_iteration_parity_counts_from_one.md")]
 #[test]
 fn alternate_iteration_parity_counts_from_one() {
     let mut h = Host::new(
@@ -207,12 +173,7 @@ fn alternate_iteration_parity_counts_from_one() {
     approx(h.width(&[0]), 25.0, "t=2.25s: iteration 3 is odd -> normal");
 }
 
-/// css-animations-1 §3.9: "forwards / After the animation ends (as determined by
-/// its animation-iteration-count), the animation will apply the property values
-/// for the time the animation ended. When animation-iteration-count is an integer
-/// greater than zero, the values applied will be those for the end of the last
-/// completed iteration of the animation (rather than the values for the start of
-/// the iteration that would be next)."
+#[doc = include_str!("spec_ch4_motion.doc/forwards_fill_uses_the_end_of_the_last_completed_iteration.md")]
 #[test]
 fn forwards_fill_uses_the_end_of_the_last_completed_iteration() {
     let mut h = Host::new(
@@ -234,10 +195,7 @@ fn forwards_fill_uses_the_end_of_the_last_completed_iteration() {
     );
 }
 
-/// css-color-4 §13.3 Interpolating with Alpha: "For rectangular orthogonal color
-/// coordinate systems, all component values are multiplied by the alpha value."
-/// and "otherwise, each component which had been premultiplied is divided by the
-/// interpolated alpha value."
+#[doc = include_str!("spec_ch4_motion.doc/color_interpolation_is_premultiplied.md")]
 #[test]
 fn color_interpolation_is_premultiplied() {
     let mut h = Host::new(

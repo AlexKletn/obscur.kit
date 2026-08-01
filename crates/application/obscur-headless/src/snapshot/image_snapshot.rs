@@ -1,93 +1,18 @@
-//! A backend-neutral capture of a rendered raster image: [`ImageSnapshot`],
-//! and the §7.14 tolerance it is compared under: [`ImageTolerance`].
+#![doc = include_str!("image_snapshot.doc/_module.md")]
 
 use std::sync::Arc;
 
-/// How much variation a raster golden comparison tolerates (spec §7.14).
-///
-/// # What the spec asks for
-///
-/// §7.14 is one sentence: *"Raster golden tests are allowed with explicit
-/// tolerances for anti-aliasing and font/backend variation."* §5.2 adds
-/// *"Golden tests use tolerances"* under its **allowed differences** list —
-/// rasterization, anti-aliasing, font rendering details, backend-specific
-/// precision.
-///
-/// Neither sentence prescribes a *metric*. What they pin down is that the
-/// tolerance must be **explicit** and must absorb the named **sources** of
-/// variation. This type therefore derives its shape from those sources rather
-/// than from a number the spec never gives:
-///
-/// - **backend-specific precision** — a different blend or gamma rounding
-///   shifts *every* pixel by a *small* amount. Absorbed by
-///   [`max_channel_delta`](Self::max_channel_delta): a per-channel noise floor.
-/// - **anti-aliasing and font rendering** — two rasterizers disagree only where
-///   coverage is *partial*: glyph and shape edges. That is a *small fraction* of
-///   pixels, but on those pixels the delta is *unbounded* — at a hard black-on-
-///   white edge, 49% vs 51% coverage is a full swing. Absorbed by
-///   [`max_differing_fraction`](Self::max_differing_fraction): a cap on *how
-///   many* pixels may exceed the noise floor, with no cap on by how much.
-///
-/// # Why two knobs and not one
-///
-/// The two sources are opposite in shape — many pixels × small delta versus few
-/// pixels × large delta — so no single scalar grants both permissions. Each of
-/// the one-knob designs was measured against real renders in
-/// `obscur-render-cpu`'s `golden_tolerance.rs`, and each fails, in *opposite*
-/// directions:
-///
-/// - **A lone noise floor is too loose.** Passing an AA edge needs a floor of
-///   240, and a floor of 240 also passes an 8/255 recolouring of the entire
-///   fill — a real regression waved straight through.
-/// - **A lone differing-pixel cap is too strict.** With no floor, the 4/255
-///   rounding difference §5.2 explicitly permits moves 52% of the image into
-///   "differing", so no cap that still rejects regressions can accept it.
-///   "Differs at all" cannot tell a rounding wobble from a wrong colour.
-///
-/// Together each knob grants exactly one of the two permissions, and a
-/// difference that is neither shape is rejected.
-///
-/// # A deliberate omission
-///
-/// There is **no cap on the channel delta of a differing pixel**, and that is
-/// not an oversight: legitimate AA variation on a partial-coverage pixel really
-/// can span the full channel range, so such a cap would reject the very
-/// difference §5.2 permits.
-///
-/// # What this therefore does not catch — read before trusting it
-///
-/// A regression with a **small footprint** passes. The two knobs bound *how far*
-/// a pixel may move and *how many* may move, and nothing bounds where: a 10×10
-/// element dropped from a 64×64 surface moves 100 pixels — 2.44% — at a full
-/// 255 delta, and is accepted by any fraction above that, though §5.2 puts scene
-/// geometry under *must match*. This was measured, not reasoned about.
-///
-/// The earlier version of this doc claimed the opposite ("a real regression moves
-/// more pixels than the tolerated fraction"). It does not follow, and it is the
-/// worse error: a reader trusting it concludes they are guarded where they are
-/// not. The fraction cap protects against a *diffuse* regression, and only that.
-///
-/// Closing it needs a discriminator neither knob has, because the honest
-/// difference between AA noise and a dropped element is **shape**, not magnitude
-/// or count: AA differences hug an outline and are a pixel or two wide, while a
-/// dropped element is a contiguous filled region. A per-tile fraction, or a
-/// reject-if-any-NxN-block-differs rule, would express that — both need a size
-/// constant this workspace has no evidence to pick yet, so neither is guessed at
-/// here.
+#[doc = include_str!("image_snapshot.doc/ImageTolerance.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageTolerance {
-    /// The per-channel absolute delta at or below which two pixels are the same.
+    #[doc = include_str!("image_snapshot.doc/max_channel_delta.md")]
     max_channel_delta: u8,
-    /// The fraction of pixels allowed to exceed `max_channel_delta`, in `0.0..=1.0`.
+    #[doc = include_str!("image_snapshot.doc/max_differing_fraction.md")]
     max_differing_fraction: f64,
 }
 
 impl ImageTolerance {
-    /// A tolerance that permits nothing: byte-for-byte equality.
-    ///
-    /// This is the honest default for a *same-backend determinism* check (the
-    /// same rasterizer, twice, on the same scene), which is not what §7.14's
-    /// tolerance is for — see [`ImageSnapshot::compare_within`].
+    #[doc = include_str!("image_snapshot.doc/exact.md")]
     #[must_use]
     pub const fn exact() -> Self {
         Self {
@@ -96,14 +21,7 @@ impl ImageTolerance {
         }
     }
 
-    /// An explicit tolerance.
-    ///
-    /// `max_channel_delta` is the per-channel noise floor; `max_differing_fraction`
-    /// is the share of pixels allowed to exceed it, clamped into `0.0..=1.0`.
-    ///
-    /// A non-finite `max_differing_fraction` is clamped to `0.0`, not propagated:
-    /// `NaN` compares false against every threshold, so letting it through would
-    /// produce a golden check that silently accepts *everything*.
+    #[doc = include_str!("image_snapshot.doc/new.md")]
     #[must_use]
     pub fn new(max_channel_delta: u8, max_differing_fraction: f64) -> Self {
         let max_differing_fraction = if max_differing_fraction.is_finite() {
@@ -117,58 +35,50 @@ impl ImageTolerance {
         }
     }
 
-    /// The per-channel absolute delta at or below which two pixels are the same.
+    #[doc = include_str!("image_snapshot.doc/max_channel_delta_2.md")]
     #[must_use]
     pub const fn max_channel_delta(&self) -> u8 {
         self.max_channel_delta
     }
 
-    /// The fraction of pixels allowed to exceed [`max_channel_delta`](Self::max_channel_delta).
+    #[doc = include_str!("image_snapshot.doc/max_differing_fraction_2.md")]
     #[must_use]
     pub const fn max_differing_fraction(&self) -> f64 {
         self.max_differing_fraction
     }
 }
 
-/// What a tolerant comparison measured (spec §7.14).
-///
-/// Returned on success so a passing golden test can still report its *residual*
-/// — the headroom left before the tolerance would have rejected it.
+#[doc = include_str!("image_snapshot.doc/ImageDiff.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageDiff {
-    /// Pixels whose worst channel exceeded the tolerance's noise floor.
+    #[doc = include_str!("image_snapshot.doc/differing_pixels.md")]
     differing_pixels: u64,
-    /// Pixels compared.
+    #[doc = include_str!("image_snapshot.doc/total_pixels.md")]
     total_pixels: u64,
-    /// The largest per-channel delta seen anywhere, tolerated or not.
+    #[doc = include_str!("image_snapshot.doc/max_channel_delta_3.md")]
     max_channel_delta: u8,
 }
 
 impl ImageDiff {
-    /// Pixels whose worst channel exceeded the tolerance's noise floor.
+    #[doc = include_str!("image_snapshot.doc/differing_pixels_2.md")]
     #[must_use]
     pub const fn differing_pixels(&self) -> u64 {
         self.differing_pixels
     }
 
-    /// Pixels compared.
+    #[doc = include_str!("image_snapshot.doc/total_pixels_2.md")]
     #[must_use]
     pub const fn total_pixels(&self) -> u64 {
         self.total_pixels
     }
 
-    /// The largest per-channel delta seen anywhere, tolerated or not.
-    ///
-    /// This counts *every* pixel, including ones inside the noise floor, so it
-    /// is a diagnostic rather than a verdict.
+    #[doc = include_str!("image_snapshot.doc/max_channel_delta_4.md")]
     #[must_use]
     pub const fn max_channel_delta(&self) -> u8 {
         self.max_channel_delta
     }
 
-    /// The share of compared pixels that exceeded the noise floor.
-    ///
-    /// An empty image has no differing pixels and reports `0.0`.
+    #[doc = include_str!("image_snapshot.doc/differing_fraction.md")]
     #[must_use]
     pub fn differing_fraction(&self) -> f64 {
         if self.total_pixels == 0 {
@@ -180,38 +90,30 @@ impl ImageDiff {
     }
 }
 
-/// Every way a raster golden comparison fails to hold (spec §7.14).
-///
-/// This deliberately folds *"compared, and differs too much"* together with
-/// *"could not compare at all"*. A golden check that cannot run is not a golden
-/// check that passed: if `PixelsUnavailable` were reported as success, a
-/// snapshot rebuilt from a bare hash would wave every regression through.
+#[doc = include_str!("image_snapshot.doc/GoldenMismatch.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GoldenMismatch {
-    /// The two rasters are different sizes, so no per-pixel comparison exists.
+    #[doc = include_str!("image_snapshot.doc/DimensionMismatch.md")]
     DimensionMismatch {
-        /// The expected raster's dimensions.
+        #[doc = include_str!("image_snapshot.doc/expected.md")]
         expected: (u32, u32),
-        /// The actual raster's dimensions.
+        #[doc = include_str!("image_snapshot.doc/actual.md")]
         actual: (u32, u32),
     },
-    /// One side carries no pixels — it was built by
-    /// [`from_parts`](ImageSnapshot::from_parts) from a bare hash, which a
-    /// tolerance cannot be applied to.
+    #[doc = include_str!("image_snapshot.doc/PixelsUnavailable.md")]
     PixelsUnavailable,
-    /// The two rasters agree on dimensions but carry different byte counts, so
-    /// they do not share a pixel layout.
+    #[doc = include_str!("image_snapshot.doc/ByteLengthMismatch.md")]
     ByteLengthMismatch {
-        /// The expected raster's byte count.
+        #[doc = include_str!("image_snapshot.doc/expected_2.md")]
         expected: usize,
-        /// The actual raster's byte count.
+        #[doc = include_str!("image_snapshot.doc/actual_2.md")]
         actual: usize,
     },
-    /// More pixels exceeded the noise floor than the tolerance allows.
+    #[doc = include_str!("image_snapshot.doc/TooManyDifferingPixels.md")]
     TooManyDifferingPixels {
-        /// What was measured.
+        #[doc = include_str!("image_snapshot.doc/diff.md")]
         diff: ImageDiff,
-        /// The fraction the tolerance permitted.
+        #[doc = include_str!("image_snapshot.doc/allowed.md")]
         allowed: f64,
     },
 }
@@ -247,67 +149,26 @@ impl std::fmt::Display for GoldenMismatch {
 
 impl std::error::Error for GoldenMismatch {}
 
-/// A deterministic, backend-neutral capture of a rendered raster image
-/// (spec §7.4).
-///
-/// The rendered image is the one §7.4 stage that is *backend-dependent*: pixels
-/// come out of a concrete rasterizer, not the backend-independent pipeline. This
-/// type keeps `obscur-headless` free of any GPU or rasterizer dependency by
-/// never *producing* pixels — [`from_rgba`](Self::from_rgba) takes whatever
-/// raster a backend already made (for example the software `obscur-render-cpu`
-/// backend's `tiny_skia::Pixmap::data`) and both hashes **and retains** it.
-///
-/// # Two comparisons, for two different questions
-///
-/// - [`PartialEq`] is **exact**: it compares dimensions and the FNV-1a content
-///   hash. This answers *"did the same backend produce the same bytes twice?"* —
-///   a determinism check, where any difference is a defect.
-/// - [`compare_within`](Self::compare_within) is **tolerant** (spec §7.14). This
-///   answers *"does this render still match its golden, allowing for the
-///   variation §5.2 permits?"* — anti-aliasing, font rendering, backend
-///   precision.
-///
-/// The two are kept separate on purpose. A hash cannot express a tolerance (one
-/// bit differs and the digest is unrelated), so the hash is retained for the
-/// question it does answer, and the pixels are retained for the one it does not.
-///
-/// # Cost
-///
-/// [`from_rgba`](Self::from_rgba) retains the raster, so a snapshot is as large
-/// as the image it captured. The buffer is shared behind an [`Arc`], so cloning
-/// a snapshot — as [`SnapshotNormalizer`](super::SnapshotNormalizer) does — does
-/// not copy it. [`from_parts`](Self::from_parts) builds a hash-only snapshot for
-/// callers that want the stage identity without the bytes; such a snapshot
-/// **cannot** take part in a tolerant comparison, and says so rather than
-/// passing.
+#[doc = include_str!("image_snapshot.doc/ImageSnapshot.md")]
 #[derive(Debug, Clone)]
 pub struct ImageSnapshot {
-    /// The image width in physical pixels.
+    #[doc = include_str!("image_snapshot.doc/width.md")]
     width: u32,
-    /// The image height in physical pixels.
+    #[doc = include_str!("image_snapshot.doc/height.md")]
     height: u32,
-    /// A stable FNV-1a content hash of the image's raw bytes.
+    #[doc = include_str!("image_snapshot.doc/pixel_hash.md")]
     pixel_hash: u64,
-    /// The raster itself, when the snapshot was built from one.
+    #[doc = include_str!("image_snapshot.doc/pixels.md")]
     pixels: Option<Arc<[u8]>>,
 }
 
 impl ImageSnapshot {
-    /// The FNV-1a 64-bit offset basis.
+    #[doc = include_str!("image_snapshot.doc/FNV_OFFSET.md")]
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    /// The FNV-1a 64-bit prime.
+    #[doc = include_str!("image_snapshot.doc/FNV_PRIME.md")]
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    /// Captures an image snapshot from raw pixel `bytes` of a `width` × `height`
-    /// raster.
-    ///
-    /// Any 4-bytes-per-pixel layout works — RGBA8, BGRA8, premultiplied or not —
-    /// as long as both sides of a comparison use the same one, since a
-    /// per-channel delta is computed bytewise.
-    ///
-    /// The `bytes` are hashed with FNV-1a into a stable content digest and
-    /// retained for [`compare_within`](Self::compare_within): identical
-    /// dimensions and bytes always produce an equal snapshot.
+    #[doc = include_str!("image_snapshot.doc/from_rgba.md")]
     #[must_use]
     pub fn from_rgba(width: u32, height: u32, bytes: &[u8]) -> Self {
         let mut hash = Self::FNV_OFFSET;
@@ -323,11 +184,7 @@ impl ImageSnapshot {
         }
     }
 
-    /// Builds a **hash-only** snapshot from an already-computed content hash,
-    /// for callers that hashed the pixels themselves.
-    ///
-    /// The result carries no raster, so [`compare_within`](Self::compare_within)
-    /// on it reports [`GoldenMismatch::PixelsUnavailable`] rather than a verdict.
+    #[doc = include_str!("image_snapshot.doc/from_parts.md")]
     #[must_use]
     pub const fn from_parts(width: u32, height: u32, pixel_hash: u64) -> Self {
         Self {
@@ -338,52 +195,37 @@ impl ImageSnapshot {
         }
     }
 
-    /// The image width in physical pixels.
+    #[doc = include_str!("image_snapshot.doc/width_2.md")]
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
-    /// The image height in physical pixels.
+    #[doc = include_str!("image_snapshot.doc/height_2.md")]
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
-    /// The stable content hash of the image's bytes.
+    #[doc = include_str!("image_snapshot.doc/pixel_hash_2.md")]
     #[must_use]
     pub const fn pixel_hash(&self) -> u64 {
         self.pixel_hash
     }
 
-    /// The captured raster, if this snapshot was built from one.
+    #[doc = include_str!("image_snapshot.doc/pixels_2.md")]
     #[must_use]
     pub fn pixels(&self) -> Option<&[u8]> {
         self.pixels.as_deref()
     }
 
-    /// Whether the image has zero area.
+    #[doc = include_str!("image_snapshot.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
 
-    /// Compares this render against a golden `other` under an **explicit
-    /// tolerance** (spec §7.14).
-    ///
-    /// `self` is the golden and `other` the render under test; the comparison is
-    /// symmetric, so the roles only shape the error's `expected`/`actual`.
-    ///
-    /// Returns the measured [`ImageDiff`] when the render is within tolerance —
-    /// including how much headroom was left — and a [`GoldenMismatch`] for every
-    /// way the check does not hold, *including* the ways it could not run at all.
-    ///
-    /// # Errors
-    ///
-    /// - [`GoldenMismatch::DimensionMismatch`] — the rasters are different sizes.
-    /// - [`GoldenMismatch::ByteLengthMismatch`] — same size, different byte counts.
-    /// - [`GoldenMismatch::PixelsUnavailable`] — a side carries only a hash.
-    /// - [`GoldenMismatch::TooManyDifferingPixels`] — too much of the image moved.
+    #[doc = include_str!("image_snapshot.doc/compare_within.md")]
     pub fn compare_within(
         &self,
         other: &Self,
@@ -436,15 +278,7 @@ impl ImageSnapshot {
     }
 }
 
-/// Exact **content identity**: dimensions and content hash.
-///
-/// Retained pixels are deliberately *not* part of equality. Equality answers the
-/// determinism question — same backend, same bytes — which the hash already
-/// decides, and keeping it hash-based means a hash-only
-/// [`from_parts`](ImageSnapshot::from_parts) snapshot still compares equal to the
-/// raster it was digested from. The §7.14 tolerant comparison is
-/// [`compare_within`](ImageSnapshot::compare_within), which is a different
-/// question and is not an equivalence relation at all — it is not transitive.
+#[doc = include_str!("image_snapshot.doc/PartialEq.md")]
 impl PartialEq for ImageSnapshot {
     fn eq(&self, other: &Self) -> bool {
         self.width == other.width

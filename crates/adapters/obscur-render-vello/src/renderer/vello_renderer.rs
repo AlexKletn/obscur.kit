@@ -1,4 +1,4 @@
-//! The Vello/wgpu implementation of the [`Renderer`] port (spec §5.2, §2.7).
+#![doc = include_str!("vello_renderer.doc/_module.md")]
 
 use std::sync::Arc;
 
@@ -13,79 +13,38 @@ use obscur_render::target::RenderTarget;
 
 use obscur_scene::command::{DisplayList, PaintCommand};
 
-use vello::Scene;
-use vello::kurbo::Affine;
 use vello::peniko::{Blob, FontData};
 
-use crate::conversion::{BlurLayer, SceneConverter, SceneSegment};
+use crate::conversion::SceneConverter;
 use crate::effects::{ColorMatrix, GaussianBlur};
 use crate::error::VelloRenderError;
+use crate::renderer::filter_layer_pass::PreparedFilterLayers;
+use crate::renderer::segmented_compositor::SegmentedCompositor;
 use crate::renderer::{VelloDevice, VelloFrame, VelloSurface};
 
-/// A GPU-accelerated [`Renderer`] backed by Vello and wgpu (spec §5.2).
-///
-/// # Optional device
-///
-/// The GPU device is host-provided and therefore **optional** (spec §2.7): a
-/// freshly constructed `VelloRenderer` holds no [`VelloDevice`], and
-/// [`Renderer::render`] then returns an honest
-/// [`RendererError::DeviceLost`] rather than fabricating a device (which would
-/// require the async `request_adapter` path the adapter refuses to own). A host
-/// attaches a device with [`Self::with_device`] / [`Self::set_device`] once it
-/// has created the wgpu context. Everything except the actual GPU submission —
-/// identity, capabilities, effect support, scene conversion — works without a
-/// device and is unit-tested that way.
-///
-/// # Effect support
-///
-/// The advertised capability profile is a GPU backend's: offscreen output, MSAA,
-/// custom shaders (gating the trusted extensions of spec §5.3), no HDR. See
-/// [`Renderer::supports_effect`] for the honest per-effect [`SupportLevel`].
+#[doc = include_str!("vello_renderer.doc/VelloRenderer.md")]
 pub struct VelloRenderer {
     id: RendererId,
     capabilities: RendererCapabilities,
     device: Option<VelloDevice>,
     scene_converter: SceneConverter,
     frames_rendered: u64,
-    /// Cached surface blitter for the on-screen present path, keyed by the
-    /// surface format it was built for. Rebuilding a `TextureBlitter` recompiles
-    /// its render pipeline, so we keep one alive across frames and only rebuild
-    /// when absent or when the surface format changes.
+    #[doc = include_str!("vello_renderer.doc/blitter.md")]
     blitter: Option<(wgpu::TextureFormat, wgpu::util::TextureBlitter)>,
-    /// Cached offscreen render target, reused while the extent holds.
-    ///
-    /// Vello renders into an offscreen and the result is blitted to the surface
-    /// (the surface cannot carry the STORAGE_BINDING usage Vello needs). That
-    /// target used to be allocated **per frame** — a full-window RGBA texture
-    /// created and dropped 60-120 times a second, which dominated present. Vello
-    /// clears it to `base_color` on every render, so reuse shows nothing stale.
+    #[doc = include_str!("vello_renderer.doc/frame_cache.md")]
     frame_cache: Option<VelloFrame>,
-    /// Cached owned wgpu gaussian-blur pipeline set for `filter: blur()` (spec
-    /// §5.2). Built lazily on the first blurred frame (it needs the device) and
-    /// reused across frames; a scene with no blur layer never constructs it, so
-    /// the non-blur path is byte-identical to before.
+    #[doc = include_str!("vello_renderer.doc/blur.md")]
     blur: Option<GaussianBlur>,
-    /// Cached owned wgpu color-matrix pipeline for the CSS color-matrix `filter`
-    /// functions (grayscale/brightness/contrast/saturate/sepia/invert/hue-rotate/
-    /// opacity). Built lazily on the first color-filtered frame and reused; a scene
-    /// with no color-matrix layer never constructs it (byte-identical to before).
+    #[doc = include_str!("vello_renderer.doc/color_matrix.md")]
     color_matrix: Option<ColorMatrix>,
-    /// Where the §5.2 explicit fallback diagnostics go; [`NullDiagnosticSink`]
-    /// until a host installs one, so an unreproducible effect follows the same code
-    /// path whether or not anyone is listening.
+    #[doc = include_str!("vello_renderer.doc/diagnostics.md")]
     diagnostics: Arc<dyn DiagnosticSink>,
-    /// Which unsupported effects have already been reported, so a standing mask
-    /// clip does not re-raise its diagnostic every frame.
+    #[doc = include_str!("vello_renderer.doc/fallbacks.md")]
     fallbacks: EffectFallbackReporter,
 }
 
 impl VelloRenderer {
-    /// Creates a device-less Vello renderer with the given `id`.
-    ///
-    /// The capability profile is the Vello GPU backend's: offscreen and MSAA
-    /// capable, custom shaders permitted (spec §5.3), HDR not offered. A host
-    /// must call [`Self::set_device`] before [`Renderer::render`] can submit GPU
-    /// work.
+    #[doc = include_str!("vello_renderer.doc/new.md")]
     #[must_use]
     pub fn new(id: RendererId) -> Self {
         Self {
@@ -107,90 +66,35 @@ impl VelloRenderer {
         }
     }
 
-    /// Installs the [`DiagnosticSink`] the §5.2 explicit diagnostics are emitted to.
-    /// Two kinds arrive here, each raised the first time it applies:
-    ///
-    /// - a [`RendererError::UnsupportedEffect`] per effect a rendered scene demands
-    ///   that this backend reports [`Unavailable`](SupportLevel::Unavailable);
-    /// - an [`EffectFallback`] per effect it *did* draw, approximated, because the
-    ///   restriction its [`Limited`](SupportLevel::Limited) level names actually bit
-    ///   on that scene — today, a text run this renderer has no font for, which is
-    ///   dropped silently and so is invisible in the output.
-    ///
-    /// Not every approximation is announced — the text fallback above is the only one
-    /// today. [`Renderer::supports_effect`] remains the complete statement of what
-    /// this backend does with an effect.
-    ///
-    /// Installing a sink is the **host's** job and nothing in this workspace does it:
-    /// the default is a [`NullDiagnosticSink`], and the `Renderer` port carries no
-    /// sink, so a generic runtime cannot install one — only whoever constructs this
-    /// concrete backend can. Until it is called, both diagnostics above are built and
-    /// dropped. That is deliberate (the render path does not branch on whether anyone
-    /// is listening), but it does mean §5.2's "explicit diagnostics" are *available*
-    /// here, not *delivered*.
+    #[doc = include_str!("vello_renderer.doc/set_diagnostic_sink.md")]
     pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
         self.diagnostics = sink;
     }
 
-    /// Attaches a host-provided [`VelloDevice`], returning the updated renderer.
+    #[doc = include_str!("vello_renderer.doc/with_device.md")]
     #[must_use]
     pub fn with_device(mut self, device: VelloDevice) -> Self {
         self.device = Some(device);
         self
     }
 
-    /// Attaches (or replaces) the host-provided [`VelloDevice`].
+    #[doc = include_str!("vello_renderer.doc/set_device.md")]
     pub fn set_device(&mut self, device: VelloDevice) {
         self.device = Some(device);
     }
 
-    /// Registers (or replaces) a host-provided font under the run font handle
-    /// `id` (`0` = primary; higher ids are fallback faces).
-    ///
-    /// Fonts are a host resource, mirroring the host-provides-device pattern:
-    /// the adapter never bundles one, so the host reads a font file and hands
-    /// the raw bytes here. The bytes are wrapped in a peniko [`FontData`] (sfnt
-    /// face index 0) and forwarded to the scene converter, which draws each
-    /// [`DrawText`](obscur_scene::command::PaintCommand::DrawText) run against
-    /// the font whose id matches the run's
-    /// [`font`](obscur_scene::text::GlyphRun::font) handle.
-    ///
-    /// The `id` **must** match the face id the runtime's font resolver (e.g.
-    /// `FontRegistry`) assigned to the same bytes, so scene run handles line up
-    /// with these fonts. Until a covering font is registered, its runs are
-    /// skipped.
+    #[doc = include_str!("vello_renderer.doc/register_font.md")]
     pub fn register_font(&mut self, id: u32, font_bytes: Vec<u8>) {
         let font = FontData::new(Blob::from(font_bytes), 0);
         self.scene_converter.register_font(id, font);
     }
 
-    /// Attaches (or replaces) the primary host font (run font handle `0`).
-    ///
-    /// Back-compat shim over [`Self::register_font`]: single-font hosts keep
-    /// working, and every untagged run renders against this face. Until this (or
-    /// [`Self::register_font`]) is called, text runs are skipped.
+    #[doc = include_str!("vello_renderer.doc/set_font.md")]
     pub fn set_font(&mut self, font_bytes: Vec<u8>) {
         self.register_font(0, font_bytes);
     }
 
-    /// The [`SceneEffect::Text`] fallbacks this backend will take drawing `list`:
-    /// one per font handle whose runs will be skipped for want of a font
-    /// (spec §5.2).
-    ///
-    /// This backend's restriction on `Text` is harsher than the CPU rasterizer's —
-    /// there is no box-coverage stand-in here, the run is simply not drawn — which
-    /// is why naming it matters most: nothing appears, so there is no artifact for a
-    /// host to notice.
-    ///
-    /// The predicate is [`SceneConverter::can_draw_text`], i.e. `font_for`'s registry
-    /// lookup, because that is the only gate the draw path applies. It is therefore
-    /// **narrower than the CPU backend's**, which also requires the bytes to parse:
-    /// registering unparseable bytes here satisfies this scan and raises nothing,
-    /// and Vello's own glyph pipeline then **panics** rather than drawing nothing
-    /// (`Scene::draw_glyphs` unwraps its `FontRef`). Reporting it would mean parsing
-    /// fonts this backend never parses, so it is left un-diagnosed rather than
-    /// guessed at — but the failure is a crash, not a blank run, and a host that
-    /// registers untrusted bytes owns that.
+    #[doc = include_str!("vello_renderer.doc/text_fallbacks.md")]
     fn text_fallbacks(&self, list: &DisplayList) -> Vec<EffectFallback> {
         text_run_font_handles(list)
             .into_iter()
@@ -208,38 +112,19 @@ impl VelloRenderer {
             .collect()
     }
 
-    /// Whether a GPU device is attached and rendering can submit work.
+    #[doc = include_str!("vello_renderer.doc/has_device.md")]
     #[must_use]
     pub const fn has_device(&self) -> bool {
         self.device.is_some()
     }
 
-    /// The number of frames this renderer has successfully rendered.
+    #[doc = include_str!("vello_renderer.doc/frames_rendered.md")]
     #[must_use]
     pub const fn frames_rendered(&self) -> u64 {
         self.frames_rendered
     }
 
-    /// Renders `submission` into an offscreen [`VelloFrame`]: the main Vello scene,
-    /// then our **own** wgpu gaussian pass for every `filter: blur()` layer.
-    ///
-    /// This is the shared core the on-screen present ([`Self::present_to_surface`]),
-    /// the headless read-back ([`Self::render_to_image`]), and the port
-    /// [`Renderer::render`] all funnel through, so every path produces the exact
-    /// same pixels. The display list is converted into a main scene plus a list of
-    /// [`BlurLayer`] sub-scenes ([`SceneConverter::convert_with_blurs`]); the main
-    /// scene is rasterized into the frame, then each blur layer is rendered into a
-    /// margin-padded offscreen, run through a separable gaussian, and composited
-    /// back onto the frame. With no blur layer this is exactly the previous single
-    /// [`render_to_texture`](vello::Renderer::render_to_texture) — byte-identical.
-    ///
-    /// # Errors
-    ///
-    /// [`RendererError::DeviceLost`] when no device is attached, or
-    /// [`RendererError::Backend`] on a Vello rasterization failure.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    /// The offscreen target for `width` x `height`, allocated once and reused until
-    /// the extent changes (a resize).
+    #[doc = include_str!("vello_renderer.doc/cached_offscreen.md")]
     fn cached_offscreen(&mut self, device: &wgpu::Device, width: u32, height: u32) -> VelloFrame {
         if let Some(frame) = self.frame_cache.as_ref() {
             if frame.width() == width && frame.height() == height {
@@ -251,6 +136,8 @@ impl VelloRenderer {
         frame
     }
 
+    #[doc = include_str!("vello_renderer.doc/render_to_frame.md")]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn render_to_frame(
         &mut self,
         submission: &FrameSubmission,
@@ -284,7 +171,15 @@ impl VelloRenderer {
             .iter()
             .any(|command| matches!(command, PaintCommand::BackdropFilter { .. }))
         {
-            return self.render_segmented(display_list, width, height);
+            // Convert first (device-free): the ordered content / backdrop segments.
+            let segments = self.scene_converter.convert_segments(display_list);
+            let Some(device) = self.device.as_mut() else {
+                return Err(
+                    VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
+                );
+            };
+            return SegmentedCompositor::new(device, &mut self.blur, &mut self.color_matrix)
+                .composite(segments, width, height);
         }
 
         // Convert first (device-free): the main scene plus any blur sub-scenes.
@@ -326,51 +221,19 @@ impl VelloRenderer {
         if !blurs.is_empty() {
             // Render each blur sub-scene into its own margin-padded offscreen: the
             // margin (~3σ) keeps the gaussian tail from being clipped at the edge.
-            let mut prepared: Vec<(VelloFrame, (f32, f32), BlurLayer)> =
-                Vec::with_capacity(blurs.len());
-            for blur in blurs {
-                let margin = (blur.radius * 3.0).ceil().max(1.0);
-                let s_width = (blur.bounds.size.width + 2.0 * margin).ceil().max(1.0) as u32;
-                let s_height = (blur.bounds.size.height + 2.0 * margin).ceil().max(1.0) as u32;
-                let s_frame = VelloFrame::new_offscreen(&gpu_device, s_width, s_height);
-                let (s_width, s_height) = s_frame.size();
-                // Offset the sub-scene so the bounds' top-left maps to (margin, margin).
-                let offset = Affine::translate((
-                    f64::from(margin) - f64::from(blur.bounds.origin.x),
-                    f64::from(margin) - f64::from(blur.bounds.origin.y),
-                ));
-                let mut placed = Scene::new();
-                placed.append(&blur.scene, Some(offset));
-                let sub_params = vello::RenderParams {
-                    base_color: vello::peniko::Color::TRANSPARENT,
-                    width: s_width,
-                    height: s_height,
-                    antialiasing_method: vello::AaConfig::Area,
-                };
-                device
-                    .renderer_mut()
-                    .render_to_texture(
-                        &gpu_device,
-                        &gpu_queue,
-                        &placed,
-                        s_frame.view(),
-                        &sub_params,
-                    )
-                    .map_err(|error| {
-                        VelloRenderError::RenderFailed(error.to_string().into())
-                            .into_renderer_error()
-                    })?;
-                // Absolute pixel top-left the padded offscreen composites back at.
-                let origin = (blur.bounds.origin.x - margin, blur.bounds.origin.y - margin);
-                prepared.push((s_frame, origin, blur));
-            }
+            let prepared = PreparedFilterLayers::render(
+                &gpu_device,
+                &gpu_queue,
+                device.renderer_mut(),
+                blurs,
+            )?;
 
             // The `device` borrow ends here; build/reuse the owned filter pipelines
             // and post-process + composite each filter sub-scene onto the frame in
             // one encoder. The Vello render-to-texture passes above already
             // submitted, so this trailing submit runs after them on the same queue
             // (correct ordering).
-            let needs_color = prepared.iter().any(|(_, _, b)| b.color_matrix.is_some());
+            let needs_color = prepared.needs_color_matrix();
             let gaussian = self
                 .blur
                 .get_or_insert_with(|| GaussianBlur::new(&gpu_device));
@@ -384,22 +247,14 @@ impl VelloRenderer {
                 label: Some("obscur-vello-filter"),
             });
             // Keep any color-matrix scratch textures alive until the encoder submits.
-            let mut scratch: Vec<wgpu::Texture> = Vec::new();
-            for (s_frame, origin, blur) in &prepared {
-                if let Some(tex) = apply_filter_layer(
-                    &gpu_device,
-                    &mut encoder,
-                    gaussian,
-                    color_matrix.as_deref(),
-                    s_frame,
-                    *origin,
-                    blur,
-                    frame.view(),
-                    (width, height),
-                ) {
-                    scratch.push(tex);
-                }
-            }
+            let scratch = prepared.composite(
+                &gpu_device,
+                &mut encoder,
+                gaussian,
+                color_matrix.as_deref(),
+                frame.view(),
+                (width, height),
+            );
             gpu_queue.submit(std::iter::once(encoder.finish()));
             drop(scratch);
         }
@@ -407,270 +262,7 @@ impl VelloRenderer {
         Ok(frame)
     }
 
-    /// Renders a display list containing `backdrop-filter` via **segmented
-    /// compositing** (spec §5.2, CSS `backdrop-filter` — the acrylic effect).
-    ///
-    /// `backdrop-filter` frosts the frame accumulated *so far*, so a single Vello
-    /// render will not do. The list is split at each
-    /// [`BackdropFilter`](PaintCommand::BackdropFilter) into
-    /// [`SceneSegment`]s ([`SceneConverter::convert_segments`]): each
-    /// [`Content`](SceneSegment::Content) run is rendered to a transparent offscreen
-    /// and composited onto an **accumulating frame** `T` (premultiplied-over, so
-    /// segments layer in paint order — no Vello load/no-clear mode needed), and each
-    /// [`Backdrop`](SceneSegment::Backdrop) boundary frosts `T` in place under the
-    /// panel's rounded border box via the owned
-    /// [`GaussianBlur::render_backdrop`]. A content run's `filter: blur` layers are
-    /// composited on top just as the non-segmented path does. The same owned
-    /// [`GaussianBlur`] pipelines are reused; this path is shared by every caller of
-    /// [`Self::render_to_frame`] (present + read-back + the port `render`).
-    ///
-    /// # Errors
-    ///
-    /// [`RendererError::DeviceLost`] when no device is attached, or
-    /// [`RendererError::Backend`] on a Vello rasterization failure.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss
-    )]
-    fn render_segmented(
-        &mut self,
-        display_list: &DisplayList,
-        width: u32,
-        height: u32,
-    ) -> Result<VelloFrame, RendererError> {
-        // Convert first (device-free): the ordered content / backdrop segments.
-        let segments = self.scene_converter.convert_segments(display_list);
-
-        let Some(device) = self.device.as_ref() else {
-            return Err(
-                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
-            );
-        };
-        let gpu_device = device.device().clone();
-        let gpu_queue = device.queue().clone();
-
-        // The accumulating frame `T`: segments composite onto it in order, and each
-        // backdrop boundary frosts it in place. Clear it to transparent first (it is
-        // never a Vello render target, so nothing else initialises it).
-        let frame = VelloFrame::new_offscreen(&gpu_device, width, height);
-        let (width, height) = frame.size();
-        {
-            let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("obscur-vello-backdrop-clear"),
-            });
-            drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("obscur-vello-backdrop-clear-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: frame.view(),
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            }));
-            gpu_queue.submit(std::iter::once(encoder.finish()));
-        }
-
-        // Build (once) / reuse the owned blur + composite pipelines.
-        if self.blur.is_none() {
-            self.blur = Some(GaussianBlur::new(&gpu_device));
-        }
-
-        for segment in segments {
-            match segment {
-                SceneSegment::Content { scene, blurs } => {
-                    // Render this segment's content into a fresh transparent
-                    // offscreen (Vello clears it to `base_color`).
-                    let seg_frame = VelloFrame::new_offscreen(&gpu_device, width, height);
-                    let params = vello::RenderParams {
-                        base_color: vello::peniko::Color::TRANSPARENT,
-                        width,
-                        height,
-                        antialiasing_method: vello::AaConfig::Area,
-                    };
-                    {
-                        let device = self
-                            .device
-                            .as_mut()
-                            .expect("device present (checked above)");
-                        device
-                            .renderer_mut()
-                            .render_to_texture(
-                                &gpu_device,
-                                &gpu_queue,
-                                &scene,
-                                seg_frame.view(),
-                                &params,
-                            )
-                            .map_err(|error| {
-                                VelloRenderError::RenderFailed(error.to_string().into())
-                                    .into_renderer_error()
-                            })?;
-                    }
-
-                    // Render this segment's `filter: blur` sub-scenes into their own
-                    // margin-padded offscreens (same prep as the fast path).
-                    let mut prepared: Vec<(VelloFrame, (f32, f32), BlurLayer)> =
-                        Vec::with_capacity(blurs.len());
-                    for blur in blurs {
-                        let margin = (blur.radius * 3.0).ceil().max(1.0);
-                        let s_width =
-                            (blur.bounds.size.width + 2.0 * margin).ceil().max(1.0) as u32;
-                        let s_height =
-                            (blur.bounds.size.height + 2.0 * margin).ceil().max(1.0) as u32;
-                        let s_frame = VelloFrame::new_offscreen(&gpu_device, s_width, s_height);
-                        let (s_width, s_height) = s_frame.size();
-                        let offset = Affine::translate((
-                            f64::from(margin) - f64::from(blur.bounds.origin.x),
-                            f64::from(margin) - f64::from(blur.bounds.origin.y),
-                        ));
-                        let mut placed = Scene::new();
-                        placed.append(&blur.scene, Some(offset));
-                        let sub_params = vello::RenderParams {
-                            base_color: vello::peniko::Color::TRANSPARENT,
-                            width: s_width,
-                            height: s_height,
-                            antialiasing_method: vello::AaConfig::Area,
-                        };
-                        {
-                            let device = self
-                                .device
-                                .as_mut()
-                                .expect("device present (checked above)");
-                            device
-                                .renderer_mut()
-                                .render_to_texture(
-                                    &gpu_device,
-                                    &gpu_queue,
-                                    &placed,
-                                    s_frame.view(),
-                                    &sub_params,
-                                )
-                                .map_err(|error| {
-                                    VelloRenderError::RenderFailed(error.to_string().into())
-                                        .into_renderer_error()
-                                })?;
-                        }
-                        let origin = (blur.bounds.origin.x - margin, blur.bounds.origin.y - margin);
-                        prepared.push((s_frame, origin, blur));
-                    }
-
-                    // Composite the segment (whole-frame) onto `T`, then its filter
-                    // layers on top, in one encoder submitted after the Vello renders.
-                    let needs_color = prepared.iter().any(|(_, _, b)| b.color_matrix.is_some());
-                    let gaussian = self.blur.as_ref().expect("blur pipelines built above");
-                    // Build/reuse the color-matrix pipeline only when a color op is
-                    // present (byte-identical no-color path otherwise).
-                    let color_matrix = needs_color.then(|| {
-                        self.color_matrix
-                            .get_or_insert_with(|| ColorMatrix::new(&gpu_device))
-                    });
-                    let mut encoder =
-                        gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("obscur-vello-segment-composite"),
-                        });
-                    gaussian.composite_over(
-                        &gpu_device,
-                        &mut encoder,
-                        seg_frame.view(),
-                        frame.view(),
-                    );
-                    let mut scratch: Vec<wgpu::Texture> = Vec::new();
-                    for (s_frame, origin, blur) in &prepared {
-                        if let Some(tex) = apply_filter_layer(
-                            &gpu_device,
-                            &mut encoder,
-                            gaussian,
-                            color_matrix.as_deref(),
-                            s_frame,
-                            *origin,
-                            blur,
-                            frame.view(),
-                            (width, height),
-                        ) {
-                            scratch.push(tex);
-                        }
-                    }
-                    gpu_queue.submit(std::iter::once(encoder.finish()));
-                    drop(scratch);
-                }
-                SceneSegment::Backdrop {
-                    bounds,
-                    radii,
-                    blur,
-                } => {
-                    let gaussian = self.blur.as_ref().expect("blur pipelines built above");
-                    let mut encoder =
-                        gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("obscur-vello-backdrop"),
-                        });
-                    gaussian.render_backdrop(
-                        &gpu_device,
-                        &mut encoder,
-                        frame.texture(),
-                        frame.view(),
-                        (width, height),
-                        [
-                            bounds.origin.x,
-                            bounds.origin.y,
-                            bounds.origin.x + bounds.size.width,
-                            bounds.origin.y + bounds.size.height,
-                        ],
-                        // The backdrop mask's WGSL SDF (`rounded_rect_coverage` in
-                        // `gaussian_blur.wgsl`) is a per-corner *circular* rounded
-                        // box: it selects one corner radius by quadrant and does
-                        // `length(q) - r`, which has no elliptical form. So a panel
-                        // with elliptical corners (`border-radius: 50%` on a
-                        // non-square box) frosts to the closest circle per corner —
-                        // the mean of its two axes, exact whenever the corner is
-                        // already circular. Confined to the backdrop-filter effect;
-                        // the panel's own clip and fill keep the true ellipse via
-                        // `Path`. See `docs/conformance-audit.md` finding 4-A.
-                        [
-                            radii.top_left.circular_approximation(),
-                            radii.top_right.circular_approximation(),
-                            radii.bottom_right.circular_approximation(),
-                            radii.bottom_left.circular_approximation(),
-                        ],
-                        blur,
-                    );
-                    gpu_queue.submit(std::iter::once(encoder.finish()));
-                }
-            }
-        }
-
-        Ok(frame)
-    }
-
-    /// Presents a submission **on-screen** by rendering into the adapter's
-    /// offscreen [`VelloFrame`] and blitting it to a windowed [`VelloSurface`].
-    ///
-    /// This is the counterpart to the port [`Renderer::render`], which targets an
-    /// offscreen texture only. Vello 0.9 has no render-to-surface helper, so the
-    /// documented pattern is followed here: rasterize into an
-    /// `Rgba8Unorm + STORAGE_BINDING` intermediate (`VelloFrame::new_offscreen`)
-    /// with [`vello::Renderer::render_to_texture`], then copy that texture onto
-    /// the acquired swapchain image with a [`wgpu::util::TextureBlitter`]. The
-    /// blitter is cached on the renderer (keyed by surface format) so its render
-    /// pipeline is only compiled once, not per frame.
-    ///
-    /// This is an inherent method, not part of the [`Renderer`] trait: only a host
-    /// that owns a window and a [`VelloSurface`] can drive it, whereas the trait's
-    /// offscreen path stays device- and window-agnostic.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RendererError::DeviceLost`] when no GPU device is attached,
-    /// [`RendererError::Backend`] when the surface has a zero extent or Vello's
-    /// rasterization fails, and surfaces any swapchain-acquisition failure
-    /// (e.g. [`RendererError::Backend`] for a lost/outdated surface).
+    #[doc = include_str!("vello_renderer.doc/present_to_surface.md")]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn present_to_surface(
         &mut self,
@@ -738,30 +330,7 @@ impl VelloRenderer {
         })
     }
 
-    /// Renders `submission` fully **headless** into an offscreen texture and reads
-    /// the pixels back to CPU memory as tightly-packed RGBA8 (spec §5.6 offscreen
-    /// output).
-    ///
-    /// This is the read-back counterpart to the port [`Renderer::render`] (which
-    /// leaves the result on the GPU) and to [`Self::present_to_surface`] (which
-    /// blits it to a window): it rasterizes into the same
-    /// [`VelloFrame::new_offscreen`] intermediate with
-    /// [`vello::Renderer::render_to_texture`], then copies that texture into a
-    /// mappable [`wgpu::Buffer`] — honoring wgpu's
-    /// [`COPY_BYTES_PER_ROW_ALIGNMENT`](wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) 256-byte
-    /// row stride — waits for the copy with a blocking [`Device::poll`], un-pads the
-    /// rows, and returns `(width, height, rgba8)`. It **does not** disturb the
-    /// on-screen path or the trait `render`; a host uses it to produce PNGs from a
-    /// display list without a window.
-    ///
-    /// The returned bytes are **premultiplied** RGBA8 (Vello's texture output), so
-    /// they can be handed straight to e.g. `tiny_skia::Pixmap::from_vec`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RendererError::DeviceLost`] when no GPU device is attached, and
-    /// [`RendererError::Backend`] on a zero extent, a Vello rasterization failure,
-    /// or a buffer-map / device-poll failure.
+    #[doc = include_str!("vello_renderer.doc/render_to_image.md")]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn render_to_image(
         &mut self,
@@ -865,90 +434,6 @@ impl VelloRenderer {
     }
 }
 
-/// Post-processes and composites one prepared `filter` sub-scene onto the target
-/// frame: the owned color-matrix pass (if the layer carries one) then the gaussian
-/// blur (if `radius > 0`), sharing the offscreen/composite plumbing.
-///
-/// `s_frame` is the layer's subtree rendered into its margin-padded offscreen (in
-/// absolute coordinates offset so its top-left maps to `origin`). The order is:
-/// color-matrix (into a scratch texture) → blur → composite, matching a
-/// `filter: <color-op> blur()` chain (a color op applied before the spatial
-/// gaussian). A color-only layer (`radius == 0`) composites the color result
-/// directly; a blur-only layer (`color_matrix == None`) is byte-identical to the
-/// shipped blur path.
-///
-/// Returns the color-matrix scratch texture (when one was allocated) so the caller
-/// keeps it alive until the shared encoder is submitted.
-#[allow(clippy::too_many_arguments)]
-fn apply_filter_layer(
-    device: &wgpu::Device,
-    encoder: &mut wgpu::CommandEncoder,
-    gaussian: &GaussianBlur,
-    color_matrix: Option<&ColorMatrix>,
-    s_frame: &VelloFrame,
-    origin: (f32, f32),
-    layer: &BlurLayer,
-    target_view: &wgpu::TextureView,
-    target_size: (u32, u32),
-) -> Option<wgpu::Texture> {
-    let (sw, sh) = s_frame.size();
-
-    // Optional color-matrix pre-pass: transform the sub-scene into a scratch texture.
-    let scratch = layer.color_matrix.and_then(|matrix| {
-        let color_matrix = color_matrix?;
-        let scratch = color_matrix.scratch_texture(device, sw, sh);
-        let src_view = s_frame
-            .texture()
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let scratch_view = scratch.create_view(&wgpu::TextureViewDescriptor::default());
-        color_matrix.apply(device, encoder, &src_view, &scratch_view, &matrix);
-        Some(scratch)
-    });
-
-    // The source for the following blur/composite is the color-matrix scratch (if a
-    // matrix was applied) or the raw sub-scene frame otherwise. A color-transformed
-    // scratch may be translucent (e.g. `opacity()`), so it composites premultiplied;
-    // the raw blur path stays `false` (byte-identical to the shipped opaque path).
-    let (source_view, premultiply) = match &scratch {
-        Some(tex) => (
-            tex.create_view(&wgpu::TextureViewDescriptor::default()),
-            true,
-        ),
-        None => (
-            s_frame
-                .texture()
-                .create_view(&wgpu::TextureViewDescriptor::default()),
-            false,
-        ),
-    };
-
-    if layer.radius > 0.0 {
-        gaussian.render_view(
-            device,
-            encoder,
-            &source_view,
-            (sw, sh),
-            origin,
-            layer.radius,
-            target_view,
-            target_size,
-        );
-    } else {
-        gaussian.composite_texture(
-            device,
-            encoder,
-            &source_view,
-            (sw, sh),
-            origin,
-            target_view,
-            target_size,
-            premultiply,
-        );
-    }
-
-    scratch
-}
-
 impl Default for VelloRenderer {
     fn default() -> Self {
         Self::new(RendererId::from_raw(0))
@@ -990,42 +475,7 @@ impl Renderer for VelloRenderer {
         })
     }
 
-    /// The honest [`SupportLevel`] at which this GPU backend reproduces each
-    /// [`SceneEffect`] (spec §5.2).
-    ///
-    /// - [`Gradient`](SceneEffect::Gradient), [`Clip`](SceneEffect::Clip), and
-    ///   [`Image`](SceneEffect::Image) are [`Native`](SupportLevel::Native): a
-    ///   gradient brush becomes a peniko gradient over the same geometry and
-    ///   stops, a clip becomes a bounded `push_layer`, and a `DrawImage` a real
-    ///   sampled `draw_image`.
-    /// - [`BlendMode`](SceneEffect::BlendMode) is [`Limited`](SupportLevel::Limited),
-    ///   because the variant names two inputs and this backend honours one. A
-    ///   layer's `blend_mode()` **field** becomes a peniko `Mix` natively. A
-    ///   [`LayerEffect::Blend`](obscur_scene::layer::LayerEffect::Blend) in the
-    ///   layer's *effects list* is **dropped**: `push_layer` reads the field, and
-    ///   the effects list is scanned only for `Blur` and `ColorMatrix`. Reporting
-    ///   `Native` claimed both. Nothing produces a `LayerEffect::Blend` today — it
-    ///   duplicates the field — so this is latent, not live.
-    /// - [`Shadow`](SceneEffect::Shadow) and
-    ///   [`BackdropFilter`](SceneEffect::BackdropFilter) are
-    ///   [`Emulated`](SupportLevel::Emulated): both are real gaussians — a shadow
-    ///   through `draw_blurred_rounded_rect`, a backdrop through the owned segmented
-    ///   wgpu compositing path — but assembled from primitives rather than a single
-    ///   native op.
-    /// - [`Blur`](SceneEffect::Blur) and [`ColorMatrix`](SceneEffect::ColorMatrix)
-    ///   are [`Limited`](SupportLevel::Limited): a `filter: blur()` / color-op layer
-    ///   runs through our owned wgpu passes (a real gaussian, a real per-pixel
-    ///   affine), but only when the layer is peeled off the main scene — which needs
-    ///   the layer to carry a bounded clip, and does not recurse. **A filter layer
-    ///   nested inside another filter layer is drawn unfiltered**, as is one with no
-    ///   clip bounds. A `DrawShadow`'s own blur radius has no such restriction.
-    /// - [`Text`](SceneEffect::Text) is `Limited`: glyphs draw against the font
-    ///   registered for the run's handle; a run whose font was never registered is
-    ///   **skipped entirely**.
-    /// - [`Mask`](SceneEffect::Mask) is [`Unavailable`](SupportLevel::Unavailable):
-    ///   a mask clip converts to the unbounded outline, so its coverage is never
-    ///   applied — the same as on the CPU backend (spec §5.2: clipping must match
-    ///   across backends).
+    #[doc = include_str!("vello_renderer.doc/supports_effect.md")]
     fn supports_effect(&self, effect: SceneEffect) -> SupportLevel {
         match effect {
             SceneEffect::Gradient | SceneEffect::Clip | SceneEffect::Image => SupportLevel::Native,

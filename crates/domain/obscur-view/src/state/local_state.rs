@@ -1,18 +1,8 @@
-//! `LocalState`: a component's owned, mutable local view state.
+#![doc = include_str!("local_state.doc/_module.md")]
 
 use crate::state::{ReadSignal, StateGeneration};
 
-/// A component's owned, mutable local view state.
-///
-/// Per spec §2.1/§10 a component *may* own local view state; this is that
-/// primitive. Because the component owns the value outright, mutation is
-/// expressed through `&mut self` — plain Rust ownership — rather than interior
-/// mutability (`RefCell`/`Rc`) or any global store. Every mutation advances a
-/// [`StateGeneration`] so downstream consumers can cheaply detect the change.
-///
-/// State only ever flows *out* as a read-only [`ReadSignal`] via
-/// [`LocalState::read`]; there is no shared writable handle, keeping the
-/// "values flow down, actions flow up" discipline intact.
+#[doc = include_str!("local_state.doc/LocalState.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LocalState<T> {
     value: T,
@@ -20,7 +10,7 @@ pub struct LocalState<T> {
 }
 
 impl<T> LocalState<T> {
-    /// Creates local state seeded with `value` at the initial generation.
+    #[doc = include_str!("local_state.doc/new.md")]
     #[must_use]
     pub const fn new(value: T) -> Self {
         Self {
@@ -29,47 +19,38 @@ impl<T> LocalState<T> {
         }
     }
 
-    /// Borrows the current value without affecting the generation.
+    #[doc = include_str!("local_state.doc/get.md")]
     #[must_use]
     pub const fn get(&self) -> &T {
         &self.value
     }
 
-    /// Returns the current generation. It advances on every mutation.
+    #[doc = include_str!("local_state.doc/generation.md")]
     #[must_use]
     pub const fn generation(&self) -> StateGeneration {
         self.generation
     }
 
-    /// Replaces the value and advances the generation.
+    #[doc = include_str!("local_state.doc/set.md")]
     pub fn set(&mut self, value: T) {
         self.value = value;
         self.bump();
     }
 
-    /// Mutates the value in place through `f` and advances the generation.
-    ///
-    /// The generation advances unconditionally, matching the spec's "mutation
-    /// bumps it" rule: the toolkit does not diff values to decide whether a
-    /// change occurred.
+    #[doc = include_str!("local_state.doc/update.md")]
     pub fn update(&mut self, f: impl FnOnce(&mut T)) {
         f(&mut self.value);
         self.bump();
     }
 
-    /// Advances the change generation. Wraps on overflow via [`StateGeneration`].
+    #[doc = include_str!("local_state.doc/bump.md")]
     fn bump(&mut self) {
         self.generation = self.generation.next();
     }
 }
 
 impl<T: Clone> LocalState<T> {
-    /// Produces a read-only [`ReadSignal`] snapshot of the current value and
-    /// generation.
-    ///
-    /// This is the only way state leaves `LocalState`, and it is read-only:
-    /// consumers receive a value they cannot write back through. Re-calling
-    /// `read` after a mutation yields a snapshot with a newer generation.
+    #[doc = include_str!("local_state.doc/read.md")]
     #[must_use]
     pub fn read(&self) -> ReadSignal<T> {
         ReadSignal::new(self.value.clone(), self.generation)

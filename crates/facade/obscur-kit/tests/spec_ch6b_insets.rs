@@ -1,19 +1,4 @@
-//! §6.15 Insets and virtual keyboard — CSS environment values.
-//!
-//! Specification-derived. The expected numbers below come from the case's host
-//! setup (a notched phone reporting a 44px top and a 34px bottom safe-area
-//! inset), never from any constant in this repository.
-//!
-//! NOTE ON THE SETUP. §6.15 requires "Typed environment values: - safe areas"
-//! *and* "CSS environment values may expose safe-area insets", so a case
-//! asserting the second must perform the first. When these cases were written
-//! the crate exposed no API by which a host could supply safe-area insets, so
-//! the setup half could not be written and only the CSS half was asserted —
-//! against a host that reported nothing. `UiRuntime::set_safe_area_insets` now
-//! exists, so the host half is written here, exactly as the "Host:" line below
-//! always described it. **No expected value changed**: the 44 and the 34 are the
-//! ones the case was derived with.
-
+#![doc = include_str!("spec_ch6b_insets.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 mod spec_ch6b_support;
@@ -23,7 +8,7 @@ use obscur_kit::style::computed::ComputedValue;
 use obscur_kit::style::property::{Length, PropertyId};
 use spec_ch6b_support::{at, drive_with_insets, el, origin_of, view};
 
-/// Host: top safe-area inset 44 CSS px, bottom safe-area inset 34 CSS px.
+#[doc = include_str!("spec_ch6b_insets.doc/HOST_INSETS.md")]
 const HOST_INSETS: Insets = Insets {
     top: 44.0,
     right: 0.0,
@@ -43,12 +28,7 @@ fn px_of(v: Option<&ComputedValue>) -> Option<f32> {
     }
 }
 
-/// §6.15 "Typed environment values: - safe areas;" / "CSS environment values may
-/// expose safe-area insets."
-///
-/// `#root { padding-top: env(safe-area-inset-top) }` under a host reporting a
-/// 44px top inset yields a used `padding-top` of 44px, and the content box
-/// starts at y=44. The declaration is not dropped as invalid.
+#[doc = include_str!("spec_ch6b_insets.doc/env_safe_area_inset_top_resolves_to_the_host_inset.md")]
 #[test]
 fn env_safe_area_inset_top_resolves_to_the_host_inset() {
     let v = view(vec![el(1, "root", vec![el(2, "child", vec![])])]);
@@ -73,11 +53,7 @@ fn env_safe_area_inset_top_resolves_to_the_host_inset() {
     );
 }
 
-/// §6.15 "Typed environment values: - safe areas;" / "CSS environment values may
-/// expose safe-area insets."
-///
-/// The bottom inset resolves independently of the top one: a host reporting a
-/// 34px bottom inset gives `#root` a used `padding-bottom` of 34px.
+#[doc = include_str!("spec_ch6b_insets.doc/env_safe_area_inset_bottom_resolves_to_the_host_inset.md")]
 #[test]
 fn env_safe_area_inset_bottom_resolves_to_the_host_inset() {
     let v = view(vec![el(1, "root", vec![el(2, "child", vec![])])]);

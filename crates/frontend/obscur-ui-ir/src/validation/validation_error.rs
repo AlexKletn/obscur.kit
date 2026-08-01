@@ -1,50 +1,27 @@
-//! `UiIrValidationError`: one structural fault found while validating a UI IR
-//! document (spec §2.5 validation).
+#![doc = include_str!("validation_error.doc/_module.md")]
 
-/// A single structural fault discovered while validating a [`UiIrDocument`]
-/// (spec §2.5).
-///
-/// Each variant names one well-formedness rule the IR tree violated. Faults
-/// carry enough context to point a diagnostic back at the offending node — most
-/// variants embed the stable node id, exposed uniformly via
-/// [`node_id`](UiIrValidationError::node_id). The same type is used for both
-/// hard errors and non-fatal warnings; whether a given fault is fatal is decided
-/// by which bucket it lands in on the [`UiIrValidationResult`], not by the
-/// variant itself.
-///
-/// [`UiIrDocument`]: crate::document::UiIrDocument
-/// [`UiIrValidationResult`]: crate::validation::UiIrValidationResult
+#[doc = include_str!("validation_error.doc/UiIrValidationError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiIrValidationError {
-    /// Two nodes in the tree share the same stable id; the payload is the
-    /// duplicated id. Ids must be unique so source maps and diagnostics resolve
-    /// unambiguously.
+    #[doc = include_str!("validation_error.doc/DuplicateNodeId.md")]
     DuplicateNodeId(u64),
-    /// An `Element` or `Component` node carries an empty tag; the payload is the
-    /// node's id. Such nodes have no element name or component to instantiate.
+    #[doc = include_str!("validation_error.doc/EmptyElementTag.md")]
     EmptyElementTag(u64),
-    /// A `Text` node has children; the payload is the node's id. Text leaves
-    /// cannot contain a subtree.
+    #[doc = include_str!("validation_error.doc/TextNodeHasChildren.md")]
     TextNodeHasChildren(u64),
-    /// A property's value is a binding with an empty path. Names the owning
-    /// `node` and the offending `property`.
+    #[doc = include_str!("validation_error.doc/EmptyBindingPath.md")]
     EmptyBindingPath {
-        /// The stable id of the node owning the property.
+        #[doc = include_str!("validation_error.doc/node.md")]
         node: u64,
-        /// The name of the property whose binding path was empty.
+        #[doc = include_str!("validation_error.doc/property.md")]
         property: Box<str>,
     },
-    /// A required capability was not present in a provided allow-set, or a
-    /// declared capability id was itself empty; the payload is the offending
-    /// capability id (empty string for the empty-id case).
+    #[doc = include_str!("validation_error.doc/UndeclaredCapability.md")]
     UndeclaredCapability(Box<str>),
 }
 
 impl UiIrValidationError {
-    /// Returns the stable id of the node this fault concerns, if any.
-    ///
-    /// [`UndeclaredCapability`](UiIrValidationError::UndeclaredCapability)
-    /// concerns a capability rather than a node and so returns `None`.
+    #[doc = include_str!("validation_error.doc/node_id.md")]
     #[must_use]
     pub const fn node_id(&self) -> Option<u64> {
         match self {

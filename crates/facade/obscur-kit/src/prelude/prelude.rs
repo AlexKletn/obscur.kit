@@ -1,5 +1,4 @@
-//! The stable prelude: `use obscur_kit::prelude::*;` brings the most-used types
-//! from across the toolkit into scope (spec §2.9).
+#![doc = include_str!("prelude.doc/_module.md")]
 
 // geometry
 pub use crate::geometry::{Point, Rect, ScaleFactor, Size};

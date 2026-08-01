@@ -1,31 +1,22 @@
-//! `LspDiagnostic`: a transport-agnostic diagnostic ready to be published to an
-//! LSP client.
+#![doc = include_str!("lsp_diagnostic.doc/_module.md")]
 
 use crate::diagnostics::{LspSeverity, Range};
 
-/// A single diagnostic in LSP shape: a source [`Range`], a [`LspSeverity`], a
-/// human-readable `message` and a `source` label naming the producing pass.
-///
-/// This is the core's uniform diagnostic currency: parse errors from the okui
-/// parser and semantic diagnostics from the okui compiler are both mapped into
-/// this type by the [`Analyzer`](crate::Analyzer). A JSON-RPC wrapper serializes
-/// it directly into an LSP `Diagnostic` for `textDocument/publishDiagnostics`.
+#[doc = include_str!("lsp_diagnostic.doc/LspDiagnostic.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LspDiagnostic {
-    /// The source span the diagnostic applies to.
+    #[doc = include_str!("lsp_diagnostic.doc/range.md")]
     pub range: Range,
-    /// The severity of the diagnostic.
+    #[doc = include_str!("lsp_diagnostic.doc/severity.md")]
     pub severity: LspSeverity,
-    /// The human-readable message.
+    #[doc = include_str!("lsp_diagnostic.doc/message.md")]
     pub message: Box<str>,
-    /// A short label naming the pass that produced the diagnostic
-    /// (e.g. `"okui-parse"`, `"okui-compile"`).
+    #[doc = include_str!("lsp_diagnostic.doc/source.md")]
     pub source: &'static str,
 }
 
 impl LspDiagnostic {
-    /// Creates a diagnostic over `range` with `severity`, `message` and
-    /// `source`.
+    #[doc = include_str!("lsp_diagnostic.doc/new.md")]
     #[must_use]
     pub fn new(
         range: Range,

@@ -1,139 +1,71 @@
-//! Typed identifiers for known longhand properties.
-//!
-//! [`PropertyId`] is a *typed* enum, not a string: the cascade and computed-value
-//! machinery dispatch on the variant, never on a property name. Names are kept
-//! only as stable `&'static str`s for diagnostics and `DevTools`.
-//!
-//! The set of variants here is a deliberate Phase-1 starter set. The full CSS
-//! longhand catalogue grows in this enum over time; adding a longhand means
-//! adding a variant plus its rows in [`PropertyId::name`] and
-//! [`PropertyId::default_inheritance`].
+#![doc = include_str!("property_id.doc/_module.md")]
 
 use crate::property::Inheritance;
 
-/// The block-flow / line orientation a box lays its content out under
-/// (`writing-mode`, css-writing-modes-4 §3).
-///
-/// This is the piece the block axis and the inline axis rotate around: it decides
-/// which physical edge `block-start` names (the input [`PropertyId::physical_under`]
-/// needs beyond `direction`), and which physical axis normal flow stacks its
-/// children along.
-///
-/// Only the three modelled values are represented; the sideways / `-rl` line
-/// orientations are out of scope. The default is [`HorizontalTb`](Self::HorizontalTb),
-/// the CSS initial, under which every mapping is byte-for-byte what it was before
-/// `writing-mode` existed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum WritingMode {
-    /// `horizontal-tb` — the CSS initial. Block flow is top-to-bottom (the block
-    /// axis is vertical), inline text runs horizontally.
-    #[default]
-    HorizontalTb,
-    /// `vertical-rl` — block flow is right-to-left (the block axis is horizontal,
-    /// `block-start` is the physical right edge), inline text runs top-to-bottom.
-    VerticalRl,
-    /// `vertical-lr` — block flow is left-to-right (the block axis is horizontal,
-    /// `block-start` is the physical left edge), inline text runs top-to-bottom.
-    VerticalLr,
-}
-
-impl WritingMode {
-    /// Whether the **block** axis is horizontal — i.e. this is one of the two
-    /// vertical writing modes, so normal flow stacks its children left/right rather
-    /// than top/bottom and the inline axis is the vertical one.
-    #[must_use]
-    pub const fn is_vertical(self) -> bool {
-        matches!(self, Self::VerticalRl | Self::VerticalLr)
-    }
-}
-
-/// A typed identifier for a known longhand CSS property.
-///
-/// Only longhands are represented; shorthands expand to longhands before the
-/// cascade sees them. This is `Copy + Eq + Hash` so it can key maps in the
-/// cascade and computed-style storage cheaply.
+#[doc = include_str!("property_id.doc/PropertyId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PropertyId {
-    /// The `color` property (foreground / text color).
+    #[doc = include_str!("property_id.doc/Color.md")]
     Color,
-    /// The `background-color` property.
+    #[doc = include_str!("property_id.doc/BackgroundColor.md")]
     BackgroundColor,
-    /// The `background-image` property (a `LinearGradient` value; NOT inherited).
-    /// Only the `linear-gradient(...)` image form is modelled; when present it
-    /// paints the element's background fill over the `background-color`.
+    #[doc = include_str!("property_id.doc/BackgroundImage.md")]
     BackgroundImage,
-    /// The `background-size` property (a `BackgroundSize` value; NOT inherited).
-    /// Sizes one copy of the `background-image` (`cover` / `contain` / `auto` /
-    /// explicit per-axis lengths); initial `auto`.
+    #[doc = include_str!("property_id.doc/BackgroundSize.md")]
     BackgroundSize,
-    /// The `background-position` property (a `BackgroundPosition` value; NOT
-    /// inherited). Places the sized image tile within the box; initial `0% 0%`.
+    #[doc = include_str!("property_id.doc/BackgroundPosition.md")]
     BackgroundPosition,
-    /// The `background-repeat` property (a `BackgroundRepeat` value; NOT
-    /// inherited). Tiles the sized image tile to fill the box; initial `repeat`.
+    #[doc = include_str!("property_id.doc/BackgroundRepeat.md")]
     BackgroundRepeat,
-    /// The `object-fit` property (an `ObjectFit` value; NOT inherited). Sizes a
-    /// replaced element's content (e.g. an `<img>`'s pixels) within its content
-    /// box: `fill` (default) / `contain` / `cover` / `none` / `scale-down`.
+    #[doc = include_str!("property_id.doc/ObjectFit.md")]
     ObjectFit,
-    /// The `object-position` property (a `BackgroundPosition` value — the same
-    /// `<position>` pair; NOT inherited). Places a replaced element's content
-    /// within its content box once `object-fit` has sized it; initial `50% 50%`
-    /// (centered), unlike `background-position`'s `0% 0%` (CSS Images 3 §5.2).
+    #[doc = include_str!("property_id.doc/ObjectPosition.md")]
     ObjectPosition,
-    /// The `opacity` property.
+    #[doc = include_str!("property_id.doc/Opacity.md")]
     Opacity,
-    /// The `width` property.
+    #[doc = include_str!("property_id.doc/Width.md")]
     Width,
-    /// The `height` property.
+    #[doc = include_str!("property_id.doc/Height.md")]
     Height,
-    /// The `box-sizing` property (Keyword-valued: `content-box` (initial) /
-    /// `border-box`; NOT inherited). Governs whether an explicit `width` /
-    /// `height` sizes the content box or the border box. See the reserved
-    /// `BOX_SIZING_*` handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/BoxSizing.md")]
     BoxSizing,
-    /// The `display` property.
+    #[doc = include_str!("property_id.doc/Display.md")]
     Display,
-    /// The `visibility` property.
+    #[doc = include_str!("property_id.doc/Visibility.md")]
     Visibility,
 
     // ---- Positioning (not inherited) ----
-    /// The `position` property (Keyword-valued: `static` / `relative` /
-    /// `absolute` / `fixed`; NOT inherited). See the reserved `POSITION_*`
-    /// handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/Position.md")]
     Position,
-    /// The `top` inset longhand (Length-valued, not inherited).
+    #[doc = include_str!("property_id.doc/Top.md")]
     Top,
-    /// The `right` inset longhand (Length-valued, not inherited).
+    #[doc = include_str!("property_id.doc/Right.md")]
     Right,
-    /// The `bottom` inset longhand (Length-valued, not inherited).
+    #[doc = include_str!("property_id.doc/Bottom.md")]
     Bottom,
-    /// The `left` inset longhand (Length-valued, not inherited).
+    #[doc = include_str!("property_id.doc/Left.md")]
     Left,
-    /// The `z-index` property (Number-valued `<integer>`, or the reserved
-    /// [`Z_INDEX_AUTO`](crate::property::layout_keyword::Z_INDEX_AUTO) keyword for
-    /// `auto`; NOT inherited). Only honored on positioned elements; drives the
-    /// scene's stacking (paint) order.
+    #[doc = include_str!("property_id.doc/ZIndex.md")]
     ZIndex,
 
     // ---- Box model: margins (Length-valued, not inherited) ----
-    /// The `margin-top` longhand.
+    #[doc = include_str!("property_id.doc/MarginTop.md")]
     MarginTop,
-    /// The `margin-right` longhand.
+    #[doc = include_str!("property_id.doc/MarginRight.md")]
     MarginRight,
-    /// The `margin-bottom` longhand.
+    #[doc = include_str!("property_id.doc/MarginBottom.md")]
     MarginBottom,
-    /// The `margin-left` longhand.
+    #[doc = include_str!("property_id.doc/MarginLeft.md")]
     MarginLeft,
 
     // ---- Box model: padding (Length-valued, not inherited) ----
-    /// The `padding-top` longhand.
+    #[doc = include_str!("property_id.doc/PaddingTop.md")]
     PaddingTop,
-    /// The `padding-right` longhand.
+    #[doc = include_str!("property_id.doc/PaddingRight.md")]
     PaddingRight,
-    /// The `padding-bottom` longhand.
+    #[doc = include_str!("property_id.doc/PaddingBottom.md")]
     PaddingBottom,
-    /// The `padding-left` longhand.
+    #[doc = include_str!("property_id.doc/PaddingLeft.md")]
     PaddingLeft,
 
     // ---- Logical box model (spec §4.13 "logical properties") ----
@@ -143,526 +75,221 @@ pub enum PropertyId {
     // them out of `COMPUTED_PROPERTIES` is deliberate — a node's computed style
     // holds `margin-left`, and every downstream phase reads that one place rather
     // than having to ask "or was it declared logically?".
-    /// The `margin-inline-start` logical longhand.
+    #[doc = include_str!("property_id.doc/MarginInlineStart.md")]
     MarginInlineStart,
-    /// The `margin-inline-end` logical longhand.
+    #[doc = include_str!("property_id.doc/MarginInlineEnd.md")]
     MarginInlineEnd,
-    /// The `margin-block-start` logical longhand.
+    #[doc = include_str!("property_id.doc/MarginBlockStart.md")]
     MarginBlockStart,
-    /// The `margin-block-end` logical longhand.
+    #[doc = include_str!("property_id.doc/MarginBlockEnd.md")]
     MarginBlockEnd,
-    /// The `padding-inline-start` logical longhand.
+    #[doc = include_str!("property_id.doc/PaddingInlineStart.md")]
     PaddingInlineStart,
-    /// The `padding-inline-end` logical longhand.
+    #[doc = include_str!("property_id.doc/PaddingInlineEnd.md")]
     PaddingInlineEnd,
-    /// The `padding-block-start` logical longhand.
+    #[doc = include_str!("property_id.doc/PaddingBlockStart.md")]
     PaddingBlockStart,
-    /// The `padding-block-end` logical longhand.
+    #[doc = include_str!("property_id.doc/PaddingBlockEnd.md")]
     PaddingBlockEnd,
-    /// The `inset-inline-start` logical longhand.
+    #[doc = include_str!("property_id.doc/InsetInlineStart.md")]
     InsetInlineStart,
-    /// The `inset-inline-end` logical longhand.
+    #[doc = include_str!("property_id.doc/InsetInlineEnd.md")]
     InsetInlineEnd,
-    /// The `inset-block-start` logical longhand.
+    #[doc = include_str!("property_id.doc/InsetBlockStart.md")]
     InsetBlockStart,
-    /// The `inset-block-end` logical longhand.
+    #[doc = include_str!("property_id.doc/InsetBlockEnd.md")]
     InsetBlockEnd,
-    /// The `border-inline-start-width` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderInlineStartWidth.md")]
     BorderInlineStartWidth,
-    /// The `border-inline-end-width` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderInlineEndWidth.md")]
     BorderInlineEndWidth,
-    /// The `border-block-start-width` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderBlockStartWidth.md")]
     BorderBlockStartWidth,
-    /// The `border-block-end-width` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderBlockEndWidth.md")]
     BorderBlockEndWidth,
-    /// The `border-inline-start-style` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderInlineStartStyle.md")]
     BorderInlineStartStyle,
-    /// The `border-inline-end-style` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderInlineEndStyle.md")]
     BorderInlineEndStyle,
-    /// The `border-block-start-style` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderBlockStartStyle.md")]
     BorderBlockStartStyle,
-    /// The `border-block-end-style` logical longhand.
+    #[doc = include_str!("property_id.doc/BorderBlockEndStyle.md")]
     BorderBlockEndStyle,
 
     // ---- Box model: border width (Length-valued, not inherited) ----
-    /// The `border-top-width` longhand. Feeds the box model's border insets and,
-    /// paired with a non-`none` style, the painted border thickness. Initial `0`.
+    #[doc = include_str!("property_id.doc/BorderTopWidth.md")]
     BorderTopWidth,
-    /// The `border-right-width` longhand.
+    #[doc = include_str!("property_id.doc/BorderRightWidth.md")]
     BorderRightWidth,
-    /// The `border-bottom-width` longhand.
+    #[doc = include_str!("property_id.doc/BorderBottomWidth.md")]
     BorderBottomWidth,
-    /// The `border-left-width` longhand.
+    #[doc = include_str!("property_id.doc/BorderLeftWidth.md")]
     BorderLeftWidth,
 
     // ---- Border style (Keyword-valued: `none` / `solid`; not inherited) ----
-    /// The `border-top-style` longhand (Keyword-valued against the reserved
-    /// `BORDER_STYLE_*` handles in [`crate::property::layout_keyword`]). Only
-    /// `none` and `solid` are modelled; other line styles fold to `solid`.
+    #[doc = include_str!("property_id.doc/BorderTopStyle.md")]
     BorderTopStyle,
-    /// The `border-right-style` longhand.
+    #[doc = include_str!("property_id.doc/BorderRightStyle.md")]
     BorderRightStyle,
-    /// The `border-bottom-style` longhand.
+    #[doc = include_str!("property_id.doc/BorderBottomStyle.md")]
     BorderBottomStyle,
-    /// The `border-left-style` longhand.
+    #[doc = include_str!("property_id.doc/BorderLeftStyle.md")]
     BorderLeftStyle,
 
     // ---- Border color (Color-valued, not inherited) ----
-    /// The `border-top-color` longhand. When unset but a style + width are
-    /// present, the painted border falls back to the computed `color`
-    /// (CSS `currentColor`).
+    #[doc = include_str!("property_id.doc/BorderTopColor.md")]
     BorderTopColor,
-    /// The `border-right-color` longhand.
+    #[doc = include_str!("property_id.doc/BorderRightColor.md")]
     BorderRightColor,
-    /// The `border-bottom-color` longhand.
+    #[doc = include_str!("property_id.doc/BorderBottomColor.md")]
     BorderBottomColor,
-    /// The `border-left-color` longhand.
+    #[doc = include_str!("property_id.doc/BorderLeftColor.md")]
     BorderLeftColor,
 
     // ---- Border radius (Length-valued, not inherited; initial `0`) ----
-    /// The `border-top-left-radius` longhand. Rounds the top-left corner of the
-    /// border box (and clips the content there); initial `0` (a square corner).
+    #[doc = include_str!("property_id.doc/BorderTopLeftRadius.md")]
     BorderTopLeftRadius,
-    /// The `border-top-right-radius` longhand.
+    #[doc = include_str!("property_id.doc/BorderTopRightRadius.md")]
     BorderTopRightRadius,
-    /// The `border-bottom-right-radius` longhand.
+    #[doc = include_str!("property_id.doc/BorderBottomRightRadius.md")]
     BorderBottomRightRadius,
-    /// The `border-bottom-left-radius` longhand.
+    #[doc = include_str!("property_id.doc/BorderBottomLeftRadius.md")]
     BorderBottomLeftRadius,
 
     // ---- Outline (painted OUTSIDE the border box; NOT inherited; no layout) ----
-    /// The `outline-width` longhand (Length-valued, not inherited; initial `0`).
-    /// Paired with a non-`none` [`OutlineStyle`](Self::OutlineStyle) it is the
-    /// thickness of the focus ring the scene coordinator strokes around — but
-    /// outside — the border box; unlike a border it reserves no layout space.
+    #[doc = include_str!("property_id.doc/OutlineWidth.md")]
     OutlineWidth,
-    /// The `outline-style` longhand (Keyword-valued against the reserved
-    /// `BORDER_STYLE_*` handles in [`crate::property::layout_keyword`]; not
-    /// inherited). Only `none` / `solid` / `dashed` are modelled (`dotted` folds
-    /// to dashed); `none` (the initial) paints no outline.
+    #[doc = include_str!("property_id.doc/OutlineStyle.md")]
     OutlineStyle,
-    /// The `outline-color` longhand (Color-valued, not inherited). When unset the
-    /// painted outline falls back to the computed `color` (CSS `currentColor`).
+    #[doc = include_str!("property_id.doc/OutlineColor.md")]
     OutlineColor,
-    /// The `outline-offset` longhand (Length-valued, not inherited; initial `0`).
-    /// The gap between the border box and the inner edge of the outline; the
-    /// outline is inflated outward by this amount before it is stroked.
+    #[doc = include_str!("property_id.doc/OutlineOffset.md")]
     OutlineOffset,
 
     // ---- Box effects (not inherited) ----
-    /// The `box-shadow` property (a `BoxShadow` list value; NOT inherited).
-    /// `box-shadow: none` lowers to an empty list. The scene coordinator paints a
-    /// drop shadow behind the box's background and an inset shadow on top of it.
+    #[doc = include_str!("property_id.doc/BoxShadow.md")]
     BoxShadow,
-    /// The `filter` property (a `BoxShadow` list value carrying only the
-    /// `drop-shadow(...)` functions; NOT inherited). Only the single
-    /// GPU-expressible filter function, `drop-shadow(<ox> <oy> <blur>? <color>?)`,
-    /// is modelled — it lowers to a drop [`BoxShadow`](crate::property::BoxShadow)
-    /// (spread `0`, not inset) that the scene coordinator paints BEHIND the
-    /// element like a `box-shadow` drop shadow. Non-drop-shadow functions
-    /// (`blur()`, `brightness()`, …) are out of scope on vello 0.9 and are
-    /// silently dropped; `filter: none` / empty lowers to an empty list.
+    #[doc = include_str!("property_id.doc/Filter.md")]
     Filter,
-    /// The `backdrop-filter` property (a `Filter` op list carrying only the
-    /// `blur(<length>)` function; NOT inherited). Unlike [`Filter`](Self::Filter)
-    /// — which blurs the element's OWN content — `backdrop-filter` blurs what is
-    /// painted BEHIND the element (the backdrop), producing frosted-glass /
-    /// Fluent acrylic. Only `blur(<length>)` is modelled; it lowers to a
-    /// [`FilterOp::Blur`](crate::property::FilterOp) that the scene coordinator
-    /// emits as a `BackdropFilter` command before the element's background, and the
-    /// Vello renderer frosts the backdrop with a segmented gaussian pass.
-    /// Color-matrix / other functions are out of scope (dropped); `none` /
-    /// `blur(0)` lowers to an empty list (no effect).
+    #[doc = include_str!("property_id.doc/BackdropFilter.md")]
     BackdropFilter,
 
     // ---- 2D transform (not inherited) ----
-    /// The `transform` property (a resolved `Transform` affine; NOT inherited).
-    /// `transform: none` lowers to an absent value. The scene coordinator
-    /// brackets the element's whole subtree paint with the composed affine,
-    /// resolved about [`TransformOrigin`](Self::TransformOrigin).
+    #[doc = include_str!("property_id.doc/Transform.md")]
     Transform,
-    /// The `transform-origin` property (a `TransformOrigin`; NOT inherited).
-    /// Initial `50% 50%` (the box center).
+    #[doc = include_str!("property_id.doc/TransformOrigin.md")]
     TransformOrigin,
 
-    /// The `mix-blend-mode` property (a `BlendMode` keyword; NOT inherited).
-    /// Initial `normal`. A value other than `normal` makes the element a group that
-    /// composites onto the backdrop with that separable blend mode (compositing-1
-    /// §5): the scene coordinator brackets the element's subtree with a
-    /// `PushLayer` carrying the blend mode. Keyword handles live in
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/MixBlendMode.md")]
     MixBlendMode,
 
     // ---- Sizing constraints (Length-valued, not inherited) ----
-    /// The `min-width` property.
+    #[doc = include_str!("property_id.doc/MinWidth.md")]
     MinWidth,
-    /// The `min-height` property.
+    #[doc = include_str!("property_id.doc/MinHeight.md")]
     MinHeight,
-    /// The `max-width` property.
+    #[doc = include_str!("property_id.doc/MaxWidth.md")]
     MaxWidth,
-    /// The `max-height` property.
+    #[doc = include_str!("property_id.doc/MaxHeight.md")]
     MaxHeight,
 
     // ---- Flex box (not inherited) ----
-    /// The `gap` property (Length-valued).
+    #[doc = include_str!("property_id.doc/Gap.md")]
     Gap,
-    /// The `flex-basis` property (Length-valued).
+    #[doc = include_str!("property_id.doc/FlexBasis.md")]
     FlexBasis,
-    /// The `flex-grow` property (Number-valued).
+    #[doc = include_str!("property_id.doc/FlexGrow.md")]
     FlexGrow,
-    /// The `flex-shrink` property (Number-valued).
+    #[doc = include_str!("property_id.doc/FlexShrink.md")]
     FlexShrink,
-    /// The `flex-direction` property (Keyword-valued; see
-    /// [`crate::property::layout_keyword`]).
+    #[doc = include_str!("property_id.doc/FlexDirection.md")]
     FlexDirection,
-    /// The `flex-wrap` property (Keyword-valued: `nowrap` (initial) / `wrap` /
-    /// `wrap-reverse`; NOT inherited). Governs whether a flex container is
-    /// single-line or wraps its items onto multiple cross-axis lines. See the
-    /// reserved `FLEX_WRAP_*` handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/FlexWrap.md")]
     FlexWrap,
-    /// The `justify-content` property (Keyword-valued; see
-    /// [`crate::property::layout_keyword`]). On a grid container this is the
-    /// *inline-axis* (column) distribution of leftover track space.
+    #[doc = include_str!("property_id.doc/JustifyContent.md")]
     JustifyContent,
-    /// The `align-content` property (Keyword-valued; see
-    /// [`crate::property::layout_keyword`]). On a grid container this is the
-    /// *block-axis* (row) distribution of leftover track space. NOT inherited.
+    #[doc = include_str!("property_id.doc/AlignContent.md")]
     AlignContent,
-    /// The `align-items` property (Keyword-valued; see
-    /// [`crate::property::layout_keyword`]). On a grid container this is also the
-    /// default *block-axis* alignment of each item within its cell.
+    #[doc = include_str!("property_id.doc/AlignItems.md")]
     AlignItems,
-    /// The `justify-items` property (Keyword-valued; the grid container's default
-    /// *inline-axis* alignment of each item within its cell). See
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/JustifyItems.md")]
     JustifyItems,
-    /// The `align-self` property (Keyword-valued; a grid item's *block-axis*
-    /// alignment override, `auto` inheriting the container `align-items`). See
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/AlignSelf.md")]
     AlignSelf,
-    /// The `justify-self` property (Keyword-valued; a grid item's *inline-axis*
-    /// alignment override, `auto` inheriting the container `justify-items`). See
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/JustifySelf.md")]
     JustifySelf,
 
     // ---- Grid container (not inherited) ----
-    /// The `grid-template-columns` property (a `GridTracks` track list).
+    #[doc = include_str!("property_id.doc/GridTemplateColumns.md")]
     GridTemplateColumns,
-    /// The `grid-template-rows` property (a `GridTracks` track list).
+    #[doc = include_str!("property_id.doc/GridTemplateRows.md")]
     GridTemplateRows,
-    /// The `grid-template-areas` property (a `GridAreas` named-cell grid; NOT
-    /// inherited). The runtime resolves a child's [`GridArea`](Self::GridArea)
-    /// name against the container's parsed template.
+    #[doc = include_str!("property_id.doc/GridTemplateAreas.md")]
     GridTemplateAreas,
-    /// The `grid-area: <custom-ident>` named-area placement on a grid item (a
-    /// `GridAreaName` marker; NOT inherited). Carried unresolved from CSS because
-    /// the area rectangle lives on the item's *container* `grid-template-areas`,
-    /// which the runtime — not the cascade — has the tree context to resolve. The
-    /// numeric `grid-area: a / b / c / d` form does not use this id; it expands to
-    /// the four `grid-*-start` / `-end` line longhands.
+    #[doc = include_str!("property_id.doc/GridArea.md")]
     GridArea,
 
-    /// The `grid-auto-flow` property (Keyword-valued: `row` / `column` /
-    /// `dense` combinations; NOT inherited). See the reserved `GRID_AUTO_FLOW_*`
-    /// handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/GridAutoFlow.md")]
     GridAutoFlow,
-    /// The `grid-auto-columns` property (a `GridTracks` track list; NOT inherited).
-    /// Sizes *implicit* column tracks — those created beyond the explicit
-    /// `grid-template-columns` by placement / auto-flow. The list is cycled: the
-    /// n-th implicit column uses index `n % len`. Initial is `auto`.
+    #[doc = include_str!("property_id.doc/GridAutoColumns.md")]
     GridAutoColumns,
-    /// The `grid-auto-rows` property (a `GridTracks` track list; NOT inherited).
-    /// Sizes *implicit* row tracks — those created beyond the explicit
-    /// `grid-template-rows` by placement / auto-flow. The list is cycled: the n-th
-    /// implicit row uses index `n % len`. Initial is `auto`.
+    #[doc = include_str!("property_id.doc/GridAutoRows.md")]
     GridAutoRows,
 
     // ---- Grid item line placement (a `GridLine` edge; not inherited) ----
-    /// The `grid-column-start` longhand (the `grid-column` start edge).
+    #[doc = include_str!("property_id.doc/GridColumnStart.md")]
     GridColumnStart,
-    /// The `grid-column-end` longhand (the `grid-column` end edge).
+    #[doc = include_str!("property_id.doc/GridColumnEnd.md")]
     GridColumnEnd,
-    /// The `grid-row-start` longhand (the `grid-row` start edge).
+    #[doc = include_str!("property_id.doc/GridRowStart.md")]
     GridRowStart,
-    /// The `grid-row-end` longhand (the `grid-row` end edge).
+    #[doc = include_str!("property_id.doc/GridRowEnd.md")]
     GridRowEnd,
 
     // ---- Typography (inherited) ----
-    /// The `font-size` property (Length-valued, inherited).
+    #[doc = include_str!("property_id.doc/FontSize.md")]
     FontSize,
-    /// The `font-family` property (a `FontFamilies` list of family/generic
-    /// names, inherited).
+    #[doc = include_str!("property_id.doc/FontFamily.md")]
     FontFamily,
-    /// The `direction` property (Keyword-valued: `ltr` / `rtl`; inherited). See
-    /// the reserved `DIRECTION_*` handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/Direction.md")]
     Direction,
-    /// The `writing-mode` property (Keyword-valued: `horizontal-tb` (initial) /
-    /// `vertical-rl` / `vertical-lr`; INHERITED — css-writing-modes-4 §3). See the
-    /// reserved `WRITING_MODE_*` handles in [`crate::property::layout_keyword`].
-    /// The block axis and the inline axis rotate around it: it is the second input
-    /// (beyond `direction`) to [`physical_under`](Self::physical_under), which maps
-    /// `block-start` to the physical top / right / left per §6.2, and it selects
-    /// the physical axis normal flow stacks children along.
+    #[doc = include_str!("property_id.doc/WritingMode.md")]
     WritingMode,
-    /// The `font-weight` property (Number-valued on the `1..=1000` axis;
-    /// inherited).
+    #[doc = include_str!("property_id.doc/FontWeight.md")]
     FontWeight,
-    /// The `font-style` property (Keyword-valued: `normal` / `italic` /
-    /// `oblique`; inherited). See the reserved `FONT_STYLE_*` handles in
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/FontStyle.md")]
     FontStyle,
-    /// The `line-height` property (a unitless [`PropertyValue::Number`] multiple
-    /// of `font-size`, or a `<length>`; inherited). The keyword initial `normal`
-    /// is left unresolved so an absent value falls back to the font's natural
-    /// line height. See [`crate::property::PropertyValue`].
+    #[doc = include_str!("property_id.doc/LineHeight.md")]
     LineHeight,
-    /// The `text-align` property (Keyword-valued: `left` / `right` / `center` /
-    /// `justify` / `start` / `end`; inherited). See the reserved `TEXT_ALIGN_*`
-    /// handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/TextAlign.md")]
     TextAlign,
-    /// The `text-overflow` property (Keyword-valued: `clip` / `ellipsis`; NOT
-    /// inherited). See the reserved `TEXT_OVERFLOW_*` handles in
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/TextOverflow.md")]
     TextOverflow,
-    /// The `letter-spacing` property (a `<length>` [`PropertyValue::Length`], or
-    /// the keyword `normal` ≡ `0`; inherited). Extra tracking added after each
-    /// typographic character unit (CSS Text 3 §8.1). May be negative.
+    #[doc = include_str!("property_id.doc/LetterSpacing.md")]
     LetterSpacing,
-    /// The `word-spacing` property (a `<length>` [`PropertyValue::Length`], or the
-    /// keyword `normal` ≡ `0`; inherited). Extra spacing added to each word
-    /// separator (CSS Text 3 §8.2). May be negative.
+    #[doc = include_str!("property_id.doc/WordSpacing.md")]
     WordSpacing,
-    /// The `text-transform` property (Keyword-valued: `none` / `uppercase` /
-    /// `lowercase` / `capitalize`; inherited). Casing applied to the text before
-    /// shaping (CSS Text 3 §2.1). See the reserved `TEXT_TRANSFORM_*` handles in
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/TextTransform.md")]
     TextTransform,
-    /// The `white-space` property (Keyword-valued: `normal` / `nowrap` / `pre` /
-    /// `pre-wrap` / `pre-line`; inherited). Selects whitespace collapsing (applied
-    /// before shaping) and the segment-break / soft-wrap behaviour of the line
-    /// breaker (CSS Text 3 §3, §4.1.1). See the reserved `WHITE_SPACE_*` handles in
-    /// [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/WhiteSpace.md")]
     WhiteSpace,
-    /// The `overflow-wrap` property (Keyword-valued: `normal` (initial) /
-    /// `break-word` / `anywhere`; inherited). The legacy `word-wrap` name is an
-    /// alias for it. Permits a last-resort grapheme-cluster break of an over-wide
-    /// unbreakable word so it does not overflow its line (CSS Text 3 §5.2). See the
-    /// reserved `OVERFLOW_WRAP_*` handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/OverflowWrap.md")]
     OverflowWrap,
-    /// The `word-break` property (Keyword-valued: `normal` (initial) / `break-all`
-    /// / `keep-all`; inherited). Selects the soft-wrap granularity: `break-all`
-    /// breaks between any two typographic units, `keep-all` forbids breaking
-    /// between CJK-context letters (CSS Text 3 §5.2). See the reserved
-    /// `WORD_BREAK_*` handles in [`crate::property::layout_keyword`].
+    #[doc = include_str!("property_id.doc/WordBreak.md")]
     WordBreak,
-    /// The `tab-size` property (a unitless [`PropertyValue::Number`] multiple of a
-    /// space advance, or a `<length>`; inherited; initial `8`). Sets the width of a
-    /// preserved tab stop (CSS Text 3 §4.3).
+    #[doc = include_str!("property_id.doc/TabSize.md")]
     TabSize,
 
     // ---- Overflow (Keyword-valued; NOT inherited; pure paint/clip) ----
-    /// The `overflow` property (Keyword-valued: `visible` (initial) / `hidden` /
-    /// `clip` / `scroll` / `auto`; NOT inherited). See the reserved `OVERFLOW_*`
-    /// handles in [`crate::property::layout_keyword`]. A value other than
-    /// `visible` clips the element's subtree to its box; `scroll` / `auto` clip
-    /// like `hidden` (no scrollbars are synthesised yet — a documented
-    /// simplification). It changes no layout, only the scene coordinator's clip.
+    #[doc = include_str!("property_id.doc/Overflow.md")]
     Overflow,
 
-    /// The `content` property (a [`PropertyValue::String`](crate::property::PropertyValue::String)
-    /// literal; NOT inherited). Only meaningful on the `::before` / `::after`
-    /// generated-content pseudo-elements (§4.16): it never computes onto a real
-    /// element's box (it is absent from the resolver's computed-property set), and
-    /// the runtime reads it off a matched pseudo-element rule to paint a
-    /// decoration-only inline box. Only the plain string form is modelled; `none`
-    /// / counters / `attr()` are out of scope.
+    #[doc = include_str!("property_id.doc/Content.md")]
     Content,
 }
 
 impl PropertyId {
-    /// The physical property this logical one resolves into, or [`None`] when
-    /// `self` is not a logical property (spec §4.13, css-writing-modes-4 §6.2).
-    ///
-    /// `rtl` is the element's computed `direction`; `wm` is its computed
-    /// `writing-mode`. Both axes rotate around `wm`:
-    ///
-    /// * The **block** axis is vertical under `horizontal-tb` (`block-start` → top),
-    ///   and horizontal under the two vertical modes: `block-start` → the physical
-    ///   RIGHT under `vertical-rl` and the physical LEFT under `vertical-lr` (§6.2).
-    ///   `direction` never touches the block axis.
-    /// * The **inline** axis is horizontal under `horizontal-tb` and vertical under
-    ///   the two vertical modes, and it is `direction` that flips it: `inline-start`
-    ///   is the line-left side under `ltr` and the line-right side under `rtl`. In a
-    ///   vertical mode "line-left" is the physical top (inline text runs
-    ///   top-to-bottom), so `inline-start` → top under `ltr`, bottom under `rtl`.
-    ///
-    /// Under the default `horizontal-tb` this is byte-for-byte the pre-`writing-mode`
-    /// mapping.
-    #[must_use]
-    pub const fn physical_under(self, rtl: bool, wm: WritingMode) -> Option<Self> {
-        let vertical = wm.is_vertical();
-        Some(match self {
-            // Inline axis: flipped by `direction`, and rotated to vertical by a
-            // vertical `writing-mode` (line-left = physical top).
-            Self::MarginInlineStart => match (vertical, rtl) {
-                (false, false) => Self::MarginLeft,
-                (false, true) => Self::MarginRight,
-                (true, false) => Self::MarginTop,
-                (true, true) => Self::MarginBottom,
-            },
-            Self::MarginInlineEnd => match (vertical, rtl) {
-                (false, false) => Self::MarginRight,
-                (false, true) => Self::MarginLeft,
-                (true, false) => Self::MarginBottom,
-                (true, true) => Self::MarginTop,
-            },
-            Self::PaddingInlineStart => match (vertical, rtl) {
-                (false, false) => Self::PaddingLeft,
-                (false, true) => Self::PaddingRight,
-                (true, false) => Self::PaddingTop,
-                (true, true) => Self::PaddingBottom,
-            },
-            Self::PaddingInlineEnd => match (vertical, rtl) {
-                (false, false) => Self::PaddingRight,
-                (false, true) => Self::PaddingLeft,
-                (true, false) => Self::PaddingBottom,
-                (true, true) => Self::PaddingTop,
-            },
-            Self::InsetInlineStart => match (vertical, rtl) {
-                (false, false) => Self::Left,
-                (false, true) => Self::Right,
-                (true, false) => Self::Top,
-                (true, true) => Self::Bottom,
-            },
-            Self::InsetInlineEnd => match (vertical, rtl) {
-                (false, false) => Self::Right,
-                (false, true) => Self::Left,
-                (true, false) => Self::Bottom,
-                (true, true) => Self::Top,
-            },
-            Self::BorderInlineStartWidth => match (vertical, rtl) {
-                (false, false) => Self::BorderLeftWidth,
-                (false, true) => Self::BorderRightWidth,
-                (true, false) => Self::BorderTopWidth,
-                (true, true) => Self::BorderBottomWidth,
-            },
-            Self::BorderInlineEndWidth => match (vertical, rtl) {
-                (false, false) => Self::BorderRightWidth,
-                (false, true) => Self::BorderLeftWidth,
-                (true, false) => Self::BorderBottomWidth,
-                (true, true) => Self::BorderTopWidth,
-            },
-            Self::BorderInlineStartStyle => match (vertical, rtl) {
-                (false, false) => Self::BorderLeftStyle,
-                (false, true) => Self::BorderRightStyle,
-                (true, false) => Self::BorderTopStyle,
-                (true, true) => Self::BorderBottomStyle,
-            },
-            Self::BorderInlineEndStyle => match (vertical, rtl) {
-                (false, false) => Self::BorderRightStyle,
-                (false, true) => Self::BorderLeftStyle,
-                (true, false) => Self::BorderBottomStyle,
-                (true, true) => Self::BorderTopStyle,
-            },
-            // Block axis: vertical under `horizontal-tb` (top/bottom), horizontal
-            // under the vertical modes — `block-start` is the right under
-            // `vertical-rl`, the left under `vertical-lr` (§6.2). `direction` does
-            // not touch it.
-            Self::MarginBlockStart => match wm {
-                WritingMode::HorizontalTb => Self::MarginTop,
-                WritingMode::VerticalRl => Self::MarginRight,
-                WritingMode::VerticalLr => Self::MarginLeft,
-            },
-            Self::MarginBlockEnd => match wm {
-                WritingMode::HorizontalTb => Self::MarginBottom,
-                WritingMode::VerticalRl => Self::MarginLeft,
-                WritingMode::VerticalLr => Self::MarginRight,
-            },
-            Self::PaddingBlockStart => match wm {
-                WritingMode::HorizontalTb => Self::PaddingTop,
-                WritingMode::VerticalRl => Self::PaddingRight,
-                WritingMode::VerticalLr => Self::PaddingLeft,
-            },
-            Self::PaddingBlockEnd => match wm {
-                WritingMode::HorizontalTb => Self::PaddingBottom,
-                WritingMode::VerticalRl => Self::PaddingLeft,
-                WritingMode::VerticalLr => Self::PaddingRight,
-            },
-            Self::InsetBlockStart => match wm {
-                WritingMode::HorizontalTb => Self::Top,
-                WritingMode::VerticalRl => Self::Right,
-                WritingMode::VerticalLr => Self::Left,
-            },
-            Self::InsetBlockEnd => match wm {
-                WritingMode::HorizontalTb => Self::Bottom,
-                WritingMode::VerticalRl => Self::Left,
-                WritingMode::VerticalLr => Self::Right,
-            },
-            Self::BorderBlockStartWidth => match wm {
-                WritingMode::HorizontalTb => Self::BorderTopWidth,
-                WritingMode::VerticalRl => Self::BorderRightWidth,
-                WritingMode::VerticalLr => Self::BorderLeftWidth,
-            },
-            Self::BorderBlockEndWidth => match wm {
-                WritingMode::HorizontalTb => Self::BorderBottomWidth,
-                WritingMode::VerticalRl => Self::BorderLeftWidth,
-                WritingMode::VerticalLr => Self::BorderRightWidth,
-            },
-            Self::BorderBlockStartStyle => match wm {
-                WritingMode::HorizontalTb => Self::BorderTopStyle,
-                WritingMode::VerticalRl => Self::BorderRightStyle,
-                WritingMode::VerticalLr => Self::BorderLeftStyle,
-            },
-            Self::BorderBlockEndStyle => match wm {
-                WritingMode::HorizontalTb => Self::BorderBottomStyle,
-                WritingMode::VerticalRl => Self::BorderLeftStyle,
-                WritingMode::VerticalLr => Self::BorderRightStyle,
-            },
-            _ => return None,
-        })
-    }
-
-    /// Whether this is a logical property — one that resolves into a physical
-    /// counterpart rather than being computed itself.
-    #[must_use]
-    pub const fn is_logical(self) -> bool {
-        // The direction / writing-mode are arbitrary here: a logical property maps
-        // under any of them, so membership is what this asks.
-        self.physical_under(false, WritingMode::HorizontalTb)
-            .is_some()
-    }
-
-    /// Every logical property, in a stable order.
-    ///
-    /// Used to find which logical declarations could feed a given physical
-    /// property; there are twenty, so a scan is cheaper than a reverse map.
-    pub const LOGICAL: [Self; 20] = [
-        Self::MarginInlineStart,
-        Self::MarginInlineEnd,
-        Self::MarginBlockStart,
-        Self::MarginBlockEnd,
-        Self::PaddingInlineStart,
-        Self::PaddingInlineEnd,
-        Self::PaddingBlockStart,
-        Self::PaddingBlockEnd,
-        Self::InsetInlineStart,
-        Self::InsetInlineEnd,
-        Self::InsetBlockStart,
-        Self::InsetBlockEnd,
-        Self::BorderInlineStartWidth,
-        Self::BorderInlineEndWidth,
-        Self::BorderBlockStartWidth,
-        Self::BorderBlockEndWidth,
-        Self::BorderInlineStartStyle,
-        Self::BorderInlineEndStyle,
-        Self::BorderBlockStartStyle,
-        Self::BorderBlockEndStyle,
-    ];
-
-    /// Returns the property's canonical CSS name as a stable string.
-    ///
-    /// This is intended for diagnostics and `DevTools` only; it is never used for
-    /// dispatch (that is what the enum variant is for).
+    #[doc = include_str!("property_id.doc/name.md")]
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -788,10 +415,7 @@ impl PropertyId {
         }
     }
 
-    /// Returns whether this property inherits from its parent by default (§4.14).
-    ///
-    /// This is the property's *default* behaviour; the CSS-wide keywords on
-    /// individual declarations may override it per element during the cascade.
+    #[doc = include_str!("property_id.doc/default_inheritance.md")]
     #[must_use]
     pub const fn default_inheritance(self) -> Inheritance {
         match self {
@@ -928,156 +552,6 @@ impl PropertyId {
             // `content` selects generated text on a pseudo-element; it does not
             // inherit (CSS Content 3).
             | Self::Content => Inheritance::NotInherited,
-        }
-    }
-
-    /// Whether this property is **paint-only**: changing it can never change any
-    /// node's box, so a frame in which only paint-only properties changed can
-    /// reuse the retained layout (spec §3.4 phase 5, §4.3 — invalidation is
-    /// classified by what actually changed, not by the frame's reason).
-    ///
-    /// This is a deliberately **conservative allow-list**: a property is
-    /// paint-only only when it provably cannot feed measure/arrange. Everything
-    /// else — including any property added later — answers `false` via the
-    /// catch-all and is treated as layout-affecting, so the failure mode is a
-    /// redundant relayout (slow but correct), never a stale box.
-    ///
-    /// Deliberately **not** paint-only despite looking like it:
-    /// - `border-*-style`: `none` forces the used border width to zero, so it
-    ///   feeds the box.
-    /// - `text-align` / `text-overflow`: both are threaded into the text
-    ///   measure pass here, so a change is treated as layout-affecting.
-    #[must_use]
-    pub const fn is_paint_only(self) -> bool {
-        matches!(
-            self,
-            Self::Color
-                | Self::BackgroundColor
-                | Self::BackgroundImage
-                | Self::BackgroundSize
-                | Self::BackgroundPosition
-                | Self::BackgroundRepeat
-                // How an image fills its box; the box itself is unchanged.
-                | Self::ObjectFit
-                // Where the image sits inside its box; the box is unchanged.
-                | Self::ObjectPosition
-                | Self::Opacity
-                // `visibility: hidden` still occupies its box (unlike `display: none`).
-                | Self::Visibility
-                // Paint order only.
-                | Self::ZIndex
-                | Self::BorderTopColor
-                | Self::BorderRightColor
-                | Self::BorderBottomColor
-                | Self::BorderLeftColor
-                // A radius rounds the corners of an unchanged box.
-                | Self::BorderTopLeftRadius
-                | Self::BorderTopRightRadius
-                | Self::BorderBottomRightRadius
-                | Self::BorderBottomLeftRadius
-                // The outline reserves no space (CSS UI 3).
-                | Self::OutlineWidth
-                | Self::OutlineStyle
-                | Self::OutlineColor
-                | Self::OutlineOffset
-                | Self::BoxShadow
-                | Self::Filter
-                | Self::BackdropFilter
-                // CSS transforms are applied at paint time; layout is unaffected.
-                | Self::Transform
-                | Self::TransformOrigin
-                // Compositing only: the blend mode changes how the group paints,
-                // never its box.
-                | Self::MixBlendMode
-        )
-    }
-
-    /// Whether a change to this property can change a node's box — the inverse of
-    /// [`is_paint_only`](Self::is_paint_only). Conservative: any property not on
-    /// the paint-only allow-list — including newly added ones — answers `true`.
-    #[must_use]
-    pub const fn affects_layout(self) -> bool {
-        !self.is_paint_only()
-    }
-}
-
-#[cfg(test)]
-mod paint_only_tests {
-    use super::*;
-
-    #[test]
-    fn typical_hover_properties_are_paint_only() {
-        // The properties a hover/focus rule usually touches must be paint-only,
-        // so such a frame can reuse the retained boxes.
-        for id in [
-            PropertyId::Color,
-            PropertyId::BackgroundColor,
-            PropertyId::BackgroundImage,
-            PropertyId::BorderTopColor,
-            PropertyId::BorderTopLeftRadius,
-            PropertyId::BoxShadow,
-            PropertyId::Opacity,
-            PropertyId::Transform,
-            PropertyId::Filter,
-            PropertyId::OutlineWidth,
-            PropertyId::OutlineColor,
-            PropertyId::ZIndex,
-            PropertyId::Visibility,
-        ] {
-            assert!(id.is_paint_only(), "{id:?} should be paint-only");
-            assert!(!id.affects_layout(), "{id:?} must not force a relayout");
-        }
-    }
-
-    #[test]
-    fn box_and_text_properties_affect_layout() {
-        for id in [
-            PropertyId::Display,
-            PropertyId::Width,
-            PropertyId::Height,
-            PropertyId::MinHeight,
-            PropertyId::MarginTop,
-            PropertyId::PaddingLeft,
-            PropertyId::BorderTopWidth,
-            PropertyId::BoxSizing,
-            PropertyId::Position,
-            PropertyId::Top,
-            PropertyId::Gap,
-            PropertyId::FlexGrow,
-            PropertyId::AlignSelf,
-            PropertyId::GridTemplateColumns,
-            PropertyId::FontSize,
-            PropertyId::FontFamily,
-            PropertyId::LineHeight,
-            PropertyId::LetterSpacing,
-            PropertyId::WhiteSpace,
-            PropertyId::Overflow,
-        ] {
-            assert!(id.affects_layout(), "{id:?} feeds layout");
-            assert!(!id.is_paint_only());
-        }
-    }
-
-    #[test]
-    fn deliberately_conservative_cases_are_layout_affecting() {
-        // `border-style: none` forces the used border width to zero, so it feeds
-        // the box; `text-align`/`text-overflow` are threaded into the text
-        // measure pass here. All three are conservatively layout-affecting.
-        assert!(PropertyId::BorderTopStyle.affects_layout());
-        assert!(PropertyId::TextAlign.affects_layout());
-        assert!(PropertyId::TextOverflow.affects_layout());
-    }
-
-    #[test]
-    fn the_two_classifiers_are_exact_inverses() {
-        for id in [
-            PropertyId::BackgroundColor,
-            PropertyId::Transform,
-            PropertyId::Width,
-            PropertyId::FontSize,
-            PropertyId::BorderTopStyle,
-        ] {
-            assert_eq!(id.affects_layout(), !id.is_paint_only());
         }
     }
 }

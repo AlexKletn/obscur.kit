@@ -1,4 +1,4 @@
-//! Color module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod color;
 
 pub use color::Color;

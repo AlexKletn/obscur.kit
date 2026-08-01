@@ -1,20 +1,10 @@
-//! The outcome of a produced frame: [`FrameResult`].
+#![doc = include_str!("frame_result.doc/_module.md")]
 
 use obscur_scene::scene::SceneSnapshot;
 
 use super::FrameId;
 
-/// The outcome of one [`FramePipeline`](super::FramePipeline) run.
-///
-/// A `FrameResult` pairs the produced frame's identity with the immutable
-/// [`SceneSnapshot`] a renderer consumes, plus a set of flags recording which
-/// pipeline phases did observable work. The snapshot is the hand-off contract:
-/// a renderer reads [`FrameResult::snapshot`] and honours its display list; it
-/// never touches the mutable scene the pipeline built it from (spec §5.2).
-///
-/// The flags are diagnostic — they let the runtime and its instrumentation see
-/// what a frame actually did (whether the tree changed, styles resolved, layout
-/// ran, and a scene was composed) without re-deriving it.
+#[doc = include_str!("frame_result.doc/FrameResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameResult {
     id: FrameId,
@@ -26,12 +16,7 @@ pub struct FrameResult {
 }
 
 impl FrameResult {
-    /// Creates a result for frame `id` carrying `snapshot` and the phase flags.
-    ///
-    /// * `reconciled` — the retained tree changed during reconciliation.
-    /// * `restyled` — at least one node resolved a computed style.
-    /// * `relaid_out` — at least one node was arranged into a box.
-    /// * `composed` — a scene was composed and published as `snapshot`.
+    #[doc = include_str!("frame_result.doc/new.md")]
     // The four phase flags are the spec-mandated per-phase outcome of a frame;
     // they are distinct booleans by design, not a flags struct.
     #[allow(clippy::fn_params_excessive_bools)]
@@ -54,46 +39,43 @@ impl FrameResult {
         }
     }
 
-    /// Returns the identity of the produced frame.
+    #[doc = include_str!("frame_result.doc/id.md")]
     #[must_use]
     pub const fn id(&self) -> FrameId {
         self.id
     }
 
-    /// Returns the immutable scene snapshot a renderer consumes.
+    #[doc = include_str!("frame_result.doc/snapshot.md")]
     #[must_use]
     pub const fn snapshot(&self) -> &SceneSnapshot {
         &self.snapshot
     }
 
-    /// Whether reconciliation changed the retained tree.
+    #[doc = include_str!("frame_result.doc/reconciled.md")]
     #[must_use]
     pub const fn reconciled(&self) -> bool {
         self.reconciled
     }
 
-    /// Whether the style phase resolved any computed styles.
+    #[doc = include_str!("frame_result.doc/restyled.md")]
     #[must_use]
     pub const fn restyled(&self) -> bool {
         self.restyled
     }
 
-    /// Whether the layout phase arranged any boxes.
+    #[doc = include_str!("frame_result.doc/relaid_out.md")]
     #[must_use]
     pub const fn relaid_out(&self) -> bool {
         self.relaid_out
     }
 
-    /// Whether a scene was composed for this frame.
+    #[doc = include_str!("frame_result.doc/composed.md")]
     #[must_use]
     pub const fn composed(&self) -> bool {
         self.composed
     }
 
-    /// Whether the published snapshot's display list is well-formed (balanced).
-    ///
-    /// Delegates to [`SceneSnapshot::is_balanced`]; a balanced list has every
-    /// push paired with a matching pop and is safe for a renderer to replay.
+    #[doc = include_str!("frame_result.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
         self.snapshot.is_balanced()

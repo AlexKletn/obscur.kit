@@ -1,4 +1,4 @@
-//! Builds an AccessKit [`TreeUpdate`] from a [`SemanticSnapshot`] (§7.1).
+#![doc = include_str!("tree_update_converter.doc/_module.md")]
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,52 +10,14 @@ use obscur_identity::NodeId as DomainNodeId;
 use super::NodeConverter;
 use crate::error::AccessKitBridgeError;
 
-/// Builds a full AccessKit [`TreeUpdate`] from an immutable
-/// [`SemanticSnapshot`] (spec §7.1, §2.7).
-///
-/// The converter walks every non-ignored node in the snapshot, converts each
-/// with its [`NodeConverter`], and assembles the [`TreeUpdate`] that a host
-/// feeds to a platform adapter. A snapshot without a root cannot form a valid
-/// AccessKit tree, so [`convert`](Self::convert) fails with
-/// [`AccessKitBridgeError::MissingRoot`].
-///
-/// # Tree structure
-///
-/// Structure comes from the snapshot's own [`children`](SemanticSnapshot::children)
-/// links — the captured parent→child links of the live [`SemanticTree`] — walked
-/// from the root. An **ignored** node (decorative or hidden) publishes no
-/// AccessKit node, so it is spliced out of the chain and its own children graft
-/// onto its nearest non-ignored ancestor rather than disappearing with it.
-///
-/// A node's [`SemanticRelation::Owns`] relations are honoured on top of that, for
-/// the non-structural ownership a flat projection expresses instead of links (an
-/// `aria-owns`-style reparent); a link and an `Owns` naming the same target agree,
-/// because a target is attached at most once, and the links claim first. Any
-/// non-ignored node that is neither the root nor claimed by either is attached
-/// directly to the root, so the resulting tree is always fully connected as
-/// AccessKit requires.
-///
-/// # Known imprecision
-///
-/// Grafting is right for a **decorative** node — its content is not decorative
-/// just because its wrapper is — but [`is_ignored`](SemanticNode::is_ignored)
-/// conflates decorative with **hidden**, and a hidden node's children are grafted
-/// too. They should be pruned: a subtree under a hidden node is not visible and
-/// should not be announced. It survives here because the projection marks only the
-/// hidden node itself (`SemanticState::hidden` is per-node, not inherited), so this
-/// converter cannot tell a hidden node's child from an ordinary one. The
-/// pre-existing orphan fallback exposed them the same way; splicing does not make
-/// it worse, and does not fix it.
-///
-/// [`SemanticTree`]: obscur_accessibility::tree::SemanticTree
-/// [`SemanticNode`]: obscur_accessibility::semantic::SemanticNode
+#[doc = include_str!("tree_update_converter.doc/TreeUpdateConverter.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TreeUpdateConverter {
     node: NodeConverter,
 }
 
 impl TreeUpdateConverter {
-    /// Creates a converter over a fresh [`NodeConverter`].
+    #[doc = include_str!("tree_update_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -63,34 +25,18 @@ impl TreeUpdateConverter {
         }
     }
 
-    /// Returns the inner [`NodeConverter`], e.g. to map ids consistently.
+    #[doc = include_str!("tree_update_converter.doc/node_converter.md")]
     #[must_use]
     pub const fn node_converter(&self) -> &NodeConverter {
         &self.node
     }
 
-    /// Converts `snapshot` into a full [`TreeUpdate`] focused on its root.
-    ///
-    /// Equivalent to [`convert_with_focus`](Self::convert_with_focus) with no
-    /// explicit focus target, so focus defaults to the root as AccessKit
-    /// requires when no node is focused.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AccessKitBridgeError::MissingRoot`] when the snapshot has no
-    /// root node.
+    #[doc = include_str!("tree_update_converter.doc/convert.md")]
     pub fn convert(&self, snapshot: &SemanticSnapshot) -> Result<TreeUpdate, AccessKitBridgeError> {
         self.convert_with_focus(snapshot, None)
     }
 
-    /// Converts `snapshot` into a full [`TreeUpdate`], focusing `focus` when it
-    /// names a present, non-ignored node and falling back to the root
-    /// otherwise.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AccessKitBridgeError::MissingRoot`] when the snapshot has no
-    /// root node.
+    #[doc = include_str!("tree_update_converter.doc/convert_with_focus.md")]
     pub fn convert_with_focus(
         &self,
         snapshot: &SemanticSnapshot,
@@ -120,9 +66,7 @@ impl TreeUpdateConverter {
         })
     }
 
-    /// Rebuilds a parent→children map from the snapshot's own child links, adds
-    /// the ownership its `Owns` relations express, then attaches every
-    /// still-parentless non-ignored node to the root.
+    #[doc = include_str!("tree_update_converter.doc/reconstruct_children.md")]
     fn reconstruct_children(
         snapshot: &SemanticSnapshot,
         root: DomainNodeId,
@@ -172,15 +116,7 @@ impl TreeUpdateConverter {
         children
     }
 
-    /// Walks `node`'s captured child links, attaching each present child under
-    /// `ancestor` and recursing into it.
-    ///
-    /// An ignored child emits no AccessKit node, so it cannot be anyone's parent:
-    /// the walk descends **through** it with `ancestor` unchanged, so its own
-    /// children graft onto the nearest non-ignored ancestor instead of being
-    /// dropped along with it. `visited` bounds the walk on a malformed (cyclic)
-    /// snapshot; `owned` records what has been attached so a later `Owns` relation
-    /// or the orphan sweep cannot attach it a second time.
+    #[doc = include_str!("tree_update_converter.doc/graft_links.md")]
     fn graft_links(
         snapshot: &SemanticSnapshot,
         ancestor: DomainNodeId,

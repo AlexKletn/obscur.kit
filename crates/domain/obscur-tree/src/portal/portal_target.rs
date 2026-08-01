@@ -1,40 +1,28 @@
-//! The visual destination a portal renders its content into.
+#![doc = include_str!("portal_target.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// Identifies where a portal renders its content — the **visual destination**.
-///
-/// A `PortalTarget` is a newtype over the destination **host** [`NodeId`]: the
-/// node that will become the portalled content's visual parent (its "portal
-/// host", spec §4.14). It says only *where* portalled content is painted; it
-/// carries no styling and does not change the source node's logical parent.
-///
-/// For Phase 1 a target is a single host node. Richer targets — a named window,
-/// an overlay layer, or a resolved-by-name slot — are a deliberate later
-/// extension and are intentionally not modelled here.
+#[doc = include_str!("portal_target.doc/PortalTarget.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PortalTarget {
-    /// The host node that will visually parent the portalled content.
+    #[doc = include_str!("portal_target.doc/host.md")]
     host: NodeId,
 }
 
 impl PortalTarget {
-    /// Creates a portal target rendering into the given `host` node.
+    #[doc = include_str!("portal_target.doc/new.md")]
     #[must_use]
     pub const fn new(host: NodeId) -> Self {
         Self { host }
     }
 
-    /// Creates a portal target rendering into the given `host` node.
-    ///
-    /// An alias for [`PortalTarget::new`] that reads naturally at call sites,
-    /// e.g. `PortalTarget::host(overlay)`.
+    #[doc = include_str!("portal_target.doc/host_2.md")]
     #[must_use]
     pub const fn host(host: NodeId) -> Self {
         Self::new(host)
     }
 
-    /// Returns the host node this target renders its content into.
+    #[doc = include_str!("portal_target.doc/host_node.md")]
     #[must_use]
     pub const fn host_node(self) -> NodeId {
         self.host

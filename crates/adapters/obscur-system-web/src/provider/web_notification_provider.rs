@@ -1,47 +1,23 @@
-//! A web [`NotificationProvider`] backed by the browser `Notification` API
-//! (spec §6.12).
-//!
-//! [`WebNotificationProvider`] implements the pure
-//! [`NotificationProvider`](obscur_system::notification::NotificationProvider)
-//! port over `web-sys`'s [`web_sys::Notification`]. Because the port is
-//! synchronous, this provider only *reads* the current permission and posts when
-//! it is already `Granted`: requesting permission is an asynchronous browser call
-//! (`Notification.requestPermission()`) that must be driven by the application
-//! before using this provider, and is out of scope for this sync port.
-//!
-//! All browser calls are gated behind `#[cfg(target_arch = "wasm32")]`; on any
-//! other target the provider reports [`SupportLevel::Unavailable`] and
-//! [`NotificationResult::Unsupported`], keeping the host build honest.
+#![doc = include_str!("web_notification_provider.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 use obscur_system::notification::{Notification, NotificationProvider, NotificationResult};
 
-/// A web [`NotificationProvider`] backed by the browser `Notification` API
-/// (spec §6.12).
-///
-/// The provider records the last app-icon badge value set through
-/// [`Self::set_badge`]. Surfacing it via the browser Badging API
-/// (`navigator.setAppBadge`) is a documented future refinement; for now the badge
-/// is stored but not displayed. [`Self::permission`] reads the browser's current
-/// `Notification.permission`, and [`Self::post`] presents a notification only when
-/// permission is already granted.
+#[doc = include_str!("web_notification_provider.doc/WebNotificationProvider.md")]
 #[derive(Debug, Clone, Default)]
 pub struct WebNotificationProvider {
-    /// The last app-icon badge count set; recorded but not surfaced.
+    #[doc = include_str!("web_notification_provider.doc/badge.md")]
     badge: Option<u32>,
 }
 
 impl WebNotificationProvider {
-    /// Creates a web notification provider with no badge set (spec §6.12).
+    #[doc = include_str!("web_notification_provider.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self { badge: None }
     }
 
-    /// Returns the last recorded app-icon badge value (spec §6.12).
-    ///
-    /// The value is recorded state only; presenting it via the Badging API is a
-    /// future refinement.
+    #[doc = include_str!("web_notification_provider.doc/badge_2.md")]
     #[must_use]
     pub const fn badge(&self) -> Option<u32> {
         self.badge

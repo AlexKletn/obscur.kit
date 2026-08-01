@@ -1,98 +1,84 @@
-//! Client→server command envelope and its capability-scoped kinds (§7.6/§7.7).
+#![doc = include_str!("command_message.doc/_module.md")]
 
 use super::{Inspectable, PermissionScope, SubscriptionId, Topic};
 
-/// A client-assigned identifier correlating a command with its response.
+#[doc = include_str!("command_message.doc/CommandId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandId(pub u64);
 
 impl CommandId {
-    /// Creates a command id from a raw value.
+    #[doc = include_str!("command_message.doc/new.md")]
     #[must_use]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw identifier value.
+    #[doc = include_str!("command_message.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// A typed control action affecting the running application (spec §7.6).
-///
-/// Control actions are a small, closed enum: DevTools may steer the runtime but
-/// can never supply arbitrary code (spec §7.7).
+#[doc = include_str!("command_message.doc/ControlAction.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlAction {
-    /// Pause the runtime (freeze frame production).
+    #[doc = include_str!("command_message.doc/Pause.md")]
     Pause,
-    /// Resume a paused runtime.
+    #[doc = include_str!("command_message.doc/Resume.md")]
     Resume,
-    /// Advance exactly one frame while paused.
+    #[doc = include_str!("command_message.doc/StepFrame.md")]
     StepFrame,
-    /// Enable (`true`) or disable (`false`) pick/inspect mode.
+    #[doc = include_str!("command_message.doc/SetInspectMode.md")]
     SetInspectMode(bool),
 }
 
-/// A typed, synthetic event injected into the runtime (spec §7.6).
-///
-/// Injection is restricted to a closed set of typed descriptors — never
-/// arbitrary code or memory writes (spec §7.7). Coordinates are logical
-/// integers; key events reference a stable key code.
+#[doc = include_str!("command_message.doc/InjectedEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InjectedEvent {
-    /// A synthetic pointer press at logical coordinates `(x, y)`.
+    #[doc = include_str!("command_message.doc/PointerDown.md")]
     PointerDown {
-        /// Logical x coordinate.
+        #[doc = include_str!("command_message.doc/x.md")]
         x: i32,
-        /// Logical y coordinate.
+        #[doc = include_str!("command_message.doc/y.md")]
         y: i32,
     },
-    /// A synthetic pointer release at logical coordinates `(x, y)`.
+    #[doc = include_str!("command_message.doc/PointerUp.md")]
     PointerUp {
-        /// Logical x coordinate.
+        #[doc = include_str!("command_message.doc/x_2.md")]
         x: i32,
-        /// Logical y coordinate.
+        #[doc = include_str!("command_message.doc/y_2.md")]
         y: i32,
     },
-    /// A synthetic key press identified by a stable key code.
+    #[doc = include_str!("command_message.doc/KeyDown.md")]
     KeyDown {
-        /// Stable key code.
+        #[doc = include_str!("command_message.doc/key.md")]
         key: u32,
     },
-    /// A synthetic key release identified by a stable key code.
+    #[doc = include_str!("command_message.doc/KeyUp.md")]
     KeyUp {
-        /// Stable key code.
+        #[doc = include_str!("command_message.doc/key_2.md")]
         key: u32,
     },
 }
 
-/// The typed body of a [`CommandMessage`].
-///
-/// Each variant maps to exactly one [`PermissionScope`] via
-/// [`required_scope`](CommandKind::required_scope), the single source of truth
-/// the server uses to authorize a command.
+#[doc = include_str!("command_message.doc/CommandKind.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandKind {
-    /// Request a one-shot snapshot of an inspectable target (needs `Read`).
+    #[doc = include_str!("command_message.doc/Inspect.md")]
     Inspect(Inspectable),
-    /// Subscribe to an event stream (needs `Subscribe`).
+    #[doc = include_str!("command_message.doc/Subscribe.md")]
     Subscribe(Topic),
-    /// Cancel an existing subscription (needs `Subscribe`).
+    #[doc = include_str!("command_message.doc/Unsubscribe.md")]
     Unsubscribe(SubscriptionId),
-    /// Perform a control action (needs `Control`; dangerous → audited).
+    #[doc = include_str!("command_message.doc/Control.md")]
     Control(ControlAction),
-    /// Inject a synthetic event (needs `Inject`; dangerous → audited).
+    #[doc = include_str!("command_message.doc/Inject.md")]
     Inject(InjectedEvent),
 }
 
 impl CommandKind {
-    /// Returns the permission scope required to execute this command.
-    ///
-    /// This is the authoritative capability check the server performs before
-    /// dispatch (spec §7.7).
+    #[doc = include_str!("command_message.doc/required_scope.md")]
     #[must_use]
     pub const fn required_scope(&self) -> PermissionScope {
         match self {
@@ -103,39 +89,36 @@ impl CommandKind {
         }
     }
 
-    /// Returns whether this command is a dangerous operation that must be
-    /// audited (spec §7.7).
-    ///
-    /// True only for control and event injection.
+    #[doc = include_str!("command_message.doc/is_dangerous.md")]
     #[must_use]
     pub const fn is_dangerous(&self) -> bool {
         matches!(self, Self::Control(_) | Self::Inject(_))
     }
 }
 
-/// A single client→server command with a correlation id.
+#[doc = include_str!("command_message.doc/CommandMessage.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandMessage {
-    /// Client-assigned id used to correlate the response/snapshot.
+    #[doc = include_str!("command_message.doc/id.md")]
     pub id: CommandId,
-    /// The command body.
+    #[doc = include_str!("command_message.doc/kind.md")]
     pub kind: CommandKind,
 }
 
 impl CommandMessage {
-    /// Creates a command message.
+    #[doc = include_str!("command_message.doc/new_2.md")]
     #[must_use]
     pub const fn new(id: CommandId, kind: CommandKind) -> Self {
         Self { id, kind }
     }
 
-    /// The permission scope required to execute this command.
+    #[doc = include_str!("command_message.doc/required_scope_2.md")]
     #[must_use]
     pub const fn required_scope(&self) -> PermissionScope {
         self.kind.required_scope()
     }
 
-    /// Whether this command is a dangerous, audited operation.
+    #[doc = include_str!("command_message.doc/is_dangerous_2.md")]
     #[must_use]
     pub const fn is_dangerous(&self) -> bool {
         self.kind.is_dangerous()

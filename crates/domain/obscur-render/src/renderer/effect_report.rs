@@ -1,15 +1,4 @@
-//! The §5.2 explicit diagnostics: what a scene demands, what a backend will not
-//! reproduce, what it reproduced only approximately, and how both reach a host.
-//!
-//! §5.2 asks for two things — "unsupported effects **and fallbacks** are explicit
-//! diagnostics" — and they are found differently. An **unsupported** effect
-//! ([`unsupported_effects`] → [`UNSUPPORTED_EFFECT`]) is answered by the backend's
-//! [`Renderer::supports_effect`] table alone: the effect never happens, whatever the
-//! frame. A **fallback** ([`EffectFallback`] → [`EFFECT_FALLBACK`]) is a property of
-//! the frame: a [`SupportLevel::Limited`] effect draws correctly until the input its
-//! restriction names is missing, so only the backend, drawing this scene, can say
-//! that it bit. Hence the table cannot be scanned for it and each backend reports
-//! its own from its render path.
+#![doc = include_str!("effect_report.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 use obscur_diagnostics::{
@@ -23,32 +12,13 @@ use obscur_scene::paint::{BlendMode, Brush, Paint};
 
 use crate::renderer::{Renderer, RendererError, SceneEffect};
 
-/// The stable code of the diagnostic raised when a backend will not reproduce an
-/// effect a scene demands (spec §5.2).
+#[doc = include_str!("effect_report.doc/UNSUPPORTED_EFFECT.md")]
 pub const UNSUPPORTED_EFFECT: DiagnosticCode = DiagnosticCode::new("render.effect.unsupported");
 
-/// The stable code of the diagnostic raised when a backend *did* draw an effect,
-/// but with one of its documented approximations standing in for what the scene
-/// asked for (spec §5.2).
-///
-/// The sibling of [`UNSUPPORTED_EFFECT`], and the other half of §5.2's "unsupported
-/// effects **and fallbacks** are explicit diagnostics": an `Unavailable` effect is a
-/// property of the backend and is knowable before drawing, whereas a fallback is a
-/// property of the *frame* — a [`SupportLevel::Limited`] effect draws perfectly
-/// until the one input its restriction names is missing. Reporting it needs the
-/// backend to say that the restriction actually bit, which is why this is emitted
-/// from the render path rather than derived from [`Renderer::supports_effect`].
+#[doc = include_str!("effect_report.doc/EFFECT_FALLBACK.md")]
 pub const EFFECT_FALLBACK: DiagnosticCode = DiagnosticCode::new("render.effect.fallback");
 
-/// One fallback a backend actually took while drawing a scene: the effect that was
-/// degraded, and the backend's own account of what it drew instead (spec §5.2).
-///
-/// The effect is drawn from the closed [`SceneEffect`] vocabulary so a host can
-/// route on it; the reason is free text because *why* an approximation bit is
-/// backend-specific in a way the port cannot enumerate (an unregistered font handle,
-/// an unpeelable nested filter layer). Both together are the identity: two runs
-/// missing two different fonts are two distinct fallbacks and are reported
-/// separately, while the same run missing the same font every frame is one.
+#[doc = include_str!("effect_report.doc/EffectFallback.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EffectFallback {
     effect: SceneEffect,
@@ -56,7 +26,7 @@ pub struct EffectFallback {
 }
 
 impl EffectFallback {
-    /// A fallback on `effect`, with the backend's account of what it drew instead.
+    #[doc = include_str!("effect_report.doc/new.md")]
     #[must_use]
     pub fn new(effect: SceneEffect, reason: impl Into<Box<str>>) -> Self {
         Self {
@@ -65,13 +35,13 @@ impl EffectFallback {
         }
     }
 
-    /// The effect that was degraded.
+    #[doc = include_str!("effect_report.doc/effect.md")]
     #[must_use]
     pub const fn effect(&self) -> SceneEffect {
         self.effect
     }
 
-    /// What the backend drew instead of what the scene asked for.
+    #[doc = include_str!("effect_report.doc/reason.md")]
     #[must_use]
     pub fn reason(&self) -> &str {
         &self.reason
@@ -84,11 +54,7 @@ impl std::fmt::Display for EffectFallback {
     }
 }
 
-/// Every [`SceneEffect`] `list` demands, deduplicated, in first-use paint order
-/// (spec §5.2).
-///
-/// This is the one place the display list is read as a set of *effect demands*, so
-/// a backend and a host agree on what a scene needs without either re-deriving it.
+#[doc = include_str!("effect_report.doc/scene_effects.md")]
 #[must_use]
 pub fn scene_effects(list: &DisplayList) -> Vec<SceneEffect> {
     let mut found: Vec<SceneEffect> = Vec::new();
@@ -135,16 +101,7 @@ pub fn scene_effects(list: &DisplayList) -> Vec<SceneEffect> {
     found
 }
 
-/// The effects `list` demands that `renderer` reports it will **not** reproduce
-/// ([`SupportLevel::Unavailable`]), in first-use paint order (spec §5.2).
-///
-/// Only `Unavailable` is collected: it is the level at which the effect does not
-/// happen at all, and it is knowable from the table alone — the answer is a property
-/// of the backend, so a scene demanding the effect is already the whole story. A
-/// [`SupportLevel::Limited`] or [`SupportLevel::Emulated`] effect *does* reach the
-/// frame, and whether its documented restriction actually bit depends on the frame,
-/// which no table can answer; a backend reports those from its render path with
-/// [`EffectFallbackReporter::report_fallbacks`].
+#[doc = include_str!("effect_report.doc/unsupported_effects.md")]
 #[must_use]
 pub fn unsupported_effects(renderer: &dyn Renderer, list: &DisplayList) -> Vec<SceneEffect> {
     scene_effects(list)
@@ -153,26 +110,13 @@ pub fn unsupported_effects(renderer: &dyn Renderer, list: &DisplayList) -> Vec<S
         .collect()
 }
 
-/// The typed error naming an effect a backend will not reproduce — the explicit
-/// §5.2 fallback diagnostic in its canonical form.
+#[doc = include_str!("effect_report.doc/unsupported_effect_error.md")]
 #[must_use]
 pub fn unsupported_effect_error(effect: SceneEffect) -> RendererError {
     RendererError::UnsupportedEffect(effect.name().into())
 }
 
-/// The font handle of every non-empty [`DrawText`](PaintCommand::DrawText) run in
-/// `list`, deduplicated, in first-use paint order.
-///
-/// Both in-tree backends report [`SceneEffect::Text`] as
-/// [`SupportLevel::Limited`] for the same reason — a run whose font the host never
-/// registered does not draw against that font — but each resolves a handle by its
-/// own rule (the CPU backend demands an exact, parseable match; Vello falls back to
-/// the primary id `0`), so each maps these handles through its own registry to
-/// decide which runs actually degraded. Reading the *list* is common, and lives
-/// here so a backend does not re-walk it.
-///
-/// Empty runs are omitted: a run with no glyphs draws nothing whether or not its
-/// font resolves, so it is not degraded by a missing one.
+#[doc = include_str!("effect_report.doc/text_run_font_handles.md")]
 #[must_use]
 pub fn text_run_font_handles(list: &DisplayList) -> Vec<u32> {
     let mut found: Vec<u32> = Vec::new();
@@ -187,19 +131,7 @@ pub fn text_run_font_handles(list: &DisplayList) -> Vec<u32> {
     found
 }
 
-/// Emits the §5.2 explicit fallback diagnostic for the effects a backend will not
-/// reproduce, once per effect.
-///
-/// A backend owns one of these and calls [`report`](Self::report) from its render
-/// path with the [`unsupported_effects`] of the scene it is about to draw. Whether
-/// a backend reproduces an effect is a property of the **backend**, not of the
-/// frame, so each effect is reported the first time a scene demands it and never
-/// again: a host learns "this backend will not draw your gradients" once, instead
-/// of sixty times a second for as long as the gradient is on screen.
-///
-/// The diagnostic is [`Warning`](DiagnosticSeverity::Warning) with
-/// [`RecoveryAction::Fallback`]: the frame is still drawn, with the backend's
-/// documented approximation in place of the effect.
+#[doc = include_str!("effect_report.doc/EffectFallbackReporter.md")]
 #[derive(Debug, Default, Clone)]
 pub struct EffectFallbackReporter {
     reported: Vec<SceneEffect>,
@@ -207,7 +139,7 @@ pub struct EffectFallbackReporter {
 }
 
 impl EffectFallbackReporter {
-    /// A reporter that has raised nothing yet.
+    #[doc = include_str!("effect_report.doc/new_2.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -216,10 +148,7 @@ impl EffectFallbackReporter {
         }
     }
 
-    /// Emits one diagnostic per effect in `unsupported` not yet reported, and
-    /// returns them.
-    ///
-    /// Pass the result of [`unsupported_effects`] for the scene about to be drawn.
+    #[doc = include_str!("effect_report.doc/report.md")]
     pub fn report(
         &mut self,
         unsupported: &[SceneEffect],
@@ -248,18 +177,7 @@ impl EffectFallbackReporter {
         raised
     }
 
-    /// Emits one diagnostic per fallback in `fallbacks` not yet reported, and
-    /// returns them.
-    ///
-    /// Pass the fallbacks the backend is about to take for the scene it is drawing —
-    /// the approximations its [`Renderer::supports_effect`] table already declares,
-    /// at the moment one of them actually stands in for what the scene asked for.
-    /// Declaring `Text` [`Limited`](SupportLevel::Limited) says "a run needs its font
-    /// registered"; this says "*this* run's font is not, and here is what I drew".
-    ///
-    /// Deduplicated on the whole [`EffectFallback`], reason included: a host learns
-    /// about each missing font once rather than once a frame, but two runs missing
-    /// two different fonts stay two reports.
+    #[doc = include_str!("effect_report.doc/report_fallbacks.md")]
     pub fn report_fallbacks(
         &mut self,
         fallbacks: &[EffectFallback],
@@ -284,21 +202,20 @@ impl EffectFallbackReporter {
         raised
     }
 
-    /// The effects this reporter has already raised.
+    #[doc = include_str!("effect_report.doc/reported.md")]
     #[must_use]
     pub fn reported(&self) -> &[SceneEffect] {
         &self.reported
     }
 
-    /// The fallbacks this reporter has already raised.
+    #[doc = include_str!("effect_report.doc/degraded.md")]
     #[must_use]
     pub fn degraded(&self) -> &[EffectFallback] {
         &self.degraded
     }
 }
 
-/// The effect a clip demands: a shape clip confines by geometry, a mask clip by
-/// coverage read from separate source content.
+#[doc = include_str!("effect_report.doc/clip_effect.md")]
 const fn clip_effect(clip: &Clip) -> SceneEffect {
     match clip {
         Clip::Shape(_) => SceneEffect::Clip,
@@ -306,7 +223,7 @@ const fn clip_effect(clip: &Clip) -> SceneEffect {
     }
 }
 
-/// The effects a `PushLayer` demands, pushed through `push`.
+#[doc = include_str!("effect_report.doc/layer_effects.md")]
 fn layer_effects(layer: &SceneLayer, push: &mut impl FnMut(SceneEffect)) {
     if layer.blend_mode() != BlendMode::Normal {
         push(SceneEffect::BlendMode);

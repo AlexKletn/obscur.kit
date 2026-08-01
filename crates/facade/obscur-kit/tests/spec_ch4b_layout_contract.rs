@@ -1,7 +1,4 @@
-//! §4.2 Measure and arrange — spec-derived conformance cases.
-//!
-//! Expected values come from the specification text quoted on each test. They
-//! must not be edited to make a case pass.
+#![doc = include_str!("spec_ch4b_layout_contract.doc/_module.md")]
 
 mod spec_ch4b_support;
 
@@ -10,8 +7,7 @@ use obscur_kit::identity::NodeId;
 use obscur_kit::layout::algorithm::{ChildMeasurer, CustomLayout, LayoutAlgorithm, LayoutChild};
 use obscur_kit::layout::model::LayoutStyle;
 
-/// A measurer whose answer depends only on the child index and the constraints
-/// it is handed — no clock, no global state, no allocation addresses.
+#[doc = include_str!("spec_ch4b_layout_contract.doc/PackingMeasurer.md")]
 struct PackingMeasurer;
 
 impl ChildMeasurer for PackingMeasurer {
@@ -26,8 +22,7 @@ impl ChildMeasurer for PackingMeasurer {
     }
 }
 
-/// Serializes every child's final rect from one layout of a 200-child custom
-/// layout context at a fixed viewport.
+#[doc = include_str!("spec_ch4b_layout_contract.doc/serialize_rects.md")]
 fn serialize_rects() -> String {
     let children: Vec<LayoutChild> = (0..200)
         .map(|i| LayoutChild::new(NodeId::from_raw(i + 1), LayoutStyle::default()))
@@ -52,14 +47,7 @@ fn serialize_rects() -> String {
     s
 }
 
-/// §4.2: "Custom layout uses restricted deterministic domain APIs for geometry
-/// and constraints."
-///
-/// The identical tree is laid out in two **separately-launched processes** (a
-/// same-process double run cannot expose a `HashMap`/`HashSet` iteration order
-/// randomized per process by `RandomState`, nor an order derived from
-/// allocation addresses). The two serialized `(x, y, w, h)` lists must be
-/// byte-identical.
+#[doc = include_str!("spec_ch4b_layout_contract.doc/ch4_2_c_custom_layout_is_deterministic_across_processes.md")]
 #[test]
 fn ch4_2_c_custom_layout_is_deterministic_across_processes() {
     // The child half of the test: a fresh process re-executes this same binary

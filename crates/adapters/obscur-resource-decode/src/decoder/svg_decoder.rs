@@ -1,18 +1,4 @@
-//! An SVG [`ResourceDecoder`] backed by `usvg` (spec §5.17).
-//!
-//! [`SvgDecoder`] parses SVG source with `usvg`, which validates the document and
-//! resolves it into a normalized vector tree. Per spec §5.17 an SVG must stay
-//! vector through the scene pipeline, so this decoder does **not** rasterize:
-//! rasterizing here would discard the vector data the scene layer needs. Instead
-//! it keeps the original SVG source bytes as the CPU payload — vector-preserving —
-//! and records the intrinsic pixel size taken from the resolved document (its
-//! `width`/`height`/`viewBox`), which is what the runtime needs for object-fit
-//! layout (spec §5.16 intrinsic size, §5.17 vector).
-//!
-//! Text is intentionally left unshaped (`usvg`'s `text` feature is disabled) so
-//! this decoder needs no font database: text elements still parse, but their
-//! glyph outlines are resolved later by the kit's own text stack, keeping the
-//! font provider replaceable (spec §5.18).
+#![doc = include_str!("svg_decoder.doc/_module.md")]
 
 use std::sync::Arc;
 
@@ -21,19 +7,12 @@ use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-/// A [`ResourceDecoder`] that validates SVG source with `usvg` and keeps it
-/// vector (spec §5.17).
-///
-/// This decoder supports only [`ResourceKind::Svg`]. It parses the bytes as UTF-8
-/// SVG (optionally gzip-compressed, which `usvg` handles), validates the
-/// document, and returns the original source bytes as the [`DecodedResource`]
-/// payload with the resolved intrinsic size in its metadata. Invalid SVG becomes
-/// [`ResourceError::DecodeFailed`].
+#[doc = include_str!("svg_decoder.doc/SvgDecoder.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SvgDecoder;
 
 impl SvgDecoder {
-    /// Creates an SVG decoder.
+    #[doc = include_str!("svg_decoder.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self

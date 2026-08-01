@@ -1,0 +1,1 @@
+Pixel-snapping policy selector.

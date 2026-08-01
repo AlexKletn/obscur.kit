@@ -1,44 +1,28 @@
-//! A directional anchor/focus text selection (spec §5.11).
+#![doc = include_str!("text_selection.doc/_module.md")]
 
 use crate::span::TextRange;
 
 use super::{Caret, CaretAffinity};
 
-/// A single directional selection over a UTF-8 text buffer (spec §5.11 editing
-/// engine).
-///
-/// A selection is defined by two *byte* offsets: the [`anchor`](Self::anchor),
-/// the fixed end that stays put while the selection is extended, and the
-/// [`focus`](Self::focus), the moving end that follows the caret. The order of
-/// the two encodes direction — a forward selection has `focus >= anchor`, a
-/// backward one has `focus < anchor` — which drives shift-arrow extension and
-/// caret placement. A [`CaretAffinity`] disambiguates the focus when it lands on
-/// a soft line-wrap boundary. When `anchor == focus` the selection is
-/// *collapsed* and behaves as a plain caret.
-///
-/// This type models exactly one selection. Multi-selection (several disjoint
-/// ranges edited together) is a set of `TextSelection`s owned and reconciled by
-/// the buffer/editing engine, not represented here.
+#[doc = include_str!("text_selection.doc/TextSelection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextSelection {
-    /// The fixed end of the selection (byte offset).
+    #[doc = include_str!("text_selection.doc/anchor.md")]
     anchor: usize,
-    /// The moving end of the selection (byte offset).
+    #[doc = include_str!("text_selection.doc/focus.md")]
     focus: usize,
-    /// The wrap-boundary affinity of the focus.
+    #[doc = include_str!("text_selection.doc/affinity.md")]
     affinity: CaretAffinity,
 }
 
 impl TextSelection {
-    /// Creates a collapsed selection at `offset` (a caret): `anchor == focus`,
-    /// with the default [`Downstream`](CaretAffinity::Downstream) affinity.
+    #[doc = include_str!("text_selection.doc/caret.md")]
     #[must_use]
     pub const fn caret(offset: usize) -> Self {
         Self::new(offset, offset)
     }
 
-    /// Creates a selection from `anchor` to `focus` with the default
-    /// [`Downstream`](CaretAffinity::Downstream) affinity.
+    #[doc = include_str!("text_selection.doc/new.md")]
     #[must_use]
     pub const fn new(anchor: usize, focus: usize) -> Self {
         Self {
@@ -48,7 +32,7 @@ impl TextSelection {
         }
     }
 
-    /// Returns a copy of this selection with the focus `affinity` replaced.
+    #[doc = include_str!("text_selection.doc/with_affinity.md")]
     #[must_use]
     pub const fn with_affinity(&self, affinity: CaretAffinity) -> Self {
         Self {
@@ -58,46 +42,43 @@ impl TextSelection {
         }
     }
 
-    /// Returns the fixed end of the selection (byte offset).
+    #[doc = include_str!("text_selection.doc/anchor_2.md")]
     #[must_use]
     pub const fn anchor(&self) -> usize {
         self.anchor
     }
 
-    /// Returns the moving end of the selection (byte offset).
+    #[doc = include_str!("text_selection.doc/focus_2.md")]
     #[must_use]
     pub const fn focus(&self) -> usize {
         self.focus
     }
 
-    /// Returns the focus's wrap-boundary affinity.
+    #[doc = include_str!("text_selection.doc/affinity_2.md")]
     #[must_use]
     pub const fn affinity(&self) -> CaretAffinity {
         self.affinity
     }
 
-    /// Returns the covered [`TextRange`], `min(anchor, focus)..max(anchor,
-    /// focus)`, regardless of selection direction.
+    #[doc = include_str!("text_selection.doc/range.md")]
     #[must_use]
     pub const fn range(&self) -> TextRange {
         TextRange::new(self.start(), self.end())
     }
 
-    /// Returns whether the selection is collapsed (`anchor == focus`), i.e. a
-    /// plain caret with no selected span.
+    #[doc = include_str!("text_selection.doc/is_collapsed.md")]
     #[must_use]
     pub const fn is_collapsed(&self) -> bool {
         self.anchor == self.focus
     }
 
-    /// Returns whether the selection points forward (`focus >= anchor`). A
-    /// collapsed selection is considered forward.
+    #[doc = include_str!("text_selection.doc/is_forward.md")]
     #[must_use]
     pub const fn is_forward(&self) -> bool {
         self.focus >= self.anchor
     }
 
-    /// Returns the lower of the two endpoints (`min(anchor, focus)`).
+    #[doc = include_str!("text_selection.doc/start.md")]
     #[must_use]
     pub const fn start(&self) -> usize {
         if self.anchor < self.focus {
@@ -107,7 +88,7 @@ impl TextSelection {
         }
     }
 
-    /// Returns the higher of the two endpoints (`max(anchor, focus)`).
+    #[doc = include_str!("text_selection.doc/end.md")]
     #[must_use]
     pub const fn end(&self) -> usize {
         if self.anchor > self.focus {
@@ -117,32 +98,31 @@ impl TextSelection {
         }
     }
 
-    /// Returns the length of the selected span in bytes (`end - start`).
+    #[doc = include_str!("text_selection.doc/len.md")]
     #[must_use]
     pub const fn len(&self) -> usize {
         self.end() - self.start()
     }
 
-    /// Returns whether the selection is empty (a collapsed caret).
+    #[doc = include_str!("text_selection.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Returns the [`Caret`] at the focus, carrying the selection's affinity.
+    #[doc = include_str!("text_selection.doc/focus_caret.md")]
     #[must_use]
     pub const fn focus_caret(&self) -> Caret {
         Caret::new(self.focus, self.affinity)
     }
 
-    /// Returns the [`Caret`] at the anchor, with the default
-    /// [`Downstream`](CaretAffinity::Downstream) affinity.
+    #[doc = include_str!("text_selection.doc/anchor_caret.md")]
     #[must_use]
     pub const fn anchor_caret(&self) -> Caret {
         Caret::at(self.anchor)
     }
 
-    /// Returns a collapsed selection at the focus, keeping the affinity.
+    #[doc = include_str!("text_selection.doc/collapse_to_focus.md")]
     #[must_use]
     pub const fn collapse_to_focus(&self) -> Self {
         Self {
@@ -152,20 +132,19 @@ impl TextSelection {
         }
     }
 
-    /// Returns a collapsed selection at the start (lower endpoint).
+    #[doc = include_str!("text_selection.doc/collapse_to_start.md")]
     #[must_use]
     pub const fn collapse_to_start(&self) -> Self {
         Self::caret(self.start())
     }
 
-    /// Returns a collapsed selection at the end (higher endpoint).
+    #[doc = include_str!("text_selection.doc/collapse_to_end.md")]
     #[must_use]
     pub const fn collapse_to_end(&self) -> Self {
         Self::caret(self.end())
     }
 
-    /// Returns a selection with the anchor unchanged and the focus moved to
-    /// `focus`, keeping the affinity. This is the shift-extend operation.
+    #[doc = include_str!("text_selection.doc/extend_to.md")]
     #[must_use]
     pub const fn extend_to(&self, focus: usize) -> Self {
         Self {

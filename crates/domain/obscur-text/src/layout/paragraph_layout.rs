@@ -1,192 +1,38 @@
-//! The full laid-out multi-font paragraph: lines stacked vertically (spec §5.10).
-
-use std::collections::{HashSet, VecDeque};
+#![doc = include_str!("paragraph_layout.doc/_module.md")]
 
 use obscur_geometry::Size;
 
 use crate::font::FontId;
-use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun, TextDirection};
+use crate::shaping::{ShapedGlyph, ShapedRun, TextDirection};
 use crate::span::TextRange;
 
+use super::break_offsets::BreakOffsets;
 use super::line_break::is_cjk_ideograph;
+use super::line_justification::justify_lines;
+use super::line_segments::line_segments;
+use super::line_truncation::truncate_lines;
+use super::packed_line::PackedLine;
+use super::tagged_glyph::TaggedGlyph;
 use super::{
-    DefaultLineBreaker, Hyphenator, LineBreak, LineBreaker, NullHyphenator, OverflowWrap,
-    ParagraphLine, TextAlignment, TextOverflow, WhiteSpace, WordBreak,
+    DefaultLineBreaker, Hyphenator, LineBreak, LineBreaker, LineStrut, NullHyphenator,
+    OverflowWrap, ParagraphLine, TextAlignment, TextOverflow, WhiteSpace, WordBreak,
 };
 
-/// The inline **line-box strut** plus the used `line-height` (CSS 2.1 §10.8.1 /
-/// CSS Inline 3 §5).
-///
-/// Per CSS 2.1 §10.8 each line box is sized from a *strut* — an imaginary
-/// zero-width inline box with the element's own (primary) font metrics — combined
-/// with the inline content actually on the line. The strut is **always present**,
-/// even on an empty line, so a line never collapses below the element's own font
-/// height. `ascent`/`descent` are that primary face's vertical metrics (the
-/// descent carries everything below the baseline, including line-gap, so
-/// `ascent + descent` is the primary content box); `line_height` is the CSS
-/// *used* `line-height` L, into which any excess over the line's content box is
-/// distributed as half-leading (§10.8.1).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LineStrut {
-    /// The CSS *used* `line-height` L, in logical pixels.
-    line_height: f32,
-    /// The primary font's ascent above the baseline, in logical pixels.
-    ascent: f32,
-    /// The primary font's descent below the baseline (magnitude, incl. line-gap),
-    /// in logical pixels.
-    descent: f32,
-}
-
-impl LineStrut {
-    /// Creates a strut from the used `line_height` L and the primary font's
-    /// `ascent` and `descent` (both logical pixels, `descent` a positive
-    /// magnitude below the baseline).
-    #[must_use]
-    pub const fn new(line_height: f32, ascent: f32, descent: f32) -> Self {
-        Self {
-            line_height,
-            ascent,
-            descent,
-        }
-    }
-
-    /// The used `line-height` L, in logical pixels.
-    #[must_use]
-    pub const fn line_height(&self) -> f32 {
-        self.line_height
-    }
-
-    /// The primary font's ascent above the baseline, in logical pixels.
-    #[must_use]
-    pub const fn ascent(&self) -> f32 {
-        self.ascent
-    }
-
-    /// The primary font's descent below the baseline (magnitude), in logical
-    /// pixels.
-    #[must_use]
-    pub const fn descent(&self) -> f32 {
-        self.descent
-    }
-}
-
-/// A fully laid-out multi-font paragraph: its [`ParagraphLine`]s stacked
-/// vertically together with the computed total [`size`](Self::size), alignment,
-/// and overflow policy (spec §5.10).
-///
-/// This is the multi-font companion of [`TextLayout`](super::TextLayout): where
-/// that wraps a single itemized [`GlyphRun`], `ParagraphLayout` wraps a sequence
-/// of font-tagged [`ShapedRun`]s (as produced by the font-fallback orchestrator)
-/// into lines whose segments may each use a different font. The paragraph's
-/// `size` is derived from its lines: the width is the widest line's width and the
-/// height is the sum of the line heights. Because it embeds `f32` metrics and
-/// non-`Eq` glyph runs it derives `PartialEq` but not `Eq`.
+#[doc = include_str!("paragraph_layout.doc/ParagraphLayout.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphLayout {
-    /// The laid-out lines, top to bottom.
+    #[doc = include_str!("paragraph_layout.doc/lines.md")]
     lines: Vec<ParagraphLine>,
-    /// The total bounding size: max line width by summed line height.
+    #[doc = include_str!("paragraph_layout.doc/size.md")]
     size: Size,
-    /// The horizontal alignment applied to the lines.
+    #[doc = include_str!("paragraph_layout.doc/alignment.md")]
     alignment: TextAlignment,
-    /// The overflow policy for text exceeding the available width.
+    #[doc = include_str!("paragraph_layout.doc/overflow.md")]
     overflow: TextOverflow,
 }
 
-/// One flattened glyph tagged with the font, direction, font size, and bidi
-/// embedding level of the [`ShapedRun`] it came from. Flattening the fallback
-/// result into this stream lets word-splitting and greedy packing treat the
-/// whole paragraph uniformly while retaining enough per-glyph provenance to
-/// rebuild same-font, same-level segments and reorder them into visual order.
-#[derive(Clone, Copy)]
-struct Tagged {
-    font: FontId,
-    direction: TextDirection,
-    font_size: f32,
-    level: u8,
-    /// Whether the segment this glyph belongs to is faux-sheared (spec §5.18).
-    synth_oblique: bool,
-    /// Whether the segment this glyph belongs to is faux-bolded (spec §5.18).
-    synth_bold: bool,
-    glyph: ShapedGlyph,
-}
-
-/// A word: the tagged glyphs between two adjacent break opportunities, its
-/// advance width, whether a mandatory break follows it, and the interior
-/// hyphenation points at which it may be split. A word may contain glyphs from
-/// more than one font.
-struct Word {
-    glyphs: Vec<Tagged>,
-    width: f32,
-    /// The advance of the word's trailing run of *collapsible* whitespace glyphs
-    /// (CSS Text 3 §3/§7.1). A word owns the space that follows it (the soft break
-    /// sits before the next word), so this is the part of `width` that **hangs**
-    /// when the word ends a line: it is excluded from the fit test and zeroed out
-    /// of the line's used width. `0.0` when the word has no trailing collapsible
-    /// space (or the mode preserves spaces).
-    trailing_ws: f32,
-    mandatory_break_after: bool,
-    /// The in-word split points (from the hyphenator or author soft hyphens),
-    /// ascending by [`head_width`](HyphenPoint::head_width).
-    hyphens: Vec<HyphenPoint>,
-}
-
-/// One interior hyphenation opportunity inside a [`Word`]: where the head ends,
-/// where the tail resumes, the head's advance width, and the source byte a
-/// rendered hyphen glyph maps back to.
-///
-/// A break splits the word into `glyphs[0..head_end]` (the head, which may gain
-/// a trailing hyphen glyph) and `glyphs[tail_start..]` (the tail). For an
-/// algorithmic (interior) break `tail_start == head_end`; for an author soft
-/// hyphen (`U+00AD`) `tail_start == head_end + 1`, so the invisible soft-hyphen
-/// glyph is dropped at the break and replaced by the rendered hyphen.
-#[derive(Clone, Copy)]
-struct HyphenPoint {
-    /// Exclusive glyph index the head runs up to.
-    head_end: usize,
-    /// Glyph index the tail resumes at (`head_end`, or `head_end + 1` for a
-    /// soft hyphen whose glyph is dropped).
-    tail_start: usize,
-    /// The advance width of the head glyphs (`glyphs[0..head_end]`).
-    head_width: f32,
-    /// The source byte offset the rendered hyphen glyph carries as its cluster.
-    break_cluster: usize,
-}
-
-/// The result of breaking a [`Word`] at a hyphenation point: the head glyphs
-/// (with an appended hyphen when one was supplied) and the remaining tail.
-struct Split {
-    head: Vec<Tagged>,
-    tail: Word,
-}
-
-/// The character at byte offset `cluster` in `text`, if any.
-fn char_at(text: &str, cluster: usize) -> Option<char> {
-    text.get(cluster..).and_then(|rest| rest.chars().next())
-}
-
-/// Whether the character at byte offset `cluster` is a CSS word separator
-/// (CSS Text 3 §8.2): U+0020 SPACE or U+00A0 NO-BREAK SPACE.
-fn is_word_separator(text: &str, cluster: usize) -> bool {
-    matches!(char_at(text, cluster), Some(' ' | '\u{00A0}'))
-}
-
-/// One packed line: its logical-order tagged glyphs, the number of words it holds
-/// (so its inter-word gap count is `word_count - 1`), and whether the line was
-/// closed by a *mandatory* (hard) break. Justification uses `word_count` and
-/// `mandatory_break_after` to decide whether the line stretches to fill the width.
-struct PackedLine {
-    glyphs: Vec<Tagged>,
-    word_count: usize,
-    mandatory_break_after: bool,
-}
-
 impl ParagraphLayout {
-    /// Creates a layout from its `lines`, `alignment`, and `overflow` policy,
-    /// computing the total [`size`](Self::size) from the lines (spec §5.10).
-    ///
-    /// The width is the widest line's width and the height is the sum of the line
-    /// heights.
+    #[doc = include_str!("paragraph_layout.doc/new.md")]
     #[must_use]
     pub fn new(
         lines: Vec<ParagraphLine>,
@@ -206,40 +52,7 @@ impl ParagraphLayout {
         }
     }
 
-    /// Greedily wraps a sequence of font-tagged shaped `runs` of `text` into a
-    /// multi-font paragraph no wider than `max_width` (spec §5.10).
-    ///
-    /// The `runs` are the logical-order output of the font-fallback orchestrator;
-    /// their glyph clusters are byte offsets into the full `text`. The algorithm:
-    ///
-    /// 1. flattens `runs` into one ordered glyph stream, tagging each glyph with
-    ///    its run's font, direction, and font size;
-    /// 2. splits the stream into words at the [`LineBreak::opportunities`] of
-    ///    `text`, mapping each break's byte offset to the glyph whose cluster
-    ///    equals it — a word may therefore span several fonts;
-    /// 3. greedily packs words onto lines under `max_width`, closing a line when
-    ///    the next word would overflow a non-empty line and always after a
-    ///    mandatory break; a word wider than `max_width` still takes its own line;
-    /// 4. splits each line's glyphs into contiguous same-font, same-level
-    ///    segments, rebuilding a [`ShapedRun`] per segment, reorders those
-    ///    segments into visual order via the UAX#9 L2 rule (see `segment`), and
-    ///    assigns the line its cumulative `top` (spaced by `line_height`),
-    ///    `height`, `baseline`, and alignment offset.
-    ///
-    /// A **non-finite** `max_width` (`f32::INFINITY`) is the explicit *no
-    /// constraint* sentinel (CSS 2.1 §10.8 available-width; the intrinsic /
-    /// max-content measure): the whole paragraph is one line. A **finite**
-    /// `max_width >= 0` is a real box, so a `0`/tiny width max-wraps toward
-    /// min-content rather than overflowing on one line. The
-    /// `white_space` mode (CSS Text 3 §3) selects the break opportunities: a
-    /// non-wrapping mode (`nowrap` / `pre`) yields no soft breaks, so each segment
-    /// between mandatory (`\n`) breaks lays out on a single line that may overflow
-    /// `max_width` — which is correct (overflow/ellipsis is a separate concern).
-    /// Empty input — no runs, or a single empty run — yields one empty line rather
-    /// than panicking. This greedy wrapper reorders a line's *segments* into
-    /// visual order (line-level bidi) but never reorders glyphs within a segment —
-    /// that is the shaper's job — and never splits a word, even one that spans
-    /// fonts.
+    #[doc = include_str!("paragraph_layout.doc/wrap.md")]
     // The wrap inputs plus the white-space mode are cohesive positional arguments
     // of one leaf entry point, not a public API surface.
     #[allow(clippy::too_many_arguments)]
@@ -272,43 +85,7 @@ impl ParagraphLayout {
         )
     }
 
-    /// Wraps like [`wrap`](Self::wrap) but additionally breaks over-wide words at
-    /// the opportunities a `hyphenator` proposes plus every author soft hyphen
-    /// (`U+00AD`), optionally rendering a visible `hyphen_glyph` at each break
-    /// (spec §5.10).
-    ///
-    /// The break opportunities are [`LineBreak::opportunities`] (whitespace and
-    /// mandatory breaks — which delimit words) **plus**, for each word, the
-    /// `hyphenator`'s interior byte offsets, **plus** every `U+00AD` in `text` as
-    /// a soft break. When the greedy packer meets a word that alone is wider than
-    /// the remaining line width, it breaks the word at the **last** hyphenation
-    /// opportunity whose head (plus the hyphen glyph's advance) still fits, places
-    /// the head — followed by `hyphen_glyph` when supplied — on the line, and
-    /// continues the tail on the next line (which may hyphenate again). A word
-    /// with no fitting opportunity still takes its own (overflowing) line, exactly
-    /// as before. A `U+00AD` that is not taken as a break is left zero-advance and
-    /// invisible. Determinism, cluster mapping, bidi reordering, and justification
-    /// are preserved: the hyphen glyph carries the break's source cluster and
-    /// inherits the font, direction, and bidi level of the glyph it follows, so it
-    /// segments and reorders with the head.
-    ///
-    /// [`wrap`](Self::wrap) is the special case `hyphenator = NullHyphenator`,
-    /// `hyphen_glyph = None`, and `ellipsis_glyph = None`.
-    ///
-    /// # `text-overflow` truncation
-    ///
-    /// After packing (and justification), any line whose content width *still*
-    /// exceeds `max_width` — a single unbreakable, un-hyphenatable word is the
-    /// usual cause — is truncated in place when `overflow.is_truncating()` and
-    /// `max_width > 0` (spec §5.10). [`TextOverflow::Clip`] keeps the largest
-    /// glyph-granular prefix that fits and drops the rest;
-    /// [`TextOverflow::Ellipsis`] reserves the `ellipsis_glyph`'s advance, keeps
-    /// the largest prefix that fits alongside it, then appends the ellipsis glyph
-    /// (carrying the last kept glyph's cluster, font, direction, and level) — with
-    /// no `ellipsis_glyph` supplied it degrades to [`Clip`](TextOverflow::Clip).
-    /// [`TextOverflow::Visible`] (and any non-truncating policy) leaves overflow
-    /// untouched, as does an unconstrained (non-finite `max_width`) wrap. A truncated
-    /// line overflows, so justification never stretches it.
+    #[doc = include_str!("paragraph_layout.doc/wrap_hyphenated.md")]
     // The wrap inputs plus the hyphenation port, hyphen glyph, and ellipsis glyph
     // are cohesive positional arguments of one leaf entry point, not a public API
     // surface.
@@ -332,7 +109,7 @@ impl ParagraphLayout {
         // baseline`) with font-agnostic segment metrics, so every line box equals
         // the scalar values — byte-identical to the pre-strut wrapper.
         let strut = LineStrut::new(line_height, baseline, line_height - baseline);
-        let seg_metrics = move |_font: FontId| (strut.ascent, strut.descent);
+        let seg_metrics = move |_font: FontId| (strut.ascent(), strut.descent());
         Self::wrap_core(
             runs,
             text,
@@ -354,11 +131,7 @@ impl ParagraphLayout {
         )
     }
 
-    /// Wraps like [`wrap`](Self::wrap) but sizes each line box from the mixed-font
-    /// line-box **strut** (CSS 2.1 §10.8.1): the `strut` (the element's own
-    /// primary-font metrics + used `line-height`) plus each segment font's metrics
-    /// from `seg_metrics`. See
-    /// [`wrap_strut_hyphenated`](Self::wrap_strut_hyphenated) for the formula.
+    #[doc = include_str!("paragraph_layout.doc/wrap_strut.md")]
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap_strut(
@@ -393,34 +166,7 @@ impl ParagraphLayout {
         )
     }
 
-    /// Wraps like [`wrap_hyphenated`](Self::wrap_hyphenated) but sizes each line
-    /// box from the mixed-font line-box **strut** (CSS 2.1 §10.8 / §10.8.1).
-    ///
-    /// For each packed line the used ascent `A = max(strut.ascent, max over
-    /// segments of seg_metrics(font).0)` and descent `D = max(strut.descent, max
-    /// over segments of seg_metrics(font).1)`; the strut floor is applied even on
-    /// an empty line. The content box is `A + D`; when the used `line-height` L
-    /// (`strut.line_height()`) exceeds it the excess splits as half-leading
-    /// `(L − (A+D))/2` above and below (line box `height = L`,
-    /// `baseline = A + half_leading`), else `height = A + D`, `baseline = A`. Lines
-    /// stack by their own heights, so a tall fallback line pushes the rest down and
-    /// the paragraph height is `Σ line heights`. Packing, hyphenation,
-    /// justification, and `text-overflow` are identical to
-    /// [`wrap_hyphenated`](Self::wrap_hyphenated).
-    ///
-    /// `tab_width` is the resolved `tab-size` stop width; after packing, each
-    /// preserved tab is re-expanded from the start of *its own line* (CSS Text 3
-    /// §4.3, see [`wrap_core`](Self::wrap_core)). `0.0` (or text with no `\t`)
-    /// disables the pass and is byte-identical, as is a tab that stays on line 0.
-    ///
-    /// `overflow_wrap` / `word_break` are the resolved CSS Text 3 §5.2 controls
-    /// for the emergency (grapheme-cluster) break of an over-wide token, and
-    /// `line_breaker` is the replaceable [`LineBreaker`] port that supplies the
-    /// ordinary break opportunities. The defaults
-    /// ([`OverflowWrap::Normal`] + [`WordBreak::Normal`] +
-    /// [`DefaultLineBreaker`]) keep the historical behaviour exactly — an over-wide
-    /// unbreakable word overflows and no port is consulted beyond the built-in
-    /// breaker.
+    #[doc = include_str!("paragraph_layout.doc/wrap_strut_hyphenated.md")]
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap_strut_hyphenated(
@@ -461,25 +207,7 @@ impl ParagraphLayout {
         )
     }
 
-    /// The shared wrapping core: packs `runs` into lines and sizes each line box
-    /// from the CSS 2.1 §10.8.1 strut (`strut` + per-font `seg_metrics`).
-    ///
-    /// `letter_spacing` / `word_spacing` are the resolved CSS Text 3 §8.1/§8.2
-    /// tracking values that were folded into the glyph advances upstream (by
-    /// [`apply_spacing`](crate::shaping::apply_spacing)); the core needs them to
-    /// *hang* (trim) the trailing tracking of each line's last cluster, which §8.1
-    /// says is "deferred to the line breaker". They are `0.0` on every historical
-    /// path, so the trim is then a no-op and the output is byte-identical.
-    ///
-    /// `tab_width` is the resolved `tab-size` stop width (CSS Text 3 §4.3): after
-    /// packing, each preserved tab is re-expanded from the start of *its own line*
-    /// via [`retab_lines`](Self::retab_lines), because §4.3 measures a tab stop
-    /// from the line the tab is on and the pre-wrap
-    /// [`apply_tab_stops`](crate::shaping::apply_tab_stops) pass could only reset
-    /// the pen at a hard `\n`, never at a soft-wrap boundary. `0.0` (or text with
-    /// no `\t`) disables the pass, so every historical path is byte-identical, as
-    /// is a tab that stays on the first (line-0) line — its line start *is* the
-    /// paragraph origin the pre-wrap pass measured from.
+    #[doc = include_str!("paragraph_layout.doc/wrap_core.md")]
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     fn wrap_core(
@@ -501,7 +229,7 @@ impl ParagraphLayout {
         overflow_wrap: OverflowWrap,
         word_break: WordBreak,
     ) -> Self {
-        let mut stream = Self::flatten(runs);
+        let mut stream = TaggedGlyph::flatten(runs);
 
         // CSS Text 3 §4.1.1: in a collapsing white-space mode a collapsible space
         // "immediately following another collapsible space … is collapsed to have
@@ -517,8 +245,7 @@ impl ParagraphLayout {
         if white_space.collapses_spaces() {
             let mut prev_collapsible = false;
             for tagged in &mut stream {
-                let is_collapsible =
-                    matches!(char_at(text, tagged.glyph.cluster()), Some(' ' | '\t'));
+                let is_collapsible = matches!(tagged.source_char(text), Some(' ' | '\t'));
                 if is_collapsible && prev_collapsible {
                     tagged.glyph = tagged.glyph.with_x_advance(0.0);
                 }
@@ -535,17 +262,17 @@ impl ParagraphLayout {
             breaks.retain(|b| !Self::is_keep_all_suppressed(*b, text));
         }
 
-        // Author soft hyphens: the byte offset of every `U+00AD` char. Their
-        // shaped glyphs are forced to zero advance so an untaken soft hyphen is
-        // invisible mid-line (spec §5.10).
-        let soft: HashSet<usize> = text
-            .char_indices()
-            .filter(|&(_, ch)| ch == '\u{00AD}')
-            .map(|(index, _)| index)
-            .collect();
-        if !soft.is_empty() {
+        // What the source text says about each byte offset: where a word may be
+        // hyphenated, where the author wrote a soft hyphen, and which collapsible
+        // spaces hang at a line's end. Collected once, after the break list is
+        // final, and consulted per glyph from here on.
+        let offsets = BreakOffsets::collect(text, &breaks, hyphenator, white_space);
+
+        // An author soft hyphen's shaped glyph is forced to zero advance so an
+        // untaken soft hyphen is invisible mid-line (spec §5.10).
+        if offsets.has_soft_hyphens() {
             for tagged in &mut stream {
-                if soft.contains(&tagged.glyph.cluster()) {
+                if offsets.is_soft_hyphen(tagged.glyph.cluster()) {
                     tagged.glyph = tagged.glyph.with_x_advance(0.0);
                 }
             }
@@ -557,28 +284,11 @@ impl ParagraphLayout {
         // trailing on its line never inflates the line width (spec §4.1.1/§7.1).
         if white_space.preserves_segment_breaks() {
             for tagged in &mut stream {
-                if char_at(text, tagged.glyph.cluster()) == Some('\n') {
+                if tagged.source_char(text) == Some('\n') {
                     tagged.glyph = tagged.glyph.with_x_advance(0.0);
                 }
             }
         }
-
-        // Byte offsets of *collapsible* trailing-hangable whitespace (CSS Text 3
-        // §3/§7.1): a run of these at a line's end is removed from the line's used
-        // width (it hangs). Only the collapsing modes have collapsible spaces
-        // (normal / nowrap / pre-line); pre / pre-wrap preserve them, so nothing
-        // hangs there and their measurement is untouched.
-        let hang_ws: HashSet<usize> = if white_space.collapses_spaces() {
-            text.char_indices()
-                .filter(|&(_, ch)| ch == ' ' || ch == '\t')
-                .map(|(index, _)| index)
-                .collect()
-        } else {
-            HashSet::new()
-        };
-
-        // Interior break offsets proposed by the hyphenator, one word at a time.
-        let hyphen_offsets = Self::hyphen_offsets(text, &breaks, hyphenator);
 
         // A **non-finite** `max_width` (`f32::INFINITY`) is the explicit no-width
         // constraint (intrinsic / max-content measure); a finite `max_width >= 0`
@@ -589,32 +299,20 @@ impl ParagraphLayout {
         // Split the flattened stream into per-line packed groups.
         let mut lines_glyphs = if stream.is_empty() {
             // Empty input still yields a single (empty) line.
-            vec![PackedLine {
-                glyphs: Vec::new(),
-                word_count: 0,
-                mandatory_break_after: false,
-            }]
-        } else if !bounded {
-            // Unconstrained width: the whole paragraph is one line. A single
-            // unconstrained line is never justified (it is the last line), so its
-            // word count is immaterial.
-            vec![PackedLine {
-                glyphs: stream,
-                word_count: 0,
-                mandatory_break_after: false,
-            }]
-        } else {
-            Self::pack_lines(
+            vec![PackedLine::empty()]
+        } else if bounded {
+            PackedLine::pack(
                 &stream,
                 max_width,
                 &breaks,
-                &hyphen_offsets,
-                &soft,
-                &hang_ws,
+                &offsets,
                 hyphen_glyph,
                 overflow_wrap,
                 word_break,
             )
+        } else {
+            // Unconstrained width: the whole paragraph is one line.
+            vec![PackedLine::whole(stream)]
         };
 
         // Re-expand preserved tabs from each visual line's own left edge (CSS Text
@@ -626,7 +324,7 @@ impl ParagraphLayout {
         // line-0 tab is unchanged (its line start is the paragraph origin). A no-op
         // unless a real stop width is supplied and `text` still holds a `\t`.
         if tab_width > 0.0 && text.contains('\t') {
-            Self::retab_lines(&mut lines_glyphs, text, tab_width);
+            PackedLine::retab(&mut lines_glyphs, text, tab_width);
         }
 
         // Hang the trailing collapsible whitespace and trailing letter-/word-spacing
@@ -635,20 +333,14 @@ impl ParagraphLayout {
         // the last remaining cluster. This is what excludes the hung advance from a
         // line's used `width()`, its alignment `x_offset`, and justification's base.
         for packed in &mut lines_glyphs {
-            Self::hang_line_trailing(
-                &mut packed.glyphs,
-                text,
-                &hang_ws,
-                letter_spacing,
-                word_spacing,
-            );
+            packed.hang_trailing(text, &offsets, letter_spacing, word_spacing);
         }
 
         // Justify: stretch every eligible line's inter-word gaps so it fills
         // `max_width`. Only meaningful under a positive constraint (the unbounded
         // and empty branches produce a single, non-justified last line).
         if alignment == TextAlignment::Justify && bounded {
-            Self::justify(&mut lines_glyphs, &breaks, max_width);
+            justify_lines(&mut lines_glyphs, &breaks, max_width);
         }
 
         // Apply `text-overflow` truncation. Only lines that *still* overflow
@@ -659,12 +351,7 @@ impl ParagraphLayout {
         // Truncation needs a *positive* finite box to clip against; a genuinely
         // 0-width box wraps to min-content (above) but is not clipped to nothing.
         if overflow.is_truncating() && bounded && max_width > 0.0 {
-            for packed in &mut lines_glyphs {
-                let width: f32 = packed.glyphs.iter().map(|t| t.glyph.x_advance()).sum();
-                if width > max_width {
-                    Self::truncate_line(&mut packed.glyphs, max_width, overflow, ellipsis_glyph);
-                }
-            }
+            truncate_lines(&mut lines_glyphs, max_width, overflow, ellipsis_glyph);
         }
 
         // The end byte of the last line falls back to the text length.
@@ -685,13 +372,13 @@ impl ParagraphLayout {
                 .map_or(text_end, |t| t.glyph.cluster());
             let range = TextRange::new(start.min(end), start.max(end));
 
-            let segments = Self::segment(glyphs, end);
+            let segments = line_segments(glyphs, end);
             let direction = glyphs
                 .first()
                 .map_or(TextDirection::LeftToRight, |t| t.direction);
             // CSS 2.1 §10.8.1: size this line box from the strut plus the fonts
             // actually on the line, then stack by its own height.
-            let (height, line_baseline) = Self::strut_line_box(glyphs, strut, seg_metrics);
+            let (height, line_baseline) = strut.line_box(glyphs, seg_metrics);
             let line = ParagraphLine::new(segments, range, top, height, line_baseline);
             let x_offset = alignment.x_offset(line.width(), max_width, direction);
             let line = line.with_x_offset(x_offset);
@@ -702,882 +389,18 @@ impl ParagraphLayout {
         Self::new(lines, alignment, overflow)
     }
 
-    /// Computes one line box's used `(height, baseline)` from the CSS 2.1
-    /// §10.8.1 strut and the fonts on the line.
-    ///
-    /// The line's ascent `A = max(strut.ascent, max seg ascent)` and descent
-    /// `D = max(strut.descent, max seg descent)` take the strut (the element's own
-    /// primary font) as an always-present floor — an empty line still gets the
-    /// strut's own box. With content box `A + D` and used `line-height`
-    /// `L = strut.line_height`: when `L > A + D` the excess splits as half-leading
-    /// `(L − (A+D))/2` above and below, giving `height = L`,
-    /// `baseline = A + half_leading`; otherwise `height = A + D`, `baseline = A`.
-    /// The `max` is order-independent, so the result is deterministic.
-    fn strut_line_box(
-        glyphs: &[Tagged],
-        strut: LineStrut,
-        seg_metrics: &dyn Fn(FontId) -> (f32, f32),
-    ) -> (f32, f32) {
-        let mut ascent = strut.ascent;
-        let mut descent = strut.descent;
-        for tagged in glyphs {
-            let (seg_ascent, seg_descent) = seg_metrics(tagged.font);
-            ascent = ascent.max(seg_ascent);
-            descent = descent.max(seg_descent);
-        }
-        let content = ascent + descent;
-        if strut.line_height > content {
-            let half_leading = (strut.line_height - content) / 2.0;
-            (strut.line_height, ascent + half_leading)
-        } else {
-            (content, ascent)
-        }
-    }
-
-    /// Hangs one line's trailing content so it is excluded from the line's used
-    /// width, alignment offset, and justification base (CSS Text 3 §7.1, §8.1/§8.2).
-    ///
-    /// Two trims, in order:
-    ///
-    /// 1. **Trailing collapsible whitespace (§3/§7.1):** the maximal run of
-    ///    collapsible-space glyphs (`hang_ws`) at the end of the line has its
-    ///    advances zeroed — a sequence of collapsible spaces at a line's end is
-    ///    *removed*. A trailing `word-spacing` folded onto that space is removed
-    ///    with it.
-    /// 2. **Trailing tracking (§8.1/§8.2):** the last *remaining* cluster carries
-    ///    the `letter_spacing` that was added after every cluster; that trailing
-    ///    tracking hangs, so it is subtracted (plus `word_spacing` when that last
-    ///    cluster is itself a word separator, e.g. a preserved NBSP). `0.0`
-    ///    tracking makes this a no-op.
-    ///
-    /// Zeroing (rather than deleting) the glyphs keeps every cluster present for
-    /// caret hit-testing; only advances change.
-    fn hang_line_trailing(
-        glyphs: &mut [Tagged],
-        text: &str,
-        hang_ws: &HashSet<usize>,
-        letter_spacing: f32,
-        word_spacing: f32,
-    ) {
-        // 1. Zero the trailing collapsible-whitespace run.
-        let mut last = glyphs.len();
-        while last > 0 && hang_ws.contains(&glyphs[last - 1].glyph.cluster()) {
-            let glyph = glyphs[last - 1].glyph;
-            glyphs[last - 1].glyph = glyph.with_x_advance(0.0);
-            last -= 1;
-        }
-        // 2. Trim the trailing letter-/word-spacing of the last remaining cluster.
-        if (letter_spacing != 0.0 || word_spacing != 0.0) && last > 0 {
-            let glyph = glyphs[last - 1].glyph;
-            let mut advance = glyph.x_advance() - letter_spacing;
-            if is_word_separator(text, glyph.cluster()) {
-                advance -= word_spacing;
-            }
-            glyphs[last - 1].glyph = glyph.with_x_advance(advance);
-        }
-    }
-
-    /// Re-expands every preserved tab (U+0009) so it advances to the next
-    /// `tab_width` stop measured from the **start of its own line** (CSS Text 3
-    /// §4.3), rewriting the tab glyphs' advances in place per packed line.
-    ///
-    /// For each line the pen is reset to zero at the line's left edge and walked in
-    /// logical order; when a glyph is a tab its advance is set to `next − pen`,
-    /// where `next = (floor(pen / tab_width) + 1) · tab_width` is the next stop
-    /// strictly past the pen (§4.3: a tab always advances), and the recomputed
-    /// advance is folded into the pen so a following tab measures from it. Only tab
-    /// glyphs change — glyph id, cluster, offsets, font, level, and synthesis are
-    /// preserved. This is the exact per-line analogue of the pre-wrap
-    /// [`apply_tab_stops`](crate::shaping::apply_tab_stops) pen, which resets only
-    /// at hard `\n`; running it here — after wrapping knows the soft-wrap
-    /// boundaries — is what makes a tab on a wrapped line measure from that line's
-    /// origin. On line 0 the pen is identical to the pre-wrap pen, so the advance
-    /// is unchanged. Assumes `tab_width > 0`.
-    fn retab_lines(lines: &mut [PackedLine], text: &str, tab_width: f32) {
-        for line in lines {
-            let mut pen = 0.0_f32;
-            for tagged in &mut line.glyphs {
-                let glyph = tagged.glyph;
-                if char_at(text, glyph.cluster()) == Some('\t') {
-                    // Advance to the next tab stop strictly past the line-local pen.
-                    let stops = (pen / tab_width).floor() + 1.0;
-                    let advance = (stops * tab_width - pen).max(0.0);
-                    tagged.glyph = glyph.with_x_advance(advance);
-                    pen += advance;
-                } else {
-                    pen += glyph.x_advance();
-                }
-            }
-        }
-    }
-
-    /// Flattens the font-tagged `runs` into one ordered stream of [`Tagged`]
-    /// glyphs, preserving run order and tagging each glyph with its run's font,
-    /// direction, and font size.
-    fn flatten(runs: &[ShapedRun]) -> Vec<Tagged> {
-        let mut stream = Vec::new();
-        for shaped in runs {
-            let run = shaped.run();
-            let font = shaped.font();
-            let direction = run.direction();
-            let font_size = run.font_size();
-            let level = shaped.level();
-            let synth_oblique = shaped.synth_oblique();
-            let synth_bold = shaped.synth_bold();
-            for glyph in run.glyphs() {
-                stream.push(Tagged {
-                    font,
-                    direction,
-                    font_size,
-                    level,
-                    synth_oblique,
-                    synth_bold,
-                    glyph: *glyph,
-                });
-            }
-        }
-        stream
-    }
-
-    /// Collects the interior hyphenation offsets a `hyphenator` proposes across
-    /// the words of `text`, mapped into full-text byte coordinates (spec §5.10).
-    ///
-    /// The text is split into the same words the greedy packer sees (the spans
-    /// between adjacent [`LineBreak::opportunities`], and the leading/trailing
-    /// spans); each word substring is offered to the hyphenator, and every
-    /// returned offset is shifted by the word's start. Offsets that are not
-    /// strictly interior to their word are dropped, so an over-eager adapter can
-    /// never split at a word edge.
-    fn hyphen_offsets(
-        text: &str,
-        breaks: &[LineBreak],
-        hyphenator: &dyn Hyphenator,
-    ) -> HashSet<usize> {
-        let mut offsets = HashSet::new();
-        let mut bounds: Vec<usize> = breaks.iter().map(LineBreak::offset).collect();
-        bounds.push(text.len());
-        let mut start = 0;
-        for end in bounds {
-            if end > start && end <= text.len() {
-                let word = &text[start..end];
-                for offset in hyphenator.hyphenate(word) {
-                    let full = start + offset;
-                    // Keep only strictly interior break points.
-                    if full > start && full < end {
-                        offsets.insert(full);
-                    }
-                }
-            }
-            start = end.max(start);
-        }
-        offsets
-    }
-
-    /// Groups a non-empty glyph `stream` into per-line [`PackedLine`]s under a
-    /// greedy `max_width` fit, breaking an over-wide word at its last fitting
-    /// hyphenation opportunity (spec §5.10). `max_width` is assumed positive.
-    ///
-    /// `hyphen_offsets` and `soft` are the full-text byte offsets of algorithmic
-    /// and author-soft-hyphen break points; `hyphen_glyph` (when present) is
-    /// appended at each taken break so a visible hyphen renders. `hang_ws` is the
-    /// set of collapsible-whitespace byte offsets, so a word's trailing space can
-    /// be excluded from the fit test (it hangs, CSS Text 3 §3/§7.1).
-    // The stream, wrap width, break list, and the three break-offset sets plus the
-    // hyphen glyph and the two §5.2 controls are cohesive positional inputs of one
-    // internal packing step.
-    #[allow(clippy::too_many_arguments)]
-    fn pack_lines(
-        stream: &[Tagged],
-        max_width: f32,
-        breaks: &[LineBreak],
-        hyphen_offsets: &HashSet<usize>,
-        soft: &HashSet<usize>,
-        hang_ws: &HashSet<usize>,
-        hyphen_glyph: Option<ShapedGlyph>,
-        overflow_wrap: OverflowWrap,
-        word_break: WordBreak,
-    ) -> Vec<PackedLine> {
-        let mut queue: VecDeque<Word> =
-            Self::split_words(stream, breaks, hyphen_offsets, soft, hang_ws).into();
-
-        // CSS Text 3 §5.2 emergency-break controls. `word-break: break-all` breaks
-        // greedily at ANY grapheme-cluster boundary (a soft-wrap opportunity exists
-        // between any two typographic units), so it also fills the *remaining*
-        // space on the current line mid-word rather than moving the whole word
-        // down. `overflow-wrap: break-word | anywhere` only breaks as a LAST RESORT
-        // — when the word does not fit even alone on a full line — to keep it from
-        // overflowing. `normal` + `normal` disables emergency breaking entirely, so
-        // an over-wide word overflows exactly as before (byte-identical).
-        let break_all = word_break.breaks_all();
-        let emergency = break_all || overflow_wrap.allows_emergency_break();
-
-        let mut lines: Vec<PackedLine> = Vec::new();
-        let mut current: Vec<Tagged> = Vec::new();
-        let mut current_width = 0.0_f32;
-        let mut word_count = 0_usize;
-        // Whether the last word placed closed its line on a *mandatory* (forced)
-        // break — used to emit a trailing empty line box after a final `\n`.
-        let mut ended_on_mandatory = false;
-        while let Some(word) = queue.pop_front() {
-            ended_on_mandatory = false;
-            // Greedy rule: a whole word that no longer fits the (non-empty) line
-            // closes it. The word's own trailing collapsible whitespace **hangs**
-            // (CSS Text 3 §3/§7.1), so it never counts toward the fit test —
-            // otherwise a line wraps one space too early. Under `word-break:
-            // break-all` we do NOT wholesale-close: the word may instead be split
-            // to fill the remaining space (§5.2), handled by the emergency step.
-            if !current.is_empty()
-                && !break_all
-                && (current_width + word.width - word.trailing_ws) > max_width
-            {
-                lines.push(PackedLine {
-                    glyphs: std::mem::take(&mut current),
-                    word_count,
-                    mandatory_break_after: false,
-                });
-                current_width = 0.0;
-                word_count = 0;
-            }
-
-            // The word alone is wider than the space left on the (now possibly
-            // fresh) line: try to break it at the last fitting opportunity.
-            let remaining = max_width - current_width;
-            if word.width > remaining
-                && let Some(split) = Self::try_split(
-                    &word,
-                    remaining,
-                    hyphen_glyph,
-                    hyphen_offsets,
-                    soft,
-                    hang_ws,
-                )
-            {
-                current.extend_from_slice(&split.head);
-                word_count += 1;
-                lines.push(PackedLine {
-                    glyphs: std::mem::take(&mut current),
-                    word_count,
-                    mandatory_break_after: false,
-                });
-                current_width = 0.0;
-                word_count = 0;
-                queue.push_front(split.tail);
-                continue;
-            }
-
-            // Emergency (grapheme-cluster) break (CSS Text 3 §5.2). No fitting
-            // hyphenation opportunity exists; if emergency breaking is enabled and
-            // the word overflows the remaining space, force a grapheme break.
-            if emergency && (word.width - word.trailing_ws) > remaining {
-                // `break-all` breaks at any boundary; `overflow-wrap` only when the
-                // word cannot fit alone on a full line (a true last resort).
-                let may_break = break_all || (word.width - word.trailing_ws) > max_width;
-                if may_break {
-                    if let Some(split) = Self::try_emergency_split(
-                        &word,
-                        remaining,
-                        current.is_empty(),
-                        hyphen_offsets,
-                        soft,
-                        hang_ws,
-                    ) {
-                        current.extend_from_slice(&split.head);
-                        word_count += 1;
-                        lines.push(PackedLine {
-                            glyphs: std::mem::take(&mut current),
-                            word_count,
-                            mandatory_break_after: false,
-                        });
-                        current_width = 0.0;
-                        word_count = 0;
-                        queue.push_front(split.tail);
-                        continue;
-                    }
-                    if !current.is_empty() {
-                        // Not even one grapheme fits the remainder: close the line
-                        // and retry the word on a fresh, full-width line. This
-                        // guarantees progress under `break-all`.
-                        lines.push(PackedLine {
-                            glyphs: std::mem::take(&mut current),
-                            word_count,
-                            mandatory_break_after: false,
-                        });
-                        current_width = 0.0;
-                        word_count = 0;
-                        queue.push_front(word);
-                        continue;
-                    }
-                    // Fresh line and no split point: the word is a single
-                    // unbreakable cluster wider than the box — place it whole (it
-                    // overflows by one grapheme), falling through below.
-                }
-            }
-
-            current.extend_from_slice(&word.glyphs);
-            current_width += word.width;
-            word_count += 1;
-            if word.mandatory_break_after {
-                lines.push(PackedLine {
-                    glyphs: std::mem::take(&mut current),
-                    word_count,
-                    mandatory_break_after: true,
-                });
-                current_width = 0.0;
-                word_count = 0;
-                ended_on_mandatory = true;
-            }
-        }
-        if !current.is_empty() {
-            lines.push(PackedLine {
-                glyphs: current,
-                word_count,
-                mandatory_break_after: false,
-            });
-        } else if ended_on_mandatory {
-            // A *trailing* forced break (a `\n` at end of text) opens a new, empty
-            // line box (CSS Text 3 §4.1.1) — the caret needs a home on the last
-            // line. `"ab\n"` is two lines: `ab`, then an empty one.
-            lines.push(PackedLine {
-                glyphs: Vec::new(),
-                word_count: 0,
-                mandatory_break_after: false,
-            });
-        }
-        if lines.is_empty() {
-            // All content ended on a mandatory break; keep a single empty line.
-            lines.push(PackedLine {
-                glyphs: Vec::new(),
-                word_count: 0,
-                mandatory_break_after: false,
-            });
-        }
-        lines
-    }
-
-    /// Attempts to break `word` so its head (plus the hyphen glyph's advance)
-    /// fits within `limit`, returning the head glyphs (with an appended
-    /// `hyphen_glyph` when supplied) and the remaining tail as a fresh [`Word`].
-    ///
-    /// The **last** (widest) fitting opportunity is chosen. Returns [`None`] when
-    /// no opportunity's head fits, so the caller falls back to placing the whole
-    /// (overflowing) word.
-    fn try_split(
-        word: &Word,
-        limit: f32,
-        hyphen_glyph: Option<ShapedGlyph>,
-        hyphen_offsets: &HashSet<usize>,
-        soft: &HashSet<usize>,
-        hang_ws: &HashSet<usize>,
-    ) -> Option<Split> {
-        let hyphen_adv = hyphen_glyph.map_or(0.0, |g| g.x_advance());
-        // Points are ascending by head width; take the widest that still fits.
-        let point = word
-            .hyphens
-            .iter()
-            .rev()
-            .find(|p| p.head_width + hyphen_adv <= limit)
-            .copied()?;
-
-        let mut head: Vec<Tagged> = word.glyphs[..point.head_end].to_vec();
-        if let (Some(glyph), Some(last)) = (hyphen_glyph, head.last().copied()) {
-            // The hyphen inherits the trailing head glyph's font/direction/level
-            // so it segments and bidi-reorders with the head, and carries the
-            // break's source cluster for hit-testing.
-            let hyphen = ShapedGlyph::new(glyph.glyph_id(), point.break_cluster, glyph.x_advance())
-                .with_offset(glyph.x_offset(), glyph.y_offset());
-            head.push(Tagged {
-                glyph: hyphen,
-                ..last
-            });
-        }
-
-        let tail = Self::make_word(
-            word.glyphs[point.tail_start..].to_vec(),
-            word.mandatory_break_after,
-            hyphen_offsets,
-            soft,
-            hang_ws,
-        );
-        Some(Split { head, tail })
-    }
-
-    /// Attempts an **emergency** grapheme-cluster break of `word` so its head fits
-    /// within `limit`, returning the head glyphs and the remaining tail as a fresh
-    /// [`Word`] (CSS Text 3 §5.2 `overflow-wrap` / `word-break: break-all`).
-    ///
-    /// Unlike [`try_split`](Self::try_split) this inserts **no** hyphen glyph — an
-    /// emergency break is invisible. The largest prefix whose cumulative advance is
-    /// `<= limit` is taken, cut only at a **grapheme-cluster boundary**: glyph
-    /// clusters are UTF-8 byte offsets, so a boundary sits wherever the cluster
-    /// changes and the cut never lands inside a multi-glyph cluster (a base plus
-    /// its combining marks, or a ligature). Determinism follows from the greedy
-    /// left-to-right scan.
-    ///
-    /// Returns [`None`] when no break is warranted or possible:
-    /// - the word is a single glyph (nothing to split);
-    /// - no cluster fits `limit` and `line_empty` is false — the caller should
-    ///   close the current line and retry on a full-width line;
-    /// - the fitting prefix is the whole word (no interior boundary before the
-    ///   end) — the caller places it whole.
-    ///
-    /// When `line_empty` is true and not even the first cluster fits `limit`, the
-    /// first cluster is forced onto the (fresh) line so it overflows by a single
-    /// grapheme rather than looping forever — matching CSS, where one unbreakable
-    /// grapheme wider than its box still overflows.
-    fn try_emergency_split(
-        word: &Word,
-        limit: f32,
-        line_empty: bool,
-        hyphen_offsets: &HashSet<usize>,
-        soft: &HashSet<usize>,
-        hang_ws: &HashSet<usize>,
-    ) -> Option<Split> {
-        let glyphs = &word.glyphs;
-        if glyphs.len() < 2 {
-            return None;
-        }
-        // Greedily accumulate whole grapheme clusters up to `limit`.
-        let mut best_end = 0usize; // widest cluster-boundary head end with width <= limit
-        let mut first_end = 0usize; // end of the first cluster (forced-progress fallback)
-        let mut acc = 0.0_f32;
-        let mut index = 0usize;
-        while index < glyphs.len() {
-            let cluster = glyphs[index].glyph.cluster();
-            let mut width = 0.0_f32;
-            while index < glyphs.len() && glyphs[index].glyph.cluster() == cluster {
-                width += glyphs[index].glyph.x_advance();
-                index += 1;
-            }
-            if first_end == 0 {
-                first_end = index;
-            }
-            if acc + width <= limit {
-                acc += width;
-                best_end = index;
-            } else {
-                break;
-            }
-        }
-        let head_end = if best_end == 0 {
-            if line_empty {
-                first_end
-            } else {
-                return None;
-            }
-        } else {
-            best_end
-        };
-        if head_end == 0 || head_end >= glyphs.len() {
-            return None;
-        }
-        let head = glyphs[..head_end].to_vec();
-        let tail = Self::make_word(
-            glyphs[head_end..].to_vec(),
-            word.mandatory_break_after,
-            hyphen_offsets,
-            soft,
-            hang_ws,
-        );
-        Some(Split { head, tail })
-    }
-
-    /// Whether a soft `break` is suppressed by `word-break: keep-all` because it
-    /// sits between two adjacent CJK ideographs (CSS Text 3 §5.2).
-    ///
-    /// A mandatory (forced) break is never suppressed. A soft break at byte offset
-    /// `o` is suppressed when the character ending at `o` and the character
-    /// starting at `o` are both CJK ideographs — i.e. it is one of the implicit
-    /// inter-ideograph opportunities `keep-all` forbids.
+    #[doc = include_str!("paragraph_layout.doc/is_keep_all_suppressed.md")]
     fn is_keep_all_suppressed(break_point: LineBreak, text: &str) -> bool {
         if break_point.is_mandatory() {
             return false;
         }
         let offset = break_point.offset();
         let before = text.get(..offset).and_then(|head| head.chars().next_back());
-        let after = char_at(text, offset);
+        let after = text.get(offset..).and_then(|tail| tail.chars().next());
         matches!((before, after), (Some(a), Some(b)) if is_cjk_ideograph(a) && is_cjk_ideograph(b))
     }
 
-    /// Stretches every justification-eligible line so it fills `max_width`,
-    /// distributing the extra space equally across the line's inter-word gaps
-    /// (spec §5.10).
-    ///
-    /// A line is **not** justified — it keeps its natural width — when it is the
-    /// paragraph's last line, when it was closed by a mandatory (hard) break, or
-    /// when it holds fewer than two words (no inter-word gap to stretch). For an
-    /// eligible line the extra space `max_width - line_width` is split evenly
-    /// across its `g` gaps and added to the trailing glyph of each gap (typically
-    /// the word-final space); glyph ids and clusters are left intact, so the line's
-    /// rendered width becomes exactly `max_width`. A line already at or past
-    /// `max_width` gains nothing.
-    fn justify(lines: &mut [PackedLine], breaks: &[LineBreak], max_width: f32) {
-        let Some(last) = lines.len().checked_sub(1) else {
-            return;
-        };
-        // Byte offsets that begin a word (every break opportunity); a glyph whose
-        // cluster equals one starts a new word, so the glyph before it ends a gap.
-        let word_starts: std::collections::HashSet<usize> =
-            breaks.iter().map(LineBreak::offset).collect();
-        for (index, line) in lines.iter_mut().enumerate() {
-            if index == last || line.mandatory_break_after || line.word_count < 2 {
-                continue;
-            }
-            Self::justify_line(&mut line.glyphs, &word_starts, max_width);
-        }
-    }
-
-    /// Distributes the extra space that fills `max_width` across one line's
-    /// inter-word gaps by widening the trailing glyph of each gap.
-    ///
-    /// A gap sits before every glyph (after the first) whose cluster is in
-    /// `word_starts`; the glyph immediately before it is the gap's trailing glyph.
-    /// The `max_width - line_width` surplus is split equally across the gaps, so a
-    /// line with `g` gaps grows to exactly `max_width`. Nothing happens when the
-    /// line has no interior gap or is already at/over `max_width`.
-    fn justify_line(
-        glyphs: &mut [Tagged],
-        word_starts: &std::collections::HashSet<usize>,
-        max_width: f32,
-    ) {
-        let line_width: f32 = glyphs.iter().map(|t| t.glyph.x_advance()).sum();
-        let extra = max_width - line_width;
-        if extra <= 0.0 {
-            return;
-        }
-        // Trailing-glyph index of every interior gap (before a word-start glyph).
-        let gap_ends: Vec<usize> = (1..glyphs.len())
-            .filter(|&j| word_starts.contains(&glyphs[j].glyph.cluster()))
-            .map(|j| j - 1)
-            .collect();
-        if gap_ends.is_empty() {
-            return;
-        }
-        #[allow(clippy::cast_precision_loss)]
-        let add = extra / gap_ends.len() as f32;
-        for index in gap_ends {
-            let glyph = glyphs[index].glyph;
-            glyphs[index].glyph = glyph.with_x_advance(glyph.x_advance() + add);
-        }
-    }
-
-    /// Truncates one overflowing line's `glyphs` in place so it fits `max_width`
-    /// under the `overflow` policy, at glyph granularity (spec §5.10).
-    ///
-    /// [`Clip`](TextOverflow::Clip) — and [`Ellipsis`](TextOverflow::Ellipsis)
-    /// with no `ellipsis_glyph` — keeps the largest prefix whose cumulative
-    /// advance is `<= max_width` and drops the rest, adding nothing.
-    /// [`Ellipsis`](TextOverflow::Ellipsis) with a glyph reserves that glyph's
-    /// advance, keeps the largest prefix whose advance plus the ellipsis fits
-    /// `max_width`, then appends the ellipsis glyph. The appended glyph carries the
-    /// last kept glyph's cluster and inherits its font, direction, and bidi level
-    /// (falling back to the line's first glyph when nothing fits) so it segments
-    /// and reorders with the kept prefix. A partially-over glyph is dropped, so the
-    /// resulting line width never exceeds `max_width`.
-    fn truncate_line(
-        glyphs: &mut Vec<Tagged>,
-        max_width: f32,
-        overflow: TextOverflow,
-        ellipsis_glyph: Option<ShapedGlyph>,
-    ) {
-        // Only `Ellipsis` reserves and later appends a glyph; `Clip` (and
-        // `Ellipsis` without a supplied glyph) truncates without adding anything.
-        let ellipsis = match overflow {
-            TextOverflow::Ellipsis => ellipsis_glyph,
-            _ => None,
-        };
-        let limit = max_width - ellipsis.map_or(0.0, |g| g.x_advance());
-
-        // Keep the largest prefix whose cumulative advance fits `limit`.
-        let mut kept = 0_usize;
-        let mut width = 0.0_f32;
-        for tagged in glyphs.iter() {
-            let next = width + tagged.glyph.x_advance();
-            if next > limit {
-                break;
-            }
-            width = next;
-            kept += 1;
-        }
-
-        // The carrier lends the ellipsis its font/direction/level and cluster: the
-        // last kept glyph, or the first glyph when nothing fit.
-        let carrier = glyphs
-            .get(kept.wrapping_sub(1))
-            .or_else(|| glyphs.first())
-            .copied();
-        glyphs.truncate(kept);
-        if let (Some(glyph), Some(carrier)) = (ellipsis, carrier) {
-            let ellipsis =
-                ShapedGlyph::new(glyph.glyph_id(), carrier.glyph.cluster(), glyph.x_advance())
-                    .with_offset(glyph.x_offset(), glyph.y_offset());
-            glyphs.push(Tagged {
-                glyph: ellipsis,
-                ..carrier
-            });
-        }
-    }
-
-    /// Segments a glyph `stream` into [`Word`]s at the line-break opportunities of
-    /// `text`. A break at byte offset `o` closes the word before the first glyph
-    /// whose cluster reaches `o`; a hard break marks that word for a mandatory line
-    /// break. Each word records its trailing collapsible whitespace (from
-    /// `hang_ws`) and its interior hyphenation points (from `hyphen_offsets` /
-    /// `soft`), see [`make_word`](Self::make_word).
-    ///
-    /// Breaks are consumed by offset (ascending), so a break offset that lands
-    /// **inside** a ligature or **past the last glyph** (the end-of-text `\n` of
-    /// `"ab\n"`, whose cluster no glyph carries) is not lost: a trailing hard break
-    /// still marks the final word mandatory (CSS Text 3 §4.1.1), and a hard break
-    /// with no preceding glyphs (a leading/consecutive `\n`) yields an empty
-    /// mandatory word — a forced empty line box.
-    fn split_words(
-        stream: &[Tagged],
-        breaks: &[LineBreak],
-        hyphen_offsets: &HashSet<usize>,
-        soft: &HashSet<usize>,
-        hang_ws: &HashSet<usize>,
-    ) -> Vec<Word> {
-        let mut words: Vec<Word> = Vec::new();
-        let mut glyphs: Vec<Tagged> = Vec::new();
-        // Breaks are ascending by offset; `bi` is the next unconsumed break.
-        let mut bi = 0usize;
-        for tagged in stream {
-            let cluster = tagged.glyph.cluster();
-            // Consume every break at or before this glyph; the strongest (hard)
-            // kind wins for the word we are about to close.
-            let mut close = false;
-            let mut close_hard = false;
-            while bi < breaks.len() && breaks[bi].offset() <= cluster {
-                close = true;
-                close_hard |= breaks[bi].is_mandatory();
-                bi += 1;
-            }
-            if close {
-                if !glyphs.is_empty() {
-                    words.push(Self::make_word(
-                        std::mem::take(&mut glyphs),
-                        close_hard,
-                        hyphen_offsets,
-                        soft,
-                        hang_ws,
-                    ));
-                } else if close_hard {
-                    // A mandatory break with nothing before it (leading or repeated
-                    // `\n`): emit an empty forced-break word → an empty line box.
-                    words.push(Self::make_word(
-                        Vec::new(),
-                        true,
-                        hyphen_offsets,
-                        soft,
-                        hang_ws,
-                    ));
-                }
-            }
-            glyphs.push(*tagged);
-        }
-        // Breaks after the last glyph (offset > every cluster): a trailing `\n`
-        // whose cluster no glyph carries still forces a break on the final word.
-        let mut trailing_hard = false;
-        while bi < breaks.len() {
-            trailing_hard |= breaks[bi].is_mandatory();
-            bi += 1;
-        }
-        if !glyphs.is_empty() {
-            words.push(Self::make_word(
-                glyphs,
-                trailing_hard,
-                hyphen_offsets,
-                soft,
-                hang_ws,
-            ));
-        } else if trailing_hard {
-            words.push(Self::make_word(
-                Vec::new(),
-                true,
-                hyphen_offsets,
-                soft,
-                hang_ws,
-            ));
-        }
-        words
-    }
-
-    /// Builds a [`Word`] from its `glyphs`, computing its advance width and its
-    /// interior hyphenation points from `hyphen_offsets` (algorithmic breaks) and
-    /// `soft` (author `U+00AD` breaks).
-    ///
-    /// An interior point sits **before** a glyph whose cluster is an algorithmic
-    /// offset (the head runs up to it, the tail resumes at it). A soft-hyphen
-    /// point sits **at** a `U+00AD` glyph: the head ends before it and the tail
-    /// resumes after it, dropping the zero-advance soft-hyphen glyph. Neither
-    /// point is emitted at the word's first glyph (an empty head) or where it
-    /// would leave an empty tail. Points are sorted ascending by head width.
-    fn make_word(
-        glyphs: Vec<Tagged>,
-        mandatory_break_after: bool,
-        hyphen_offsets: &HashSet<usize>,
-        soft: &HashSet<usize>,
-        hang_ws: &HashSet<usize>,
-    ) -> Word {
-        let width: f32 = glyphs.iter().map(|t| t.glyph.x_advance()).sum();
-        // The trailing run of collapsible-whitespace advance that hangs when this
-        // word ends a line (CSS Text 3 §3/§7.1).
-        let trailing_ws: f32 = glyphs
-            .iter()
-            .rev()
-            .take_while(|t| hang_ws.contains(&t.glyph.cluster()))
-            .map(|t| t.glyph.x_advance())
-            .sum();
-        let mut hyphens: Vec<HyphenPoint> = Vec::new();
-        let mut head_width = 0.0_f32;
-        for (index, tagged) in glyphs.iter().enumerate() {
-            let cluster = tagged.glyph.cluster();
-            // An algorithmic break resumes the tail *at* this glyph.
-            if index >= 1 && hyphen_offsets.contains(&cluster) {
-                hyphens.push(HyphenPoint {
-                    head_end: index,
-                    tail_start: index,
-                    head_width,
-                    break_cluster: cluster,
-                });
-            }
-            // A soft hyphen breaks *after* this (invisible) glyph, which is
-            // dropped; require a non-empty head and a non-empty tail.
-            if soft.contains(&cluster) && index >= 1 && index + 1 < glyphs.len() {
-                hyphens.push(HyphenPoint {
-                    head_end: index,
-                    tail_start: index + 1,
-                    head_width,
-                    break_cluster: cluster,
-                });
-            }
-            head_width += tagged.glyph.x_advance();
-        }
-        hyphens.sort_by(|a, b| {
-            a.head_width
-                .partial_cmp(&b.head_width)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(a.head_end.cmp(&b.head_end))
-        });
-        Word {
-            glyphs,
-            width,
-            trailing_ws,
-            mandatory_break_after,
-            hyphens,
-        }
-    }
-
-    /// Splits one line's logical-order `glyphs` into contiguous [`ShapedRun`]
-    /// segments homogeneous in font, bidi level, font size, and synthesis
-    /// (faux bold / oblique), then reorders those segments into visual
-    /// (left-to-right) order via the UAX#9 L2 rule (see `reorder_visual`). Each
-    /// segment's [`GlyphRun`] takes its direction and font size from its glyphs'
-    /// source run, a `source` byte range from its glyphs' clusters (its last
-    /// logical segment ending at `line_end`), and carries its bidi `level`.
-    ///
-    /// A boundary in ANY of {font, level, font-size, synth-bold, synth-oblique}
-    /// ends a segment. Per CSS Inline Layout 3 §3.1 an inline box is split into
-    /// fragments at style boundaries, and CSS Text 3 §1.3 defines a run as a
-    /// maximal sequence of characters sharing formatting: glyphs that differ in
-    /// used font size or in synthesized boldness/obliqueness (CSS Fonts 4 §2.4,
-    /// spec §5.18) belong to distinct inline boxes and must not be coalesced into
-    /// one run rendered at the first glyph's size / synthesis. Within a segment
-    /// the glyph order is left as the shaper produced it: both HarfRust and the
-    /// deterministic mock already emit an RTL run's glyphs in visual order.
-    fn segment(glyphs: &[Tagged], line_end: usize) -> Vec<ShapedRun> {
-        let mut segments = Vec::new();
-        let mut index = 0;
-        while index < glyphs.len() {
-            let font = glyphs[index].font;
-            let direction = glyphs[index].direction;
-            let font_size = glyphs[index].font_size;
-            let level = glyphs[index].level;
-            let synth_oblique = glyphs[index].synth_oblique;
-            let synth_bold = glyphs[index].synth_bold;
-            let seg_start = glyphs[index].glyph.cluster();
-
-            let mut run_glyphs = Vec::new();
-            while index < glyphs.len()
-                && glyphs[index].font == font
-                && glyphs[index].level == level
-                && glyphs[index].font_size == font_size
-                && glyphs[index].synth_oblique == synth_oblique
-                && glyphs[index].synth_bold == synth_bold
-            {
-                run_glyphs.push(glyphs[index].glyph);
-                index += 1;
-            }
-
-            // The segment ends where the next segment begins (or the line end).
-            let seg_end = glyphs.get(index).map_or(line_end, |t| t.glyph.cluster());
-            let range = TextRange::new(seg_start.min(seg_end), seg_start.max(seg_end));
-            let run = GlyphRun::new(run_glyphs, direction, font_size, range);
-            segments.push(
-                ShapedRun::new(font, run)
-                    .with_level(level)
-                    .with_synthesis(synth_oblique, synth_bold),
-            );
-        }
-        Self::reorder_visual(&mut segments);
-        segments
-    }
-
-    /// Reorders a line's logical-order `segments` into visual (left-to-right)
-    /// order in place, applying the UAX#9 L2 rule using each segment's bidi
-    /// [`level`](ShapedRun::level).
-    ///
-    /// From the highest level present down to the lowest odd level, every maximal
-    /// contiguous span of segments whose level is `>= lvl` is reversed. This
-    /// places right-to-left runs (and nested higher-level runs within them) into
-    /// their correct visual position without touching within-segment glyph order.
-    /// A line that is entirely even-levelled (pure LTR) has no odd level and is
-    /// left untouched. The reversal is a pure function of the levels, so the
-    /// result is deterministic.
-    fn reorder_visual(segments: &mut [ShapedRun]) {
-        let Some(max_level) = segments.iter().map(ShapedRun::level).max() else {
-            return;
-        };
-        let lowest_odd = segments
-            .iter()
-            .map(ShapedRun::level)
-            .filter(|lvl| lvl % 2 == 1)
-            .min();
-        let Some(lowest_odd) = lowest_odd else {
-            // No odd level: pure LTR line, nothing to reorder.
-            return;
-        };
-
-        let mut lvl = max_level;
-        while lvl >= lowest_odd {
-            let mut start = 0;
-            while start < segments.len() {
-                if segments[start].level() >= lvl {
-                    let mut end = start;
-                    while end < segments.len() && segments[end].level() >= lvl {
-                        end += 1;
-                    }
-                    segments[start..end].reverse();
-                    start = end;
-                } else {
-                    start += 1;
-                }
-            }
-            lvl -= 1;
-        }
-    }
-
-    /// Returns this paragraph with every line re-aligned inside `width`.
-    ///
-    /// Wrapping and alignment answer to **different widths**, and conflating them
-    /// is why `text-align` used to do nothing. A text box is shrink-wrapped to its
-    /// longest line, so aligning inside *it* can only ever produce a zero offset —
-    /// there is no slack to distribute. What CSS aligns within is the containing
-    /// block, which is wider. So the paragraph wraps to the width it was measured
-    /// against and is then re-aligned inside the width it is actually laid out in.
-    ///
-    /// A no-op for `start`/`left` in LTR (offset `0` either way), which is what
-    /// keeps every existing paint byte-identical.
+    #[doc = include_str!("paragraph_layout.doc/aligned_to.md")]
     #[must_use]
     pub fn aligned_to(self, width: f32) -> Self {
         let alignment = self.alignment;
@@ -1593,31 +416,31 @@ impl ParagraphLayout {
         Self::new(lines, alignment, overflow)
     }
 
-    /// Returns the laid-out lines, top to bottom.
+    #[doc = include_str!("paragraph_layout.doc/lines_2.md")]
     #[must_use]
     pub fn lines(&self) -> &[ParagraphLine] {
         &self.lines
     }
 
-    /// Returns the total bounding size of the paragraph.
+    #[doc = include_str!("paragraph_layout.doc/size_2.md")]
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    /// Returns the horizontal alignment applied to the lines.
+    #[doc = include_str!("paragraph_layout.doc/alignment_2.md")]
     #[must_use]
     pub const fn alignment(&self) -> TextAlignment {
         self.alignment
     }
 
-    /// Returns the overflow policy for text exceeding the available width.
+    #[doc = include_str!("paragraph_layout.doc/overflow_2.md")]
     #[must_use]
     pub const fn overflow(&self) -> TextOverflow {
         self.overflow
     }
 
-    /// Returns the number of lines.
+    #[doc = include_str!("paragraph_layout.doc/line_count.md")]
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.lines.len()
@@ -1627,6 +450,8 @@ impl ParagraphLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::shaping::GlyphRun;
 
     /// Builds a font-tagged run whose glyphs have the given `(cluster, advance)`
     /// pairs and byte `source` range.
@@ -1773,51 +598,6 @@ mod tests {
         assert_eq!(line.width(), 28.0);
         assert_eq!(layout.size().width, 28.0);
         assert_eq!(layout.size().height, 12.0);
-    }
-
-    #[test]
-    fn segment_splits_on_font_size_and_synthesis_boundaries() {
-        // CSS Inline Layout 3 §3.1 / CSS Text 3 §1.3: within one line and one
-        // font face, glyphs that differ in used font size or in synthesized
-        // bold/oblique (CSS Fonts 4 §2.4, spec §5.18) form distinct inline
-        // boxes and MUST NOT be coalesced into a single run rendered at the
-        // first glyph's size / synthesis. The coordinator builds such a line by
-        // concatenating two independently-styled shaped spans of the same font
-        // and bidi level before wrapping:
-        //   [font 0, level 0, size 20, synth_bold=true,  "AB"] (clusters 0,1)
-        //   [font 0, level 0, size 12, synth_bold=false, "cd"] (clusters 2,3)
-        // → TWO segments (20px faux-bold, then 12px plain), not one 20px bold.
-        let tag = |cluster: usize, font_size: f32, synth_bold: bool| Tagged {
-            font: FontId::new(0),
-            direction: TextDirection::LeftToRight,
-            font_size,
-            level: 0,
-            synth_oblique: false,
-            synth_bold,
-            glyph: ShapedGlyph::new(1, cluster, 6.0),
-        };
-        let glyphs = vec![
-            tag(0, 20.0, true),
-            tag(1, 20.0, true),
-            tag(2, 12.0, false),
-            tag(3, 12.0, false),
-        ];
-        let segments = ParagraphLayout::segment(&glyphs, 4);
-        assert_eq!(segments.len(), 2);
-        // First segment: 20px, faux-bold, both "AB" glyphs — NOT the whole line.
-        assert_eq!(segments[0].run().font_size(), 20.0);
-        assert!(segments[0].synth_bold());
-        assert!(!segments[0].synth_oblique());
-        assert_eq!(segments[0].run().len(), 2);
-        // Second segment: 12px, not faux-bold, both "cd" glyphs.
-        assert_eq!(segments[1].run().font_size(), 12.0);
-        assert!(!segments[1].synth_bold());
-        assert_eq!(segments[1].run().len(), 2);
-        // Both share font 0 and level 0: the split is purely on size/synthesis.
-        assert_eq!(segments[0].font(), FontId::new(0));
-        assert_eq!(segments[1].font(), FontId::new(0));
-        assert_eq!(segments[0].level(), 0);
-        assert_eq!(segments[1].level(), 0);
     }
 
     #[test]

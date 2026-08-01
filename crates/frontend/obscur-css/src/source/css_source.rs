@@ -1,26 +1,19 @@
-//! An owned CSS source: its id, logical name, and text (spec §2.5 source maps).
+#![doc = include_str!("css_source.doc/_module.md")]
 
 use crate::source::{SourceId, SourceSpan, SourceVersion};
 
-/// An owned CSS source together with its identity and text (spec §2.5).
-///
-/// A `CssSource` bundles a [`SourceId`], a logical `name` (for example
-/// `"theme.css"`), and the full source `text`. The parser reads `text` and
-/// produces [`SourceSpan`]s into it; [`CssSource::slice`] resolves a span back
-/// to the substring it covers. Both `name` and `text` are stored as `Box<str>`
-/// so a source is compact and immutable once built.
+#[doc = include_str!("css_source.doc/CssSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CssSource {
     id: SourceId,
-    /// Which revision of this source's text `text` is (spec §4.12). Stamped by
-    /// the owner; a cache compares it rather than the text.
+    #[doc = include_str!("css_source.doc/version.md")]
     version: SourceVersion,
     name: Box<str>,
     text: Box<str>,
 }
 
 impl CssSource {
-    /// Creates a source with the given `id`, logical `name`, and `text`.
+    #[doc = include_str!("css_source.doc/new.md")]
     #[must_use]
     pub fn new(id: SourceId, name: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         Self {
@@ -31,67 +24,56 @@ impl CssSource {
         }
     }
 
-    /// Creates an anonymous source ([`SourceId::ANONYMOUS`], empty name) from
-    /// `text`.
+    #[doc = include_str!("css_source.doc/anonymous.md")]
     #[must_use]
     pub fn anonymous(text: impl Into<Box<str>>) -> Self {
         Self::new(SourceId::ANONYMOUS, "", text)
     }
 
-    /// Returns this source at revision `version` (fluent).
-    ///
-    /// An owner that re-reads a stylesheet from disk stamps the new text with the
-    /// next revision, which is what invalidates a
-    /// [`StylesheetCache`](crate::cache::StylesheetCache) entry — explicitly, per
-    /// spec §4.12, rather than by the cache re-hashing text behind the owner's back.
+    #[doc = include_str!("css_source.doc/at_version.md")]
     #[must_use]
     pub fn at_version(mut self, version: SourceVersion) -> Self {
         self.version = version;
         self
     }
 
-    /// The revision of this source's text.
+    #[doc = include_str!("css_source.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> SourceVersion {
         self.version
     }
 
-    /// Returns the id of this source.
+    #[doc = include_str!("css_source.doc/id.md")]
     #[must_use]
     pub const fn id(&self) -> SourceId {
         self.id
     }
 
-    /// Returns the logical name of this source.
+    #[doc = include_str!("css_source.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the full source text.
+    #[doc = include_str!("css_source.doc/text.md")]
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Returns the length of the source text in bytes.
+    #[doc = include_str!("css_source.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.text.len()
     }
 
-    /// Returns whether the source text is empty.
+    #[doc = include_str!("css_source.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    /// Returns the substring of the source text covered by `span`.
-    ///
-    /// The span offsets are clamped to the text's byte length and then snapped
-    /// down to the nearest UTF-8 character boundaries, so this never panics even
-    /// for out-of-bounds spans or spans that split a multi-byte character. An
-    /// out-of-range or fully-collapsed span yields an empty string.
+    #[doc = include_str!("css_source.doc/slice.md")]
     #[must_use]
     pub fn slice(&self, span: SourceSpan) -> &str {
         let text = &self.text;

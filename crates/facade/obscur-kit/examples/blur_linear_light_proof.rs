@@ -1,33 +1,4 @@
-//! **Proof: the gaussian blur convolves in LINEAR light, not gamma-sRGB.**
-//!
-//! Per the Filter Effects Module Level 1, the initial value of
-//! `color-interpolation-filters` is `linearRGB`, so `feGaussianBlur` — what CSS
-//! `filter: blur()` / `backdrop-filter: blur()` lower to — must convolve in linear
-//! light. A gamma-space gaussian darkens/muddies bright-on-dark and colored edges;
-//! a linear-light one keeps saturated edges bright and clean.
-//!
-//! This renders, headless through Vello/wgpu, a saturated GREEN box (`#00ff00`)
-//! centered on a RED field (`#ff0000`), the whole thing wrapped in a blur layer —
-//! `PushLayer(SceneLayer::with_clip(bounds).add_effect(blur(R)))` … `PopLayer`, the
-//! exact bracket the coordinator emits for `filter: blur(Rpx)`. The green/red edge
-//! is an INTERNAL edge inside the blurred subtree (both colors in one texture,
-//! fully opaque), so the transition band isolates the color-space difference.
-//!
-//! It writes `target/blur_linear_light_proof.png` and self-asserts:
-//!   * at the green↔red crossover (where the blurred R and G channels are equal),
-//!     that value is well ABOVE the gamma-space average of 128 — a gamma blur would
-//!     land near ~128, linear light lands near ~182 (= sRGB-encode of the linear
-//!     midpoint 0.5);
-//!   * flat interior regions round-trip the transfer: deep green stays ~`#00ff00`
-//!     and deep red stays ~`#ff0000` (blur of a constant is that constant).
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. With none it prints a diagnostic and exits cleanly
-//! (no panic); it never fabricates a device.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example blur_linear_light_proof --features render-vello`
+#![doc = include_str!("blur_linear_light_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -44,16 +15,15 @@ use obscur_kit::scene::paint::Paint;
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// The output image extent.
+#[doc = include_str!("blur_linear_light_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(240.0, 240.0);
-/// The blurred panel (a red field with a green box in it).
+#[doc = include_str!("blur_linear_light_proof.doc/PANEL.md")]
 const PANEL: Rect = Rect::new(Point::new(20.0, 20.0), Size::new(200.0, 200.0));
-/// The centered green box whose edges the blur smears against the red field.
+#[doc = include_str!("blur_linear_light_proof.doc/GREEN_BOX.md")]
 const GREEN_BOX: Rect = Rect::new(Point::new(70.0, 70.0), Size::new(100.0, 100.0));
-/// The blur radius applied to the panel (logical px) — moderate, so the green↔red
-/// transition band is several pixels wide and easy to sample.
+#[doc = include_str!("blur_linear_light_proof.doc/BLUR_RADIUS.md")]
 const BLUR_RADIUS: f32 = 8.0;
-/// The row (device px) the crossover is sampled along — through the box's middle.
+#[doc = include_str!("blur_linear_light_proof.doc/SCAN_Y.md")]
 const SCAN_Y: u32 = 120;
 
 fn main() {
@@ -163,9 +133,7 @@ fn main() {
     );
 }
 
-/// Builds the display list: a dark backdrop plus a blur layer wrapping a red field
-/// with a centered green box — the exact bracket the coordinator emits for
-/// `filter: blur()`.
+#[doc = include_str!("blur_linear_light_proof.doc/build_scene.md")]
 fn build_scene() -> DisplayList {
     let mut commands: Vec<PaintCommand> = Vec::new();
 
@@ -188,7 +156,7 @@ fn build_scene() -> DisplayList {
     DisplayList::from_commands(commands)
 }
 
-/// A solid-fill `DrawPath` command over `rect`.
+#[doc = include_str!("blur_linear_light_proof.doc/fill.md")]
 fn fill(rect: Rect, color: Color) -> PaintCommand {
     PaintCommand::DrawPath {
         path: Path::rect(rect),
@@ -196,8 +164,7 @@ fn fill(rect: Rect, color: Color) -> PaintCommand {
     }
 }
 
-/// Acquires a headless wgpu device + queue (no surface), or [`None`] when no
-/// adapter/device is available so the caller exits cleanly instead of panicking.
+#[doc = include_str!("blur_linear_light_proof.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -209,7 +176,7 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("blur_linear_light_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

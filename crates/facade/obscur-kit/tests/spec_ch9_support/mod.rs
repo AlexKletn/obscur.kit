@@ -1,4 +1,4 @@
-//! Shared harness for the §9 spec-derived non-goal/guardrail tests.
+#![doc = include_str!("mod.doc/_module.md")]
 
 pub mod harness;
 

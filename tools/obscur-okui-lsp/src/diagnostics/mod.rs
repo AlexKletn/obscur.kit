@@ -1,5 +1,4 @@
-//! Diagnostics: the transport-agnostic [`LspDiagnostic`] plus its coordinate
-//! ([`Position`], [`Range`]) and [`LspSeverity`] vocabulary.
+#![doc = include_str!("mod.doc/_module.md")]
 mod lsp_diagnostic;
 pub use lsp_diagnostic::LspDiagnostic;
 mod position;

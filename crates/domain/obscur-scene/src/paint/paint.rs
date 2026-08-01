@@ -1,56 +1,50 @@
-//! How a shape is painted: filled or stroked.
+#![doc = include_str!("paint.doc/_module.md")]
 
 use crate::color::Color;
 
 use super::{Brush, Stroke};
 
-/// How a shape is painted (spec §5.1): its interior filled with a [`Brush`], or
-/// its outline drawn with a [`Stroke`].
-///
-/// `Paint` describes only the color source and geometry of the mark. A shape's
-/// final on-screen appearance is this paint combined with the blend mode and
-/// opacity applied by its enclosing layer.
+#[doc = include_str!("paint.doc/Paint.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Paint {
-    /// Fill the shape's interior with a brush.
+    #[doc = include_str!("paint.doc/Fill.md")]
     Fill(Brush),
-    /// Draw the shape's outline with a stroke.
+    #[doc = include_str!("paint.doc/Stroke.md")]
     Stroke(Stroke),
 }
 
 impl Paint {
-    /// Creates a fill paint using `brush`.
+    #[doc = include_str!("paint.doc/fill.md")]
     #[must_use]
     pub const fn fill(brush: Brush) -> Self {
         Self::Fill(brush)
     }
 
-    /// Creates a fill paint using a solid brush of `color`.
+    #[doc = include_str!("paint.doc/solid_fill.md")]
     #[must_use]
     pub const fn solid_fill(color: Color) -> Self {
         Self::Fill(Brush::solid(color))
     }
 
-    /// Creates a stroke paint using `stroke`.
+    #[doc = include_str!("paint.doc/stroke.md")]
     #[must_use]
     pub const fn stroke(stroke: Stroke) -> Self {
         Self::Stroke(stroke)
     }
 
-    /// Returns whether this is a [`Paint::Fill`].
+    #[doc = include_str!("paint.doc/is_fill.md")]
     #[must_use]
     pub const fn is_fill(&self) -> bool {
         matches!(self, Self::Fill(_))
     }
 
-    /// Returns whether this is a [`Paint::Stroke`].
+    #[doc = include_str!("paint.doc/is_stroke.md")]
     #[must_use]
     pub const fn is_stroke(&self) -> bool {
         matches!(self, Self::Stroke(_))
     }
 
-    /// Returns the brush that colors this paint: the fill's brush, or the
-    /// stroke's brush.
+    #[doc = include_str!("paint.doc/brush.md")]
     #[must_use]
     pub const fn brush(&self) -> &Brush {
         match self {

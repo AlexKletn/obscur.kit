@@ -1,41 +1,25 @@
-//! The CPU renderer adapter's internal error, mapped onto the domain
-//! [`RendererError`] (spec §5.2 explicit diagnostics).
+#![doc = include_str!("cpu_render_error.doc/_module.md")]
 
 use obscur_render::RendererError;
 
-/// A failure raised inside the software [`CpuRenderer`](crate::renderer::CpuRenderer)
-/// while rasterizing a frame (spec §5.2).
-///
-/// This is the adapter's own, `tiny-skia`-shaped error. It never leaves the
-/// adapter as-is: [`CpuRenderError::into_renderer_error`] lifts it into the
-/// backend-agnostic [`RendererError`] the `Renderer` port speaks, so callers see
-/// only the domain diagnostic. Every variant is an explicit, actionable cause,
-/// honoring the rule of spec §5.2 that a backend reports failures rather than
-/// panicking.
+#[doc = include_str!("cpu_render_error.doc/CpuRenderError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CpuRenderError {
-    /// `tiny_skia::Pixmap::new` returned `None` for the requested dimensions —
-    /// the pixel buffer could not be allocated (e.g. a zero or too-large edge).
+    #[doc = include_str!("cpu_render_error.doc/PixmapAllocationFailed.md")]
     PixmapAllocationFailed {
-        /// The requested buffer width, in physical pixels.
+        #[doc = include_str!("cpu_render_error.doc/width.md")]
         width: u32,
-        /// The requested buffer height, in physical pixels.
+        #[doc = include_str!("cpu_render_error.doc/height.md")]
         height: u32,
     },
-    /// The render target has zero area, so there is nothing to rasterize into.
+    #[doc = include_str!("cpu_render_error.doc/EmptyTarget.md")]
     EmptyTarget,
-    /// A generic rasterizer-backend failure, carrying a human-readable reason.
+    #[doc = include_str!("cpu_render_error.doc/Backend.md")]
     Backend(Box<str>),
 }
 
 impl CpuRenderError {
-    /// Lifts this adapter error into the domain [`RendererError`] the
-    /// [`Renderer`](obscur_render::Renderer) port returns (spec §5.2).
-    ///
-    /// A buffer that cannot be allocated and a zero-area target are both
-    /// [`RendererError::InvalidTarget`]: the target the caller asked for cannot
-    /// hold a frame. A [`CpuRenderError::Backend`] failure maps to
-    /// [`RendererError::Backend`], preserving its reason.
+    #[doc = include_str!("cpu_render_error.doc/into_renderer_error.md")]
     #[must_use]
     pub fn into_renderer_error(self) -> RendererError {
         match self {

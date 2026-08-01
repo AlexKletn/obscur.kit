@@ -1,9 +1,4 @@
-//! **SPECIFICATION-DERIVED** headless-mode cases for obscur.kit §7.4.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §7.4
-//! (with §3.5's "animation progress is sampled from time/value, never slowed to
-//! match missed frames") with **no access to this repository's source**. A
-//! failure here is a defect report about the engine.
+#![doc = include_str!("spec_ch7_headless.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7_support/mod.rs"]
@@ -24,8 +19,7 @@ use support::{at, drive, el, geom, runtime, txt, view};
 
 const VW: f32 = 1000.0;
 
-/// A `.b` box under a `.c` container, wired to a `width` transition that a
-/// `:hover` on the box starts.
+#[doc = include_str!("spec_ch7_headless.doc/Animated.md")]
 struct Animated {
     rt: UiRuntime,
     css: CssPipeline,
@@ -61,7 +55,7 @@ impl Animated {
         self.frame();
     }
 
-    /// Advances the deterministic clock by `ms` milliseconds and produces a frame.
+    #[doc = include_str!("spec_ch7_headless.doc/advance_ms.md")]
     fn advance_ms(&mut self, ms: u32) {
         self.rt.advance_motion(f64::from(ms) as f32 / 1000.0);
         self.frame();
@@ -72,22 +66,7 @@ impl Animated {
     }
 }
 
-/// §7.4: "Testing facilities:" / "- deterministic clock;" with §3.5 "animation
-/// progress is sampled from time/value, never slowed to match missed frames."
-///
-/// WEAKENED 2026-07-19: the five comparisons were `assert_eq!` on `f32` and
-/// demanded the three runs agree BIT FOR BIT. Fifteen 10ms steps measured
-/// 149.99998 against one 150ms step's 150.0 — an f32 rounding residue of
-/// 1.3e-7 relative, not a behavioural difference. §3.5's sentence forbids
-/// frame-rate-dependent SLOWING: a runtime that advanced one fixed quantum per
-/// frame would report ~10 here, not 149.99998. §7.4's "- deterministic clock;"
-/// requires the same script to give the same answer, which it does (see
-/// `real_time_does_not_leak_into_the_deterministic_clock`), not that different
-/// step patterns be bit-identical. The comparisons now carry a tolerance well
-/// below anything a slowed clock could hide in. Candidate spec amendment: state
-/// whether the deterministic clock accumulates a delta per step or samples an
-/// absolute time — only the latter makes bit-identical step patterns a
-/// requirement rather than luck.
+#[doc = include_str!("spec_ch7_headless.doc/the_clock_is_sampled_not_accumulated.md")]
 #[test]
 fn the_clock_is_sampled_not_accumulated() {
     let mut a = Animated::new();
@@ -129,8 +108,7 @@ fn the_clock_is_sampled_not_accumulated() {
     close(run_b, run_c, "run B and run C agree");
 }
 
-/// §7.4: "Testing facilities:" / "- deterministic clock;" / "- deterministic
-/// executor;".
+#[doc = include_str!("spec_ch7_headless.doc/real_time_does_not_leak_into_the_deterministic_clock.md")]
 #[test]
 fn real_time_does_not_leak_into_the_deterministic_clock() {
     let mut a = Animated::new();
@@ -155,9 +133,7 @@ fn real_time_does_not_leak_into_the_deterministic_clock() {
     );
 }
 
-/// §7.4, verbatim: "Official headless mode operates without window or GPU." and
-/// "It can output:" / "- scene;" / "- paint;" / "- render graph;" /
-/// "- rendered image;".
+#[doc = include_str!("spec_ch7_headless.doc/scene_paint_and_accessibility_are_produced_without_a_renderer.md")]
 #[test]
 fn scene_paint_and_accessibility_are_produced_without_a_renderer() {
     let v = view(vec![el(1, "box", vec![txt("hello")])]);
@@ -196,7 +172,7 @@ fn scene_paint_and_accessibility_are_produced_without_a_renderer() {
     );
 }
 
-/// A button-typed element with `class`, sized by the stylesheet.
+#[doc = include_str!("spec_ch7_headless.doc/button.md")]
 fn button(id: u64, class: &str) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
         .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
@@ -204,29 +180,7 @@ fn button(id: u64, class: &str) -> ViewNode {
         .with_children(ViewFragment::from_nodes(vec![ViewNode::text(class)]))
 }
 
-/// §7.4: "Dispatch results may include:" / "- target;" / "- propagation path;" /
-/// "- default action;" / "- focus changes;" / "- state changes;" /
-/// "- layout changes;".
-///
-/// OBSERVATION MOVED 2026-07-19: nothing here is weakened. The case read
-/// `focus_changed` off the wrong dispatch. Its `click` closure issued a
-/// `pointer_down` then a `pointer_up` and returned only the UP outcome, while
-/// focus moves on the DOWN — so `on_b.focus_changed` was always false and case
-/// (i) reported a missing focus-change that the runtime had in fact already
-/// reported, one dispatch earlier. The closure now returns both halves, (i)
-/// asserts the down reports the move, and (ii) asserts NEITHER half reports one
-/// for a click that moves nothing, which is strictly stronger than before.
-///
-/// (ii)'s "no-op dispatch" premise was also false twice over, and its fixture is
-/// repaired rather than its assertion weakened. Clicking the background while B
-/// is focused blurs B, and a blur IS a focus change; and the element the case
-/// calls "a non-interactive background node" is in fact focusable, so even the
-/// first click on it with nothing focused moves focus None -> bg. Neither is a
-/// no-op. (ii) now runs first and clicks the background TWICE, asserting on the
-/// second — a dispatch that genuinely changes nothing. Recorded as a finding,
-/// not acted on: that a plain container element is click-focusable at all looks
-/// wrong against §2.5's "- tab order;" / "- focus-visible semantics;", but it is
-/// outside this pass's scope.
+#[doc = include_str!("spec_ch7_headless.doc/a_dispatch_result_reports_a_focus_change_only_when_focus_moved.md")]
 #[test]
 fn a_dispatch_result_reports_a_focus_change_only_when_focus_moved() {
     let css = ".panel { width: 400px; height: 200px } \

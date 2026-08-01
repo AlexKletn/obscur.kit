@@ -1,4 +1,4 @@
-//! Rule: no dumping-ground file names (spec §3.1).
+#![doc = include_str!("forbidden_file_name.doc/_module.md")]
 
 use std::path::Path;
 
@@ -16,7 +16,7 @@ const FORBIDDEN: &[&str] = &[
     "manager.rs",
 ];
 
-/// Checks for banned generic file names anywhere in the workspace.
+#[doc = include_str!("forbidden_file_name.doc/check.md")]
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
     let mut files = Vec::new();
     collect_rs(root, &mut files);

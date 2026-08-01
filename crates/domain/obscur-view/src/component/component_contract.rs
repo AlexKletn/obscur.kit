@@ -1,4 +1,4 @@
-//! Typed component contract (spec §2.13).
+#![doc = include_str!("component_contract.doc/_module.md")]
 
 use obscur_diagnostics::DiagnosticSubsystem;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -8,54 +8,33 @@ use crate::contract::{
     CapabilityContract, ChildContract, EventContract, PropContract, SlotContract, StylePartContract,
 };
 
-/// The typed, exported contract of a component (spec §2.13).
-///
-/// A contract is the component's public surface, aggregating the sub-contracts
-/// from the [`contract`](crate::contract) module: the props it accepts (and
-/// which carry defaults), the events it exposes, the slots and allowed
-/// children, its style parts, and the capabilities it depends on. It also
-/// carries diagnostics metadata: the [`DiagnosticSubsystem`] failures are
-/// attributed to (defaulting to [`DiagnosticSubsystem::View`]) and an optional
-/// stable component name.
-///
-/// Everything here is plain, comparable data — it derives `Eq`, so no field may
-/// embed a float (the sub-contract types are all `Eq`).
+#[doc = include_str!("component_contract.doc/ComponentContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentContract {
-    /// Stable component identity.
+    #[doc = include_str!("component_contract.doc/id.md")]
     pub id: ComponentId,
-    /// Optional stable, interned name for the component (for diagnostics and
-    /// `DevTools`).
+    #[doc = include_str!("component_contract.doc/name.md")]
     pub name: Option<InternedSymbol>,
-    /// The props this component accepts, including default/required metadata.
+    #[doc = include_str!("component_contract.doc/props.md")]
     pub props: Vec<PropContract>,
-    /// The events this component exposes.
+    #[doc = include_str!("component_contract.doc/events.md")]
     pub events: Vec<EventContract>,
-    /// The named slots this component exports.
+    #[doc = include_str!("component_contract.doc/slots.md")]
     pub slots: Vec<SlotContract>,
-    /// Which direct children the component accepts.
+    #[doc = include_str!("component_contract.doc/allowed_children.md")]
     pub allowed_children: ChildContract,
-    /// The style parts (and their states) this component exports.
+    #[doc = include_str!("component_contract.doc/style_parts.md")]
     pub style_parts: Vec<StylePartContract>,
-    /// Whether the document's ordinary selectors reach this component's
-    /// rendered output (§4.15). [`StyleScope::Scoped`] by default — the spec's
-    /// "component stylesheets are scoped by default" — and
-    /// [`StyleScope::Open`] for its "explicitly open/global scopes are
-    /// possible".
+    #[doc = include_str!("component_contract.doc/style_scope.md")]
     pub style_scope: StyleScope,
-    /// The capabilities this component depends on.
+    #[doc = include_str!("component_contract.doc/capabilities.md")]
     pub capabilities: Vec<CapabilityContract>,
-    /// The subsystem failures in this component are attributed to.
+    #[doc = include_str!("component_contract.doc/subsystem.md")]
     pub subsystem: DiagnosticSubsystem,
 }
 
 impl ComponentContract {
-    /// Creates an empty-but-valid contract for `id`.
-    ///
-    /// It exposes no props/events/slots/style-parts, requires no capabilities,
-    /// accepts no children ([`ChildContract::None`]), has no name, and is
-    /// attributed to [`DiagnosticSubsystem::View`]. Callers refine it with the
-    /// `with_*`/`allowing_children` builders.
+    #[doc = include_str!("component_contract.doc/new.md")]
     #[must_use]
     pub const fn new(id: ComponentId) -> Self {
         Self {
@@ -72,68 +51,63 @@ impl ComponentContract {
         }
     }
 
-    /// Sets the component's stable interned name.
+    #[doc = include_str!("component_contract.doc/with_name.md")]
     #[must_use]
     pub fn with_name(mut self, name: InternedSymbol) -> Self {
         self.name = Some(name);
         self
     }
 
-    /// Adds a prop to the contract.
+    #[doc = include_str!("component_contract.doc/with_prop.md")]
     #[must_use]
     pub fn with_prop(mut self, prop: PropContract) -> Self {
         self.props.push(prop);
         self
     }
 
-    /// Adds an event to the contract.
+    #[doc = include_str!("component_contract.doc/with_event.md")]
     #[must_use]
     pub fn with_event(mut self, event: EventContract) -> Self {
         self.events.push(event);
         self
     }
 
-    /// Adds a slot to the contract.
+    #[doc = include_str!("component_contract.doc/with_slot.md")]
     #[must_use]
     pub fn with_slot(mut self, slot: SlotContract) -> Self {
         self.slots.push(slot);
         self
     }
 
-    /// Adds a style part to the contract.
+    #[doc = include_str!("component_contract.doc/with_style_part.md")]
     #[must_use]
     pub fn with_style_part(mut self, style_part: StylePartContract) -> Self {
         self.style_parts.push(style_part);
         self
     }
 
-    /// Declares whether the document's ordinary selectors reach this
-    /// component's rendered output (§4.15).
-    ///
-    /// Unstated it is [`StyleScope::Scoped`], so an existing contract's
-    /// encapsulation is unchanged; a component that wants to be styled by the
-    /// application's sheets says so here.
+    #[doc = include_str!("component_contract.doc/with_style_scope.md")]
     #[must_use]
     pub fn with_style_scope(mut self, style_scope: StyleScope) -> Self {
         self.style_scope = style_scope;
         self
     }
 
-    /// Adds a capability dependency to the contract.
+    #[doc = include_str!("component_contract.doc/with_capability.md")]
     #[must_use]
     pub fn with_capability(mut self, capability: CapabilityContract) -> Self {
         self.capabilities.push(capability);
         self
     }
 
-    /// Sets the rule for which direct children the component accepts.
+    #[doc = include_str!("component_contract.doc/allowing_children.md")]
     #[must_use]
     pub fn allowing_children(mut self, allowed_children: ChildContract) -> Self {
         self.allowed_children = allowed_children;
         self
     }
 
-    /// Sets the subsystem failures in this component are attributed to.
+    #[doc = include_str!("component_contract.doc/with_subsystem.md")]
     #[must_use]
     pub fn with_subsystem(mut self, subsystem: DiagnosticSubsystem) -> Self {
         self.subsystem = subsystem;

@@ -1,4 +1,4 @@
-//! Path module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod fill_rule;
 pub use fill_rule::FillRule;
 mod path;

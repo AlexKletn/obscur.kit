@@ -1,29 +1,18 @@
-//! Per-corner border radii in logical pixels.
+#![doc = include_str!("corner_radii.doc/_module.md")]
 
 use super::Rect;
 
-/// One corner's two radii, in logical pixels.
-///
-/// A CSS corner is a **quarter ellipse**, not a quarter circle: CSS Backgrounds 3
-/// §4.1 defines the two `<length-percentage>` values of `border-*-radius` as "the
-/// radii of a quarter ellipse that defines the shape of the corner", and resolves
-/// them against different bases — "Percentages for the horizontal radius refer to
-/// the width of the border box, whereas percentages for the vertical radius refer
-/// to the height of the border box". So `border-radius: 50%` on a 200×100 box is
-/// an ellipse (`x = 100`, `y = 50`), and only a square box makes it a circle. A
-/// single scalar per corner cannot express that, which is why this type is a pair.
-///
-/// `x` runs along the horizontal edges, `y` along the vertical ones.
+#[doc = include_str!("corner_radii.doc/CornerRadius.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CornerRadius {
-    /// The horizontal radius (along the top/bottom edges).
+    #[doc = include_str!("corner_radii.doc/x.md")]
     pub x: f32,
-    /// The vertical radius (along the left/right edges).
+    #[doc = include_str!("corner_radii.doc/y.md")]
     pub y: f32,
 }
 
 impl CornerRadius {
-    /// A circular corner: the same radius on both axes.
+    #[doc = include_str!("corner_radii.doc/circular.md")]
     #[must_use]
     pub const fn circular(radius: f32) -> Self {
         Self {
@@ -32,27 +21,19 @@ impl CornerRadius {
         }
     }
 
-    /// An elliptical corner with a horizontal radius `x` and a vertical radius `y`.
+    #[doc = include_str!("corner_radii.doc/new.md")]
     #[must_use]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
-    /// Whether this corner actually rounds.
-    ///
-    /// Per CSS Backgrounds 3 §4.1, "if either length is zero, the corner is
-    /// square, not rounded" — a quarter ellipse with a zero axis has no area. So
-    /// this is a conjunction, not a disjunction: `50%` on a zero-height box gives
-    /// `y == 0` and a square corner.
+    #[doc = include_str!("corner_radii.doc/is_rounded.md")]
     #[must_use]
     pub fn is_rounded(self) -> bool {
         self.x > 0.0 && self.y > 0.0
     }
 
-    /// Both radii, floored at zero.
-    ///
-    /// A negative radius is not valid CSS and does not survive parsing; this is the
-    /// defensive floor for a hand-built value reaching a path builder.
+    #[doc = include_str!("corner_radii.doc/non_negative.md")]
     #[must_use]
     pub fn non_negative(self) -> Self {
         Self {
@@ -61,7 +42,7 @@ impl CornerRadius {
         }
     }
 
-    /// Scales both radii by `f`.
+    #[doc = include_str!("corner_radii.doc/scaled.md")]
     #[must_use]
     pub fn scaled(self, f: f32) -> Self {
         Self {
@@ -70,57 +51,40 @@ impl CornerRadius {
         }
     }
 
-    /// The radius of the circle standing in for this quarter ellipse, for a backend
-    /// that cannot draw one — the mean of the two axes.
-    ///
-    /// **This is a lossy fallback, not a CSS rule.** No single radius describes a
-    /// quarter ellipse, so any backend forced to pick one is approximating. The mean
-    /// is chosen because it is *exact* whenever the corner is already circular
-    /// (`x == y`, the case such a backend can express, so the common path never
-    /// degrades) and unbiased otherwise — unlike `max(x, y)`, which systematically
-    /// over-rounds, or `min`, which under-rounds.
-    ///
-    /// Every caller must be a backend that genuinely cannot express an ellipse, and
-    /// must say so at the call site. Do **not** reach for this from scene geometry:
-    /// [`super::super::Rect`]-based path building expresses ellipses exactly, and
-    /// clip/scene geometry must agree across backends (spec §5.2).
+    #[doc = include_str!("corner_radii.doc/circular_approximation.md")]
     #[must_use]
     pub fn circular_approximation(self) -> f32 {
         (self.x + self.y) / 2.0
     }
 }
 
-/// Border radii for each corner, in logical pixels.
-///
-/// Each corner carries a horizontal and a vertical radius (see [`CornerRadius`]);
-/// the common circular case sets both to the same number, which is what
-/// [`CornerRadii::uniform`] builds.
+#[doc = include_str!("corner_radii.doc/CornerRadii.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CornerRadii {
-    /// Top-left radii.
+    #[doc = include_str!("corner_radii.doc/top_left.md")]
     pub top_left: CornerRadius,
-    /// Top-right radii.
+    #[doc = include_str!("corner_radii.doc/top_right.md")]
     pub top_right: CornerRadius,
-    /// Bottom-right radii.
+    #[doc = include_str!("corner_radii.doc/bottom_right.md")]
     pub bottom_right: CornerRadius,
-    /// Bottom-left radii.
+    #[doc = include_str!("corner_radii.doc/bottom_left.md")]
     pub bottom_left: CornerRadius,
 }
 
 impl CornerRadii {
-    /// The same **circular** radius on every corner.
+    #[doc = include_str!("corner_radii.doc/uniform.md")]
     #[must_use]
     pub const fn uniform(radius: f32) -> Self {
         Self::all(CornerRadius::circular(radius))
     }
 
-    /// The same **elliptical** radii on every corner: `x` horizontal, `y` vertical.
+    #[doc = include_str!("corner_radii.doc/elliptical.md")]
     #[must_use]
     pub const fn elliptical(x: f32, y: f32) -> Self {
         Self::all(CornerRadius::new(x, y))
     }
 
-    /// The same `corner` on every corner.
+    #[doc = include_str!("corner_radii.doc/all.md")]
     #[must_use]
     pub const fn all(corner: CornerRadius) -> Self {
         Self {
@@ -131,7 +95,7 @@ impl CornerRadii {
         }
     }
 
-    /// The four corners in CSS order: top-left, top-right, bottom-right, bottom-left.
+    #[doc = include_str!("corner_radii.doc/corners.md")]
     #[must_use]
     pub const fn corners(self) -> [CornerRadius; 4] {
         [
@@ -142,22 +106,19 @@ impl CornerRadii {
         ]
     }
 
-    /// Whether any corner actually rounds (i.e. the box is not a plain rectangle).
-    ///
-    /// A corner counts only when **both** its radii are positive — see
-    /// [`CornerRadius::is_rounded`].
+    #[doc = include_str!("corner_radii.doc/any_positive.md")]
     #[must_use]
     pub fn any_positive(self) -> bool {
         self.corners().iter().any(|c| c.is_rounded())
     }
 
-    /// Every corner floored at zero on both axes.
+    #[doc = include_str!("corner_radii.doc/non_negative_2.md")]
     #[must_use]
     pub fn non_negative(self) -> Self {
         self.map(CornerRadius::non_negative)
     }
 
-    /// Applies `f` to every corner.
+    #[doc = include_str!("corner_radii.doc/map.md")]
     #[must_use]
     pub fn map(self, f: impl Fn(CornerRadius) -> CornerRadius) -> Self {
         Self {
@@ -168,37 +129,7 @@ impl CornerRadii {
         }
     }
 
-    /// Offsets every corner by `delta` on **each axis independently**, keeping a
-    /// sharp (zero) corner sharp and flooring at `0`.
-    ///
-    /// This is the neutral geometric primitive shared by the two CSS rules that
-    /// grow or shrink a set of radii by a distance. It is deliberately *not* named
-    /// for either of them, because they do not agree:
-    ///
-    /// * **CSS Backgrounds 3 §4.2 (corner shaping)** — "The padding edge (inner
-    ///   border) radius is the outer border radius minus the corresponding border
-    ///   thickness. In the case where this results in a negative value, the inner
-    ///   radius is zero." That is exactly this method, and the *whole* of it: §4.2
-    ///   prescribes a plain subtraction with no easing.
-    /// * **CSS Backgrounds 3 §6.1.1 (`box-shadow` spread)** — the shadow's radii are
-    ///   the box radii ±spread, "applied independently to the radii in each
-    ///   dimension", which is this method **plus** a correction this method does not
-    ///   implement: when a radius is *smaller* than the spread, §6.1.1 first scales
-    ///   the spread by `1 + (r−1)³` (where `r` = radius ÷ spread) so a nearly-sharp
-    ///   corner stays sharp rather than ballooning. A 10px radius with 20px spread
-    ///   should give 27.5px; this method gives 30px.
-    ///
-    /// **Do not add the §6.1.1 easing here** — it would silently corrupt §4.2, which
-    /// forbids it, and the two other callers that legitimately want a raw distance:
-    /// the dashed-border centerline, and `outline`'s concentric growth (`outline` is
-    /// CSS UI 3 §4 — it is not a CSS Backgrounds property at all — and neither it
-    /// nor `outline-offset` (§4.5) defines any easing of its own). §6.1.1 has its own
-    /// method: [`CornerRadii::spread_offset`].
-    ///
-    /// Sharp-stays-sharp is not a shortcut: it is the `r == 0` endpoint both rules
-    /// agree on (§6.1.1's easing factor is `1 + (0−1)³ = 0` there), and it follows
-    /// from §4.1 — a corner with a zero axis "is square, not rounded", so there is no
-    /// curve for a distance to grow.
+    #[doc = include_str!("corner_radii.doc/offset.md")]
     #[must_use]
     pub fn offset(self, delta: f32) -> Self {
         self.map(|c| {
@@ -210,50 +141,7 @@ impl CornerRadii {
         })
     }
 
-    /// Offsets every corner by `delta` for CSS Backgrounds 3 **§6.1.1**
-    /// (`box-shadow` spread), easing a corner whose radius is smaller than the
-    /// distance it grows by.
-    ///
-    /// `delta` is the signed distance the *radii* grow by, which is **not** the
-    /// authored `spread` for both shadow kinds: §6.1.1 expands an outer shadow's
-    /// perimeter and contracts an inner one's ("expanded outward (for outer
-    /// box-shadows) or contracted inward (for inner box-shadows)"), so a drop
-    /// shadow passes `+spread` and an inset shadow passes `−spread`. Growth is
-    /// therefore `delta > 0` whichever kind is asking.
-    ///
-    /// Against [`CornerRadii::offset`] — the neutral §4.2 primitive — this adds
-    /// exactly one rule, and nothing else. §6.1.1:
-    ///
-    /// > However, in order to create a sharper corner when the border radius is
-    /// > small (and thus ensure continuity between round and sharp corners), when
-    /// > the border radius is less than the spread distance (or in the case of an
-    /// > inner shadow, less than the absolute value of a negative spread
-    /// > distance), the spread distance is first multiplied by the proportion
-    /// > 1 + (r-1)³, where r is the ratio of the border radius to the spread
-    /// > distance, in calculating the corner radii of the spread shadow shape. For
-    /// > example, if the border radius is 10px and the spread distance is 20px
-    /// > (r = .5), the corner radius of the shadow shape will be
-    /// > 10px + 20px × (1 + (.5 - 1)³) = 27.5px rather than 30px. This adjustment
-    /// > is applied independently to the radii in each dimension.
-    ///
-    /// **Only growth is eased.** Both cases the spec names — an outer shadow whose
-    /// radius is under a *positive* spread, and an inner shadow whose radius is
-    /// under the absolute value of a *negative* one — are cases where the radius
-    /// grows; §8.3's change log records that narrowing as its own entry ("Spread
-    /// radius adjustment is only applied to shadows and margins where the radius of
-    /// curvature grows, rather than shrinks", Issue 1900). A shrinking corner
-    /// (`delta < 0`) therefore takes the plain floored subtraction — the same
-    /// arithmetic [`CornerRadii::offset`] does.
-    ///
-    /// "Applied independently to the radii in each dimension" is why `r` is taken
-    /// per axis rather than per corner: an elliptical corner can sit below the
-    /// spread on one axis and above it on the other, and each axis eases alone.
-    ///
-    /// The two branches meet continuously: at `radius == delta`, `r == 1` and the
-    /// factor is `1 + 0³ == 1`, which is the raw addition. At the other endpoint a
-    /// sharp corner stays sharp — `r == 0` gives `1 + (−1)³ == 0` — which is also
-    /// what the shared `is_rounded` gate enforces. Those two agreeing endpoints are
-    /// why a test that only probes them cannot tell this method from `offset`.
+    #[doc = include_str!("corner_radii.doc/spread_offset.md")]
     #[must_use]
     pub fn spread_offset(self, delta: f32) -> Self {
         self.map(|c| {
@@ -265,36 +153,7 @@ impl CornerRadii {
         })
     }
 
-    /// Applies the CSS Backgrounds 3 §4.5 overlapping-curves correction for `rect`.
-    ///
-    /// The spec: "Let f = min(Li/Si), where i ∈ {top, right, bottom, left}, Si is
-    /// the sum of the two corresponding radii of the corners on side i, and Ltop =
-    /// Lbottom = the width of the box, and Lleft = Lright = the height of the box.
-    /// If f < 1, then all corner radii are reduced by multiplying them by f."
-    ///
-    /// The *corresponding* radius of a corner on a side is the one running **along**
-    /// that side: the horizontal (`x`) radii sum on the top and bottom, the vertical
-    /// (`y`) radii on the left and right.
-    ///
-    /// ```text
-    /// f = min( W / (tl.x + tr.x),   // top side
-    ///          W / (bl.x + br.x),   // bottom side
-    ///          H / (tl.y + bl.y),   // left side
-    ///          H / (tr.y + br.y) )  // right side
-    /// ```
-    ///
-    /// A side whose radius-sum is `0` is skipped — treated as `+∞` so it never
-    /// constrains, avoiding a divide-by-zero. If `f < 1` **both** radii of every
-    /// corner are multiplied by `f`, which is what the spec's note means by
-    /// "quarter circles remain quarter circles and large radii remain larger than
-    /// smaller ones"; if `f ≥ 1` the radii already fit and are returned unchanged
-    /// (byte-identical). This is the single scale applied to all four corners,
-    /// unlike an independent per-corner `min(w,h)/2` clamp which distorts
-    /// asymmetric radii on non-square boxes.
-    ///
-    /// `border-radius: 50%` is the fixed point this protects: on any box the four
-    /// side sums equal exactly that side's length, so `f == 1` and the authored
-    /// ellipse survives untouched.
+    #[doc = include_str!("corner_radii.doc/normalized.md")]
     #[must_use]
     pub fn normalized(self, rect: Rect) -> Self {
         let w = rect.size.width.max(0.0);
@@ -319,11 +178,7 @@ impl CornerRadii {
     }
 }
 
-/// One axis of CSS Backgrounds 3 §6.1.1's spread rule: `radius` grown by `delta`,
-/// with the easing applied only when the corner grows by more than it is round.
-///
-/// See [`CornerRadii::spread_offset`] for the quoted text and why growth is the
-/// only eased direction.
+#[doc = include_str!("corner_radii.doc/spread_axis.md")]
 fn spread_axis(radius: f32, delta: f32) -> f32 {
     // Shrinking (§8.3 Issue 1900), or a corner already at least as round as the
     // distance it grows by (`r ≥ 1`, outside the rule's "border radius is less

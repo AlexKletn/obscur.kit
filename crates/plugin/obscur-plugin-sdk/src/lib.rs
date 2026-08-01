@@ -1,8 +1,8 @@
-//! Ergonomic Rust wrappers over the Plugin API/ABI.
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-/// Registering a plugin's implementations.
+#[doc = include_str!("lib.doc/registration.md")]
 pub mod registration;
-/// Generated wrappers around plugin entry points.
+#[doc = include_str!("lib.doc/wrapper.md")]
 pub mod wrapper;

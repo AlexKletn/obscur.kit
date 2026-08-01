@@ -1,40 +1,17 @@
-//! The CSS `box-sizing` model: whether an explicit `width` / `height` sizes the
-//! content box or the border box.
+#![doc = include_str!("box_sizing.doc/_module.md")]
 
-/// How an explicit `width` / `height` is interpreted against the box model
-/// (CSS `box-sizing`, spec §2.3).
-///
-/// This governs only how an **explicit** size resolves into the element's
-/// *content* extent (the region children are laid out within); an `Auto` size is
-/// unaffected (it always fills the available content box). The distinction only
-/// matters when the element has border + padding: with none, both modes are
-/// identical.
-///
-/// * [`ContentBox`](Self::ContentBox) — the CSS default. An explicit `width` /
-///   `height` is the **content** box, so the element's border box is
-///   `authored + border + padding`.
-/// * [`BorderBox`](Self::BorderBox) — an explicit `width` / `height` is the
-///   **border** box, so the content extent is `authored − border − padding`
-///   (floored at `0`) and the element's border box equals the authored size.
+#[doc = include_str!("box_sizing.doc/BoxSizing.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BoxSizing {
-    /// An explicit size is the content box (the CSS initial value).
+    #[doc = include_str!("box_sizing.doc/ContentBox.md")]
     #[default]
     ContentBox,
-    /// An explicit size is the border box (`box-sizing: border-box`).
+    #[doc = include_str!("box_sizing.doc/BorderBox.md")]
     BorderBox,
 }
 
 impl BoxSizing {
-    /// Maps an explicit authored size `size` into the element's **content**
-    /// extent along one axis, given the axis's total border + padding `bp`.
-    ///
-    /// Under [`ContentBox`](Self::ContentBox) the authored value already *is* the
-    /// content extent, so it passes through unchanged. Under
-    /// [`BorderBox`](Self::BorderBox) the authored value is the border box, so the
-    /// border + padding is subtracted and the result floored at `0` (a box
-    /// smaller than its own border + padding collapses its content to zero rather
-    /// than going negative).
+    #[doc = include_str!("box_sizing.doc/content_extent.md")]
     #[must_use]
     pub fn content_extent(self, size: f32, bp: f32) -> f32 {
         match self {
@@ -43,20 +20,7 @@ impl BoxSizing {
         }
     }
 
-    /// Maps an explicit authored size `size` into the element's **border** extent
-    /// along one axis, given the axis's total border + padding `bp`.
-    ///
-    /// This is the inverse of [`content_extent`](Self::content_extent): it yields
-    /// the border-box extent an explicitly-sized element occupies. Under
-    /// [`ContentBox`](Self::ContentBox) the authored value is the content box, so
-    /// the border + padding is **added** (a `width: 0` element with a 10px
-    /// horizontal border occupies a 10px border box). Under
-    /// [`BorderBox`](Self::BorderBox) the authored value already *is* the border
-    /// box, so it passes through unchanged.
-    ///
-    /// A parent formatting context uses this to size an in-flow child from its own
-    /// explicit `width` / `height` without collapsing away the child's border +
-    /// padding (which would otherwise invert a degenerate CSS border-triangle box).
+    #[doc = include_str!("box_sizing.doc/border_extent.md")]
     #[must_use]
     pub fn border_extent(self, size: f32, bp: f32) -> f32 {
         match self {

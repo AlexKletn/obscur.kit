@@ -1,4 +1,4 @@
-//! `Menu`: a headless menu of activatable items (spec §2.6, §6.7).
+#![doc = include_str!("menu.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -8,12 +8,7 @@ use obscur_view::view::{
     EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
-/// A single entry in a [`Menu`].
-///
-/// Each item carries a display `label`, the `command` it fires when activated,
-/// and whether it is currently [`enabled`](Self::is_enabled). Disabled items are
-/// still rendered but are skipped by keyboard highlight navigation and cannot be
-/// activated.
+#[doc = include_str!("menu.doc/MenuItem.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuItem {
     label: Box<str>,
@@ -22,8 +17,7 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
-    /// Creates an enabled item showing `label` that fires `command` when
-    /// activated.
+    #[doc = include_str!("menu.doc/new.md")]
     #[must_use]
     pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -33,21 +27,14 @@ impl MenuItem {
         }
     }
 
-    /// Marks the item disabled, returning it (fluent builder).
+    #[doc = include_str!("menu.doc/disabled.md")]
     #[must_use]
     pub fn disabled(mut self) -> Self {
         self.enabled = false;
         self
     }
 
-    /// Derives an item from a unified [`Command`] and its live [`CommandState`]
-    /// (spec §6.7).
-    ///
-    /// The item is a *projection* of the one action descriptor, not a second
-    /// copy of it: the label is the command's [`title`](Command::title), the
-    /// fired command is its [`id`](Command::id) — the same symbol its shortcut
-    /// resolves to and its handler is registered for — and the item is enabled
-    /// exactly while the state is. Editing the command edits the menu.
+    #[doc = include_str!("menu.doc/from_command.md")]
     #[must_use]
     pub fn from_command(command: &Command, state: CommandState) -> Self {
         Self {
@@ -57,44 +44,26 @@ impl MenuItem {
         }
     }
 
-    /// Returns the item label.
+    #[doc = include_str!("menu.doc/label.md")]
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
-    /// Returns the command fired when the item is activated.
+    #[doc = include_str!("menu.doc/command.md")]
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    /// Returns whether the item is enabled.
+    #[doc = include_str!("menu.doc/is_enabled.md")]
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 }
 
-/// A headless menu of activatable items (spec §2.6, §6.7).
-///
-/// `Menu` owns its [`MenuItem`]s, whether the menu is currently
-/// [`open`](Self::is_open), and which item (if any) is
-/// [`highlighted`](Self::highlighted). It bakes in **no** visual theme:
-/// [`view`](Self::view) derives a [`SemanticRole::Menu`] element carrying the
-/// open/highlighted state as properties, with one
-/// [`SemanticRole::MenuItem`]-shaped child element per item (each carrying its
-/// disabled flag, a click event bound to the item's command, and a [`Text`]
-/// label child), rendered by the style layer keyed on
-/// [`COMPONENT_ID`](Self::COMPONENT_ID).
-///
-/// The state machine covers open/close ([`open`](Self::open),
-/// [`close`](Self::close) — which also clears the highlight —
-/// [`toggle_open`](Self::toggle_open)), highlight movement
-/// ([`highlight`](Self::highlight), [`highlight_next`](Self::highlight_next),
-/// [`highlight_prev`](Self::highlight_prev), which wrap and skip disabled
-/// items), and committing a choice ([`activate`](Self::activate), which returns
-/// the highlighted enabled item's command and closes the menu).
+#[doc = include_str!("menu.doc/Menu.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Menu {
     items: Vec<MenuItem>,
@@ -103,27 +72,22 @@ pub struct Menu {
 }
 
 impl Menu {
-    /// Stable component id for the menu widget (see [`Button::COMPONENT_ID`]
-    /// for the shared `0x00D0_00NN` scheme).
-    ///
-    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    #[doc = include_str!("menu.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0005);
 
-    /// Stable component id for the per-item child element.
+    #[doc = include_str!("menu.doc/MENU_ITEM_ID.md")]
     const MENU_ITEM_ID: ComponentId = ComponentId::from_raw(0x00D0_0015);
 
-    /// Interned name of the semantic-role property (`role`); shares the
-    /// `0x00D1_NNXX` scheme with `NN = 05` (menu): role=`00`, open=`01`,
-    /// highlighted=`02`, disabled=`03` (on item children).
+    #[doc = include_str!("menu.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0500);
-    /// Interned name of the `open` state property.
+    #[doc = include_str!("menu.doc/PROP_OPEN.md")]
     const PROP_OPEN: InternedSymbol = InternedSymbol::from_raw(0x00D1_0501);
-    /// Interned name of the `highlighted` index property (`-1` = none).
+    #[doc = include_str!("menu.doc/PROP_HIGHLIGHTED.md")]
     const PROP_HIGHLIGHTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0502);
-    /// Interned name of the per-item `disabled` state property.
+    #[doc = include_str!("menu.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0503);
 
-    /// Creates a closed, empty menu with no highlighted item.
+    #[doc = include_str!("menu.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -133,14 +97,14 @@ impl Menu {
         }
     }
 
-    /// Appends a single item, returning the updated menu (fluent builder).
+    #[doc = include_str!("menu.doc/item.md")]
     #[must_use]
     pub fn item(mut self, item: MenuItem) -> Self {
         self.items.push(item);
         self
     }
 
-    /// Appends every item from `items`, returning the updated menu.
+    #[doc = include_str!("menu.doc/with_items.md")]
     #[must_use]
     pub fn with_items<I>(mut self, items: I) -> Self
     where
@@ -150,19 +114,7 @@ impl Menu {
         self
     }
 
-    /// Builds a closed menu from `ids` looked up in `registry`, in the given
-    /// order (spec §6.7).
-    ///
-    /// This is the kit-rendered menu surface of the unified action model: each
-    /// item is derived from the registered [`Command`] via
-    /// [`MenuItem::from_command`], so titles and enabled-ness come from the one
-    /// descriptor rather than being restated here.
-    ///
-    /// An id is **omitted** from the menu when it is not registered (there is no
-    /// title to show and no state to honour) or when its state is not
-    /// [`visible`](CommandState::is_visible) — `visible` is what hides an action
-    /// from its surfaces, while [`enabled`](CommandState::is_enabled) renders it
-    /// greyed and inert.
+    #[doc = include_str!("menu.doc/from_registry.md")]
     #[must_use]
     pub fn from_registry<I>(registry: &CommandRegistry, ids: I) -> Self
     where
@@ -185,18 +137,18 @@ impl Menu {
         }
     }
 
-    /// Opens the menu.
+    #[doc = include_str!("menu.doc/open.md")]
     pub fn open(&mut self) {
         self.open = true;
     }
 
-    /// Closes the menu, clearing any highlighted item.
+    #[doc = include_str!("menu.doc/close.md")]
     pub fn close(&mut self) {
         self.open = false;
         self.highlighted = None;
     }
 
-    /// Toggles the menu open/closed. Closing clears the highlight.
+    #[doc = include_str!("menu.doc/toggle_open.md")]
     pub fn toggle_open(&mut self) {
         if self.open {
             self.close();
@@ -205,8 +157,7 @@ impl Menu {
         }
     }
 
-    /// Highlights the item at `index`, returning `true` when `index` is in
-    /// range; otherwise leaves the highlight untouched and returns `false`.
+    #[doc = include_str!("menu.doc/highlight.md")]
     pub fn highlight(&mut self, index: usize) -> bool {
         if index < self.items.len() {
             self.highlighted = Some(index);
@@ -216,24 +167,17 @@ impl Menu {
         }
     }
 
-    /// Moves the highlight to the next enabled item, wrapping around. With no
-    /// current highlight this selects the first enabled item. A no-op when no
-    /// item is enabled.
+    #[doc = include_str!("menu.doc/highlight_next.md")]
     pub fn highlight_next(&mut self) {
         self.highlighted = self.scan_enabled(self.highlighted, true);
     }
 
-    /// Moves the highlight to the previous enabled item, wrapping around. With
-    /// no current highlight this selects the last enabled item. A no-op when no
-    /// item is enabled.
+    #[doc = include_str!("menu.doc/highlight_prev.md")]
     pub fn highlight_prev(&mut self) {
         self.highlighted = self.scan_enabled(self.highlighted, false);
     }
 
-    /// Scans for the next/previous enabled item relative to `from`, wrapping.
-    /// With `from == None`, starts so the first (forward) or last (backward)
-    /// enabled item is chosen. Returns the current highlight when no item is
-    /// enabled.
+    #[doc = include_str!("menu.doc/scan_enabled.md")]
     fn scan_enabled(&self, from: Option<usize>, forward: bool) -> Option<usize> {
         let len = self.items.len();
         if len == 0 {
@@ -254,10 +198,7 @@ impl Menu {
         from
     }
 
-    /// Activates the highlighted item, returning its command when an item is
-    /// highlighted **and** enabled, then closes the menu. Returns `None` (and
-    /// still closes) when nothing is highlighted or the highlighted item is
-    /// disabled.
+    #[doc = include_str!("menu.doc/activate.md")]
     pub fn activate(&mut self) -> Option<InternedSymbol> {
         let command = self
             .highlighted
@@ -268,42 +209,37 @@ impl Menu {
         command
     }
 
-    /// Returns whether the menu is open.
+    #[doc = include_str!("menu.doc/is_open.md")]
     #[must_use]
     pub const fn is_open(&self) -> bool {
         self.open
     }
 
-    /// Returns the highlighted item index, if any.
+    #[doc = include_str!("menu.doc/highlighted.md")]
     #[must_use]
     pub const fn highlighted(&self) -> Option<usize> {
         self.highlighted
     }
 
-    /// Returns the number of items.
+    #[doc = include_str!("menu.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    /// Returns whether the menu has no items.
+    #[doc = include_str!("menu.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
-    /// Returns the accessible role of this control ([`SemanticRole::Menu`]).
+    #[doc = include_str!("menu.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Menu
     }
 
-    /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
-    /// open state, and highlighted index (`-1` when none), with one
-    /// menuitem-role child element per item (each carrying its disabled flag, a
-    /// click event bound to the item's command, and a [`Text`] label child).
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[doc = include_str!("menu.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let highlighted = self

@@ -1,17 +1,11 @@
-//! The functional diagnostics channel (spec §7.8).
+#![doc = include_str!("diagnostic_channel.doc/_module.md")]
 
 use super::diagnostic_buffer_policy::DiagnosticBufferPolicy;
 use super::diagnostic_filter::DiagnosticFilter;
 use super::diagnostic_subscription::{DiagnosticSubscription, SubscriptionId};
 use crate::diagnostic::Diagnostic;
 
-/// A multi-subscriber diagnostics channel (spec §7.8).
-///
-/// Consumers [`subscribe`](Self::subscribe) with a [`DiagnosticFilter`] and a
-/// [`DiagnosticBufferPolicy`]; each subscription buffers independently, so
-/// backpressure is per-subscription. [`publish`](Self::publish) offers a
-/// diagnostic to every enabled, matching subscription. Buffered diagnostics are
-/// consumed with [`drain`](Self::drain).
+#[doc = include_str!("diagnostic_channel.doc/DiagnosticChannel.md")]
 #[derive(Debug, Default)]
 pub struct DiagnosticChannel {
     subscriptions: Vec<DiagnosticSubscription>,
@@ -19,7 +13,7 @@ pub struct DiagnosticChannel {
 }
 
 impl DiagnosticChannel {
-    /// Creates an empty channel with no subscriptions.
+    #[doc = include_str!("diagnostic_channel.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -28,7 +22,7 @@ impl DiagnosticChannel {
         }
     }
 
-    /// Registers a subscription and returns its freshly minted id.
+    #[doc = include_str!("diagnostic_channel.doc/subscribe.md")]
     pub fn subscribe(
         &mut self,
         filter: DiagnosticFilter,
@@ -41,58 +35,48 @@ impl DiagnosticChannel {
         id
     }
 
-    /// Removes the subscription with `id`, returning whether one was removed.
+    #[doc = include_str!("diagnostic_channel.doc/unsubscribe.md")]
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
         let before = self.subscriptions.len();
         self.subscriptions.retain(|s| s.id() != id);
         self.subscriptions.len() != before
     }
 
-    /// Publishes `diagnostic` to the channel, offering it to every enabled,
-    /// matching subscription. Each subscription applies its own buffer policy,
-    /// so backpressure is independent per subscriber.
+    #[doc = include_str!("diagnostic_channel.doc/publish.md")]
     pub fn publish(&mut self, diagnostic: &Diagnostic) {
         for subscription in &mut self.subscriptions {
             subscription.offer(diagnostic);
         }
     }
 
-    /// Drains all buffered diagnostics from the subscription with `id`, or
-    /// returns an empty vector if no such subscription exists.
+    #[doc = include_str!("diagnostic_channel.doc/drain.md")]
     pub fn drain(&mut self, id: SubscriptionId) -> Vec<Diagnostic> {
         self.subscription_mut(id)
             .map(DiagnosticSubscription::drain)
             .unwrap_or_default()
     }
 
-    /// Returns a mutable reference to the subscription with `id`, if any, so
-    /// callers can toggle it enabled/disabled or inspect its buffer.
+    #[doc = include_str!("diagnostic_channel.doc/subscription_mut.md")]
     #[must_use]
     pub fn subscription_mut(&mut self, id: SubscriptionId) -> Option<&mut DiagnosticSubscription> {
         self.subscriptions.iter_mut().find(|s| s.id() == id)
     }
 
-    /// Returns the number of active subscriptions.
+    #[doc = include_str!("diagnostic_channel.doc/subscription_count.md")]
     #[must_use]
     pub fn subscription_count(&self) -> usize {
         self.subscriptions.len()
     }
 }
 
-/// A [`DiagnosticSink`](crate::DiagnosticSink) wrapper over a channel, so
-/// existing sink-based producers can publish into a channel.
-///
-/// The channel is held behind interior mutability because [`DiagnosticSink`]
-/// takes `&self`; a `RefCell` keeps the port std-only and unsafe-free.
-///
-/// [`DiagnosticSink`]: crate::DiagnosticSink
+#[doc = include_str!("diagnostic_channel.doc/ChannelSink.md")]
 #[derive(Debug, Default)]
 pub struct ChannelSink {
     channel: std::cell::RefCell<DiagnosticChannel>,
 }
 
 impl ChannelSink {
-    /// Wraps `channel` as a sink.
+    #[doc = include_str!("diagnostic_channel.doc/new_2.md")]
     #[must_use]
     pub fn new(channel: DiagnosticChannel) -> Self {
         Self {
@@ -100,13 +84,13 @@ impl ChannelSink {
         }
     }
 
-    /// Borrows the underlying channel mutably (e.g. to subscribe or drain).
+    #[doc = include_str!("diagnostic_channel.doc/channel_mut.md")]
     #[must_use]
     pub fn channel_mut(&self) -> std::cell::RefMut<'_, DiagnosticChannel> {
         self.channel.borrow_mut()
     }
 
-    /// Consumes the sink, returning the underlying channel.
+    #[doc = include_str!("diagnostic_channel.doc/into_inner.md")]
     #[must_use]
     pub fn into_inner(self) -> DiagnosticChannel {
         self.channel.into_inner()

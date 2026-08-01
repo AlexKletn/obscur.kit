@@ -1,4 +1,4 @@
-//! Editing module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod deletion_unit;
 pub use deletion_unit::DeletionUnit;
 mod edit_command;

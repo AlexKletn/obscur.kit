@@ -1,38 +1,4 @@
-//! End-to-end verification that **authored CSS grid line placement** (`grid-column`
-//! / `grid-row`, integer lines and `span`) reaches the layout engine and produces
-//! the expected [`LayoutBox`](obscur_kit::layout::model::LayoutBox) geometry through
-//! the *real* live pipeline (spec §4.13, the positive-line + span subset).
-//!
-//! Each test drives the genuine path — author CSS text (`display: grid` plus
-//! `grid-column` / `grid-row` shorthands on the children), compile it through the
-//! real `obscur-css` frontend (`source -> parse -> compile -> matchable
-//! Stylesheet`), and render one frame on a [`UiRuntime`] via
-//! [`render_now`](UiRuntime::render_now), which runs `reconcile -> match -> cascade
-//! -> resolve (ComputedStyles, incl. the four `grid-*-start`/`-end` longhands) ->
-//! grid-templates -> layout (LayoutBoxes)`. The assertions read the *actual*
-//! absolute [`LayoutBox`] coordinates the pipeline produced
-//! (`runtime.layout_boxes()`), never a hand-built `GridPlacement`/`LayoutStyle`, so
-//! a regression anywhere in the chain (CSS shorthand→longhand lowering → resolver
-//! `GridLineValue` → coordinator `grid_placement_of` → the grid algorithm's
-//! two-phase placement) fails the run.
-//!
-//! Every container authors an explicit `width` so the columns (and thus the placed
-//! item x-coordinates) are deterministic regardless of the viewport.
-//!
-//! # Proven vs still limited
-//!
-//! Proven end-to-end here: line-based column placement (`grid-column: 1 / 3`),
-//! `span` on an auto-placed item (`grid-column: span 2`), a single explicit line
-//! (`grid-column: 2`) with auto items flowing around it, explicit row placement
-//! (`grid-row: 2`) against fixed row tracks, a span crossing an interior `gap`, a
-//! mixed explicit + auto layout where the auto items first-fit around the occupied
-//! cell, negative (from-end) lines (`grid-column: 1 / -1` spanning the whole row),
-//! the `grid-area` four-line shorthand, and **named-area placement**
-//! (`grid-template-areas` on the container + `grid-area: <name>` on the items,
-//! resolved in the runtime against the parent's parsed template), and **named grid
-//! lines** (`[name]` groups in the container's `grid-template-columns` +
-//! `grid-column: <name> / <name>` on the item, resolved in the runtime against the
-//! parent's per-axis line-name map).
+#![doc = include_str!("grid_placement_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -44,15 +10,14 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`] through the
-/// real CSS frontend (`source -> parse -> compile`).
+#[doc = include_str!("grid_placement_css.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Tags a view node with a `class` attribute so authored selectors match it.
+#[doc = include_str!("grid_placement_css.doc/tag.md")]
 fn tag(node: ViewNode, cls: &str) -> ViewNode {
     node.with_prop(ViewProperty::new(CLASS, ViewValue::Text(cls.into())))
 }
@@ -61,10 +26,10 @@ fn el(id: u64) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
 }
 
-/// The class each grid child carries, in authored order.
+#[doc = include_str!("grid_placement_css.doc/CHILD_CLASSES.md")]
 const CHILD_CLASSES: [&str; 5] = ["a", "b", "c", "d", "e"];
 
-/// A `.grid` container holding `n` children classed `.a`, `.b`, `.c`, … in order.
+#[doc = include_str!("grid_placement_css.doc/grid_view.md")]
 fn grid_view(n: usize) -> View {
     let kids: Vec<ViewNode> = (0..n)
         .map(|i| tag(el(100 + i as u64), CHILD_CLASSES[i]))
@@ -73,9 +38,7 @@ fn grid_view(n: usize) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![container]))
 }
 
-/// Renders one real frame for `css` + a `.grid` container of `n` children under a
-/// `width` x `height` viewport, returning the driven runtime and each child's
-/// [`NodeId`] in authored order.
+#[doc = include_str!("grid_placement_css.doc/drive.md")]
 fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId>) {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
     let sheet = compile(css);
@@ -92,7 +55,7 @@ fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId
     (rt, kids)
 }
 
-/// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.
+#[doc = include_str!("grid_placement_css.doc/geom.md")]
 fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
     let b = rt
         .layout_boxes()
@@ -109,8 +72,7 @@ fn approx(actual: f32, expected: f32, what: &str) {
     );
 }
 
-/// The shared three-fixed-column container prefix (`width:300px`, `100px 100px
-/// 100px`). Callers append the per-child rules.
+#[doc = include_str!("grid_placement_css.doc/THREE_COL.md")]
 const THREE_COL: &str = ".grid{display:grid;width:300px;grid-template-columns:100px 100px 100px}";
 
 // 1. column span via lines: `.a{grid-column: 1 / 3}` spans columns 0-1 (x=0,
@@ -382,8 +344,7 @@ fn named_grid_lines_place_child_by_line_name() {
 // ---- Grid item alignment within a cell (`justify-self` / `align-self` and the
 //      `place-self` shorthand), end-to-end through the real pipeline. ----
 
-/// A single `100×100` fixed cell holding one `40×30` child. Callers append the
-/// per-child alignment rule.
+#[doc = include_str!("grid_placement_css.doc/ONE_CELL.md")]
 const ONE_CELL: &str =
     ".grid{display:grid;width:100px;grid-template-columns:100px;grid-template-rows:100px}";
 

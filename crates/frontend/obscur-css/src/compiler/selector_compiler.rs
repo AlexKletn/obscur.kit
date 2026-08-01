@@ -1,14 +1,4 @@
-//! Computing selector specificity and minting selector ids (§4.13/§4.14).
-//!
-//! [`SelectorCompiler`] turns a parsed selector into a [`CompiledSelector`]: the
-//! CSS `(a, b, c)` specificity triple the cascade ranks declarations by, plus a
-//! sequential [`SelectorId`] handle that ties a produced [`Declaration`] back to
-//! the rule that authored it. It also surfaces the excluded dynamic-state
-//! pseudo-classes (`:link`, `:visited`, `:target`) and pseudo-elements
-//! (`::before`, `::after`, …) as [`UnsupportedCssFeature`]s (§4.13) rather than
-//! silently matching them.
-//!
-//! [`Declaration`]: obscur_style::cascade::Declaration
+#![doc = include_str!("selector_compiler.doc/_module.md")]
 
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{
@@ -20,55 +10,35 @@ use crate::source::{CssSource, SourceSpan};
 use obscur_style::selector as style;
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
-/// A compiled selector: its cascade [`SelectorId`] and its specificity.
-///
-/// The parsed selector AST carries no per-token spans, so the excluded
-/// pseudo-classes it triggers are reported against an empty span.
+#[doc = include_str!("selector_compiler.doc/CompiledSelector.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CompiledSelector {
-    /// The sequential handle minted for this selector.
+    #[doc = include_str!("selector_compiler.doc/id.md")]
     pub id: SelectorId,
-    /// The computed CSS `(a, b, c)` specificity.
+    #[doc = include_str!("selector_compiler.doc/specificity.md")]
     pub specificity: SelectorSpecificity,
 }
 
-/// Computes specificity for parsed selectors and mints their [`SelectorId`]s.
-///
-/// Ids are handed out sequentially (starting at zero) across the lifetime of the
-/// compiler, so every selector it compiles gets a distinct handle.
+#[doc = include_str!("selector_compiler.doc/SelectorCompiler.md")]
 #[derive(Debug, Clone, Default)]
 pub struct SelectorCompiler {
     next_id: u64,
 }
 
 impl SelectorCompiler {
-    /// Creates a selector compiler whose first minted id is zero.
+    #[doc = include_str!("selector_compiler.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self { next_id: 0 }
     }
 
-    /// Computes the CSS `(a, b, c)` specificity of a complex selector (§4.14).
-    ///
-    /// `a` counts id selectors, `b` counts class/attribute/pseudo-class
-    /// selectors, and `c` counts type/pseudo-element selectors; the universal
-    /// selector contributes nothing. Components are summed (saturating) across
-    /// every compound in the complex selector.
-    ///
-    /// This delegates to the lowered `obscur-style` model rather than counting
-    /// the parsed AST a second time, so the flat-cascade path and the
-    /// runtime-matcher path cannot disagree. That matters for the selectors-4
-    /// §15 "evaluation context" pseudo-classes (`:is()`, `:not()`, `:where()`,
-    /// `:has()`, `:nth-child(… of S)`), whose specificity is a function of their
-    /// *argument* — which only exists once the raw argument text has been
-    /// re-parsed by [`lower_complex`](Self::lower_complex).
+    #[doc = include_str!("selector_compiler.doc/specificity_2.md")]
     #[must_use]
     pub fn specificity(selector: &ParsedComplexSelector) -> SelectorSpecificity {
         Self::lower_complex(selector).specificity()
     }
 
-    /// Compiles one complex selector, minting its id and reporting any excluded
-    /// pseudo-classes and pseudo-elements into `unsupported`.
+    #[doc = include_str!("selector_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(
         &mut self,
@@ -82,7 +52,7 @@ impl SelectorCompiler {
         CompiledSelector { id, specificity }
     }
 
-    /// Compiles every complex selector in a selector list, in source order.
+    #[doc = include_str!("selector_compiler.doc/compile_list.md")]
     #[must_use]
     pub fn compile_list(
         &mut self,
@@ -95,24 +65,13 @@ impl SelectorCompiler {
             .collect()
     }
 
-    /// Lowers a parsed selector list into the `obscur-style` selector model the
-    /// runtime matcher consumes (§4.13).
-    ///
-    /// This is a pure, id-free structural translation: the parsed AST maps 1:1
-    /// onto [`style::SelectorList`], preserving source order. Excluded
-    /// dynamic-state pseudo-classes are *not* filtered here (that diagnostic is
-    /// raised by [`compile`](Self::compile)); they lower to
-    /// [`style::PseudoClassSelector::Other`], which the matcher treats as
-    /// matching nothing. Pseudo-elements lower likewise — preserved as
-    /// [`style::SimpleSelector::PseudoElement`], which the matcher never
-    /// matches because the kit generates no box for one.
+    #[doc = include_str!("selector_compiler.doc/lower_list.md")]
     #[must_use]
     pub fn lower_list(list: &ParsedSelectorList) -> style::SelectorList {
         style::SelectorList::new(list.0.iter().map(Self::lower_complex).collect())
     }
 
-    /// Lowers one parsed complex selector, mapping the head and each
-    /// combinator-linked tail compound left-to-right.
+    #[doc = include_str!("selector_compiler.doc/lower_complex.md")]
     #[must_use]
     pub fn lower_complex(selector: &ParsedComplexSelector) -> style::ComplexSelector {
         let head = Self::lower_compound(&selector.head);
@@ -129,14 +88,14 @@ impl SelectorCompiler {
         style::ComplexSelector::new(head, tail)
     }
 
-    /// Lowers one parsed compound selector into its run of simple selectors.
+    #[doc = include_str!("selector_compiler.doc/lower_compound.md")]
     #[must_use]
     pub fn lower_compound(compound: &ParsedCompoundSelector) -> style::CompoundSelector {
         style::CompoundSelector::new(compound.parts.iter().map(lower_simple).collect())
     }
 }
 
-/// Maps a parser combinator onto its `obscur-style` counterpart (1:1 by name).
+#[doc = include_str!("selector_compiler.doc/lower_combinator.md")]
 const fn lower_combinator(combinator: Combinator) -> style::Combinator {
     match combinator {
         Combinator::Descendant => style::Combinator::Descendant,
@@ -146,10 +105,7 @@ const fn lower_combinator(combinator: Combinator) -> style::Combinator {
     }
 }
 
-/// Lowers one parsed simple selector into the `obscur-style` model.
-///
-/// Type/universal/class/id/pseudo-element map directly; attribute and
-/// pseudo-class selectors delegate to [`lower_attr_op`]/[`lower_pseudo_class`].
+#[doc = include_str!("selector_compiler.doc/lower_simple.md")]
 fn lower_simple(simple: &SimpleSelector) -> style::SimpleSelector {
     match simple {
         SimpleSelector::Type(name) => style::SimpleSelector::Type(name.clone()),
@@ -175,7 +131,7 @@ fn lower_simple(simple: &SimpleSelector) -> style::SimpleSelector {
     }
 }
 
-/// Pairs an attribute operator with its operand to build an [`style::AttrMatch`].
+#[doc = include_str!("selector_compiler.doc/lower_attr_op.md")]
 fn lower_attr_op(op: AttrOp, operand: &str) -> style::AttrMatch {
     match op {
         AttrOp::Exact => style::AttrMatch::Exact(operand.into()),
@@ -187,20 +143,7 @@ fn lower_attr_op(op: AttrOp, operand: &str) -> style::AttrMatch {
     }
 }
 
-/// Lowers a pseudo-class name (and optional functional argument) into the
-/// `obscur-style` [`style::PseudoClassSelector`].
-///
-/// The name is matched case-insensitively. Functional `:nth-*` forms parse their
-/// argument via [`parse_anb`]; the selector-list forms (`:is()`, `:where()`,
-/// `:not()`, `:has()`, and the `of S` tail of `:nth-child()`) re-parse their raw
-/// argument text via [`parse_nested_list`]; any name the model does not know is
-/// preserved as [`style::PseudoClassSelector::Other`] (which matches nothing).
-///
-/// `:nth-last-child(An+B of S)` is deliberately **not** lowered to a modelled
-/// form: deciding it means testing `S` against *following* siblings, which
-/// `MatchElement` cannot navigate to (see
-/// [`style::PseudoClassSelector::Has`] for the same blocker). It falls through
-/// to `Other`, matching nothing, and is reported as unsupported.
+#[doc = include_str!("selector_compiler.doc/lower_pseudo_class.md")]
 fn lower_pseudo_class(name: &str, arg: Option<&str>) -> style::PseudoClassSelector {
     use style::PseudoClassSelector as P;
     let lowered_name = name.to_ascii_lowercase();
@@ -253,18 +196,7 @@ fn lower_pseudo_class(name: &str, arg: Option<&str>) -> style::PseudoClassSelect
     }
 }
 
-/// Re-parses the raw argument text of a selector-list pseudo-class into the
-/// lowered `obscur-style` [`style::SelectorList`].
-///
-/// The selector parser captures a functional pseudo-class's argument as raw
-/// source text (it is grammar-dependent), so the nested list is parsed here, on
-/// demand. Argument text that does not parse — and the empty argument — yields
-/// an **empty** list, which matches nothing and contributes zero specificity:
-/// that is what selectors-4 §4.2 prescribes for an empty `:is()` list ("the
-/// pseudo-class is valid but matches nothing"), and it is the fail-closed answer
-/// for the malformed case. Note this is *not* the full `<forgiving-selector-list>`
-/// behaviour: one invalid selector discards the whole list rather than only
-/// itself.
+#[doc = include_str!("selector_compiler.doc/parse_nested_list.md")]
 fn parse_nested_list(arg: &str) -> style::SelectorList {
     let trimmed = arg.trim();
     if trimmed.is_empty() {
@@ -277,22 +209,12 @@ fn parse_nested_list(arg: &str) -> style::SelectorList {
         .unwrap_or_default()
 }
 
-/// The `<forgiving-selector-list>` of selectors-4 §16.1, for `:is()` and
-/// `:where()` — "parses each selector in the list individually, simply ignoring
-/// ones that fail to parse, so the remaining selectors can still be used."
+#[doc = include_str!("selector_compiler.doc/parse_forgiving_list.md")]
 fn parse_forgiving_list(arg: &str) -> style::SelectorList {
     parse_nested_list(arg)
 }
 
-/// The ordinary, **unforgiving** selector list `:not()` and `:has()` take, and
-/// the reason they cannot share the forgiving path.
-///
-/// Returning [`None`] for an unparsable argument is not a stylistic choice: an
-/// empty `:not()` list matches *every element*, because `!any([])` is `!false`.
-/// So the tolerant reading fails **open** — `:not(em, %%%)` would silently drop
-/// the valid `em` branch and turn "everything except em" into "everything,
-/// unconditionally", which is the opposite of what the author wrote. The caller
-/// maps [`None`] to an unrecognised pseudo-class, which matches nothing.
+#[doc = include_str!("selector_compiler.doc/parse_strict_list.md")]
 fn parse_strict_list(arg: &str) -> Option<style::SelectorList> {
     let trimmed = arg.trim();
     if trimmed.is_empty() {
@@ -305,14 +227,7 @@ fn parse_strict_list(arg: &str) -> Option<style::SelectorList> {
     (!lowered.selectors().is_empty()).then_some(lowered)
 }
 
-/// Splits a `:nth-child()` / `:nth-last-child()` argument into its `An+B` part
-/// and the optional `of S` selector list (selectors-4 §13.3.1:
-/// `:nth-child( <an+b> [of <complex-real-selector-list>]? )`).
-///
-/// The split is made at the first `of` **keyword** — an `of` that stands alone as
-/// an identifier at bracket depth zero — so the `of` inside `-n+3 of .of-item`
-/// or inside `[data-of]` is not mistaken for the separator. Returns the whole
-/// argument and [`None`] when there is no such keyword.
+#[doc = include_str!("selector_compiler.doc/split_anb_of.md")]
 fn split_anb_of(arg: &str) -> (&str, Option<&str>) {
     let bytes = arg.as_bytes();
     let mut depth: i32 = 0;
@@ -355,19 +270,12 @@ fn split_anb_of(arg: &str) -> (&str, Option<&str>) {
     (arg, None)
 }
 
-/// Returns whether `byte` would continue a CSS identifier, so that an `of` with
-/// such a neighbour is part of a longer name rather than the `of` keyword. A
-/// missing byte — the start or the end of the argument — is not one.
+#[doc = include_str!("selector_compiler.doc/is_ident_byte.md")]
 fn is_ident_byte(byte: Option<u8>) -> bool {
     byte.is_some_and(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// Parses an `An+B` micro-syntax argument into an [`style::AnB`].
-///
-/// Handles the keywords `odd` (`2n+1`) and `even` (`2n`), a bare integer `k`
-/// (`0n+k`), and the general `An±B` grammar including the omitted-coefficient
-/// forms `n` (`1n+0`) and `-n+B` (`-1n+B`). Whitespace inside the argument is
-/// ignored. Anything unparseable degrades to `0n+0`, which matches no index.
+#[doc = include_str!("selector_compiler.doc/parse_anb.md")]
 fn parse_anb(arg: &str) -> style::AnB {
     let compact: String = arg.chars().filter(|c| !c.is_whitespace()).collect();
     let lower = compact.to_ascii_lowercase();
@@ -397,12 +305,7 @@ fn parse_anb(arg: &str) -> style::AnB {
     style::AnB::new(0, lower.parse::<i32>().unwrap_or(0))
 }
 
-/// Records the constructs the kit recognises but cannot honour, found anywhere
-/// in the complex selector (§4.13): the excluded dynamic-state pseudo-classes
-/// (`:link`, `:visited`, `:target`) and every pseudo-element.
-///
-/// Both lower to something the matcher never matches, so the rule is inert; the
-/// diagnostic is what keeps that from being a silent drop.
+#[doc = include_str!("selector_compiler.doc/collect_unsupported.md")]
 fn collect_unsupported(
     selector: &ParsedComplexSelector,
     unsupported: &mut Vec<UnsupportedCssFeature>,
@@ -436,15 +339,7 @@ fn collect_unsupported(
     }
 }
 
-/// Returns whether a pseudo-class is one the kit excludes (§4.13).
-///
-/// Three are excluded by policy — the dynamic-state `:link`, `:visited` and
-/// `:target`. Two more are excluded because deciding them requires navigating
-/// *forward* from the subject, which the matcher's `MatchElement` seam cannot
-/// do: `:has()`, and `:nth-last-child()` **only in its `of S` form** (the plain
-/// `:nth-last-child(An+B)` is decided from the sibling count and is fully
-/// supported). All five lower to something that matches nothing, so the
-/// diagnostic is what keeps the rule from being a silent drop.
+#[doc = include_str!("selector_compiler.doc/is_excluded_pseudo.md")]
 fn is_excluded_pseudo(name: &str, arg: Option<&str>) -> bool {
     name.eq_ignore_ascii_case("link")
         || name.eq_ignore_ascii_case("visited")

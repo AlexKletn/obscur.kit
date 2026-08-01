@@ -1,15 +1,4 @@
-//! **SPECIFICATION-DERIVED** retained-tree and control-flow cases for
-//! obscur.kit §2.2 (*Tree model*) and §2.11 (*Conditions and collections*).
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expectation below was produced by an agent reading obscur.kit §2 with
-//! **no access to this repository's source**. The cases are a statement of what
-//! the implementation owes the spec, not a record of what it currently does. A
-//! failure here is a defect report about the engine (or, occasionally, about the
-//! spec) and must not be "corrected" by editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch2_tree.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch2_support/mod.rs"]
@@ -23,30 +12,7 @@ use support::{
 
 use obscur_kit::ui_macros::okui;
 
-/// §2.2: "child identity is stable through explicit keys;" and "layout, focus,
-/// selection, animation, DnD and caches attach to retained identity."
-///
-/// FIXTURE REPAIRED 2026-07-19: `rows()` used to build each row as
-/// `keyed(100 + i, "row", key, [el(200 + i, …)])`, making the row's
-/// ComponentId — its element *type* — a function of its POSITION in the list.
-/// Reordering therefore changed each row's type, which is the one thing that
-/// legitimately defeats key-based identity, so the fixture contradicted the very
-/// premise it asserts. The ComponentId is now constant across rows and identity
-/// is carried by the key alone.
-///
-/// OBSERVATION MOVED 2026-07-19: with the fixture repaired, every identity
-/// assertion passes — row b's NodeId is unchanged, it lands third, and the tree
-/// gains and loses no nodes. What did not survive is
-/// `rt.editing_text() == Some("hello")`, and that assertion was reading the
-/// wrong thing: `editing_text` is a RUNTIME-GLOBAL `TextEditSession` whose text
-/// is reseeded from the declarative tree on commit (and this row's input
-/// declares no value), so it measures value flow-down (§3.1), not state attached
-/// to retained identity. It is replaced by the part that does test identity —
-/// the session survives the reorder at all, which it could not if row b's node
-/// had been destroyed and recreated. Candidate spec amendment: §2.2 lists what
-/// "attach[es] to retained identity" (layout, focus, selection, animation, DnD,
-/// caches) but not text-editing state; say whether an editing session is
-/// per-node retained state, and how it interacts with §3.1's downward value flow.
+#[doc = include_str!("spec_ch2_tree.doc/tree_key_reorder_preserves_child_state.md")]
 #[test]
 fn tree_key_reorder_preserves_child_state() {
     // Three keyed rows, each holding an input. Row `b` is given editing state
@@ -109,13 +75,7 @@ fn tree_key_reorder_preserves_child_state() {
     );
 }
 
-/// §2.2: "nodes keep stable IDs where identity is preserved;"
-///
-/// FIXTURE REPAIRED 2026-07-19: same defect as
-/// `tree_key_reorder_preserves_child_state` — `100 + i` made each row's
-/// ComponentId shift when an earlier sibling was dropped, so "c" was component
-/// 102 in frame 1 and component 101 in frame 2 and could not possibly keep its
-/// node. The ComponentId is now constant. The assertion is unchanged.
+#[doc = include_str!("spec_ch2_tree.doc/tree_key_removal_does_not_reuse_the_removed_id.md")]
 #[test]
 fn tree_key_removal_does_not_reuse_the_removed_id() {
     fn rows(keys: &[&str]) -> obscur_kit::view::view::View {
@@ -147,8 +107,7 @@ fn tree_key_removal_does_not_reuse_the_removed_id() {
     );
 }
 
-/// §2.11: "These constructs do not create real retained nodes unless their
-/// rendered output requires them."
+#[doc = include_str!("spec_ch2_tree.doc/an_untaken_conditional_branch_is_never_constructed.md")]
 #[test]
 fn an_untaken_conditional_branch_is_never_constructed() {
     // Alpha and Beta are distinguished by class; a branch that was constructed
@@ -178,7 +137,7 @@ fn an_untaken_conditional_branch_is_never_constructed() {
     );
 }
 
-/// §2.11: "- `ElseIf`;"
+#[doc = include_str!("spec_ch2_tree.doc/an_elseif_chain_is_exclusive.md")]
 #[test]
 fn an_elseif_chain_is_exclusive() {
     fn grade(score: i32) -> obscur_kit::view::view::View {
@@ -203,20 +162,7 @@ fn an_elseif_chain_is_exclusive() {
     assert_eq!(view_text(&grade(50)), vec!["C".to_owned()]);
 }
 
-/// §2.11: "- simple conditional attributes."
-///
-/// WEAKENED 2026-07-19: this originally asserted that a false conditional
-/// attribute is *absent from the desired tree entirely*
-/// (`desired_prop(button, DISABLED) == None`), and that it is not
-/// `ViewValue::Bool(false)`. That is HTML's boolean-attribute omission rule;
-/// §2.11's entire text here is one bullet, "- simple conditional attributes.",
-/// which does not state it, and `.okui`/`okui!` have no conditional-attribute
-/// form distinct from an ordinary attribute binding. What survives is the part
-/// the spec does support — the attribute must faithfully carry the condition and
-/// must never be stringified — plus the observable consequence, that no
-/// `[disabled]`-style selector matches. Candidate spec amendment: state whether a
-/// false conditional attribute is omitted or carried as `false`, since selector
-/// matching, accessibility and IR size all depend on the answer.
+#[doc = include_str!("spec_ch2_tree.doc/a_false_conditional_attribute_is_absent_not_empty.md")]
 #[test]
 fn a_false_conditional_attribute_is_absent_not_empty() {
     let disabled = false;
@@ -257,8 +203,7 @@ fn a_false_conditional_attribute_is_absent_not_empty() {
     );
 }
 
-/// §2.11: "These constructs do not create real retained nodes unless their
-/// rendered output requires them."
+#[doc = include_str!("spec_ch2_tree.doc/a_for_adds_no_wrapper_node.md")]
 #[test]
 fn a_for_adds_no_wrapper_node() {
     let rows = [1u64, 2, 3];
@@ -303,7 +248,7 @@ fn a_for_adds_no_wrapper_node() {
     );
 }
 
-/// §2.11: "- optional empty/loading/separator slots."
+#[doc = include_str!("spec_ch2_tree.doc/a_for_separator_is_interleaved_with_no_trailing_divider.md")]
 #[test]
 fn a_for_separator_is_interleaved_with_no_trailing_divider() {
     #[allow(clippy::needless_pass_by_value)]
@@ -356,7 +301,7 @@ fn a_for_separator_is_interleaved_with_no_trailing_divider() {
     assert_eq!(count_class(&rt0, "divider"), 0, "0 items -> 0 dividers");
 }
 
-/// §2.11: "- optional empty/loading/separator slots."
+#[doc = include_str!("spec_ch2_tree.doc/a_for_empty_slot_is_shown_only_while_the_list_is_empty.md")]
 #[test]
 fn a_for_empty_slot_is_shown_only_while_the_list_is_empty() {
     #[allow(clippy::needless_pass_by_value)]
@@ -395,13 +340,7 @@ fn a_for_empty_slot_is_shown_only_while_the_list_is_empty() {
     assert_eq!(count_class(&rt, "row"), 0);
 }
 
-/// §2.11: "- `VirtualFor`;"
-///
-/// `<VirtualFor>` cannot be written in an `okui!` invocation in this file —
-/// were the front end to refuse it, the *test file* would fail to compile and
-/// report nothing. It is therefore driven through the `.okui` string path,
-/// whose verdict is a value rather than a compile error, and the realized-count
-/// assertion follows from the document that path produces.
+#[doc = include_str!("spec_ch2_tree.doc/virtualfor_realizes_a_count_independent_of_the_item_count.md")]
 #[test]
 fn virtualfor_realizes_a_count_independent_of_the_item_count() {
     fn document(n: u64) -> String {

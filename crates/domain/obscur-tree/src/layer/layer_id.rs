@@ -1,22 +1,17 @@
-//! An opaque identifier for a compositing layer.
+#![doc = include_str!("layer_id.doc/_module.md")]
 
-/// An opaque identifier for a compositing layer (spec §5.1).
-///
-/// A newtype over a `u32`. Its integer value is an identity token only: callers
-/// mint and compare `LayerId`s but must not attribute meaning to the underlying
-/// number beyond equality and a stable, deterministic ordering. It is `Ord` and
-/// `Hash` so layers can be sorted and keyed in maps.
+#[doc = include_str!("layer_id.doc/LayerId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LayerId(u32);
 
 impl LayerId {
-    /// Creates a layer id from a raw integer value.
+    #[doc = include_str!("layer_id.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw integer value backing this id.
+    #[doc = include_str!("layer_id.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0

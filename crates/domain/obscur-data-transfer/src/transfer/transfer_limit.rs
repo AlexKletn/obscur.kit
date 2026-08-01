@@ -1,12 +1,6 @@
-//! Capability limits applied to a data transfer (spec §6.20 limits).
+#![doc = include_str!("transfer_limit.doc/_module.md")]
 
-/// The size and count limits a capability places on a transfer (spec §6.20).
-///
-/// Clipboard and drag-and-drop integrate capability limits: a policy may cap the
-/// total byte volume a transfer may carry, the number of items, or both. Each
-/// bound is optional — `None` means "no limit on this axis" — so the default is
-/// entirely [`TransferLimit::unlimited`]. The predicates report whether a
-/// proposed transfer fits, without performing the transfer.
+#[doc = include_str!("transfer_limit.doc/TransferLimit.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TransferLimit {
     max_bytes: Option<u64>,
@@ -14,7 +8,7 @@ pub struct TransferLimit {
 }
 
 impl TransferLimit {
-    /// Creates a limit that constrains nothing (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/unlimited.md")]
     #[must_use]
     pub const fn unlimited() -> Self {
         Self {
@@ -23,7 +17,7 @@ impl TransferLimit {
         }
     }
 
-    /// Creates a limit that caps only the total byte volume (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/bytes.md")]
     #[must_use]
     pub const fn bytes(max_bytes: u64) -> Self {
         Self {
@@ -32,7 +26,7 @@ impl TransferLimit {
         }
     }
 
-    /// Creates a limit that caps only the item count (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/items.md")]
     #[must_use]
     pub const fn items(max_items: usize) -> Self {
         Self {
@@ -41,37 +35,33 @@ impl TransferLimit {
         }
     }
 
-    /// Returns this limit with its maximum byte volume set (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/with_max_bytes.md")]
     #[must_use]
     pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
         self.max_bytes = Some(max_bytes);
         self
     }
 
-    /// Returns this limit with its maximum item count set (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/with_max_items.md")]
     #[must_use]
     pub const fn with_max_items(mut self, max_items: usize) -> Self {
         self.max_items = Some(max_items);
         self
     }
 
-    /// Returns the maximum byte volume, if bounded (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/max_bytes.md")]
     #[must_use]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
 
-    /// Returns the maximum item count, if bounded (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/max_items.md")]
     #[must_use]
     pub const fn max_items(&self) -> Option<usize> {
         self.max_items
     }
 
-    /// Returns whether a transfer of `total_bytes` across `item_count` items is
-    /// admitted (spec §6.20).
-    ///
-    /// A bounded axis rejects any value strictly greater than its cap;
-    /// unbounded axes admit everything. Both axes must pass.
+    #[doc = include_str!("transfer_limit.doc/admits.md")]
     #[must_use]
     pub const fn admits(&self, total_bytes: u64, item_count: usize) -> bool {
         let bytes_ok = match self.max_bytes {
@@ -85,8 +75,7 @@ impl TransferLimit {
         bytes_ok && items_ok
     }
 
-    /// Returns whether `total_bytes` exceeds the byte cap (always `false` when
-    /// unbounded) (spec §6.20).
+    #[doc = include_str!("transfer_limit.doc/exceeds_bytes.md")]
     #[must_use]
     pub const fn exceeds_bytes(&self, total_bytes: u64) -> bool {
         match self.max_bytes {

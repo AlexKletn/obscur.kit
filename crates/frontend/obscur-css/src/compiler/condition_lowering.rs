@@ -1,21 +1,4 @@
-//! Lowering a parsed `@media`/`@container` condition into `obscur-style`'s
-//! CSS-syntax-free [`RuleCondition`], so the runtime matcher can gate rules by a
-//! live environment (§4.13).
-//!
-//! Only length features on the width/height (viewport) or inline-size/block-size
-//! (container) axes with a `px` reference are represented as comparisons. Every
-//! other feature (a boolean feature, a non-`px` length, an unknown name) lowers
-//! to a per-family fallback: [`RuleCondition::Always`] for `@media`, so the rule
-//! is gated permissively rather than silently dropped, but
-//! [`RuleCondition::Never`] for `@container`, which fails closed because nothing
-//! can establish a query container — see
-//! [`MediaEnvironment`](obscur_style::matching::MediaEnvironment).
-//!
-//! `and`/`or` connectors are not distinguished by the parser, so a query's
-//! feature list is treated as a conjunction; a media query list is a
-//! disjunction, and the `not` qualifier negates a query. Container queries have
-//! no `not` qualifier in the parsed grammar, so no negation can flip a
-//! failed-closed container feature back to holding.
+#![doc = include_str!("condition_lowering.doc/_module.md")]
 
 use crate::parser::{
     ContainerCondition, MediaComparator, MediaCondition, MediaQualifier, ParsedContainerQuery,
@@ -26,7 +9,7 @@ use obscur_style::matching::{ConditionAxis, ConditionComparator, FeatureQuery, R
 
 use super::stylesheet_compiler::CompiledCondition;
 
-/// Lowers a compiled condition into an evaluable [`RuleCondition`].
+#[doc = include_str!("condition_lowering.doc/lower_condition.md")]
 pub(crate) fn lower_condition(condition: &CompiledCondition) -> RuleCondition {
     match condition {
         CompiledCondition::Media(list) => lower_media_list(list),
@@ -34,7 +17,7 @@ pub(crate) fn lower_condition(condition: &CompiledCondition) -> RuleCondition {
     }
 }
 
-/// A media query list is a disjunction of its queries.
+#[doc = include_str!("condition_lowering.doc/lower_media_list.md")]
 fn lower_media_list(list: &ParsedMediaQueryList) -> RuleCondition {
     match list.0.as_slice() {
         [] => RuleCondition::Always,
@@ -43,8 +26,7 @@ fn lower_media_list(list: &ParsedMediaQueryList) -> RuleCondition {
     }
 }
 
-/// Lowers one media query: its media type plus its (conjunctive) features,
-/// negated when the query carries the `not` qualifier.
+#[doc = include_str!("condition_lowering.doc/lower_media_query.md")]
 fn lower_media_query(query: &ParsedMediaQuery) -> RuleCondition {
     let base = if query
         .media_type
@@ -68,12 +50,7 @@ fn lower_media_query(query: &ParsedMediaQuery) -> RuleCondition {
     }
 }
 
-/// A container query is a conjunction of its features.
-///
-/// The container name is ignored: nothing can establish a *named* container any
-/// more than an anonymous one, so matching the name would not change the answer.
-/// A query with no features at all (`@container name { … }`) asks only "does
-/// this container exist", which is [`Never`](RuleCondition::Never) here.
+#[doc = include_str!("condition_lowering.doc/lower_container_query.md")]
 fn lower_container_query(query: &ParsedContainerQuery) -> RuleCondition {
     if query.conditions.is_empty() {
         return RuleCondition::Never;
@@ -87,7 +64,7 @@ fn lower_container_query(query: &ParsedContainerQuery) -> RuleCondition {
     )
 }
 
-/// Builds a conjunction, collapsing the empty case to [`RuleCondition::Always`].
+#[doc = include_str!("condition_lowering.doc/conjoin.md")]
 fn conjoin(parts: impl Iterator<Item = RuleCondition>) -> RuleCondition {
     let parts: Vec<RuleCondition> = parts.collect();
     if parts.is_empty() {
@@ -97,10 +74,7 @@ fn conjoin(parts: impl Iterator<Item = RuleCondition>) -> RuleCondition {
     }
 }
 
-/// Lowers a media feature (viewport width/height axes).
-///
-/// An unrepresentable media feature is permissive: the viewport exists, we
-/// simply cannot test this aspect of it, so the rule still applies.
+#[doc = include_str!("condition_lowering.doc/lower_media_condition.md")]
 fn lower_media_condition(condition: &MediaCondition) -> RuleCondition {
     lower_feature(
         &condition.feature,
@@ -112,13 +86,7 @@ fn lower_media_condition(condition: &MediaCondition) -> RuleCondition {
     )
 }
 
-/// Lowers a container feature (container inline/block size axes).
-///
-/// An unrepresentable container feature lowers to [`RuleCondition::Never`], not
-/// `Always`: a container query is evaluated against a container that nothing in
-/// this pipeline can establish, so a permissive fallback would resurrect the
-/// always-matches bug through the back door (`@container (orientation: portrait)`
-/// would apply everywhere).
+#[doc = include_str!("condition_lowering.doc/lower_container_condition.md")]
 fn lower_container_condition(condition: &ContainerCondition) -> RuleCondition {
     lower_feature(
         &condition.feature,
@@ -130,8 +98,7 @@ fn lower_container_condition(condition: &ContainerCondition) -> RuleCondition {
     )
 }
 
-/// Maps a feature name/comparator/value onto a width- or height-axis comparison,
-/// falling back to `unrepresentable` for anything it cannot express.
+#[doc = include_str!("condition_lowering.doc/lower_feature.md")]
 fn lower_feature(
     feature: &str,
     comparator: Option<MediaComparator>,
@@ -162,8 +129,7 @@ fn lower_feature(
     RuleCondition::Feature(FeatureQuery::new(axis, comparator, reference_px))
 }
 
-/// Extracts a single `px` reference length (or unitless `0`) from a feature
-/// value, returning [`None`] for anything we cannot resolve to pixels.
+#[doc = include_str!("condition_lowering.doc/reference_px.md")]
 fn reference_px(value: &[ParsedValue]) -> Option<f32> {
     match value.first()? {
         ParsedValue::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {

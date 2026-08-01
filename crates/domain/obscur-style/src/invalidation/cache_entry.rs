@@ -1,18 +1,9 @@
-//! A single cached computed style with its version: [`CacheEntry`] (§4.3).
-//!
-//! [`CacheEntry`] is the value stored per node in a [`crate::invalidation::StyleCache`]:
-//! an owned [`ComputedStyle`] tagged with the [`VersionStamp`] it was computed
-//! at. The stamp lets the cache reject stale hits — a lookup that asks for a newer
-//! version than the entry holds misses, so recomputation is confined to genuinely
-//! out-of-date nodes (§4.3).
+#![doc = include_str!("cache_entry.doc/_module.md")]
 
 use crate::computed::ComputedStyle;
 use obscur_identity::VersionStamp;
 
-/// A cached computed style tagged with the version it was produced at (§4.3).
-///
-/// Because [`ComputedStyle`] carries `f32` data, this derives [`PartialEq`] but
-/// not [`Eq`].
+#[doc = include_str!("cache_entry.doc/CacheEntry.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CacheEntry {
     version: VersionStamp,
@@ -20,25 +11,25 @@ pub struct CacheEntry {
 }
 
 impl CacheEntry {
-    /// Creates an entry pairing `style` with the `version` it was computed at.
+    #[doc = include_str!("cache_entry.doc/new.md")]
     #[must_use]
     pub fn new(version: VersionStamp, style: ComputedStyle) -> Self {
         Self { version, style }
     }
 
-    /// Returns the version this entry was computed at.
+    #[doc = include_str!("cache_entry.doc/version.md")]
     #[must_use]
     pub fn version(&self) -> VersionStamp {
         self.version
     }
 
-    /// Returns the cached computed style.
+    #[doc = include_str!("cache_entry.doc/style.md")]
     #[must_use]
     pub fn style(&self) -> &ComputedStyle {
         &self.style
     }
 
-    /// Returns whether this entry was computed at exactly `version`.
+    #[doc = include_str!("cache_entry.doc/is_current.md")]
     #[must_use]
     pub fn is_current(&self, version: VersionStamp) -> bool {
         self.version == version

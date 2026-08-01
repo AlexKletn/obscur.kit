@@ -1,6 +1,5 @@
-//! `StateMigration` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("state_migration.doc/_module.md")]
 
-/// Placeholder for the `StateMigration` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("state_migration.doc/StateMigration.md")]
 #[derive(Debug)]
 pub struct StateMigration;

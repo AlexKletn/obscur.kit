@@ -1,0 +1,1 @@
+A `--`-prefixed custom property.

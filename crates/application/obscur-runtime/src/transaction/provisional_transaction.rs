@@ -1,4 +1,4 @@
-//! [`ProvisionalTransaction`]: commit/cancel semantics for provisional systems (spec §3.2).
+#![doc = include_str!("provisional_transaction.doc/_module.md")]
 
 use obscur_identity::VersionStamp;
 
@@ -8,36 +8,20 @@ use super::transaction_validator::TransactionValidator;
 use super::ui_operation::UiOperation;
 use super::ui_transaction::UiTransaction;
 
-/// A staged [`UiTransaction`] wrapped with **commit/cancel** semantics, for
-/// provisional systems such as drag-and-drop (spec §3.2).
-///
-/// A provisional transaction accumulates normalized operations that represent an
-/// in-flight, not-yet-confirmed interaction. Because staging never touches any
-/// domain, the interaction can be abandoned at any time:
-///
-/// - [`cancel`](Self::cancel) is *free* — it simply drops the staged
-///   transaction; no domain was ever mutated, so there is nothing to roll back.
-/// - [`commit`](Self::commit) is *atomic* — the staged transaction is validated
-///   first, and only on success is a [`TransactionCommit`] produced. If
-///   validation fails the error is returned and, again, nothing is applied.
-///
-/// This is the scoped rollback the spec calls for: provisional commit/cancel
-/// rather than heavyweight universal rollback.
-///
-/// [`UiTransaction`]: crate::transaction::UiTransaction
+#[doc = include_str!("provisional_transaction.doc/ProvisionalTransaction.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionalTransaction {
     pending: UiTransaction,
 }
 
 impl ProvisionalTransaction {
-    /// Begins a provisional transaction from an already-staged [`UiTransaction`].
+    #[doc = include_str!("provisional_transaction.doc/begin.md")]
     #[must_use]
     pub fn begin(tx: UiTransaction) -> Self {
         Self { pending: tx }
     }
 
-    /// Creates an empty provisional transaction with no pending operations.
+    #[doc = include_str!("provisional_transaction.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -45,31 +29,19 @@ impl ProvisionalTransaction {
         }
     }
 
-    /// Stages one more operation onto the pending transaction and returns
-    /// `&mut self` for chaining. Nothing is applied — the op only accumulates.
+    #[doc = include_str!("provisional_transaction.doc/stage.md")]
     pub fn stage(&mut self, op: UiOperation) -> &mut Self {
         self.pending.push(op);
         self
     }
 
-    /// Returns the pending, not-yet-applied transaction.
+    #[doc = include_str!("provisional_transaction.doc/transaction.md")]
     #[must_use]
     pub const fn transaction(&self) -> &UiTransaction {
         &self.pending
     }
 
-    /// Validates the pending transaction and, on success, produces a
-    /// [`TransactionCommit`] stamped with `version`.
-    ///
-    /// This is the atomic commit path: validation happens first, and the commit
-    /// record is produced only if validation passes. On failure the
-    /// [`TransactionError`] is returned and nothing is applied — the staged
-    /// operations never touched any domain.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`TransactionError`] when validation of the pending transaction
-    /// fails; in that case nothing is committed.
+    #[doc = include_str!("provisional_transaction.doc/commit.md")]
     pub fn commit(
         self,
         validator: &TransactionValidator,
@@ -82,12 +54,7 @@ impl ProvisionalTransaction {
         ))
     }
 
-    /// Cancels the provisional transaction, discarding all staged operations
-    /// without producing a commit.
-    ///
-    /// This is intentionally free: staging never mutated any domain, so cancel
-    /// only needs to drop the pending transaction. Consuming `self` guarantees a
-    /// cancelled transaction cannot later be committed.
+    #[doc = include_str!("provisional_transaction.doc/cancel.md")]
     pub fn cancel(self) {
         // Dropping `self` discards the pending transaction; nothing to undo.
     }

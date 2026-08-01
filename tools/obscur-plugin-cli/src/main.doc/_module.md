@@ -1,0 +1,1 @@
+Plugin SDK CLI (skeleton).

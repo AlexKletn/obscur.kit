@@ -1,34 +1,30 @@
-//! A semantic resize area on a window edge or corner (spec §6.4).
+#![doc = include_str!("resize_region.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect};
 
-/// Which edge or corner of the window a resize region drives (spec §6.4).
-///
-/// `ResizeEdge` is a tightly-coupled part of [`ResizeRegion`]: it names the grab
-/// direction of a resize area and has no meaning apart from it, so it is
-/// colocated here rather than given its own module.
+#[doc = include_str!("resize_region.doc/ResizeEdge.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResizeEdge {
-    /// The top edge.
+    #[doc = include_str!("resize_region.doc/Top.md")]
     Top,
-    /// The bottom edge.
+    #[doc = include_str!("resize_region.doc/Bottom.md")]
     Bottom,
-    /// The left edge.
+    #[doc = include_str!("resize_region.doc/Left.md")]
     Left,
-    /// The right edge.
+    #[doc = include_str!("resize_region.doc/Right.md")]
     Right,
-    /// The top-left corner.
+    #[doc = include_str!("resize_region.doc/TopLeft.md")]
     TopLeft,
-    /// The top-right corner.
+    #[doc = include_str!("resize_region.doc/TopRight.md")]
     TopRight,
-    /// The bottom-left corner.
+    #[doc = include_str!("resize_region.doc/BottomLeft.md")]
     BottomLeft,
-    /// The bottom-right corner.
+    #[doc = include_str!("resize_region.doc/BottomRight.md")]
     BottomRight,
 }
 
 impl ResizeEdge {
-    /// Returns whether this edge is a corner (resizes in both axes).
+    #[doc = include_str!("resize_region.doc/is_corner.md")]
     #[must_use]
     pub const fn is_corner(self) -> bool {
         matches!(
@@ -37,7 +33,7 @@ impl ResizeEdge {
         )
     }
 
-    /// Returns whether resizing this edge changes the window's width.
+    #[doc = include_str!("resize_region.doc/is_horizontal.md")]
     #[must_use]
     pub const fn is_horizontal(self) -> bool {
         matches!(
@@ -51,7 +47,7 @@ impl ResizeEdge {
         )
     }
 
-    /// Returns whether resizing this edge changes the window's height.
+    #[doc = include_str!("resize_region.doc/is_vertical.md")]
     #[must_use]
     pub const fn is_vertical(self) -> bool {
         matches!(
@@ -66,39 +62,35 @@ impl ResizeEdge {
     }
 }
 
-/// A semantic resize area on one edge or corner of a window (spec §6.4).
-///
-/// A compositor treats a drag that begins within [`Self::bounds`] as a resize
-/// in the direction named by [`Self::edge`]. Coordinates are in window-local
-/// logical pixels.
+#[doc = include_str!("resize_region.doc/ResizeRegion.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResizeRegion {
-    /// The window-local area treated as a resize grab handle.
+    #[doc = include_str!("resize_region.doc/bounds.md")]
     pub bounds: Rect,
-    /// The edge or corner this region resizes.
+    #[doc = include_str!("resize_region.doc/edge.md")]
     pub edge: ResizeEdge,
 }
 
 impl ResizeRegion {
-    /// Creates a resize region over `bounds` driving `edge`.
+    #[doc = include_str!("resize_region.doc/new.md")]
     #[must_use]
     pub const fn new(bounds: Rect, edge: ResizeEdge) -> Self {
         Self { bounds, edge }
     }
 
-    /// Returns the window-local grab area.
+    #[doc = include_str!("resize_region.doc/bounds_2.md")]
     #[must_use]
     pub const fn bounds(&self) -> Rect {
         self.bounds
     }
 
-    /// Returns the edge or corner this region resizes.
+    #[doc = include_str!("resize_region.doc/edge_2.md")]
     #[must_use]
     pub const fn edge(&self) -> ResizeEdge {
         self.edge
     }
 
-    /// Returns whether the window-local point lies within the resize region.
+    #[doc = include_str!("resize_region.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, point: Point) -> bool {
         self.bounds.contains(point)

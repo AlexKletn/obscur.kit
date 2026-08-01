@@ -1,37 +1,30 @@
-//! The [`FocusResult`] reporting the outcome of a focus request
-//! (spec §7.1 focus).
+#![doc = include_str!("focus_result.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// The outcome of resolving a [`FocusRequest`](super::FocusRequest) (spec §7.1).
-///
-/// The focus state machine returns exactly one of these for every request,
-/// distinguishing a successful move from a rejection (target exists but is not
-/// focusable), no available target, or a request that left focus unchanged.
+#[doc = include_str!("focus_result.doc/FocusResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusResult {
-    /// Focus moved to this node.
+    #[doc = include_str!("focus_result.doc/Focused.md")]
     Focused(NodeId),
-    /// Focus was removed; nothing is focused.
+    #[doc = include_str!("focus_result.doc/Cleared.md")]
     Cleared,
-    /// The target exists but is not focusable, so focus did not move.
+    #[doc = include_str!("focus_result.doc/Rejected.md")]
     Rejected(NodeId),
-    /// There was nothing to focus (no matching or eligible target).
+    #[doc = include_str!("focus_result.doc/NoTarget.md")]
     NoTarget,
-    /// The requested target was already focused; focus did not change.
+    #[doc = include_str!("focus_result.doc/Unchanged.md")]
     Unchanged(NodeId),
 }
 
 impl FocusResult {
-    /// Returns whether the request succeeded in changing focus state:
-    /// [`Focused`](Self::Focused) or [`Cleared`](Self::Cleared).
+    #[doc = include_str!("focus_result.doc/is_success.md")]
     #[must_use]
     pub const fn is_success(self) -> bool {
         matches!(self, Self::Focused(_) | Self::Cleared)
     }
 
-    /// Returns the node that now holds focus after this result, if any:
-    /// [`Focused`](Self::Focused) or [`Unchanged`](Self::Unchanged).
+    #[doc = include_str!("focus_result.doc/focused_node.md")]
     #[must_use]
     pub const fn focused_node(self) -> Option<NodeId> {
         match self {

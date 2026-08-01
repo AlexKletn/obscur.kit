@@ -1,15 +1,8 @@
-//! A privileged rendering extension gated behind a capability (spec §5.3).
+#![doc = include_str!("render_extension.doc/_module.md")]
 
 use crate::extension::{CustomPass, TrustedRenderContext};
 
-/// A privileged rendering extension bundling custom passes behind a required
-/// capability (spec §5.3).
-///
-/// Trusted extensions may inject backend-specific [`CustomPass`]es, but only
-/// after the host's capability check passes (spec §5.3). This value pairs the
-/// passes with the [`Self::required_capability`] the host must have granted and
-/// evaluates that check via [`Self::is_permitted`]. It never redefines ordinary
-/// Canvas semantics — it only schedules additional privileged work.
+#[doc = include_str!("render_extension.doc/RenderExtension.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderExtension {
     name: Box<str>,
@@ -18,8 +11,7 @@ pub struct RenderExtension {
 }
 
 impl RenderExtension {
-    /// Creates an extension named `name` that requires the host to have granted
-    /// `required_capability`, carrying no passes yet.
+    #[doc = include_str!("render_extension.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, required_capability: impl Into<Box<str>>) -> Self {
         Self {
@@ -29,53 +21,44 @@ impl RenderExtension {
         }
     }
 
-    /// Appends a custom pass, returning the updated extension.
+    #[doc = include_str!("render_extension.doc/with_pass.md")]
     #[must_use]
     pub fn with_pass(mut self, pass: CustomPass) -> Self {
         self.passes.push(pass);
         self
     }
 
-    /// The extension name, used for diagnostics.
+    #[doc = include_str!("render_extension.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// The capability id the host must have granted for this extension to run
-    /// (spec §5.3).
+    #[doc = include_str!("render_extension.doc/required_capability.md")]
     #[must_use]
     pub fn required_capability(&self) -> &str {
         &self.required_capability
     }
 
-    /// The custom passes this extension contributes.
+    #[doc = include_str!("render_extension.doc/passes.md")]
     #[must_use]
     pub fn passes(&self) -> &[CustomPass] {
         &self.passes
     }
 
-    /// The number of custom passes.
+    #[doc = include_str!("render_extension.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.passes.len()
     }
 
-    /// Whether this extension contributes no passes.
+    #[doc = include_str!("render_extension.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.passes.is_empty()
     }
 
-    /// Whether `ctx` permits this extension to run — the capability check of
-    /// spec §5.3.
-    ///
-    /// This is a **compound gate**: the context must have granted
-    /// [`Self::required_capability`], *and*, if any of the extension's passes
-    /// [`requires_shaders`](CustomPass::requires_shaders), the context must also
-    /// allow custom shaders
-    /// ([`TrustedRenderContext::allows_custom_shaders`]). An extension with no
-    /// shader passes needs only the capability grant.
+    #[doc = include_str!("render_extension.doc/is_permitted.md")]
     #[must_use]
     pub fn is_permitted(&self, ctx: &TrustedRenderContext) -> bool {
         if !ctx.has_capability(&self.required_capability) {

@@ -1,4 +1,4 @@
-//! Unit module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod logical_px;
 mod physical_px;
 mod scale_factor;

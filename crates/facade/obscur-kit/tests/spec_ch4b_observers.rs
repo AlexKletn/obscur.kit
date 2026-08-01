@@ -1,7 +1,4 @@
-//! §4.4 Geometry observers — spec-derived conformance cases.
-//!
-//! Expected values come from the specification text quoted on each test. They
-//! must not be edited to make a case pass.
+#![doc = include_str!("spec_ch4b_observers.doc/_module.md")]
 
 mod spec_ch4b_support;
 
@@ -10,14 +7,7 @@ use obscur_kit::layout::model::LayoutBox;
 use obscur_kit::layout::observer::{IntersectionObserver, VisibilityObserver};
 use spec_ch4b_support::harness::{approx, at, drive, el, geom, txt, view};
 
-/// §4.4: "Supported observers:" / "- `VisibilityObserver`;" /
-/// "- `IntersectionObserver`;"
-///
-/// A 200px-tall scroll container holds 20 items of 100px. Both observer types
-/// are registered on item 15. At scroll offset 0 item 15 is neither
-/// intersecting nor visible; after scrolling to 1400 (item 14 flush with the
-/// container top, item 15 at viewport y 100..200) both report
-/// intersecting/visible, and the intersection covers item 15's full 100px.
+#[doc = include_str!("spec_ch4b_observers.doc/ch4_4_d_visibility_and_intersection_observers_track_the_scroll_chain.md")]
 #[test]
 fn ch4_4_d_visibility_and_intersection_observers_track_the_scroll_chain() {
     let css = "

@@ -1,17 +1,10 @@
-//! The [`GestureContender`] — a recognizer entered into the arena (spec §6.16
-//! mobile gestures).
+#![doc = include_str!("gesture_contender.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use super::RecognizerId;
 
-/// A recognizer entered into a [`GestureArena`](super::GestureArena), bound to
-/// a node with a priority (spec §6.16).
-///
-/// The contender pairs a [`RecognizerId`] with the [`NodeId`] it is attached to
-/// and a `priority`. Higher priority is preferred when the arena resolves; the
-/// runtime gives system gestures (semantic back, edge swipes) a high priority
-/// so they win ties against app recognizers.
+#[doc = include_str!("gesture_contender.doc/GestureContender.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GestureContender {
     recognizer: RecognizerId,
@@ -20,7 +13,7 @@ pub struct GestureContender {
 }
 
 impl GestureContender {
-    /// Creates a contender binding `recognizer` to `node` with priority `0`.
+    #[doc = include_str!("gesture_contender.doc/new.md")]
     #[must_use]
     pub const fn new(recognizer: RecognizerId, node: NodeId) -> Self {
         Self {
@@ -30,26 +23,26 @@ impl GestureContender {
         }
     }
 
-    /// Returns this contender with its priority set to `priority` (higher wins).
+    #[doc = include_str!("gesture_contender.doc/with_priority.md")]
     #[must_use]
     pub const fn with_priority(mut self, priority: i32) -> Self {
         self.priority = priority;
         self
     }
 
-    /// Returns the recognizer this contender represents.
+    #[doc = include_str!("gesture_contender.doc/recognizer.md")]
     #[must_use]
     pub const fn recognizer(self) -> RecognizerId {
         self.recognizer
     }
 
-    /// Returns the node this contender is bound to.
+    #[doc = include_str!("gesture_contender.doc/node.md")]
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    /// Returns the contender's priority (higher is preferred).
+    #[doc = include_str!("gesture_contender.doc/priority.md")]
     #[must_use]
     pub const fn priority(self) -> i32 {
         self.priority

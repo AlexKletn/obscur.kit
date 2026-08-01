@@ -1,4 +1,4 @@
-//! Token → scope authentication for DevTools sessions (spec §7.7).
+#![doc = include_str!("mod.doc/_module.md")]
 
 mod authenticator;
 pub use authenticator::Authenticator;

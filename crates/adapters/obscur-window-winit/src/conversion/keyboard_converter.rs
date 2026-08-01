@@ -1,35 +1,19 @@
-//! The [`KeyboardConverter`] pure winit→domain key converter (spec §6.7
-//! keyboard; §6.1 windowing; §2.7 "преобразует native events в доменные
-//! события").
+#![doc = include_str!("keyboard_converter.doc/_module.md")]
 
 use obscur_interaction::command::{LogicalKey, NamedKey, PhysicalKey};
 
-/// A stateless converter from winit's native keys to the domain's layout-
-/// independent [`PhysicalKey`] and layout-dependent [`LogicalKey`] (spec §6.7,
-/// §2.7).
-///
-/// These are **pure**, per-key conversions with no event-loop state. The backend
-/// extracts the two halves of a winit `KeyEvent` — its
-/// `physical_key` and `logical_key` — and calls
-/// [`KeyboardConverter::physical_key`] / [`KeyboardConverter::logical_key`] on
-/// them. Only the keys both winit and the domain model are mapped; anything else
-/// (media keys, IME composition, unidentified scancodes) converts to `None`.
+#[doc = include_str!("keyboard_converter.doc/KeyboardConverter.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KeyboardConverter;
 
 impl KeyboardConverter {
-    /// Creates a converter.
+    #[doc = include_str!("keyboard_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Maps a winit [`KeyCode`](winit::keyboard::KeyCode) to the domain's
-    /// layout-independent [`PhysicalKey`], or `None` for a position the domain
-    /// does not model (spec §6.7).
-    ///
-    /// The winit `SuperLeft`/`SuperRight` positions map to the domain's
-    /// `MetaLeft`/`MetaRight` (the `Meta` / `Super` / `Command` modifier).
+    #[doc = include_str!("keyboard_converter.doc/physical_key.md")]
     #[must_use]
     pub fn physical_key(code: winit::keyboard::KeyCode) -> Option<PhysicalKey> {
         use winit::keyboard::KeyCode as Kc;
@@ -109,14 +93,7 @@ impl KeyboardConverter {
         Some(mapped)
     }
 
-    /// Maps a winit [`Key`](winit::keyboard::Key) to the domain's layout-
-    /// dependent [`LogicalKey`], or `None` for a key the domain does not model
-    /// (spec §6.7).
-    ///
-    /// A `Key::Character` maps to the first `char` of the produced text; a
-    /// `Key::Named` maps to the matching domain [`NamedKey`] when both crates
-    /// model it. `Key::Dead` and `Key::Unidentified`, and named keys outside the
-    /// modeled subset, convert to `None`.
+    #[doc = include_str!("keyboard_converter.doc/logical_key.md")]
     #[must_use]
     pub fn logical_key(key: &winit::keyboard::Key) -> Option<LogicalKey> {
         use winit::keyboard::{Key, NamedKey as Winit};

@@ -1,0 +1,1 @@
+Creates an empty recording provider (spec §6.12).

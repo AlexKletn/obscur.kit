@@ -1,22 +1,6 @@
-//! The [`Fling`] — the coast a flicked surface keeps after the finger has gone
-//! (spec §6.16 `Swipe`/`Pan` continuation).
+#![doc = include_str!("fling.doc/_module.md")]
 
-/// The decaying motion a surface continues with once a flick releases it.
-///
-/// A finger that leaves the glass mid-movement has thrown the content, and a
-/// surface that stopped dead at the release would feel nailed down: the whole
-/// impression of touching the content directly comes from it carrying on and
-/// slowing to a stop. This models that as friction — velocity decaying
-/// exponentially toward zero — and answers one question per frame: how far has
-/// the surface moved since the last one.
-///
-/// The velocity decays with a time constant `tau`: after `tau` seconds about 37%
-/// of the launch speed remains, and total travel is `velocity × tau`, which is
-/// the number to reason with when tuning. Both `tau` and the speed below which
-/// the coast is over are the caller's to choose — they are feel, and feel
-/// belongs to whoever knows the display and the content, not to this type.
-///
-/// Reads no clock: it is told each step's duration, like everything else here.
+#[doc = include_str!("fling.doc/Fling.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fling {
     velocity: f32,
@@ -25,9 +9,7 @@ pub struct Fling {
 }
 
 impl Fling {
-    /// Launches a fling at `velocity` (units per second, signed), decaying with
-    /// time constant `tau` seconds, ending once the speed falls below
-    /// `rest_speed`.
+    #[doc = include_str!("fling.doc/new.md")]
     #[must_use]
     pub fn new(velocity: f32, tau: f32, rest_speed: f32) -> Self {
         Self {
@@ -37,14 +19,7 @@ impl Fling {
         }
     }
 
-    /// Advances the coast by `seconds` and returns how far the surface travelled
-    /// during that step (signed, in the velocity's units).
-    ///
-    /// The distance is the integral of the decaying velocity over the step —
-    /// `tau × (v_before − v_after)` — not `velocity × seconds`. Multiplying the
-    /// start-of-step velocity by the step would overshoot on every frame, and by
-    /// more the longer the frame took, so a stuttering frame would fling further
-    /// than a smooth one.
+    #[doc = include_str!("fling.doc/advance.md")]
     pub fn advance(&mut self, seconds: f32) -> f32 {
         if self.is_done() || seconds <= 0.0 {
             return 0.0;
@@ -58,20 +33,19 @@ impl Fling {
         travelled
     }
 
-    /// Whether the coast has come to rest and should be dropped.
+    #[doc = include_str!("fling.doc/is_done.md")]
     #[must_use]
     pub fn is_done(&self) -> bool {
         self.velocity.abs() <= self.rest_speed
     }
 
-    /// The current velocity (units per second, signed).
+    #[doc = include_str!("fling.doc/velocity.md")]
     #[must_use]
     pub fn velocity(&self) -> f32 {
         self.velocity
     }
 
-    /// Stops the coast immediately — a new contact on the surface, or the surface
-    /// reaching the end of its content.
+    #[doc = include_str!("fling.doc/stop.md")]
     pub fn stop(&mut self) {
         self.velocity = 0.0;
     }

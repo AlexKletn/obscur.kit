@@ -1,4 +1,4 @@
-//! The AccessKit adapter's own error type (spec §7.1 explicit diagnostics).
+#![doc = include_str!("mod.doc/_module.md")]
 
 mod accesskit_bridge_error;
 pub use accesskit_bridge_error::AccessKitBridgeError;

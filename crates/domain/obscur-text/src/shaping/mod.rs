@@ -1,4 +1,4 @@
-//! Shaping module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod caching_shaper;
 pub use caching_shaper::CachingShaper;
 mod face_source_key;

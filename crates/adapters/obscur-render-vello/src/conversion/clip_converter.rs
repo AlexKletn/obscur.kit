@@ -1,8 +1,4 @@
-//! Converts an obscur-scene [`Clip`] into a kurbo [`BezPath`] clip shape.
-//!
-//! Pure, backend-local conversion (spec §2.7). Vello models a clip as a layer
-//! bounded by a shape, so a clip becomes the [`BezPath`] outline it confines
-//! drawing to. Geometry is preserved exactly (spec §5.2).
+#![doc = include_str!("clip_converter.doc/_module.md")]
 
 use obscur_scene::clip::{Clip, ClipShape};
 use obscur_scene::path::Path;
@@ -10,50 +6,23 @@ use vello::kurbo::{BezPath, Rect as KurboRect, Shape};
 
 use super::path_converter::PathConverter;
 
-/// Half-extent of the outline standing in for "no geometric bound". Vello has no
-/// unbounded clip shape, so a clip that confines nothing is expressed as a rect
-/// far larger than any real surface.
+#[doc = include_str!("clip_converter.doc/UNBOUNDED_HALF_EXTENT.md")]
 const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
 
-/// A converter from an obscur-scene [`Clip`] to a kurbo [`BezPath`] clip shape.
-///
-/// It owns a [`PathConverter`] so every clip outline is built through the same
-/// path conversion.
-///
-/// # Shape mapping
-///
-/// - [`ClipShape::Rect`] → the rectangle's four-line closed outline
-///   (via [`Path::rect`]).
-/// - [`ClipShape::RoundedRect`] → the rounded-rectangle outline
-///   (via [`Path::rounded_rect`]), matching the domain's own rounding.
-/// - [`ClipShape::Path`] → the path converted directly.
-/// - [`Clip::Mask`] → the [`unbounded`](Self::unbounded) outline, which confines
-///   nothing. A mask carries only *how* to read its coverage, never the source
-///   the coverage comes from ([`Mask`](obscur_scene::clip::Mask)), so a mask clip
-///   in the command stream has no known extent — [`Clip::bounds`] reports `None`
-///   for exactly this reason. An empty `BezPath` would be the opposite claim
-///   (extent known, and empty), and Vello would clip the content away entirely;
-///   inheriting the enclosing clip asserts nothing the domain has not stated, and
-///   matches the CPU backend (spec §5.2 requires clipping to match across
-///   backends).
-///
-///   This is the documented §5.8 fallback, **not** mask support: coverage is not
-///   applied, so a masked region paints as if unmasked on both backends. Neither
-///   backend rasterizes mask coverage today, and neither raises the §5.8
-///   diagnostic that an explicit fallback is supposed to carry.
+#[doc = include_str!("clip_converter.doc/ClipConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ClipConverter {
     path: PathConverter,
 }
 
 impl ClipConverter {
-    /// Creates a clip converter using the given path converter.
+    #[doc = include_str!("clip_converter.doc/new.md")]
     #[must_use]
     pub const fn new(path: PathConverter) -> Self {
         Self { path }
     }
 
-    /// Converts an obscur-scene [`Clip`] into a kurbo [`BezPath`] clip shape.
+    #[doc = include_str!("clip_converter.doc/shape.md")]
     #[must_use]
     pub fn shape(&self, clip: &Clip) -> BezPath {
         match clip {
@@ -66,11 +35,7 @@ impl ClipConverter {
         }
     }
 
-    /// The outline standing in for "no geometric bound": a rect far larger than
-    /// any real surface, so drawing through it is confined by nothing.
-    ///
-    /// Used for a [`Clip::Mask`] and for a layer with no clip at all — both cases
-    /// where nothing is known to confine the content.
+    #[doc = include_str!("clip_converter.doc/unbounded.md")]
     #[must_use]
     pub fn unbounded() -> BezPath {
         KurboRect::new(

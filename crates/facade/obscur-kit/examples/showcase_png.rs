@@ -1,28 +1,4 @@
-//! **Headless capability showcase → PNG.**
-//!
-//! Renders the shared [`showcase`] scene (grid + flex layout, gradients, borders,
-//! radius, shadows, opacity, transforms, a `background-image` and an `<img>`
-//! primitive, real shaped text, and the [`Button`]/[`Checkbox`]/[`Input`]
-//! widgets) through the **software** [`CpuRenderer`] — no display and no GPU — and
-//! writes the rasterized frame to `target/showcase_cpu.png`, a real viewable
-//! artifact.
-//!
-//! GPU-class effects (gradients, shadows, blur) degrade to the documented CPU
-//! approximation per the project's effect-split policy: a gradient paints its
-//! first stop, a shadow paints a flat offset rect. Layout, text, images, borders,
-//! radius, opacity, and transform geometry render faithfully. Sub-step 2's
-//! windowed Vello example shows the effects at full fidelity from the *same*
-//! [`showcase`] module.
-//!
-//! Text is a host resource: this example loads a system font off disk (best
-//! effort) and wires the full itemize → resolve-by-coverage → shape stack, then
-//! hands the **same** font bytes to the CPU renderer so glyphs rasterize as real
-//! outlines. With no system font present it still runs — text falls back to the
-//! backend's box-coverage marks (never a panic).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example showcase_png \
-//!   --features "render-cpu resource-fs resource-decode text-harfrust text-unicode"`
+#![doc = include_str!("showcase_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -46,9 +22,7 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "showcase/scene.rs"]
 mod showcase;
 
-/// The fixed viewport the showcase is laid out and rasterized under. Wide by
-/// default so the PNG artifact demonstrates the sections/cards filling the whole
-/// window width (the gallery's `1fr` grid tracks divide this extent).
+#[doc = include_str!("showcase_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1440.0, 900.0);
 
 fn main() {
@@ -148,16 +122,14 @@ fn main() {
     );
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("showcase_png.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Writes the embedded showcase PNG into a fresh temp directory and returns it
-/// (the resource loader's sandbox root). A `url()` / `src` path resolves relative
-/// to this directory.
+#[doc = include_str!("showcase_png.doc/stage_image_asset.md")]
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-showcase-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
@@ -169,8 +141,7 @@ fn stage_image_asset() -> PathBuf {
     dir
 }
 
-/// The workspace-relative output path `target/<name>`, resolved from the crate
-/// manifest dir up to the workspace root so it is independent of the cwd.
+#[doc = include_str!("showcase_png.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -178,10 +149,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the full text stack: itemize → resolve-by-coverage → shape, registering
-/// `bytes` under the `sans-serif` generic family (id `0`) on the runtime's
-/// resolver and the SAME id↔bytes on the CPU renderer so shaped run handles select
-/// the rasterized outlines.
+#[doc = include_str!("showcase_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -199,15 +167,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`]: the renderer and the
-/// scene both key fonts by this value, so the two must agree.
+#[doc = include_str!("showcase_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes for the text path, scanning well-known
-/// Linux/macOS/Windows locations and returning the first that exists, or `None`
-/// (text then renders as box marks — still no panic).
+#[doc = include_str!("showcase_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

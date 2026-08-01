@@ -1,20 +1,8 @@
-//! `LayoutEnvironment`: the ambient context a measurement happens in.
+#![doc = include_str!("layout_environment.doc/_module.md")]
 
 use obscur_geometry::{ScaleFactor, Size};
 
-/// The ambient context in which an intrinsic measurement is performed.
-///
-/// Passed to every [`IntrinsicMeasure`](super::IntrinsicMeasure) call so a
-/// provider can size content correctly for the current display and viewport.
-///
-/// For the Phase-1 headless slice this carries only:
-/// * `scale_factor` — the device pixel ratio, for DPI-aware measuring;
-/// * `viewport` — the viewport size, used later for viewport-relative resolution
-///   (e.g. `vw`/`vh` units).
-///
-/// This type is intentionally minimal and **will grow** in later phases (font
-/// context, locale/BiDi, writing mode). It is a plain value: `Copy` and cheap
-/// to pass by reference.
+#[doc = include_str!("layout_environment.doc/LayoutEnvironment.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutEnvironment {
     scale_factor: ScaleFactor,
@@ -22,7 +10,7 @@ pub struct LayoutEnvironment {
 }
 
 impl LayoutEnvironment {
-    /// Creates an environment with an explicit scale factor and viewport size.
+    #[doc = include_str!("layout_environment.doc/new.md")]
     #[must_use]
     pub const fn new(scale_factor: ScaleFactor, viewport: Size) -> Self {
         Self {
@@ -31,9 +19,7 @@ impl LayoutEnvironment {
         }
     }
 
-    /// Creates the identity environment: [`ScaleFactor::IDENTITY`] and a
-    /// [`Size::ZERO`] viewport. Useful as a neutral default for tests and for
-    /// headless measurement where no display context is present.
+    #[doc = include_str!("layout_environment.doc/identity.md")]
     #[must_use]
     pub const fn identity() -> Self {
         Self {
@@ -42,13 +28,13 @@ impl LayoutEnvironment {
         }
     }
 
-    /// The device pixel ratio to measure at.
+    #[doc = include_str!("layout_environment.doc/scale_factor.md")]
     #[must_use]
     pub const fn scale_factor(self) -> ScaleFactor {
         self.scale_factor
     }
 
-    /// The viewport size, for later viewport-relative resolution.
+    #[doc = include_str!("layout_environment.doc/viewport.md")]
     #[must_use]
     pub const fn viewport(self) -> Size {
         self.viewport

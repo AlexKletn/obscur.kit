@@ -1,31 +1,19 @@
-//! Fairness for background work (spec §3.6 "starvation prevention"):
-//! [`StarvationGuard`].
+#![doc = include_str!("starvation_guard.doc/_module.md")]
 
-/// A deterministic fairness counter that prevents lower-priority background work
-/// from being starved (spec §3.6 "starvation prevention for background work").
-///
-/// This is **not** time-based: it carries no wall-clock and observes no timers.
-/// Instead it counts how many times higher-priority frames have been served
-/// while a piece of background/low-priority work waited. Once that count reaches
-/// a threshold the guard reports the work as starved, letting the scheduler
-/// force a promotion so it finally runs.
+#[doc = include_str!("starvation_guard.doc/StarvationGuard.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StarvationGuard {
-    /// The number of preemptions tolerated before the waiting work is starved.
+    #[doc = include_str!("starvation_guard.doc/threshold.md")]
     threshold: u32,
-    /// How many higher-priority frames have been served while work waited.
+    #[doc = include_str!("starvation_guard.doc/waited.md")]
     waited: u32,
 }
 
 impl StarvationGuard {
-    /// The default preemption threshold: a small, deterministic bound that lets a
-    /// handful of urgent frames through before background work must be promoted.
+    #[doc = include_str!("starvation_guard.doc/DEFAULT_THRESHOLD.md")]
     pub const DEFAULT_THRESHOLD: u32 = 8;
 
-    /// Creates a guard that reports starvation after `threshold` preemptions.
-    ///
-    /// A `threshold` of `0` disables the guard: it never reports starvation (see
-    /// [`is_starved`](StarvationGuard::is_starved)).
+    #[doc = include_str!("starvation_guard.doc/new.md")]
     #[must_use]
     pub const fn new(threshold: u32) -> Self {
         Self {
@@ -34,36 +22,29 @@ impl StarvationGuard {
         }
     }
 
-    /// Records that a higher-priority frame was served while the guarded work
-    /// waited, bringing it one step closer to starvation.
-    ///
-    /// The count saturates, so a very long wait cannot overflow.
+    #[doc = include_str!("starvation_guard.doc/record_preempted.md")]
     pub fn record_preempted(&mut self) {
         self.waited = self.waited.saturating_add(1);
     }
 
-    /// Records that the guarded background/low-priority work was finally served,
-    /// resetting the wait count.
+    #[doc = include_str!("starvation_guard.doc/record_served.md")]
     pub fn record_served(&mut self) {
         self.waited = 0;
     }
 
-    /// Returns whether the guarded work is now starved and should be promoted.
-    ///
-    /// This is `waited >= threshold`, except that a `threshold` of `0` disables
-    /// the guard and always returns `false`.
+    #[doc = include_str!("starvation_guard.doc/is_starved.md")]
     #[must_use]
     pub const fn is_starved(&self) -> bool {
         self.threshold > 0 && self.waited >= self.threshold
     }
 
-    /// Returns how many preemptions have accumulated since the last service.
+    #[doc = include_str!("starvation_guard.doc/waited_2.md")]
     #[must_use]
     pub const fn waited(&self) -> u32 {
         self.waited
     }
 
-    /// Returns the preemption threshold at which work is considered starved.
+    #[doc = include_str!("starvation_guard.doc/threshold_2.md")]
     #[must_use]
     pub const fn threshold(&self) -> u32 {
         self.threshold
@@ -71,7 +52,7 @@ impl StarvationGuard {
 }
 
 impl Default for StarvationGuard {
-    /// The default guard uses [`StarvationGuard::DEFAULT_THRESHOLD`].
+    #[doc = include_str!("starvation_guard.doc/default.md")]
     fn default() -> Self {
         Self::new(Self::DEFAULT_THRESHOLD)
     }

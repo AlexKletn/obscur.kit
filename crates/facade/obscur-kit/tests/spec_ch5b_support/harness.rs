@@ -1,13 +1,4 @@
-//! Shared harness for the `spec_ch5b_*` **specification-derived** test files.
-//!
-//! These tests are NOT implementation-derived. Every expected value in the
-//! `spec_ch5b_*.rs` files was written by an agent reading the specification
-//! (obscur.kit §5.4 "Overlay host mode", §5.5, §5.9, §5.13) **without opening
-//! any source in this repository**. This module exists only to give those cases
-//! a compiling home; it contains no expectations of its own.
-//!
-//! Nothing here may be "fixed" to make a case pass. A failing `spec_ch5b_*` test
-//! is a claim about the implementation, not about the test.
+#![doc = include_str!("harness.doc/_module.md")]
 #![allow(dead_code, unreachable_pub)]
 
 use obscur_kit::bootstrap::CssPipeline;
@@ -26,42 +17,30 @@ use obscur_kit::scene::paint::{Brush, Paint};
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A mock external engine that owns the window, the event loop, the render graph,
-/// the lifecycle and the frame callback, and hands the kit only what §5.4 says
-/// the kit receives: viewport, input, clock, render target, and frame scheduling
-/// hooks.
-///
-/// It deliberately exposes no way to create a window and never enters a loop:
-/// [`windows_created`](Self::windows_created) and
-/// [`event_loop_entered`](Self::event_loop_entered) are the observations the
-/// §5.4 cases assert on.
+#[doc = include_str!("harness.doc/MockOverlayHost.md")]
 pub struct MockOverlayHost {
-    /// The kit instance the host drives. Constructed with a viewport only — no
-    /// window, no surface, no event loop.
+    #[doc = include_str!("harness.doc/runtime.md")]
     runtime: UiRuntime,
-    /// The viewport the host supplies.
+    #[doc = include_str!("harness.doc/viewport.md")]
     viewport: Size,
-    /// The host's clock, in milliseconds. The kit must read time from here.
+    #[doc = include_str!("harness.doc/clock_ms.md")]
     clock_ms: f64,
-    /// The clock reading the kit's motion was last driven to.
+    #[doc = include_str!("harness.doc/motion_at_ms.md")]
     motion_at_ms: f64,
-    /// Stylesheets installed through the kit's own CSS frontend.
+    #[doc = include_str!("harness.doc/sheets.md")]
     sheets: Vec<Stylesheet>,
-    /// The host's input queue. The §5.4 cases keep it empty.
+    #[doc = include_str!("harness.doc/input.md")]
     input: Vec<InputEvent>,
-    /// How many OS windows this host created. Always incremented by the host, so
-    /// a non-zero value would mean the host itself made one.
+    #[doc = include_str!("harness.doc/windows_created.md")]
     windows_created: usize,
-    /// Whether the host's event loop was ever entered.
+    #[doc = include_str!("harness.doc/event_loop_entered.md")]
     event_loop_entered: bool,
-    /// How many times the kit asked the host to schedule another frame, observed
-    /// after each host-driven frame.
+    #[doc = include_str!("harness.doc/frame_hook_calls.md")]
     frame_hook_calls: usize,
 }
 
 impl MockOverlayHost {
-    /// Creates an overlay-mode kit against a host supplying a `w x h` viewport at
-    /// scale 1.0, an empty input queue and a clock reading 0 ms.
+    #[doc = include_str!("harness.doc/new.md")]
     #[must_use]
     pub fn new(w: f32, h: f32) -> Self {
         Self {
@@ -77,16 +56,14 @@ impl MockOverlayHost {
         }
     }
 
-    /// Installs authored CSS through the kit's own frontend.
+    #[doc = include_str!("harness.doc/install_css.md")]
     pub fn install_css(&mut self, css: &str) {
         let mut pipeline = CssPipeline::new();
         pipeline.install(&mut self.runtime, &[CssSource::anonymous(css)]);
         self.sheets = pipeline.sheets().to_vec();
     }
 
-    /// The host-driven frame entry: sets the host clock to `host_clock_ms` and
-    /// asks the kit for one frame's worth of render commands. It returns rather
-    /// than blocking, and never enters a loop.
+    #[doc = include_str!("harness.doc/drive_frame_at.md")]
     pub fn drive_frame_at(&mut self, host_clock_ms: f64, view: &View) -> FrameResult {
         self.clock_ms = host_clock_ms;
         let delta_ms = self.clock_ms - self.motion_at_ms;
@@ -104,49 +81,49 @@ impl MockOverlayHost {
         result
     }
 
-    /// The host clock's current reading, in milliseconds.
+    #[doc = include_str!("harness.doc/clock_ms_2.md")]
     #[must_use]
     pub const fn clock_ms(&self) -> f64 {
         self.clock_ms
     }
 
-    /// How many OS windows exist for this host.
+    #[doc = include_str!("harness.doc/windows_created_2.md")]
     #[must_use]
     pub const fn windows_created(&self) -> usize {
         self.windows_created
     }
 
-    /// Whether the host's event loop was ever entered.
+    #[doc = include_str!("harness.doc/event_loop_entered_2.md")]
     #[must_use]
     pub const fn event_loop_entered(&self) -> bool {
         self.event_loop_entered
     }
 
-    /// How many times the kit asked the host to schedule a frame.
+    #[doc = include_str!("harness.doc/frame_hook_calls_2.md")]
     #[must_use]
     pub const fn frame_hook_calls(&self) -> usize {
         self.frame_hook_calls
     }
 
-    /// How many frames the kit currently has queued for the host to drive.
+    #[doc = include_str!("harness.doc/pending_frame_requests.md")]
     #[must_use]
     pub fn pending_frame_requests(&self) -> usize {
         self.runtime.pending_frames()
     }
 
-    /// The kit instance, for reads the host does not wrap.
+    #[doc = include_str!("harness.doc/runtime_2.md")]
     #[must_use]
     pub const fn runtime(&self) -> &UiRuntime {
         &self.runtime
     }
 
-    /// The last returned batch of render commands, in paint order.
+    #[doc = include_str!("harness.doc/commands.md")]
     #[must_use]
     pub fn commands(&self) -> Vec<PaintCommand> {
         self.runtime.snapshot().display_list().commands().to_vec()
     }
 
-    /// The bounding rectangles of every solid fill in the returned batch.
+    #[doc = include_str!("harness.doc/fill_bounds.md")]
     #[must_use]
     pub fn fill_bounds(&self) -> Vec<Rect> {
         self.commands()
@@ -161,7 +138,7 @@ impl MockOverlayHost {
             .collect()
     }
 
-    /// The opacity of every group layer pushed in the returned batch.
+    #[doc = include_str!("harness.doc/layer_opacities.md")]
     #[must_use]
     pub fn layer_opacities(&self) -> Vec<f32> {
         self.commands()
@@ -173,8 +150,7 @@ impl MockOverlayHost {
             .collect()
     }
 
-    /// Rasterizes the returned batch onto a host-supplied render target,
-    /// producing the texture §5.4 says the kit may hand back.
+    #[doc = include_str!("harness.doc/render_to_target.md")]
     #[must_use]
     pub fn render_to_target(&self) -> Vec<u8> {
         let mut renderer = CpuRenderer::new(RendererId::from_raw(9));
@@ -191,8 +167,7 @@ impl MockOverlayHost {
             .to_vec()
     }
 
-    /// A cheap identity for the currently published batch, so a test can assert
-    /// that nothing repainted while the host drove nothing.
+    #[doc = include_str!("harness.doc/batch_fingerprint.md")]
     #[must_use]
     pub fn batch_fingerprint(&self) -> (usize, Vec<String>) {
         let commands = self.commands();
@@ -200,14 +175,14 @@ impl MockOverlayHost {
         (commands.len(), shapes)
     }
 
-    /// The number of queued but undelivered host input events.
+    #[doc = include_str!("harness.doc/pending_input.md")]
     #[must_use]
     pub fn pending_input(&self) -> usize {
         self.input.len()
     }
 }
 
-/// An element node carrying `class`, with `kids` as its children.
+#[doc = include_str!("harness.doc/el.md")]
 #[must_use]
 pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
     ViewNode::element(obscur_kit::identity::ComponentId::from_raw(id))
@@ -215,13 +190,13 @@ pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
         .with_children(ViewFragment::from_nodes(kids))
 }
 
-/// A view whose root fragment is `nodes`.
+#[doc = include_str!("harness.doc/view.md")]
 #[must_use]
 pub fn view(nodes: Vec<ViewNode>) -> View {
     View::from_fragment(ViewFragment::from_nodes(nodes))
 }
 
-/// Asserts `actual ≈ expected` within `tolerance`.
+#[doc = include_str!("harness.doc/approx.md")]
 pub fn approx(actual: f32, expected: f32, tolerance: f32, what: &str) {
     assert!(
         (actual - expected).abs() <= tolerance,

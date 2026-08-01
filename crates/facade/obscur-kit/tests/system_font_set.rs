@@ -1,19 +1,4 @@
-//! The desktop production path: `KitBootstrap::system_font_set` reads the host's
-//! own faces off disk through fontconfig (spec §5.18).
-//!
-//! # These tests are deliberately weak, and that is the point
-//!
-//! Everything here depends on what the running machine has installed, so nothing
-//! can assert a metric, a glyph id, or a family name without drifting per machine
-//! — on the authoring machine `fc-match sans-serif` resolves into
-//! `/usr/share/fonts/WindowsFonts/`. So this file asserts only the two properties
-//! that must hold on *any* machine: whatever comes back is **loadable**, and
-//! whatever comes back **shapes real glyphs**. The numeric assertions live in
-//! `text_stack_install.rs` against the vendored faces, which is the split the
-//! owner's policy asks for: system fonts for production, vendored fonts for tests.
-//!
-//! A machine with no fontconfig skips rather than fails — a bare CI container is a
-//! legitimate host, not a broken one.
+#![doc = include_str!("system_font_set.doc/_module.md")]
 #![cfg(all(
     feature = "font-fontconfig",
     feature = "text-harfrust",
@@ -31,15 +16,12 @@ use obscur_kit::scene::text::PositionedGlyph;
 use obscur_kit::text::font::GenericFamily;
 use obscur_kit::view::view::{View, ViewFragment, ViewNode};
 
-/// Whether this machine can answer font queries at all.
+#[doc = include_str!("system_font_set.doc/fontconfig_present.md")]
 fn fontconfig_present() -> bool {
     FontconfigSource::new().is_available()
 }
 
-/// Every face fontconfig hands back must be one the shaping stack can actually
-/// parse. This is the `.ttc` guard's end-to-end consequence: a collection would
-/// register with no `cmap` coverage and its text would silently vanish, so the
-/// enumeration must never emit one.
+#[doc = include_str!("system_font_set.doc/every_enumerated_face_is_loadable_by_the_shaping_stack.md")]
 #[test]
 fn every_enumerated_face_is_loadable_by_the_shaping_stack() {
     if !fontconfig_present() {
@@ -72,9 +54,7 @@ fn every_enumerated_face_is_loadable_by_the_shaping_stack() {
     }
 }
 
-/// The whole desktop path in one line: enumerate the host's faces, install them,
-/// and get real glyphs. No family name, glyph id, or metric is asserted — only
-/// that *something the host owns* shaped.
+#[doc = include_str!("system_font_set.doc/the_host_font_set_installs_and_shapes_real_glyphs.md")]
 #[test]
 fn the_host_font_set_installs_and_shapes_real_glyphs() {
     if !fontconfig_present() {
@@ -128,15 +108,7 @@ fn the_host_font_set_installs_and_shapes_real_glyphs() {
     );
 }
 
-/// `fc-match` never fails — asked for a family that does not exist it returns the
-/// system default with exit status 0. A named-family lookup built on it alone would
-/// resolve every absent family to a substituted face, and an author's fallback
-/// chain would never be walked.
-///
-/// The adapter guards this twice over (`fc-list`, which returns nothing for an
-/// absent family, plus a name filter), and the guards are redundant: this test only
-/// fails once **both** are gone, so it pins the outcome rather than either
-/// mechanism. That is what it should pin — the substitution is the bug.
+#[doc = include_str!("system_font_set.doc/an_absent_named_family_is_not_silently_substituted.md")]
 #[test]
 fn an_absent_named_family_is_not_silently_substituted() {
     if !fontconfig_present() {

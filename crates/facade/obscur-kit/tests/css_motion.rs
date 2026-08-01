@@ -1,11 +1,4 @@
-//! End-to-end coverage for audit S4 (§4.17): a CSS-authored `transition` and
-//! `@keyframes` animation, compiled through the real CSS frontend and driven by
-//! the runtime's `MotionScheduler`, actually run.
-//!
-//! This exercises the whole wiring through the public facade only: author CSS ->
-//! hand the sources to the kit's [`CssPipeline`] -> render frames and observe the
-//! animated value flow through style -> motion -> layout. The CSS->runtime
-//! plumbing is the kit's, not the test's: a host installs sources and renders.
+#![doc = include_str!("css_motion.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::bootstrap::CssPipeline;
@@ -16,9 +9,7 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::selector::PseudoState;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// Authored CSS exercising both motion frontends at once: a `transition` on
-/// `.box` (whose width changes on `:hover`) and a `@keyframes` animation played
-/// on `.spinner` via the `animation` shorthand.
+#[doc = include_str!("css_motion.doc/STYLESHEET.md")]
 const STYLESHEET: &str = "\
 .box { width: 100px; height: 50px; transition: width 1s linear; }\n\
 .box:hover { width: 200px; }\n\
@@ -26,7 +17,7 @@ const STYLESHEET: &str = "\
 .spinner { width: 10px; height: 10px; animation: fade 1s; }\n\
 ";
 
-/// A `.box` element followed by a `.spinner` element, as two top-level nodes.
+#[doc = include_str!("css_motion.doc/view.md")]
 fn view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(1))
@@ -107,14 +98,7 @@ fn css_transition_and_keyframes_drive_through_the_scheduler() {
     assert_eq!(box_width(&runtime, node), 200.0, "settled at the new width");
 }
 
-/// A host that installs CSS through the kit gets §4.12's parse cache without
-/// asking for it.
-///
-/// Proven by the one observation only a cache can produce: the *same* source
-/// identity at the *same* revision, but with different text, must lay out with
-/// the FIRST revision's rules — a pipeline that re-parsed would pick up the new
-/// text. Bumping the revision then re-parses, so the cache is a cache and not a
-/// one-shot.
+#[doc = include_str!("css_motion.doc/the_pipeline_parses_each_source_once_per_revision.md")]
 #[test]
 fn the_pipeline_parses_each_source_once_per_revision() {
     let app = |text: &str| CssSource::new(SourceId::from_raw(1), "app.css", text);

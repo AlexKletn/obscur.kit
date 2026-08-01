@@ -1,5 +1,4 @@
-//! The multi-font paragraph orchestrator composing itemize → resolve → shape
-//! (spec §5.10).
+#![doc = include_str!("paragraph_shaper.doc/_module.md")]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -17,65 +16,24 @@ use crate::shaping::{
 };
 use crate::span::TextRange;
 
-/// The orchestrator that shapes a whole paragraph across multiple fonts
-/// (spec §5.10 font fallback).
-///
-/// A single [`TextShaper`] only shapes one uniformly-styled, single-font run;
-/// real paragraphs mix scripts and therefore fonts. `ParagraphShaper` composes
-/// three ports to bridge that gap: it [`itemize`](TextItemizer::itemize)s the
-/// text into uniform runs, [`resolve`](FontResolver::resolve)s a covering font
-/// for each, and [`shape`](TextShaper::shape)s each run with the resolved face,
-/// yielding one [`ShapedRun`] per item in logical order.
-///
-/// Each sub-run is shaped against a *slice* of the paragraph, so its glyph
-/// clusters and source range come back relative to that slice (0-based).
-/// `ParagraphShaper` rewrites them into **full-text byte coordinates** — every
-/// glyph's cluster is offset by the item's start and the run's source is set to
-/// the item's range — so callers can map any glyph straight back to the original
-/// string.
-///
-/// # Paragraph shaping cache
-///
-/// The runtime shapes each text node twice per frame — once to **measure**
-/// (layout) and once to **compose** (scene) — and re-shapes every frame even
-/// when nothing changed, and the *whole* itemize + font-resolve + multi-run
-/// assembly re-runs each time. `ParagraphShaper` therefore memoizes each
-/// [`shape_paragraph`](Self::shape_paragraph) result behind an interior
-/// [`RefCell`] cache keyed by every input that affects the output
-/// ([`ParagraphKey`]). Because the result is width-independent, measure and
-/// compose share the same cached runs, so an unchanged node itemizes, resolves,
-/// and shapes exactly **once** per frame and hits the cache on later frames. The
-/// output is byte-identical to shaping without the cache — a pure performance
-/// change. Swapping any port ([`set_itemizer`](Self::set_itemizer),
-/// [`set_resolver`](Self::set_resolver), [`set_shaper`](Self::set_shaper))
-/// clears the cache, since the memoized runs no longer reflect the ports.
-///
-/// The cache is single-threaded interior state (`RefCell`): the runtime shapes
-/// on one thread and the ports carry no `Send`/`Sync` bound.
+#[doc = include_str!("paragraph_shaper.doc/ParagraphShaper.md")]
 pub struct ParagraphShaper {
     itemizer: Box<dyn TextItemizer>,
     resolver: Box<dyn FontResolver>,
     shaper: Box<dyn TextShaper>,
-    /// The content locale's BCP-47 language hint, passed to every shaping
-    /// request (spec §7.2). Configuration, like the ports beside it — not a
-    /// per-call input — so it is *not* in [`ParagraphKey`];
-    /// [`set_language`](Self::set_language) flushes the cache instead, exactly as
-    /// a port swap does.
+    #[doc = include_str!("paragraph_shaper.doc/language.md")]
     language: Option<Box<str>>,
-    /// Memoized paragraph runs, keyed by every input that affects the output.
+    #[doc = include_str!("paragraph_shaper.doc/cache.md")]
     cache: RefCell<HashMap<ParagraphKey, Vec<ShapedRun>>>,
-    /// The maximum number of cached paragraphs before a flush.
+    #[doc = include_str!("paragraph_shaper.doc/capacity.md")]
     capacity: usize,
 }
 
 impl ParagraphShaper {
-    /// The default cache capacity: the number of distinct shaped paragraphs kept
-    /// before the cache is flushed.
+    #[doc = include_str!("paragraph_shaper.doc/MAX_ENTRIES.md")]
     pub const MAX_ENTRIES: usize = 512;
 
-    /// Creates a shaper composing the given `itemizer`, `resolver`, and `shaper`
-    /// ports, with a paragraph cache of the default capacity
-    /// ([`MAX_ENTRIES`](Self::MAX_ENTRIES)).
+    #[doc = include_str!("paragraph_shaper.doc/new.md")]
     #[must_use]
     pub fn new(
         itemizer: Box<dyn TextItemizer>,
@@ -85,9 +43,7 @@ impl ParagraphShaper {
         Self::with_capacity(itemizer, resolver, shaper, Self::MAX_ENTRIES)
     }
 
-    /// Creates a shaper whose paragraph cache holds at most `capacity` results (a
-    /// `capacity` of zero is treated as one, so a single entry can always be
-    /// cached).
+    #[doc = include_str!("paragraph_shaper.doc/with_capacity.md")]
     #[must_use]
     pub fn with_capacity(
         itemizer: Box<dyn TextItemizer>,
@@ -105,122 +61,60 @@ impl ParagraphShaper {
         }
     }
 
-    /// Installs `shaper` as the inner single-run shaper, replacing the previous
-    /// one and leaving the itemizer and resolver in place.
-    ///
-    /// The caller wraps the engine in whatever caching decorator it wants before
-    /// calling this; the orchestrator stores it verbatim. The paragraph cache is
-    /// flushed so no run from the old shaper survives.
+    #[doc = include_str!("paragraph_shaper.doc/set_shaper.md")]
     pub fn set_shaper(&mut self, shaper: Box<dyn TextShaper>) {
         self.shaper = shaper;
         self.clear_cache();
     }
 
-    /// Installs `itemizer` as the run itemizer, replacing the previous one and
-    /// leaving the resolver and inner shaper in place. The paragraph cache is
-    /// flushed so no run itemized by the old itemizer survives.
+    #[doc = include_str!("paragraph_shaper.doc/set_itemizer.md")]
     pub fn set_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
         self.itemizer = itemizer;
         self.clear_cache();
     }
 
-    /// Installs `resolver` as the font resolver, replacing the previous one and
-    /// leaving the itemizer and inner shaper in place. The paragraph cache is
-    /// flushed so no run resolved by the old resolver survives.
+    #[doc = include_str!("paragraph_shaper.doc/set_resolver.md")]
     pub fn set_resolver(&mut self, resolver: Box<dyn FontResolver>) {
         self.resolver = resolver;
         self.clear_cache();
     }
 
-    /// Installs the BCP-47 `language` hint every [`ShapingRequest`] this
-    /// orchestrator issues will carry (spec §5.10, §7.2 text shaping
-    /// integration).
-    ///
-    /// The language is a property of the *content's locale*, not of a run: it is
-    /// uniform across a paragraph and constant until the application changes
-    /// locale, so it is installed here alongside the ports rather than threaded
-    /// through [`shape_paragraph`](Self::shape_paragraph)'s signature. `None` —
-    /// the default — leaves the hint unset, and a shaper then guesses from the
-    /// text.
-    ///
-    /// It matters because a shaper cannot infer it. Serbian and Russian are both
-    /// `Cyrl`, and their italic б differ; `locl` is the OpenType feature that
-    /// picks, and it is driven by the language tag alone. The
-    /// [`ShapingRequest::language`](crate::shaping::ShapingRequest::language)
-    /// field has existed all along and nothing ever set it — this is the setter
-    /// that gives it a value.
-    ///
-    /// The paragraph cache is flushed, for the same reason a port swap flushes
-    /// it: the memoized runs were shaped under the outgoing hint.
+    #[doc = include_str!("paragraph_shaper.doc/set_language.md")]
     pub fn set_language(&mut self, language: Option<Box<str>>) {
         self.language = language;
         self.clear_cache();
     }
 
-    /// Returns the installed BCP-47 language hint, if any.
+    #[doc = include_str!("paragraph_shaper.doc/language_2.md")]
     #[must_use]
     pub fn language(&self) -> Option<&str> {
         self.language.as_deref()
     }
 
-    /// Empties the paragraph cache. Called on any port swap so stale runs never
-    /// leak past a reconfiguration.
+    #[doc = include_str!("paragraph_shaper.doc/clear_cache.md")]
     fn clear_cache(&mut self) {
         self.cache.get_mut().clear();
     }
 
-    /// Returns the number of currently cached paragraphs (for tests and
-    /// diagnostics).
+    #[doc = include_str!("paragraph_shaper.doc/cache_len.md")]
     #[must_use]
     pub fn cache_len(&self) -> usize {
         self.cache.borrow().len()
     }
 
-    /// Returns the vertical [`LineMetrics`] for a line at `font_size`, delegating
-    /// to the inner [`TextShaper`].
-    ///
-    /// A paragraph shares one line box height and baseline across all of its
-    /// fonts (spec §5.10), so the inner shaper's metrics — the idealized ratios
-    /// for the mock, real font metrics for an adapter — drive line stacking for
-    /// the whole paragraph.
+    #[doc = include_str!("paragraph_shaper.doc/line_metrics.md")]
     #[must_use]
     pub fn line_metrics(&self, font_size: f32) -> LineMetrics {
         self.shaper.line_metrics(font_size)
     }
 
-    /// Returns the vertical [`LineMetrics`] of a specific `font` at `font_size`,
-    /// for the mixed-font line-box **strut** (CSS 2.1 §10.8.1), delegating to the
-    /// inner [`TextShaper`].
-    ///
-    /// Where [`line_metrics`](Self::line_metrics) gives the primary/default face's
-    /// metrics (the strut floor), this asks for one segment font's own metrics so
-    /// the wrapper can grow a line box to the *max* ascent/descent over the fonts
-    /// on that line. Under the font-agnostic mock every font reports the same
-    /// metrics (the inner shaper's default), so the strut equals the primary strut
-    /// and output stays byte-identical; a real multi-face backend returns
-    /// face-specific metrics.
+    #[doc = include_str!("paragraph_shaper.doc/line_metrics_for.md")]
     #[must_use]
     pub fn line_metrics_for(&self, font: FontId, font_size: f32) -> LineMetrics {
         self.shaper.line_metrics_for(font, font_size)
     }
 
-    /// Shapes `text` end to end, returning one [`ShapedRun`] per itemized run in
-    /// logical (reading) order (spec §5.10).
-    ///
-    /// For each itemized run the resolver is asked for a covering font from
-    /// `families` matching `attributes`; when it returns `None` the run falls
-    /// back to [`FontId::PRIMARY`] paired with `default_face`. Every run is
-    /// shaped at `font_size` with the item's own direction (itself seeded by
-    /// `base_direction`), and its glyph clusters and source range are normalized
-    /// to full-text byte coordinates. Empty `text` yields a single empty
-    /// `ShapedRun` (the itemizer emits one empty item), never a panic.
-    ///
-    /// The result is memoized: the first call for a given set of inputs runs the
-    /// full itemize → resolve → shape pipeline and stores the runs; every later
-    /// identical call (a second phase this frame, or any future frame) returns a
-    /// clone of the cached runs without re-itemizing or re-resolving. Any change
-    /// to `text`, `families`, `attributes`, `default_face`, `font_size`, or
-    /// `base_direction` is a distinct key and re-shapes.
+    #[doc = include_str!("paragraph_shaper.doc/shape_paragraph.md")]
     #[must_use]
     pub fn shape_paragraph(
         &self,
@@ -263,7 +157,7 @@ impl ParagraphShaper {
         runs
     }
 
-    /// Runs the full itemize → resolve → shape pipeline with no cache lookup.
+    #[doc = include_str!("paragraph_shaper.doc/shape_paragraph_uncached.md")]
     // `attributes` stays by reference to mirror the public `shape_paragraph`
     // signature this helper is factored out of and the convention used across
     // this pass.
@@ -321,19 +215,7 @@ impl ParagraphShaper {
         runs
     }
 
-    /// Returns the single precomposed character (as a `String`) a sub-run should
-    /// be shaped as under the css-fonts-4 §5.3 canonical-equivalence rule, or
-    /// [`None`] when the run shapes as-is.
-    ///
-    /// The rule fires only when **all** of these hold: `sub` is more than one
-    /// codepoint; its canonical composition ([NFC](UnicodeNormalization::nfc)) is a
-    /// **single** scalar `c` distinct from `sub`; and the resolver selects the same
-    /// font for `c` as it did for the whole sequence. That last check preserves the
-    /// spec's precedence — a font that *directly* supports the decomposed sequence
-    /// (or a different font in the chain) keeps the base + mark glyphs — so
-    /// composition happens exactly when the resolved font supports the precomposed
-    /// character but not the sequence as authored (the canonical-equivalence branch
-    /// of a coverage-driven resolver).
+    #[doc = include_str!("paragraph_shaper.doc/canonical_compose.md")]
     #[allow(clippy::trivially_copy_pass_by_ref)]
     fn canonical_compose(
         &self,
@@ -368,8 +250,7 @@ impl ParagraphShaper {
     }
 }
 
-/// Rewrites a run shaped against a slice into full-text coordinates: shifts each
-/// glyph's cluster by `range.start` and sets the run source to `range`.
+#[doc = include_str!("paragraph_shaper.doc/rebase_run.md")]
 fn rebase_run(run: &GlyphRun, range: TextRange) -> GlyphRun {
     let glyphs: Vec<ShapedGlyph> = run
         .glyphs()

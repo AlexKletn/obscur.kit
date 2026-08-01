@@ -1,677 +1,43 @@
-//! Turns cascaded values into computed values: [`StyleResolver`] (§4.13–§4.14).
-//!
-//! The resolver implements the computed-value algorithm for a single node:
-//!
-//! 1. **Effective custom properties** — custom properties always inherit, so the
-//!    node's effective set is the parent's set overridden by the node's own
-//!    cascaded custom properties. This set is resolved *before* any computed
-//!    value, and is stored on the resulting [`ComputedStyle`] so descendants
-//!    inherit it (§4.14).
-//! 2. **`var()` substitution** — a [`PropertyValue::CustomRef`] is replaced by the
-//!    referenced effective custom property, following chains with a visited-set
-//!    guard so a cycle terminates. An unresolved reference (missing name or a
-//!    cycle) resolves as if the declaration were [`PropertyValue::Unset`].
-//! 3. **`font-size`, before anything else** — it is the base its own node's `em`
-//!    resolves against, so it cannot be folded with the context it defines. It is
-//!    resolved against the *parent's* size (which is what `em` and `%` mean on
-//!    this property) and folded to absolute pixels first; see
-//!    [`absolutize::absolute_font_size`].
-//! 4. **Per-property computed value** — the (substituted) cascaded value is
-//!    resolved against the CSS-wide keywords and default inheritance to produce a
-//!    concrete [`ComputedValue`], and then **absolutized**: every `<length>` it
-//!    carries is folded to `px` against the node's own [`LengthContext`] (§4.14 —
-//!    the computed value of a `<length>` is absolute). Downstream consumers read
-//!    pixels; none of them needs a length context.
-//!
-//! # Deliberate limitations
-//!
-//! * **Keyword initial values are deferred.** The initial values of keyword-
-//!   valued properties (`display: inline`, `visibility: visible`) are interned
-//!   symbols, and this crate has no interner in Phase 1. Rather than fake one,
-//!   [`StyleResolver::initial_value`] returns [`None`] for those properties, and a
-//!   property that would need its (unavailable) initial value is simply left
-//!   unresolved on the [`ComputedStyle`]. A later phase supplies the interner and
-//!   fills these in.
-//! * **Full modelled property set.** The resolver computes *every* modelled
-//!   [`PropertyId`] longhand (see [`StyleResolver::computed_properties`]), so an
-//!   authored value for any of them flows through the computed-value step to the
-//!   downstream layout / scene / text consumers. A property whose only value would
-//!   be a deferred keyword initial is still left unresolved (see the previous
-//!   bullet); an *unauthored* node is therefore byte-for-byte unchanged, because
-//!   each property still resolves to exactly the value (or [`None`]) it did before
-//!   — the set merely no longer drops authored values for the added longhands.
-//! * **`ch` absolutizes only when the caller supplies metrics.** Every other unit
-//!   folds from numbers this step already holds; `ch` is the advance of the `0`
-//!   glyph, which needs text *shaped* in the node's own face, and this crate has
-//!   no shaper and should not have one. It therefore *asks*, through the
-//!   [`ChMetrics`] port on [`ResolutionContext`] — the measurement is threaded
-//!   into computed-value time rather than deferred to whichever consumer happens
-//!   to own a shaper. A caller that attaches one gets `ch` folded to `px` like
-//!   every other unit, and paint reads it correctly.
-//!
-//!   A caller that attaches **no** port leaves `ch` symbolic on the
-//!   [`ComputedStyle`], exactly as before this port existed: this step will not
-//!   bake in [`LengthContext::ch_base`]'s `0.5em` substitute, which is wrong for
-//!   exactly the monospace faces `ch` exists to serve. Layout can still measure
-//!   such a term; paint cannot, so on that path `ch` still reaches paint as `0`.
-//!   The seam is closed for callers that supply metrics, not by construction.
+#![doc = include_str!("style_resolver.doc/_module.md")]
 
 use crate::cascade::ResolvedDeclarations;
 use crate::computed::absolutize::{absolute_font_size, absolutize_value};
-use crate::computed::{ChMetrics, ComputedStyle, ComputedValue};
+use crate::computed::computed_property_set::{COMPUTED_PROPERTIES, FACE_PROPERTIES};
+use crate::computed::effective_custom_properties::{effective_custom_properties, substitute};
+use crate::computed::initial_value::{INITIAL_FONT_SIZE, initial_value_of};
+use crate::computed::logical_cascade::{cascaded_for, resolves_rtl, resolves_writing_mode};
+use crate::computed::relative_font_weight::resolve_relative_weight;
+use crate::computed::{ComputedStyle, ComputedValue, ResolutionContext};
 use crate::property::{
-    EnvironmentValues, InheritedProperty, Length, LengthContext, PropertyId, PropertyValue,
-    StyleColor, WritingMode, layout_keyword,
+    InheritedProperty, Length, LengthContext, PropertyId, PropertyValue, WritingMode,
 };
 use obscur_identity::InternedSymbol;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-/// The CSS initial `font-weight` (`normal`), and the weight a relative
-/// `bolder` / `lighter` resolves against when there is no parent weight.
-const NORMAL_FONT_WEIGHT: f32 = 400.0;
-
-/// The CSS initial `font-size` (`medium`), in logical pixels.
-///
-/// This is the root element's implicit parent size, and therefore also what `rem`
-/// means *on* the root element (CSS Values 4 §6.1.1).
-const INITIAL_FONT_SIZE: f32 = 16.0;
-
-/// Every modelled longhand the resolver computes.
-///
-/// This is the complete [`PropertyId`] catalogue: the resolver must compute each
-/// property that a downstream consumer reads back off a [`ComputedStyle`]
-/// (layout box-model / flex, scene paint, text typography), otherwise an authored
-/// CSS value for that property would be silently dropped at the computed-value
-/// step. It is spelled out as a local `const` list — rather than derived from the
-/// enum — because [`PropertyId`] lives in another module this file must not edit;
-/// the list is kept exhaustive by the `computed_properties_cover_every_property_id`
-/// test, which fails if a new longhand is added upstream without being computed.
-const COMPUTED_PROPERTIES: &[PropertyId] = &[
-    // Paint.
-    PropertyId::Color,
-    PropertyId::BackgroundColor,
-    PropertyId::BackgroundImage,
-    PropertyId::BackgroundSize,
-    PropertyId::BackgroundPosition,
-    PropertyId::BackgroundRepeat,
-    PropertyId::ObjectFit,
-    PropertyId::ObjectPosition,
-    PropertyId::Opacity,
-    PropertyId::Visibility,
-    // Positioning.
-    PropertyId::Position,
-    PropertyId::Top,
-    PropertyId::Right,
-    PropertyId::Bottom,
-    PropertyId::Left,
-    PropertyId::ZIndex,
-    // Box model: sizing.
-    PropertyId::Width,
-    PropertyId::Height,
-    PropertyId::BoxSizing,
-    PropertyId::MinWidth,
-    PropertyId::MinHeight,
-    PropertyId::MaxWidth,
-    PropertyId::MaxHeight,
-    // Box model: margins.
-    PropertyId::MarginTop,
-    PropertyId::MarginRight,
-    PropertyId::MarginBottom,
-    PropertyId::MarginLeft,
-    // Box model: padding.
-    PropertyId::PaddingTop,
-    PropertyId::PaddingRight,
-    PropertyId::PaddingBottom,
-    PropertyId::PaddingLeft,
-    // Box model: border (width feeds the box model; style + color paint).
-    PropertyId::BorderTopWidth,
-    PropertyId::BorderRightWidth,
-    PropertyId::BorderBottomWidth,
-    PropertyId::BorderLeftWidth,
-    PropertyId::BorderTopStyle,
-    PropertyId::BorderRightStyle,
-    PropertyId::BorderBottomStyle,
-    PropertyId::BorderLeftStyle,
-    PropertyId::BorderTopColor,
-    PropertyId::BorderRightColor,
-    PropertyId::BorderBottomColor,
-    PropertyId::BorderLeftColor,
-    // Box model: border radius (rounds the background / border / content clip).
-    PropertyId::BorderTopLeftRadius,
-    PropertyId::BorderTopRightRadius,
-    PropertyId::BorderBottomRightRadius,
-    PropertyId::BorderBottomLeftRadius,
-    // Outline (painted outside the border box; no layout).
-    PropertyId::OutlineWidth,
-    PropertyId::OutlineStyle,
-    PropertyId::OutlineColor,
-    PropertyId::OutlineOffset,
-    // Box effects.
-    PropertyId::BoxShadow,
-    PropertyId::Filter,
-    PropertyId::BackdropFilter,
-    // 2D transform.
-    PropertyId::Transform,
-    PropertyId::TransformOrigin,
-    // Compositing.
-    PropertyId::MixBlendMode,
-    // Flex container / item.
-    PropertyId::Display,
-    PropertyId::FlexDirection,
-    PropertyId::FlexWrap,
-    PropertyId::JustifyContent,
-    PropertyId::AlignContent,
-    PropertyId::AlignItems,
-    PropertyId::JustifyItems,
-    PropertyId::AlignSelf,
-    PropertyId::JustifySelf,
-    PropertyId::Gap,
-    PropertyId::FlexBasis,
-    PropertyId::FlexGrow,
-    PropertyId::FlexShrink,
-    // Grid container.
-    PropertyId::GridTemplateColumns,
-    PropertyId::GridTemplateRows,
-    PropertyId::GridTemplateAreas,
-    PropertyId::GridAutoFlow,
-    PropertyId::GridAutoColumns,
-    PropertyId::GridAutoRows,
-    // Grid item line placement.
-    PropertyId::GridColumnStart,
-    PropertyId::GridColumnEnd,
-    PropertyId::GridRowStart,
-    PropertyId::GridRowEnd,
-    PropertyId::GridArea,
-    // Typography.
-    PropertyId::FontSize,
-    PropertyId::FontFamily,
-    PropertyId::FontWeight,
-    PropertyId::FontStyle,
-    PropertyId::LineHeight,
-    PropertyId::Direction,
-    PropertyId::WritingMode,
-    PropertyId::TextAlign,
-    PropertyId::TextOverflow,
-    // Inherited text spacing/casing (CSS Text 3 §8.1 / §8.2 / §2.1).
-    PropertyId::LetterSpacing,
-    PropertyId::WordSpacing,
-    PropertyId::TextTransform,
-    // Inherited white-space processing + tab-size (CSS Text 3 §3 / §4.3).
-    PropertyId::WhiteSpace,
-    // Inherited line-break controls (CSS Text 3 §5.2).
-    PropertyId::OverflowWrap,
-    PropertyId::WordBreak,
-    PropertyId::TabSize,
-    // Overflow (pure paint/clip; no layout effect).
-    PropertyId::Overflow,
-];
-
-/// The properties that select a **face**, and therefore decide what the `0` glyph
-/// measures — the inputs [`ChMetrics::zero_advance`] needs (CSS Values 4 §6.1.2:
-/// `ch` is the advance of `0` *"in the font used to render it"*).
-///
-/// `font-size` is not here: it selects a *size*, not a face, and the resolver has
-/// to compute it separately anyway (it is the base its own node's `em` resolves
-/// against). Both halves are set on the style before the port is asked.
-///
-/// Every entry must be a property that cannot carry a `<length>`, since these are
-/// resolved before a [`LengthContext`] exists. All three hold today — a family
-/// list, a number, and a keyword respectively — and all three land in
-/// `absolutize_value`'s identity arm.
-const FACE_PROPERTIES: &[PropertyId] = &[
-    PropertyId::FontFamily,
-    PropertyId::FontWeight,
-    PropertyId::FontStyle,
-];
-
-/// The document-wide bases a computed `<length>` is absolutized against (§4.14).
-///
-/// These are the things a node's own style cannot supply: the **root** element's
-/// computed `font-size` (the base for `rem`), the **viewport** dimensions (the
-/// bases for `vw` / `vh` / `vmin` / `vmax`), and the **font metrics** port that
-/// measures the `0` glyph (the base for `ch`). The node's own `font-size` — the
-/// base for `em` — is not here because the resolver computes it itself, before
-/// every other property.
-///
-/// `rem` has no chicken-and-egg problem: the root's font-size depends only on the
-/// root's own cascaded value and the initial `medium`, so it is known before any
-/// other node is resolved. Build the root's context with
-/// [`ResolutionContext::for_root`], read the root's computed `font-size` back with
-/// [`StyleResolver::font_size_of`], and pass it to
-/// [`ResolutionContext::new`] for every descendant.
-///
-/// `ch` is the one base that is a *measurement* rather than a number, so it
-/// arrives as a port ([`ChMetrics`]) rather than as an `f32`: its value depends
-/// on the node's own resolved font, which only the resolver knows, so the resolver
-/// has to be able to *ask* mid-resolution rather than be told up front. Attach one
-/// with [`with_metrics`](Self::with_metrics); a context without one resolves every
-/// other unit exactly as before and leaves `ch` to the specified fallbacks.
-///
-/// This does not implement [`PartialEq`]: a port has no meaningful value equality,
-/// and nothing compares contexts. [`Debug`] is hand-written for the same reason —
-/// so that implementing [`ChMetrics`] does not oblige an implementor to derive
-/// [`Debug`], which no other port in this workspace requires.
-#[derive(Clone, Copy)]
-pub struct ResolutionContext<'a> {
-    /// The document root's computed `font-size` in logical pixels (base for
-    /// `rem`).
-    pub root_font_size: f32,
-    /// The viewport width in logical pixels (base for `vw`).
-    pub viewport_width: f32,
-    /// The viewport height in logical pixels (base for `vh`).
-    pub viewport_height: f32,
-    /// The port that measures the `0` glyph (base for `ch`), when the caller has
-    /// one. [`None`] leaves `ch` to the specified fallbacks — see
-    /// [`with_metrics`](Self::with_metrics).
-    pub metrics: Option<&'a dyn ChMetrics>,
-    /// The host-reported environment values `env()` resolves against (spec
-    /// §6.15). All zeroes unless a host reports insets.
-    pub environment: EnvironmentValues,
-}
-
-impl std::fmt::Debug for ResolutionContext<'_> {
-    /// Reports whether a [`ChMetrics`] port is attached, not what it is: a port
-    /// is opaque, and "is one attached?" is the question a `ch` bug asks.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ResolutionContext")
-            .field("root_font_size", &self.root_font_size)
-            .field("viewport_width", &self.viewport_width)
-            .field("viewport_height", &self.viewport_height)
-            .field("metrics", &self.metrics.map(|_| "<ChMetrics>"))
-            .field("environment", &self.environment)
-            .finish()
-    }
-}
-
-impl<'a> ResolutionContext<'a> {
-    /// Builds a context whose `rem` base is `root_font_size`, with no font
-    /// metrics — see [`with_metrics`](Self::with_metrics).
-    #[must_use]
-    pub const fn new(root_font_size: f32, viewport_width: f32, viewport_height: f32) -> Self {
-        Self {
-            root_font_size,
-            viewport_width,
-            viewport_height,
-            metrics: None,
-            environment: EnvironmentValues::none(),
-        }
-    }
-
-    /// Builds the context for resolving the **root** node itself.
-    ///
-    /// On the root element `rem` refers to the *initial* `font-size` (`medium`),
-    /// not to the root's own computed one — otherwise `html { font-size: 2rem }`
-    /// would be defined in terms of itself.
-    #[must_use]
-    pub const fn for_root(viewport_width: f32, viewport_height: f32) -> Self {
-        Self::new(INITIAL_FONT_SIZE, viewport_width, viewport_height)
-    }
-
-    /// Attaches the port that measures the `0` glyph, making `ch` absolutize like
-    /// every other relative unit.
-    ///
-    /// Without one, `ch` cannot be folded to pixels here and is left symbolic on
-    /// the [`ComputedStyle`] for a downstream consumer that can measure it — which
-    /// is what the resolver did for every caller before this port existed. That
-    /// path is still correct for a consumer that measures (layout does), and still
-    /// wrong for one that does not (paint reads `0`), so a caller that *can* supply
-    /// metrics should.
-    #[must_use]
-    pub const fn with_metrics(mut self, metrics: &'a dyn ChMetrics) -> Self {
-        self.metrics = Some(metrics);
-        self
-    }
-
-    /// Attaches the host-reported environment values, so `env(safe-area-inset-*)`
-    /// and the keyboard insets resolve to what the host measured rather than to
-    /// the no-cutout default (spec §6.15).
-    #[must_use]
-    pub const fn with_environment(mut self, environment: EnvironmentValues) -> Self {
-        self.environment = environment;
-        self
-    }
-}
-
-/// Stateless resolver that computes a node's [`ComputedStyle`] from its cascaded
-/// values, its cascaded custom properties, and its parent's computed style.
-///
-/// It carries no state; construct one with [`StyleResolver::new`] (or
-/// [`Default`]) and call [`StyleResolver::resolve`]. Resolution is deterministic,
-/// panic-free, and cycle-safe on `var()`.
+#[doc = include_str!("style_resolver.doc/StyleResolver.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StyleResolver;
 
 impl StyleResolver {
-    /// Creates a resolver.
+    #[doc = include_str!("style_resolver.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Returns the set of properties this resolver computes.
+    #[doc = include_str!("style_resolver.doc/computed_properties.md")]
     #[must_use]
     pub const fn computed_properties() -> &'static [PropertyId] {
         COMPUTED_PROPERTIES
     }
 
-    /// Returns the initial value of `property`, if it can be expressed without an
-    /// interner.
-    ///
-    /// Value-typed properties have concrete initials: `color` is opaque black,
-    /// `background-color` is transparent, `opacity` is `1.0`, and `width` /
-    /// `height` are `auto`. Keyword-valued properties (`display`, `visibility`)
-    /// return [`None`]: their initial keyword is an interned symbol that Phase 1
-    /// cannot mint, so the property is left unresolved instead (see the module
-    /// docs).
-    // Several arms share a body (`Some(number(1.0))`, `None`) but are grouped by
-    // CSS meaning with distinct explanatory comments; merging them would obscure
-    // why each property is unresolved or shares an initial.
-    #[allow(clippy::match_same_arms)]
+    #[doc = include_str!("style_resolver.doc/initial_value.md")]
     #[must_use]
     pub fn initial_value(self, property: PropertyId) -> Option<ComputedValue> {
-        match property {
-            // A logical property has no computed value of its own: it resolves
-            // INTO its physical counterpart, which carries the initial. It is not
-            // in `COMPUTED_PROPERTIES`, so these arms are unreachable in practice
-            // — they exist to keep the match total rather than assumed.
-            PropertyId::MarginInlineStart
-            | PropertyId::MarginInlineEnd
-            | PropertyId::MarginBlockStart
-            | PropertyId::MarginBlockEnd
-            | PropertyId::PaddingInlineStart
-            | PropertyId::PaddingInlineEnd
-            | PropertyId::PaddingBlockStart
-            | PropertyId::PaddingBlockEnd
-            | PropertyId::InsetInlineStart
-            | PropertyId::InsetInlineEnd
-            | PropertyId::InsetBlockStart
-            | PropertyId::InsetBlockEnd
-            | PropertyId::BorderInlineStartWidth
-            | PropertyId::BorderInlineEndWidth
-            | PropertyId::BorderBlockStartWidth
-            | PropertyId::BorderBlockEndWidth
-            | PropertyId::BorderInlineStartStyle
-            | PropertyId::BorderInlineEndStyle
-            | PropertyId::BorderBlockStartStyle
-            | PropertyId::BorderBlockEndStyle => None,
-            PropertyId::Color => Some(ComputedValue::color(StyleColor::BLACK)),
-            PropertyId::BackgroundColor => Some(ComputedValue::color(StyleColor::TRANSPARENT)),
-            // `background-image` initial is `none` (no image). There is no
-            // `LinearGradient` value for `none`, so an absent value is left
-            // unresolved and the scene paints no gradient fill — byte-for-byte
-            // identical to before background images existed.
-            PropertyId::BackgroundImage => None,
-            // `background-size` initial is `auto` (draw at intrinsic size),
-            // `background-position` initial is `0% 0%` (top-left), and
-            // `background-repeat` initial is `repeat` (tile both axes). All three
-            // have no-interner concrete values, so they resolve to the CSS initial
-            // directly (the scene coordinator would default to the same values for
-            // an absent property, so this is purely explicit).
-            PropertyId::BackgroundSize => Some(
-                ComputedValue::from_concrete(PropertyValue::BackgroundSize(
-                    crate::property::BackgroundSize::Auto,
-                ))
-                .expect("BackgroundSize is a concrete computed value"),
-            ),
-            PropertyId::BackgroundPosition => Some(
-                ComputedValue::from_concrete(PropertyValue::BackgroundPosition(
-                    crate::property::BackgroundPosition::default(),
-                ))
-                .expect("BackgroundPosition is a concrete computed value"),
-            ),
-            PropertyId::BackgroundRepeat => Some(
-                ComputedValue::from_concrete(PropertyValue::BackgroundRepeat(
-                    crate::property::BackgroundRepeat::Repeat,
-                ))
-                .expect("BackgroundRepeat is a concrete computed value"),
-            ),
-            // `object-fit` initial is `fill` (stretch to the box). It has a
-            // no-interner concrete value, so it resolves to the CSS initial
-            // directly (the scene coordinator would default to the same for an
-            // absent property, so this is purely explicit).
-            PropertyId::ObjectFit => Some(
-                ComputedValue::from_concrete(PropertyValue::ObjectFit(
-                    crate::property::ObjectFit::Fill,
-                ))
-                .expect("ObjectFit is a concrete computed value"),
-            ),
-            // `object-position` initial is `50% 50%` (centered) — NOT
-            // `background-position`'s `0% 0%`. Resolved explicitly so an absent
-            // property still centers the replaced content (CSS Images 3 §5.2).
-            PropertyId::ObjectPosition => Some(
-                ComputedValue::from_concrete(PropertyValue::BackgroundPosition(
-                    crate::property::BackgroundPosition::new(
-                        crate::property::Length::Percent(50.0),
-                        crate::property::Length::Percent(50.0),
-                    ),
-                ))
-                .expect("ObjectPosition is a concrete computed value"),
-            ),
-            // `box-shadow` initial is `none` (no shadows). There is no
-            // `BoxShadow` list value for `none` other than an empty one, and an
-            // absent value paints nothing all the same, so it is left unresolved —
-            // byte-for-byte identical to before box-shadow existed.
-            PropertyId::BoxShadow => None,
-            // `filter` initial is `none` (no filter). Like `box-shadow`, an absent
-            // value paints nothing, so it is left unresolved — byte-for-byte
-            // identical to before `filter: drop-shadow(...)` existed.
-            PropertyId::Filter => None,
-            // `backdrop-filter` initial is `none` (no backdrop effect). Like
-            // `filter`, an absent value frosts nothing, so it is left unresolved —
-            // byte-for-byte identical to before backdrop-filter existed.
-            PropertyId::BackdropFilter => None,
-            // `transform` initial is `none` (no transform). There is no
-            // `Transform` value for `none` other than the identity, and an absent
-            // value brackets nothing all the same, so it is left unresolved —
-            // byte-for-byte identical to before transforms existed.
-            PropertyId::Transform => None,
-            // `transform-origin` initial is `50% 50%` (the box center). An absent
-            // value is left unresolved and the coordinator defaults to the center,
-            // so no value need be minted here.
-            PropertyId::TransformOrigin => None,
-            // `mix-blend-mode` initial is the `normal` keyword, an interned symbol
-            // Phase 1 cannot mint, so it is left unresolved (the coordinator treats
-            // an absent value as `normal` and brackets nothing) — like `display`.
-            PropertyId::MixBlendMode => None,
-            PropertyId::Opacity => Some(ComputedValue::number(1.0)),
-            PropertyId::Width | PropertyId::Height => Some(ComputedValue::length(Length::Auto)),
-            // Box-model spacing: initial `0`.
-            PropertyId::MarginTop
-            | PropertyId::MarginRight
-            | PropertyId::MarginBottom
-            | PropertyId::MarginLeft
-            | PropertyId::PaddingTop
-            | PropertyId::PaddingRight
-            | PropertyId::PaddingBottom
-            | PropertyId::PaddingLeft
-            // `border-*-width` initial is `medium`, but it is modelled as `0` so
-            // an element with no authored border insets nothing and paints
-            // nothing — byte-for-byte identical to before borders existed.
-            | PropertyId::BorderTopWidth
-            | PropertyId::BorderRightWidth
-            | PropertyId::BorderBottomWidth
-            | PropertyId::BorderLeftWidth
-            // `border-*-radius` initial is `0` (a square corner), so an element
-            // with no authored radius rounds nothing — byte-for-byte identical to
-            // before border-radius existed.
-            | PropertyId::BorderTopLeftRadius
-            | PropertyId::BorderTopRightRadius
-            | PropertyId::BorderBottomRightRadius
-            | PropertyId::BorderBottomLeftRadius
-            // `outline-width` initial is `medium`, modelled as `0` (like border
-            // width) so no outline paints until authored; `outline-offset` initial
-            // is `0` (the outline hugs the border box).
-            | PropertyId::OutlineWidth
-            | PropertyId::OutlineOffset
-            | PropertyId::Gap => Some(ComputedValue::length(Length::px(0.0))),
-            // Sizing minimums and `flex-basis`: initial `auto`.
-            PropertyId::MinWidth | PropertyId::MinHeight | PropertyId::FlexBasis => {
-                Some(ComputedValue::length(Length::Auto))
-            }
-            // Positioning insets: initial `auto` (no offset).
-            PropertyId::Top | PropertyId::Right | PropertyId::Bottom | PropertyId::Left => {
-                Some(ComputedValue::length(Length::Auto))
-            }
-            // `max-width` / `max-height` initial is `none`, which `Length` cannot
-            // yet represent; left unresolved until a `none` length lands.
-            PropertyId::MaxWidth | PropertyId::MaxHeight => None,
-            // Flex factors: `flex-grow` initial `0`, `flex-shrink` initial `1`.
-            PropertyId::FlexGrow => Some(ComputedValue::number(0.0)),
-            PropertyId::FlexShrink => Some(ComputedValue::number(1.0)),
-            // `font-size` initial is `medium` (~16px logical).
-            PropertyId::FontSize => Some(ComputedValue::length(Length::px(16.0))),
-            // `font-family` initial is UA-dependent; left unresolved so an absent
-            // authored value falls back to the runtime's default font chain.
-            PropertyId::FontFamily => None,
-            // `z-index` initial is `auto`. Although `auto` has a reserved
-            // cross-crate handle, an absent value is left unresolved so the scene's
-            // stacking treats the node as `auto` (effective z of 0, inheriting its
-            // parent's stacking level) — byte-for-byte identical to the pre-stacking
-            // paint order.
-            PropertyId::ZIndex => None,
-            // `border-*-style` initial is `none`; its keyword initial needs the
-            // interner, so an absent value is left unresolved and the scene treats
-            // the side as `none` (no border painted) — the pre-border behaviour.
-            PropertyId::BorderTopStyle
-            | PropertyId::BorderRightStyle
-            | PropertyId::BorderBottomStyle
-            | PropertyId::BorderLeftStyle
-            // `border-*-color` initial is `currentColor`. There is no computed
-            // value for `currentColor`, so an absent color is left unresolved and
-            // the scene falls back to the computed `color` when a style + width
-            // are present (the CSS `currentColor` rule).
-            | PropertyId::BorderTopColor
-            | PropertyId::BorderRightColor
-            | PropertyId::BorderBottomColor
-            | PropertyId::BorderLeftColor
-            // `outline-style` initial is `none` (its keyword needs the interner, so
-            // an absent value is treated as `none` — no outline painted), and
-            // `outline-color` initial is `currentColor` (an absent color falls back
-            // to the computed `color`, like a border color).
-            | PropertyId::OutlineStyle
-            | PropertyId::OutlineColor
-            // Keyword initials need the interner; deferred to a later phase.
-            | PropertyId::Display
-            | PropertyId::Visibility
-            // `box-sizing` initial is `content-box`; its keyword initial likewise
-            // falls back to the runtime's default (`BoxSizing::ContentBox`) when
-            // absent — byte-for-byte identical to today's behaviour.
-            | PropertyId::BoxSizing
-            // `position` initial is `static`; its keyword initial likewise needs
-            // the interner, so an absent value falls back to the runtime's default
-            // (`Position::Static`) — byte-for-byte identical to today.
-            | PropertyId::Position
-            | PropertyId::FlexDirection
-            // `flex-wrap` initial is `nowrap`; its keyword initial needs the
-            // interner, so an absent value falls back to the layout default
-            // (`FlexWrap::NoWrap`) — byte-for-byte identical to today.
-            | PropertyId::FlexWrap
-            | PropertyId::JustifyContent
-            | PropertyId::AlignContent
-            | PropertyId::AlignItems
-            // The grid alignment keyword initials (`justify-items` / `align-items`
-            // stretch, `justify-self` / `align-self` auto) likewise need the
-            // interner, so an absent value falls back to the layout defaults
-            // (`Stretch` / `Auto`) — byte-for-byte identical to today.
-            | PropertyId::JustifyItems
-            | PropertyId::AlignSelf
-            | PropertyId::JustifySelf
-            // `direction` (`ltr`) / `writing-mode` (`horizontal-tb`) / `font-style`
-            // (`normal`) keyword initials are likewise deferred, and `font-weight`'s
-            // initial (`normal` = 400) is left unresolved so an absent value falls
-            // back to the shaping default (also 400) — byte-for-byte identical to
-            // today's behaviour. `writing-mode`'s absent value maps to
-            // `horizontal-tb` in `resolves_writing_mode` / the layout bridge.
-            | PropertyId::Direction
-            | PropertyId::WritingMode
-            | PropertyId::FontWeight
-            | PropertyId::FontStyle
-            // `grid-template-columns` / `grid-template-rows` initial is `none`
-            // (no explicit tracks). There is no `GridTracks` value for `none`, so
-            // an absent template is left unresolved and the runtime falls back to
-            // the default single implicit column (`GridLayout::new(1)`) — exactly
-            // the behaviour before authored templates were wired.
-            | PropertyId::GridTemplateColumns
-            | PropertyId::GridTemplateRows
-            // `grid-auto-flow` initial is `row`; its keyword initial likewise
-            // needs the interner, so an absent value falls back to the runtime's
-            // default (`GridAutoFlow::Row`) — byte-for-byte identical to today.
-            | PropertyId::GridAutoFlow
-            // `grid-auto-columns` / `grid-auto-rows` initial is `auto`. There is no
-            // no-interner `GridTracks` value for a single `auto` track, so an absent
-            // value is left unresolved and the runtime falls back to the default
-            // implicit-track sizing (`[Auto]`) — byte-for-byte identical to today.
-            | PropertyId::GridAutoColumns
-            | PropertyId::GridAutoRows
-            // `grid-column-start` / `-end` / `grid-row-start` / `-end` initial is
-            // `auto`. There is no `GridLine` value for `auto` (it is the enum's
-            // implicit default), so an absent edge is left unresolved and the
-            // runtime falls back to the all-`Auto` `GridPlacement` default — exactly
-            // the behaviour before authored line placement was wired.
-            | PropertyId::GridColumnStart
-            | PropertyId::GridColumnEnd
-            | PropertyId::GridRowStart
-            | PropertyId::GridRowEnd
-            // `grid-template-areas` initial is `none` (no named areas), and
-            // `grid-area`'s named form is absent by default. Neither has a
-            // no-interner initial value, so an absent value is left unresolved and
-            // the runtime falls back to no named-area placement — byte-for-byte
-            // identical to today's behaviour.
-            | PropertyId::GridTemplateAreas
-            | PropertyId::GridArea
-            // `text-align` initial is `start`; its keyword initial likewise needs
-            // the interner, so an absent value falls back to the runtime's default
-            // (`Start`) — byte-for-byte identical to today's behaviour.
-            | PropertyId::TextAlign
-            // `line-height` initial is the keyword `normal`, which cannot be
-            // expressed without the interner; left unresolved so an absent value
-            // falls back to the font's natural (metric) line height in the
-            // coordinator — byte-for-byte identical to pre-`line-height` behaviour.
-            | PropertyId::LineHeight
-            // `text-overflow` initial is `clip`; its keyword initial likewise needs
-            // the interner, so an absent value falls back to the runtime's default
-            // (`Clip`) — byte-for-byte identical to today's behaviour.
-            | PropertyId::TextOverflow
-            // `letter-spacing` / `word-spacing` initial is `normal` (≡ 0). An
-            // absent value is left unresolved so the runtime's spacing helpers
-            // default to `0.0` — no tracking / no word spacing, byte-for-byte
-            // identical to before these properties existed (CSS Text 3 §8.1/§8.2).
-            | PropertyId::LetterSpacing
-            | PropertyId::WordSpacing
-            // `text-transform` initial is `none`; its keyword initial needs the
-            // interner, so an absent value falls back to the runtime's default
-            // (`TextTransform::None`, the string shaped unchanged) — byte-for-byte
-            // identical to before it existed (CSS Text 3 §2.1).
-            | PropertyId::TextTransform
-            // `white-space` initial is `normal`; its keyword initial needs the
-            // interner, so an absent value falls back to the runtime's default
-            // (`WhiteSpace::Normal`) — byte-for-byte identical to before it existed
-            // (CSS Text 3 §3). `tab-size` initial is `8`, left unresolved so an
-            // absent value falls back to the runtime's default tab stop (§4.3).
-            | PropertyId::WhiteSpace
-            | PropertyId::TabSize
-            // `overflow-wrap` / `word-break` initial is `normal`; their keyword
-            // initials need the interner, so an absent value falls back to the
-            // runtime's default (`OverflowWrap::Normal` / `WordBreak::Normal`) —
-            // byte-for-byte identical to before they existed (CSS Text 3 §5.2).
-            | PropertyId::OverflowWrap
-            | PropertyId::WordBreak
-            // `overflow` initial is `visible` (no clip); its keyword initial
-            // likewise needs the interner, so an absent value falls back to the
-            // coordinator's default (no added clip) — byte-for-byte identical.
-            | PropertyId::Overflow
-            // `content` is never a real element's computed value (it decorates a
-            // generated pseudo-element box only), so it has no element initial.
-            | PropertyId::Content => None,
-        }
+        initial_value_of(property)
     }
 
-    /// Reads a node's computed `font-size` in logical pixels.
-    ///
-    /// Every style [`resolve`](Self::resolve) produces carries an **absolute**
-    /// `font-size` (the resolver folds it before anything else), so this never
-    /// falls back for a resolved style. The [`INITIAL_FONT_SIZE`] default covers
-    /// only a hand-built [`ComputedStyle`] that never went through the resolver.
+    #[doc = include_str!("style_resolver.doc/font_size_of.md")]
     #[must_use]
     pub fn font_size_of(style: &ComputedStyle) -> f32 {
         style
@@ -681,17 +47,7 @@ impl StyleResolver {
             .map_or(INITIAL_FONT_SIZE, |px| px.0)
     }
 
-    /// Computes the node's [`ComputedStyle`] from its cascaded declarations, its
-    /// cascaded custom properties, and its parent's computed style (§4.14).
-    ///
-    /// `parent` is [`None`] for the root; every inherited property then falls
-    /// back to its initial value. The returned style stores the node's effective
-    /// (inheritable) custom properties for its descendants.
-    ///
-    /// `ctx` supplies the document-wide `rem` / viewport bases; the node's own
-    /// `font-size` supplies `em`. Every `<length>` on the returned style is
-    /// absolute, except a `%` (whose containing block layout has not produced), an
-    /// `auto`, and a `ch` (see the module docs).
+    #[doc = include_str!("style_resolver.doc/resolve.md")]
     #[must_use]
     pub fn resolve(
         self,
@@ -705,15 +61,7 @@ impl StyleResolver {
         // Step 1: effective custom properties = parent's (inherited), overridden
         // by this node's cascaded custom properties. Resolved before any computed
         // value (§4.14).
-        let mut effective: HashMap<InternedSymbol, PropertyValue> = HashMap::new();
-        if let Some(parent) = parent {
-            for (name, value) in parent.custom_properties() {
-                effective.insert(*name, value.clone());
-            }
-        }
-        for (name, value) in custom {
-            effective.insert(*name, value.clone());
-        }
+        let effective = effective_custom_properties(custom, parent);
         for (name, value) in &effective {
             style.set_custom_property(*name, value.clone());
         }
@@ -722,14 +70,14 @@ impl StyleResolver {
         // a physical one *through* the computed direction (spec §4.13), so it has
         // to be known before any box-model property is resolved — resolving it as
         // part of the loop below would make the answer depend on iteration order.
-        let rtl = Self::resolves_rtl(cascaded, parent);
+        let rtl = resolves_rtl(cascaded, parent);
 
         // Step 1a′: `writing-mode`, for the same reason as `direction` — it is the
         // second input the logical→physical box-model mapping consults (the block
         // axis rotates around it, css-writing-modes-4 §6.2), so it must be known
         // before any box-model property is resolved. It inherits, and defaults to
         // `horizontal-tb`, under which every mapping is byte-for-byte unchanged.
-        let wm = Self::resolves_writing_mode(cascaded, parent);
+        let wm = resolves_writing_mode(cascaded, parent);
 
         // Step 1b: the face-selecting `font-*` properties, so the `ch` measurement
         // in step 1d has a face to select. None of them can carry a `<length>` (a
@@ -821,13 +169,7 @@ impl StyleResolver {
         style
     }
 
-    /// Resolves this node's `font-size` to absolute logical pixels (§4.14).
-    ///
-    /// The cascaded value goes through the same substitution / CSS-wide-keyword /
-    /// inheritance path as every other property, and the resulting [`Length`] is
-    /// then folded against the *parent's* size — the base `em` and `%` mean on
-    /// this one property. An inherited value is already absolute (the parent's
-    /// pass folded it), so it survives that fold unchanged.
+    #[doc = include_str!("style_resolver.doc/resolve_font_size.md")]
     fn resolve_font_size(
         self,
         cascaded: &ResolvedDeclarations,
@@ -889,18 +231,7 @@ impl StyleResolver {
         )
     }
 
-    /// The style a [`ChMetrics`] port should measure to get the **parent's**
-    /// metrics, per CSS Values 4 §6.1.2.
-    ///
-    /// For a node with a parent this is simply the parent's computed style, which
-    /// already carries its resolved `font-size` and face.
-    ///
-    /// For the **root**, §6.1.2 says a font-relative unit on a `font-*` property
-    /// resolves *"against the computed metrics corresponding to the initial values
-    /// of the font and line-height properties, if the element has no parent"* — so
-    /// the answer is not "unmeasurable", it is "measure the initial font". That is
-    /// a style carrying the initial `font-size` and no `font-family`, which is
-    /// exactly what an implementor reads as the default face.
+    #[doc = include_str!("style_resolver.doc/font_context_of.md")]
     fn font_context_of(parent: Option<&ComputedStyle>) -> ComputedStyle {
         parent.cloned().unwrap_or_else(|| {
             let mut initial = ComputedStyle::new();
@@ -912,108 +243,7 @@ impl StyleResolver {
         })
     }
 
-    /// Whether this element's computed `direction` is `rtl`.
-    ///
-    /// Cascaded value first, then the parent's computed one (`direction` inherits),
-    /// then the CSS initial `ltr`. This is the same resolution the `Direction`
-    /// property gets in the loop; it is done early because the logical-property
-    /// mapping below depends on it.
-    fn resolves_rtl(cascaded: &ResolvedDeclarations, parent: Option<&ComputedStyle>) -> bool {
-        if let Some(PropertyValue::Keyword(symbol)) = cascaded.get(PropertyId::Direction) {
-            return *symbol == layout_keyword::DIRECTION_RTL;
-        }
-        parent
-            .and_then(|style| style.get(PropertyId::Direction))
-            .and_then(|value| match value.value() {
-                PropertyValue::Keyword(symbol) => Some(*symbol),
-                _ => None,
-            })
-            .is_some_and(|symbol| symbol == layout_keyword::DIRECTION_RTL)
-    }
-
-    /// This element's computed `writing-mode`.
-    ///
-    /// Cascaded value first, then the parent's computed one (`writing-mode`
-    /// inherits — css-writing-modes-4 §3), then the CSS initial `horizontal-tb`.
-    /// Resolved early, next to [`resolves_rtl`](Self::resolves_rtl), because the
-    /// logical→physical box-model mapping ([`PropertyId::physical_under`]) depends
-    /// on it. An absent value is `horizontal-tb`, under which every mapping is
-    /// byte-for-byte the pre-`writing-mode` behaviour.
-    fn resolves_writing_mode(
-        cascaded: &ResolvedDeclarations,
-        parent: Option<&ComputedStyle>,
-    ) -> WritingMode {
-        let symbol =
-            if let Some(PropertyValue::Keyword(symbol)) = cascaded.get(PropertyId::WritingMode) {
-                Some(*symbol)
-            } else {
-                parent
-                    .and_then(|style| style.get(PropertyId::WritingMode))
-                    .and_then(|value| match value.value() {
-                        PropertyValue::Keyword(symbol) => Some(*symbol),
-                        _ => None,
-                    })
-            };
-        match symbol {
-            Some(symbol) if symbol == layout_keyword::WRITING_MODE_VERTICAL_RL => {
-                WritingMode::VerticalRl
-            }
-            Some(symbol) if symbol == layout_keyword::WRITING_MODE_VERTICAL_LR => {
-                WritingMode::VerticalLr
-            }
-            _ => WritingMode::HorizontalTb,
-        }
-    }
-
-    /// The cascaded value for `property`, honouring any **logical** declaration
-    /// that maps onto it (spec §4.13).
-    ///
-    /// A logical property and its physical counterpart are separate `PropertyId`s
-    /// that cascade independently, but CSS decides between them by ordinary cascade
-    /// order. Both winners are therefore compared here, by the priority the cascade
-    /// recorded — the later/stronger declaration wins, exactly as it would between
-    /// two `margin-left` rules.
-    ///
-    /// Ties and missing priorities prefer the physical declaration: a value with no
-    /// recorded priority did not come from a cascade (a test, a runtime override),
-    /// and "the physical one" is the only honest answer when nothing states which
-    /// was declared later.
-    fn cascaded_for<'a>(
-        cascaded: &'a ResolvedDeclarations,
-        property: PropertyId,
-        rtl: bool,
-        wm: WritingMode,
-    ) -> Option<&'a PropertyValue> {
-        let physical = cascaded.get(property);
-        // Only a physical box-model property can have a logical counterpart, so
-        // this scan is skipped entirely for the other ~80 properties.
-        let logical = PropertyId::LOGICAL
-            .iter()
-            .copied()
-            .filter(|candidate| candidate.physical_under(rtl, wm) == Some(property))
-            .filter_map(|candidate| Some((candidate, cascaded.get(candidate)?)))
-            .max_by_key(|(candidate, _)| cascaded.priority_of(*candidate));
-        let Some((candidate, logical_value)) = logical else {
-            return physical;
-        };
-        if physical.is_none() {
-            return Some(logical_value);
-        }
-        match (
-            cascaded.priority_of(candidate),
-            cascaded.priority_of(property),
-        ) {
-            (Some(logical_priority), Some(physical_priority))
-                if logical_priority > physical_priority =>
-            {
-                Some(logical_value)
-            }
-            _ => physical,
-        }
-    }
-
-    /// Resolves one property to a computed value, or [`None`] if it is left
-    /// unresolved (deferred keyword initial).
+    #[doc = include_str!("style_resolver.doc/resolve_property.md")]
     fn resolve_property(
         self,
         property: PropertyId,
@@ -1023,19 +253,17 @@ impl StyleResolver {
         rtl: bool,
         wm: WritingMode,
     ) -> Option<ComputedValue> {
-        match Self::cascaded_for(cascaded, property, rtl, wm) {
+        match cascaded_for(cascaded, property, rtl, wm) {
             Some(raw) => {
                 // Step 2: substitute var() (unresolved -> Unset).
-                let value = Self::substitute(raw, custom);
+                let value = substitute(raw, custom);
                 // A relative `font-weight` (`bolder` / `lighter`) resolves here,
                 // at the computed-value step, against the parent's already-
                 // computed weight (§4.14) — never as a fixed number.
                 if property == PropertyId::FontWeight
-                    && let PropertyValue::Keyword(symbol) = value
-                    && let Some(bolder) = relative_weight_is_bolder(symbol)
+                    && let Some(weight) = resolve_relative_weight(&value, parent)
                 {
-                    let resolved = resolve_relative_font_weight(parent_font_weight(parent), bolder);
-                    return Some(ComputedValue::number(resolved));
+                    return Some(ComputedValue::number(weight));
                 }
                 self.resolve_specified(property, value, parent)
             }
@@ -1050,8 +278,7 @@ impl StyleResolver {
         }
     }
 
-    /// Resolves a substituted specified value (never a [`PropertyValue::CustomRef`])
-    /// against the CSS-wide keywords.
+    #[doc = include_str!("style_resolver.doc/resolve_specified.md")]
     fn resolve_specified(
         self,
         property: PropertyId,
@@ -1073,11 +300,7 @@ impl StyleResolver {
         }
     }
 
-    /// Returns the inherited computed value for `property`: the parent's computed
-    /// value, or the property's initial value when there is no parent.
-    ///
-    /// When a parent exists but did not compute `property` (a deferred keyword
-    /// initial), the result is [`None`] and the property is left unresolved.
+    #[doc = include_str!("style_resolver.doc/inherited_from.md")]
     fn inherited_from(
         self,
         property: PropertyId,
@@ -1088,86 +311,12 @@ impl StyleResolver {
             None => self.initial_value(property),
         }
     }
-
-    /// Substitutes `var()` references, following chains with a visited guard so a
-    /// cycle terminates.
-    ///
-    /// Returns the referenced concrete value, or [`PropertyValue::Unset`] when the
-    /// reference is unresolvable — the name is missing, or a cycle was detected.
-    /// A non-reference value is returned unchanged.
-    fn substitute(
-        value: &PropertyValue,
-        custom: &HashMap<InternedSymbol, PropertyValue>,
-    ) -> PropertyValue {
-        let mut current = value.clone();
-        let mut visited: HashSet<InternedSymbol> = HashSet::new();
-        loop {
-            match current {
-                PropertyValue::CustomRef(name) => {
-                    if !visited.insert(name) {
-                        // Cycle: treat as unset.
-                        return PropertyValue::Unset;
-                    }
-                    match custom.get(&name) {
-                        Some(next) => current = next.clone(),
-                        // Missing custom property: treat as unset.
-                        None => return PropertyValue::Unset,
-                    }
-                }
-                other => return other,
-            }
-        }
-    }
-}
-
-/// Classifies a reserved relative-`font-weight` handle: `Some(true)` for
-/// `bolder`, `Some(false)` for `lighter`, and [`None`] for any other symbol.
-fn relative_weight_is_bolder(symbol: InternedSymbol) -> Option<bool> {
-    if symbol == layout_keyword::FONT_WEIGHT_BOLDER {
-        Some(true)
-    } else if symbol == layout_keyword::FONT_WEIGHT_LIGHTER {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Reads the parent's computed numeric `font-weight`, defaulting to
-/// [`NORMAL_FONT_WEIGHT`] (400) when there is no parent or the parent did not
-/// compute a numeric weight (the root's implicit parent is `normal`).
-fn parent_font_weight(parent: Option<&ComputedStyle>) -> f32 {
-    parent
-        .and_then(|p| p.get(PropertyId::FontWeight))
-        .and_then(|value| match value.value() {
-            PropertyValue::Number(weight) => Some(*weight),
-            _ => None,
-        })
-        .unwrap_or(NORMAL_FONT_WEIGHT)
-}
-
-/// Resolves a relative `font-weight` (`bolder` / `lighter`) against the parent's
-/// computed weight, per the CSS fixed table (§4.14).
-///
-/// The parent weight is rounded to the nearest hundred and clamped to the
-/// `100..=900` buckets; each bucket maps to a fixed `(bolder, lighter)` pair:
-/// 100/200/300 → (400, 100), 400/500 → (700, 100), 600/700 → (900, 400),
-/// 800/900 → (900, 700).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn resolve_relative_font_weight(parent_weight: f32, bolder: bool) -> f32 {
-    let bucket = (parent_weight / 100.0).round().clamp(1.0, 9.0) as u16;
-    let (heavier, lighter) = match bucket {
-        1..=3 => (400u16, 100u16),
-        4 | 5 => (700, 100),
-        6 | 7 => (900, 400),
-        // 8..=9 (the clamp guarantees the bucket is within `1..=9`).
-        _ => (900, 700),
-    };
-    f32::from(if bolder { heavier } else { lighter })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::property::{StyleColor, layout_keyword};
 
     /// Root font-size 16 (the initial), viewport 800x600: the bases a test that
     /// is not about relative units resolves against.
@@ -1367,27 +516,6 @@ mod tests {
             Some(PropertyValue::Number(n)) => Some(*n),
             _ => None,
         }
-    }
-
-    #[test]
-    fn relative_font_weight_table() {
-        // The nine CSS buckets, keyed on the parent's computed weight.
-        assert_eq!(resolve_relative_font_weight(100.0, true), 400.0);
-        assert_eq!(resolve_relative_font_weight(100.0, false), 100.0);
-        assert_eq!(resolve_relative_font_weight(400.0, true), 700.0);
-        assert_eq!(resolve_relative_font_weight(400.0, false), 100.0);
-        assert_eq!(resolve_relative_font_weight(500.0, true), 700.0);
-        assert_eq!(resolve_relative_font_weight(600.0, true), 900.0);
-        assert_eq!(resolve_relative_font_weight(600.0, false), 400.0);
-        assert_eq!(resolve_relative_font_weight(700.0, true), 900.0);
-        assert_eq!(resolve_relative_font_weight(700.0, false), 400.0);
-        assert_eq!(resolve_relative_font_weight(800.0, false), 700.0);
-        assert_eq!(resolve_relative_font_weight(900.0, false), 700.0);
-        // In-between values round to the nearest hundred bucket.
-        assert_eq!(resolve_relative_font_weight(430.0, true), 700.0);
-        // Out-of-range weights clamp into `100..=900`.
-        assert_eq!(resolve_relative_font_weight(20.0, true), 400.0);
-        assert_eq!(resolve_relative_font_weight(1500.0, false), 700.0);
     }
 
     #[test]
@@ -1613,264 +741,6 @@ mod tests {
                 .and_then(ComputedValue::as_length),
             Some(Length::px(0.0))
         );
-    }
-
-    /// Every modelled [`PropertyId`] must be in the computed set, or an authored
-    /// value for it would be dropped at the computed-value step (the bug this
-    /// closes). The `match` is exhaustive, so a new upstream variant fails to
-    /// compile here until it is classified; the assertion then fails until it is
-    /// also added to `COMPUTED_PROPERTIES`.
-    #[test]
-    fn computed_properties_cover_every_property_id() {
-        // Exhaustive by construction: adding a `PropertyId` variant upstream
-        // breaks this `match` until the new variant is listed below.
-        const fn assert_known(id: PropertyId) {
-            match id {
-                PropertyId::Color
-                | PropertyId::BackgroundColor
-                | PropertyId::BackgroundImage
-                | PropertyId::BackgroundSize
-                | PropertyId::BackgroundPosition
-                | PropertyId::BackgroundRepeat
-                | PropertyId::ObjectFit
-                | PropertyId::ObjectPosition
-                | PropertyId::Opacity
-                | PropertyId::Width
-                | PropertyId::Height
-                | PropertyId::BoxSizing
-                | PropertyId::Display
-                | PropertyId::Visibility
-                | PropertyId::Position
-                | PropertyId::Top
-                | PropertyId::Right
-                | PropertyId::Bottom
-                | PropertyId::Left
-                | PropertyId::ZIndex
-                | PropertyId::MarginTop
-                | PropertyId::MarginRight
-                | PropertyId::MarginBottom
-                | PropertyId::MarginLeft
-                | PropertyId::PaddingTop
-                | PropertyId::PaddingRight
-                | PropertyId::PaddingBottom
-                | PropertyId::PaddingLeft
-                | PropertyId::BorderTopWidth
-                | PropertyId::BorderRightWidth
-                | PropertyId::BorderBottomWidth
-                | PropertyId::BorderLeftWidth
-                | PropertyId::BorderTopStyle
-                | PropertyId::BorderRightStyle
-                | PropertyId::BorderBottomStyle
-                | PropertyId::BorderLeftStyle
-                | PropertyId::BorderTopColor
-                | PropertyId::BorderRightColor
-                | PropertyId::BorderBottomColor
-                | PropertyId::BorderLeftColor
-                | PropertyId::BorderTopLeftRadius
-                | PropertyId::BorderTopRightRadius
-                | PropertyId::BorderBottomRightRadius
-                | PropertyId::BorderBottomLeftRadius
-                | PropertyId::OutlineWidth
-                | PropertyId::OutlineStyle
-                | PropertyId::OutlineColor
-                | PropertyId::OutlineOffset
-                | PropertyId::BoxShadow
-                | PropertyId::Filter
-                | PropertyId::BackdropFilter
-                | PropertyId::Transform
-                | PropertyId::TransformOrigin
-                | PropertyId::MixBlendMode
-                | PropertyId::MinWidth
-                | PropertyId::MinHeight
-                | PropertyId::MaxWidth
-                | PropertyId::MaxHeight
-                | PropertyId::Gap
-                | PropertyId::FlexBasis
-                | PropertyId::FlexGrow
-                | PropertyId::FlexShrink
-                | PropertyId::FlexDirection
-                | PropertyId::FlexWrap
-                | PropertyId::JustifyContent
-                | PropertyId::AlignContent
-                | PropertyId::AlignItems
-                | PropertyId::JustifyItems
-                | PropertyId::AlignSelf
-                | PropertyId::JustifySelf
-                | PropertyId::GridTemplateColumns
-                | PropertyId::GridTemplateRows
-                | PropertyId::GridTemplateAreas
-                | PropertyId::GridAutoFlow
-                | PropertyId::GridAutoColumns
-                | PropertyId::GridAutoRows
-                | PropertyId::GridColumnStart
-                | PropertyId::GridColumnEnd
-                | PropertyId::GridRowStart
-                | PropertyId::GridRowEnd
-                | PropertyId::GridArea
-                | PropertyId::FontSize
-                | PropertyId::FontFamily
-                | PropertyId::Direction
-                | PropertyId::WritingMode
-                | PropertyId::FontWeight
-                | PropertyId::FontStyle
-                | PropertyId::LineHeight
-                | PropertyId::TextAlign
-                | PropertyId::TextOverflow
-                | PropertyId::LetterSpacing
-                | PropertyId::WordSpacing
-                | PropertyId::TextTransform
-                | PropertyId::WhiteSpace
-                | PropertyId::OverflowWrap
-                | PropertyId::WordBreak
-                | PropertyId::TabSize
-                | PropertyId::Overflow
-                // Logical properties are classified but deliberately NOT computed:
-                // each resolves into its physical counterpart via
-                // `cascaded_for`, so the computed style holds `margin-left` and
-                // every downstream phase reads that one place. The assertion below
-                // exempts them for exactly this reason.
-                | PropertyId::MarginInlineStart
-                | PropertyId::MarginInlineEnd
-                | PropertyId::MarginBlockStart
-                | PropertyId::MarginBlockEnd
-                | PropertyId::PaddingInlineStart
-                | PropertyId::PaddingInlineEnd
-                | PropertyId::PaddingBlockStart
-                | PropertyId::PaddingBlockEnd
-                | PropertyId::InsetInlineStart
-                | PropertyId::InsetInlineEnd
-                | PropertyId::InsetBlockStart
-                | PropertyId::InsetBlockEnd
-                | PropertyId::BorderInlineStartWidth
-                | PropertyId::BorderInlineEndWidth
-                | PropertyId::BorderBlockStartWidth
-                | PropertyId::BorderBlockEndWidth
-                | PropertyId::BorderInlineStartStyle
-                | PropertyId::BorderInlineEndStyle
-                | PropertyId::BorderBlockStartStyle
-                | PropertyId::BorderBlockEndStyle
-                // `content` is generated-content-only: like the logical properties
-                // it is deliberately NOT a computed property of a real box (it
-                // decorates a `::before`/`::after` pseudo-element), so it is
-                // classified here but excluded from `COMPUTED_PROPERTIES`.
-                | PropertyId::Content => {}
-            }
-        }
-        let all = [
-            PropertyId::Color,
-            PropertyId::BackgroundColor,
-            PropertyId::BackgroundImage,
-            PropertyId::BackgroundSize,
-            PropertyId::BackgroundPosition,
-            PropertyId::BackgroundRepeat,
-            PropertyId::ObjectFit,
-            PropertyId::ObjectPosition,
-            PropertyId::Opacity,
-            PropertyId::Width,
-            PropertyId::Height,
-            PropertyId::BoxSizing,
-            PropertyId::Display,
-            PropertyId::Visibility,
-            PropertyId::Position,
-            PropertyId::Top,
-            PropertyId::Right,
-            PropertyId::Bottom,
-            PropertyId::Left,
-            PropertyId::ZIndex,
-            PropertyId::MarginTop,
-            PropertyId::MarginRight,
-            PropertyId::MarginBottom,
-            PropertyId::MarginLeft,
-            PropertyId::PaddingTop,
-            PropertyId::PaddingRight,
-            PropertyId::PaddingBottom,
-            PropertyId::PaddingLeft,
-            PropertyId::BorderTopWidth,
-            PropertyId::BorderRightWidth,
-            PropertyId::BorderBottomWidth,
-            PropertyId::BorderLeftWidth,
-            PropertyId::BorderTopStyle,
-            PropertyId::BorderRightStyle,
-            PropertyId::BorderBottomStyle,
-            PropertyId::BorderLeftStyle,
-            PropertyId::BorderTopColor,
-            PropertyId::BorderRightColor,
-            PropertyId::BorderBottomColor,
-            PropertyId::BorderLeftColor,
-            PropertyId::BorderTopLeftRadius,
-            PropertyId::BorderTopRightRadius,
-            PropertyId::BorderBottomRightRadius,
-            PropertyId::BorderBottomLeftRadius,
-            PropertyId::OutlineWidth,
-            PropertyId::OutlineStyle,
-            PropertyId::OutlineColor,
-            PropertyId::OutlineOffset,
-            PropertyId::BoxShadow,
-            PropertyId::Filter,
-            PropertyId::BackdropFilter,
-            PropertyId::Transform,
-            PropertyId::TransformOrigin,
-            PropertyId::MixBlendMode,
-            PropertyId::MinWidth,
-            PropertyId::MinHeight,
-            PropertyId::MaxWidth,
-            PropertyId::MaxHeight,
-            PropertyId::Gap,
-            PropertyId::FlexBasis,
-            PropertyId::FlexGrow,
-            PropertyId::FlexShrink,
-            PropertyId::FlexDirection,
-            PropertyId::FlexWrap,
-            PropertyId::JustifyContent,
-            PropertyId::AlignContent,
-            PropertyId::AlignItems,
-            PropertyId::JustifyItems,
-            PropertyId::AlignSelf,
-            PropertyId::JustifySelf,
-            PropertyId::GridTemplateColumns,
-            PropertyId::GridTemplateRows,
-            PropertyId::GridTemplateAreas,
-            PropertyId::GridAutoFlow,
-            PropertyId::GridAutoColumns,
-            PropertyId::GridAutoRows,
-            PropertyId::GridColumnStart,
-            PropertyId::GridColumnEnd,
-            PropertyId::GridRowStart,
-            PropertyId::GridRowEnd,
-            PropertyId::GridArea,
-            PropertyId::FontSize,
-            PropertyId::FontFamily,
-            PropertyId::Direction,
-            PropertyId::WritingMode,
-            PropertyId::FontWeight,
-            PropertyId::FontStyle,
-            PropertyId::LineHeight,
-            PropertyId::TextAlign,
-            PropertyId::TextOverflow,
-            PropertyId::LetterSpacing,
-            PropertyId::WordSpacing,
-            PropertyId::TextTransform,
-            PropertyId::WhiteSpace,
-            PropertyId::OverflowWrap,
-            PropertyId::WordBreak,
-            PropertyId::TabSize,
-            PropertyId::Overflow,
-        ];
-        for id in all {
-            assert_known(id);
-            assert!(
-                COMPUTED_PROPERTIES.contains(&id),
-                "{} is modelled but not computed — authored values would be dropped",
-                id.name()
-            );
-            assert!(
-                !id.is_logical(),
-                "{} is logical: it must resolve INTO a physical property, not be \
-                 computed alongside one — two sources of truth for one box edge",
-                id.name()
-            );
-        }
-        assert_eq!(COMPUTED_PROPERTIES.len(), all.len());
     }
 
     /// An authored typography value (previously dropped because the property was

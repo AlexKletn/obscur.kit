@@ -1,4 +1,4 @@
-//! Event module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod dispatch_result;
 pub use dispatch_result::DispatchResult;
 mod event_dispatcher;

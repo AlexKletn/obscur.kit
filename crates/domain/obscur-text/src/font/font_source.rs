@@ -1,69 +1,56 @@
-//! Where a font face's bytes come from (spec §5.18).
+#![doc = include_str!("font_source.doc/_module.md")]
 
 use std::sync::Arc;
 
-/// Where a [`FontFace`](crate::font::FontFace)'s bytes come from: a
-/// system-installed face, a bundled fallback face, or in-memory data (spec
-/// §5.18).
-///
-/// The kit itself never reads system fonts: the platform
-/// [`FontProvider`](crate::font::FontProvider) resolves [`FontSource::System`]
-/// and [`FontSource::Bundled`] against the OS or a bundled fallback set, while
-/// [`FontSource::Memory`] carries the font bytes directly for WASM and isolated
-/// environments. Only `Memory` exposes bytes here.
+#[doc = include_str!("font_source.doc/FontSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontSource {
-    /// A system-installed face, referenced by its PostScript or family name and
-    /// resolved by the platform provider.
+    #[doc = include_str!("font_source.doc/System.md")]
     System(Box<str>),
-    /// A key into the bundled fallback set used for WASM and isolated
-    /// environments.
+    #[doc = include_str!("font_source.doc/Bundled.md")]
     Bundled(Box<str>),
-    /// In-memory font data, shared cheaply via [`Arc`] and compared by content.
+    #[doc = include_str!("font_source.doc/Memory.md")]
     Memory(Arc<[u8]>),
 }
 
 impl FontSource {
-    /// Creates a [`FontSource::System`] referencing the face named `name`.
+    #[doc = include_str!("font_source.doc/system.md")]
     #[must_use]
     pub fn system(name: impl Into<Box<str>>) -> Self {
         Self::System(name.into())
     }
 
-    /// Creates a [`FontSource::Bundled`] keyed by `key` in the bundled fallback
-    /// set.
+    #[doc = include_str!("font_source.doc/bundled.md")]
     #[must_use]
     pub fn bundled(key: impl Into<Box<str>>) -> Self {
         Self::Bundled(key.into())
     }
 
-    /// Creates a [`FontSource::Memory`] holding in-memory font `data`.
+    #[doc = include_str!("font_source.doc/memory.md")]
     #[must_use]
     pub fn memory(data: impl Into<Arc<[u8]>>) -> Self {
         Self::Memory(data.into())
     }
 
-    /// Returns whether this is a [`FontSource::System`] source.
+    #[doc = include_str!("font_source.doc/is_system.md")]
     #[must_use]
     pub const fn is_system(&self) -> bool {
         matches!(self, Self::System(_))
     }
 
-    /// Returns whether this is a [`FontSource::Bundled`] source.
+    #[doc = include_str!("font_source.doc/is_bundled.md")]
     #[must_use]
     pub const fn is_bundled(&self) -> bool {
         matches!(self, Self::Bundled(_))
     }
 
-    /// Returns whether this is a [`FontSource::Memory`] source.
+    #[doc = include_str!("font_source.doc/is_memory.md")]
     #[must_use]
     pub const fn is_memory(&self) -> bool {
         matches!(self, Self::Memory(_))
     }
 
-    /// Returns the in-memory font bytes for a [`FontSource::Memory`] source, or
-    /// `None` for a `System` or `Bundled` source whose bytes the provider must
-    /// resolve (spec §5.18).
+    #[doc = include_str!("font_source.doc/data.md")]
     #[must_use]
     pub fn data(&self) -> Option<&[u8]> {
         match self {

@@ -1,5 +1,4 @@
-//! The [`FontRegistry`] adapter implementing [`FontResolver`] with real,
-//! `cmap`-coverage-driven font fallback (spec §5.10).
+#![doc = include_str!("registry.doc/_module.md")]
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -14,53 +13,20 @@ use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
 use crate::face_metrics::FaceMetrics;
 
-/// A real [`FontResolver`] backed by a set of registered fonts and their true
-/// `cmap` coverage (spec §5.10 font fallback).
-///
-/// Fonts are added with [`register`](Self::register), which parses each face
-/// once (via [`read_fonts`]) to read its `units_per_em` and vertical metrics and
-/// hands back a [`FontId`] assigned in registration order (`0, 1, 2, …`). The id
-/// is deterministic and stable, so a later renderer can look the same face back
-/// up by id — and so can a shaper, through the
-/// [`face_metrics`](Self::face_metrics) table, which is how a line box gets sized
-/// from the face's own metrics instead of idealized ratios.
-///
-/// [`resolve`](FontResolver::resolve) walks the request's fallback chain in
-/// order (primary first). For each family it consults every registered font
-/// whose family name matches, and returns the **first** one whose `cmap`
-/// actually covers the run — i.e. every non-whitespace character maps to a
-/// non-zero glyph id. When nothing in the chain covers the run it returns
-/// `None`, leaving the orchestrator to fall back to its default face.
-///
-/// Coverage is checked by re-parsing the font's `cmap` per `resolve` call
-/// (cheap: resolution happens once per itemized run, not per glyph, and an
-/// upstream cache elides repeats), so the registry holds only the raw bytes and
-/// pre-read metrics — no borrowed, self-referential font handle.
+#[doc = include_str!("registry.doc/FontRegistry.md")]
 #[derive(Clone, Default)]
 pub struct FontRegistry {
     fonts: Vec<RegisteredFont>,
-    /// Faces pulled in from the host on demand for characters nothing
-    /// registered covers — see [`with_system_fallback`](Self::with_system_fallback).
-    ///
-    /// Kept apart from `fonts` so the registered chain's ids, order and search
-    /// stay exactly what they were: a discovered face is only ever consulted
-    /// after every authored family has already declined the run.
-    ///
-    /// **Shared across clones.** The registry is cloned to be handed to the
-    /// runtime, and a face discovered on the runtime's copy must be visible to
-    /// the copy a host drains for the renderer — otherwise the glyph resolves
-    /// but nothing rasterizes it.
+    #[doc = include_str!("registry.doc/discovered.md")]
     discovered: Rc<RefCell<Vec<RegisteredFont>>>,
-    /// Discovered faces the renderer has not been handed yet — drained by
-    /// [`take_undelivered_faces`](Self::take_undelivered_faces).
+    #[doc = include_str!("registry.doc/undelivered.md")]
     undelivered: UndeliveredFaces,
-    /// The host lookup, when one is wired.
+    #[doc = include_str!("registry.doc/fallback.md")]
     fallback: Option<Arc<dyn SystemFontFallback>>,
 }
 
 impl std::fmt::Debug for FontRegistry {
-    /// Reports whether a host fallback is attached, not what it is — a port is
-    /// opaque, and "is one attached?" is the question a missing-glyph bug asks.
+    #[doc = include_str!("registry.doc/fmt.md")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FontRegistry")
             .field("fonts", &self.fonts)
@@ -74,13 +40,10 @@ impl std::fmt::Debug for FontRegistry {
     }
 }
 
-/// Faces discovered at shape time and not yet handed to a renderer, as
-/// `(id, bytes)`. Shared across clones for the same reason `discovered` is.
+#[doc = include_str!("registry.doc/UndeliveredFaces.md")]
 type UndeliveredFaces = Rc<RefCell<Vec<(FontId, Arc<[u8]>)>>>;
 
-/// One registered font: its id, requested family/attributes, raw bytes, and the
-/// vertical metrics read once at registration time — `None` when the bytes carry
-/// no readable `head`/`hhea`.
+#[doc = include_str!("registry.doc/RegisteredFont.md")]
 #[derive(Debug, Clone)]
 struct RegisteredFont {
     id: FontId,
@@ -91,22 +54,13 @@ struct RegisteredFont {
 }
 
 impl FontRegistry {
-    /// Creates an empty registry; every [`resolve`](FontResolver::resolve)
-    /// returns `None` until a font is registered.
+    #[doc = include_str!("registry.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers a font (`bytes`) under `family`/`attributes` and returns the
-    /// [`FontId`] assigned to it — the next index in registration order (`0` for
-    /// the first font, `1` for the second, …).
-    ///
-    /// The bytes are parsed once to read the face's `units_per_em` and `hhea`
-    /// vertical metrics for the resolved [`FontFace`]. Bytes that do not parse as
-    /// a font are still registered (keeping id assignment deterministic) with
-    /// idealized default metrics; such a font simply never covers any run, and
-    /// [`face_metrics`](Self::face_metrics) reports it as having no real metrics.
+    #[doc = include_str!("registry.doc/register.md")]
     pub fn register(
         &mut self,
         family: FontFamily,
@@ -128,42 +82,20 @@ impl FontRegistry {
         id
     }
 
-    /// Attaches the host lookup consulted when **no** registered family covers a
-    /// run (spec §5.10).
-    ///
-    /// Without one, a character outside the registered faces' `cmap`s resolves
-    /// to nothing and is simply not drawn — a blank where a glyph should be.
-    /// With one, the first appearance of such a character costs one host lookup;
-    /// the face is then kept and answers instantly thereafter.
-    ///
-    /// Attach it **after** every `register` call: discovered faces take ids
-    /// above the registered ones, and a `register` afterwards would collide.
+    #[doc = include_str!("registry.doc/with_system_fallback.md")]
     #[must_use]
     pub fn with_system_fallback(mut self, fallback: Arc<dyn SystemFontFallback>) -> Self {
         self.fallback = Some(fallback);
         self
     }
 
-    /// Takes the discovered faces the renderer has not been given yet, as
-    /// `(id, bytes)`.
-    ///
-    /// A face found mid-frame exists only in this registry; the renderer
-    /// rasterizes from its own id→bytes table and would draw nothing for a glyph
-    /// whose face it has never seen. A host drains this after each frame and
-    /// hands what it finds to the renderer — the same id→bytes hand-off
-    /// `InstalledFonts` performs at startup, continued for the faces that arrive
-    /// later.
+    #[doc = include_str!("registry.doc/take_undelivered_faces.md")]
     #[must_use]
     pub fn take_undelivered_faces(&self) -> Vec<(FontId, Arc<[u8]>)> {
         std::mem::take(&mut self.undelivered.borrow_mut())
     }
 
-    /// Resolves `text` against the host lookup: finds the first character no
-    /// registered face covers, asks for a face that does, and keeps it.
-    ///
-    /// Returns the newly discovered font's index in `discovered`, or [`None`]
-    /// when there is no lookup, every character is already covered by something,
-    /// or the host has nothing to offer.
+    #[doc = include_str!("registry.doc/discover.md")]
     fn discover(&self, text: &str) -> Option<usize> {
         let fallback = self.fallback.as_ref()?;
         // The first character no face — registered or already discovered — can
@@ -201,22 +133,13 @@ impl FontRegistry {
         Some(discovered.len() - 1)
     }
 
-    /// The next free [`FontId`]: registered faces occupy `0..fonts.len()` and
-    /// discovered ones continue from there.
+    #[doc = include_str!("registry.doc/next_id.md")]
     fn next_id(&self) -> FontId {
         let used = self.fonts.len() + self.discovered.borrow().len();
         FontId::new(u32::try_from(used).unwrap_or(u32::MAX))
     }
 
-    /// Returns a snapshot of every registered face's real design metrics, keyed by
-    /// the [`FontId`] handed out at registration (spec §5.10).
-    ///
-    /// Hand it to
-    /// [`HarfrustShaper::with_faces`](crate::HarfrustShaper::with_faces): a shaper
-    /// is asked for line metrics by id alone, so without this table it cannot tell
-    /// which face an id names and answers every query with the idealized ratios.
-    /// A face registered *after* this call is not in the snapshot — take it once
-    /// the faces are registered.
+    #[doc = include_str!("registry.doc/face_metrics.md")]
     #[must_use]
     pub fn face_metrics(&self) -> FaceMetrics {
         FaceMetrics::new(
@@ -227,13 +150,13 @@ impl FontRegistry {
         )
     }
 
-    /// Returns the number of registered fonts.
+    #[doc = include_str!("registry.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.fonts.len()
     }
 
-    /// Returns whether no fonts are registered.
+    #[doc = include_str!("registry.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.fonts.is_empty()
@@ -296,14 +219,7 @@ impl FontResolver for FontRegistry {
 }
 
 impl RegisteredFont {
-    /// Returns whether this font's `cmap` covers every meaningful character of
-    /// `text` — i.e. each maps to a non-zero (non-`.notdef`) glyph id.
-    ///
-    /// ASCII whitespace and control characters are treated as always covered, so
-    /// a run like `"ab cd"` is not rejected for its space. Bytes that fail to
-    /// parse (or lack a `cmap`) cover nothing.
-    /// Whether this font's `cmap` maps `character` to a real (non-`.notdef`)
-    /// glyph.
+    #[doc = include_str!("registry.doc/covers_char.md")]
     fn covers_char(&self, character: char) -> bool {
         let Ok(font) = ReadFontRef::new(&self.bytes) else {
             return false;
@@ -328,23 +244,10 @@ impl RegisteredFont {
     }
 }
 
-/// The design metrics standing in for a face whose own tables are unreadable:
-/// the idealized 0.8 / 0.2 ratios expressed at 1000 units per em, so a scaled
-/// line height equals the font size exactly. A face resolved with these is
-/// reported as metric-less by [`FontRegistry::face_metrics`], so the shaper's
-/// fallback to the same ratios is observable rather than a silent pretence of
-/// real data.
+#[doc = include_str!("registry.doc/IDEALIZED_METRICS.md")]
 const IDEALIZED_METRICS: FontMetrics = FontMetrics::new(1000, 800.0, -200.0, 0.0);
 
-/// Reads a face's design metrics (units-per-em plus `hhea`
-/// ascender / descender / line-gap) in font units, or `None` when the bytes are
-/// not a loadable font, the `head`/`hhea` tables are missing, or `units_per_em`
-/// is zero. `descent` keeps the font's signed (negative-below-baseline)
-/// convention, matching [`FontMetrics`].
-///
-/// Only `hhea` is consulted: the OS/2 `USE_TYPO_METRICS` selection between
-/// `sTypoAscender`/`usWinAscent` is **not** implemented, so a face that asks for
-/// its typo metrics is still measured by its `hhea` ones.
+#[doc = include_str!("registry.doc/read_metrics.md")]
 fn read_metrics(bytes: &[u8]) -> Option<FontMetrics> {
     let font = ReadFontRef::new(bytes).ok()?;
     let units_per_em = font.head().ok()?.units_per_em();
@@ -360,21 +263,10 @@ fn read_metrics(bytes: &[u8]) -> Option<FontMetrics> {
     ))
 }
 
-/// The weight at and above which a request is treated as "bold-ish": a request
-/// this heavy matched to a clearly lighter face is faux-bolded (spec §5.18).
+#[doc = include_str!("registry.doc/BOLD_THRESHOLD.md")]
 const BOLD_THRESHOLD: u16 = 600;
 
-/// Decides whether a run resolved to `matched` (the nearest available face) must
-/// be synthesized to satisfy the `requested` attributes (spec §5.18).
-///
-/// * **Oblique** — the request wants a non-upright slant (italic or oblique) but
-///   the matched face is registered upright: shear the glyphs to fake the slant.
-/// * **Bold** — the request is bold-ish (weight ≥ [`BOLD_THRESHOLD`]) but the
-///   matched face is clearly lighter (weight < [`BOLD_THRESHOLD`]): thicken the
-///   glyphs to fake the weight.
-///
-/// When the matched face already carries the requested style neither flag is
-/// set, so a true italic/bold cut renders as itself.
+#[doc = include_str!("registry.doc/synthesis.md")]
 fn synthesis(requested: &FontAttributes, matched: &FontAttributes) -> (bool, bool) {
     let oblique = requested.slant != FontSlant::Normal && matched.slant == FontSlant::Normal;
     let bold =
@@ -382,8 +274,7 @@ fn synthesis(requested: &FontAttributes, matched: &FontAttributes) -> (bool, boo
     (oblique, bold)
 }
 
-/// Returns whether `ch` is ignored for coverage: ASCII whitespace or an ASCII
-/// control character, which need no glyph.
+#[doc = include_str!("registry.doc/is_ignorable.md")]
 const fn is_ignorable(ch: char) -> bool {
     ch.is_ascii_whitespace() || ch.is_ascii_control()
 }

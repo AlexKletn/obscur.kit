@@ -1,22 +1,22 @@
-//! Filter applied to a diagnostic subscription.
+#![doc = include_str!("diagnostic_filter.doc/_module.md")]
 
 use crate::diagnostic::{Diagnostic, DiagnosticSeverity};
 
-/// A minimum-severity filter for a diagnostic subscription (spec §7.8).
+#[doc = include_str!("diagnostic_filter.doc/DiagnosticFilter.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct DiagnosticFilter {
-    /// Lowest severity that passes the filter.
+    #[doc = include_str!("diagnostic_filter.doc/min_severity.md")]
     pub min_severity: DiagnosticSeverity,
 }
 
 impl DiagnosticFilter {
-    /// Creates a filter admitting diagnostics at or above `min_severity`.
+    #[doc = include_str!("diagnostic_filter.doc/min.md")]
     #[must_use]
     pub const fn min(min_severity: DiagnosticSeverity) -> Self {
         Self { min_severity }
     }
 
-    /// Returns whether `diagnostic` passes this filter.
+    #[doc = include_str!("diagnostic_filter.doc/admits.md")]
     #[must_use]
     pub fn admits(&self, diagnostic: &Diagnostic) -> bool {
         diagnostic.severity >= self.min_severity

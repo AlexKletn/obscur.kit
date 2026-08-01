@@ -1,31 +1,22 @@
-//! The [`LayoutObserver`] — watches a node's full layout box (spec §4.4).
-//!
-//! Geometry observers run *after* layout commit, are coalesced, and report the
-//! net change to their watched property; the callback dispatch and transaction
-//! scheduling are the runtime's job. This type models only the observer state
-//! and the pure change detection: given the newly-committed [`LayoutBox`], it
-//! reports whether the box changed since the last observation.
+#![doc = include_str!("layout_observer.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use crate::model::LayoutBox;
 
-/// A coalesced layout change reported by a [`LayoutObserver`] (spec §4.4).
-///
-/// `previous` is `None` on the first observation and `Some` thereafter;
-/// `current` is always the newly-committed box.
+#[doc = include_str!("layout_observer.doc/LayoutChange.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutChange {
-    /// The observed node.
+    #[doc = include_str!("layout_observer.doc/node.md")]
     pub node: NodeId,
-    /// The box before this change, or `None` on the first observation.
+    #[doc = include_str!("layout_observer.doc/previous.md")]
     pub previous: Option<LayoutBox>,
-    /// The newly-committed box.
+    #[doc = include_str!("layout_observer.doc/current.md")]
     pub current: LayoutBox,
 }
 
 impl LayoutChange {
-    /// Constructs a layout change event.
+    #[doc = include_str!("layout_observer.doc/new.md")]
     #[must_use]
     pub const fn new(node: NodeId, previous: Option<LayoutBox>, current: LayoutBox) -> Self {
         Self {
@@ -36,8 +27,7 @@ impl LayoutChange {
     }
 }
 
-/// Watches one node's full layout [`LayoutBox`] — position *and* size — and
-/// fires on any change (spec §4.4).
+#[doc = include_str!("layout_observer.doc/LayoutObserver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutObserver {
     node: NodeId,
@@ -45,30 +35,25 @@ pub struct LayoutObserver {
 }
 
 impl LayoutObserver {
-    /// Creates an observer for `node`. It has not yet observed any box, so the
-    /// first [`observe`](Self::observe) fires with the initial value.
+    #[doc = include_str!("layout_observer.doc/new_2.md")]
     #[must_use]
     pub const fn new(node: NodeId) -> Self {
         Self { node, last: None }
     }
 
-    /// The observed node.
+    #[doc = include_str!("layout_observer.doc/node_2.md")]
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    /// The last observed box, or `None` before the first observation.
+    #[doc = include_str!("layout_observer.doc/last.md")]
     #[must_use]
     pub const fn last(self) -> Option<LayoutBox> {
         self.last
     }
 
-    /// Records the newly-committed box, returning a [`LayoutChange`] when it
-    /// differs from the last observed box (or on the first observation).
-    ///
-    /// Returns `None` when the box is unchanged. Updates the stored box on a
-    /// fire.
+    #[doc = include_str!("layout_observer.doc/observe.md")]
     #[must_use]
     pub fn observe(&mut self, current: LayoutBox) -> Option<LayoutChange> {
         if self.last == Some(current) {
@@ -79,7 +64,7 @@ impl LayoutObserver {
         Some(LayoutChange::new(self.node, previous, current))
     }
 
-    /// Forgets the last observed box, so the next observation fires afresh.
+    #[doc = include_str!("layout_observer.doc/reset.md")]
     pub const fn reset(&mut self) {
         self.last = None;
     }

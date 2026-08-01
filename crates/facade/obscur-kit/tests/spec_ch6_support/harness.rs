@@ -1,13 +1,4 @@
-//! Shared harness for the `spec_ch6_*` **specification-derived** test files.
-//!
-//! These tests are NOT implementation-derived. Every expected value in the
-//! `spec_ch6_*.rs` files was written by an agent reading obscur.kit §6
-//! (Platform, windows & services) **without opening any source in this
-//! repository**. This module exists only to give those cases a compiling home;
-//! it contains no expectations of its own.
-//!
-//! Nothing here may be "fixed" to make a case pass. A failing `spec_ch6_*` test
-//! is a claim about the implementation, not about the test.
+#![doc = include_str!("harness.doc/_module.md")]
 #![allow(dead_code, unreachable_pub)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -21,7 +12,7 @@ use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, 
 use obscur_kit::windowing::request::CreateWindow;
 use obscur_kit::windowing::window::WindowProperties;
 
-/// Compiles authored CSS text through the real CSS frontend.
+#[doc = include_str!("harness.doc/compile.md")]
 #[must_use]
 pub fn compile(css: &str) -> Stylesheet {
     let src = obscur_kit::css::source::CssSource::anonymous(css);
@@ -29,7 +20,7 @@ pub fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// An element node carrying `class`, with `kids` as its children.
+#[doc = include_str!("harness.doc/el.md")]
 #[must_use]
 pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
@@ -37,13 +28,13 @@ pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
         .with_children(ViewFragment::from_nodes(kids))
 }
 
-/// A view whose root fragment is `nodes`.
+#[doc = include_str!("harness.doc/view.md")]
 #[must_use]
 pub fn view(nodes: Vec<ViewNode>) -> View {
     View::from_fragment(ViewFragment::from_nodes(nodes))
 }
 
-/// Renders one real frame of `v` under `css` in a fresh `w x h` runtime.
+#[doc = include_str!("harness.doc/drive.md")]
 #[must_use]
 pub fn drive(w: f32, h: f32, css: &str, v: &View) -> UiRuntime {
     let sheet = compile(css);
@@ -52,7 +43,7 @@ pub fn drive(w: f32, h: f32, css: &str, v: &View) -> UiRuntime {
     rt
 }
 
-/// Walks from the tree root down `path` (child indices) to a [`NodeId`].
+#[doc = include_str!("harness.doc/at.md")]
 #[must_use]
 pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
     let mut node = rt.tree().root().expect("a root after a frame");
@@ -69,7 +60,7 @@ pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
     node
 }
 
-/// A mouse pointer event of `kind` at `(x, y)` for pointer id 1.
+#[doc = include_str!("harness.doc/pointer.md")]
 #[must_use]
 pub fn pointer(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     PointerEvent::new(
@@ -80,7 +71,7 @@ pub fn pointer(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     )
 }
 
-/// A window-creation request for a `w x h` window at `(x, y)`.
+#[doc = include_str!("harness.doc/create_at.md")]
 #[must_use]
 pub fn create_at(x: f32, y: f32, w: f32, h: f32) -> CreateWindow {
     CreateWindow::new(

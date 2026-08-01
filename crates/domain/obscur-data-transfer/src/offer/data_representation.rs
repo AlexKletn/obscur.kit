@@ -1,21 +1,10 @@
-//! One representation of offered data in a specific MIME format (spec §6.20
-//! multiple representations).
+#![doc = include_str!("data_representation.doc/_module.md")]
 
 use std::sync::Arc;
 
 use crate::offer::MimeType;
 
-/// A single representation of a [`DataOffer`](crate::offer::DataOffer)'s content
-/// in one MIME format (spec §6.20).
-///
-/// An offer typically advertises the same logical content under several MIME
-/// types; each is one `DataRepresentation`. A representation is either *eager* —
-/// its bytes are already in hand, held in an [`Arc<[u8]>`] so clones are cheap
-/// and equal content compares equal — or *lazy*, meaning the bytes are not
-/// materialized yet and must be fetched on demand from a
-/// [`LazyDataProvider`](crate::offer::LazyDataProvider). Modeling async
-/// provision is an adapter concern; this value only records *which* MIME the
-/// representation carries and whether its bytes are inline.
+#[doc = include_str!("data_representation.doc/DataRepresentation.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DataRepresentation {
     mime: MimeType,
@@ -23,8 +12,7 @@ pub struct DataRepresentation {
 }
 
 impl DataRepresentation {
-    /// Creates an eager representation whose `bytes` are already available (spec
-    /// §6.20).
+    #[doc = include_str!("data_representation.doc/eager.md")]
     #[must_use]
     pub fn eager(mime: MimeType, bytes: impl Into<Arc<[u8]>>) -> Self {
         Self {
@@ -33,42 +21,37 @@ impl DataRepresentation {
         }
     }
 
-    /// Creates a lazy representation whose bytes must be fetched on demand (spec
-    /// §6.20).
+    #[doc = include_str!("data_representation.doc/lazy.md")]
     #[must_use]
     pub fn lazy(mime: MimeType) -> Self {
         Self { mime, inline: None }
     }
 
-    /// Returns the MIME descriptor for this representation (spec §6.20).
+    #[doc = include_str!("data_representation.doc/mime.md")]
     #[must_use]
     pub fn mime(&self) -> &MimeType {
         &self.mime
     }
 
-    /// Returns the inline bytes if this representation is eager, otherwise
-    /// `None` (spec §6.20).
+    #[doc = include_str!("data_representation.doc/inline_bytes.md")]
     #[must_use]
     pub fn inline_bytes(&self) -> Option<&[u8]> {
         self.inline.as_deref()
     }
 
-    /// Returns whether this representation is lazy (its bytes are not inline)
-    /// (spec §6.20).
+    #[doc = include_str!("data_representation.doc/is_lazy.md")]
     #[must_use]
     pub fn is_lazy(&self) -> bool {
         self.inline.is_none()
     }
 
-    /// Returns the eager byte length, or `None` for a lazy representation (spec
-    /// §6.20).
+    #[doc = include_str!("data_representation.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> Option<usize> {
         self.inline.as_ref().map(|bytes| bytes.len())
     }
 
-    /// Returns whether this representation is eagerly present but carries no
-    /// bytes; a lazy representation is not considered empty (spec §6.20).
+    #[doc = include_str!("data_representation.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == Some(0)

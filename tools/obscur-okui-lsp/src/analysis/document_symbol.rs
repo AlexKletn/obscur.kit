@@ -1,22 +1,18 @@
-//! `DocumentSymbol`: a hierarchical outline entry for one `.okui` element or
-//! component, mirroring the LSP `DocumentSymbol` shape.
+#![doc = include_str!("document_symbol.doc/_module.md")]
 
 use crate::diagnostics::Range;
 
-/// Whether a [`DocumentSymbol`] names a plain element or a component.
-///
-/// Following the okui lowering convention, a tag whose name starts with an
-/// uppercase letter is a component; everything else is an element.
+#[doc = include_str!("document_symbol.doc/SymbolKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
-    /// A lowercase-tagged element (e.g. `<row>`).
+    #[doc = include_str!("document_symbol.doc/Element.md")]
     Element,
-    /// An uppercase-tagged component (e.g. `<Button>`).
+    #[doc = include_str!("document_symbol.doc/Component.md")]
     Component,
 }
 
 impl SymbolKind {
-    /// Classifies a tag `name` by the case of its first character.
+    #[doc = include_str!("document_symbol.doc/of_tag.md")]
     #[must_use]
     pub fn of_tag(name: &str) -> Self {
         if name.chars().next().is_some_and(char::is_uppercase) {
@@ -26,7 +22,7 @@ impl SymbolKind {
         }
     }
 
-    /// Returns a short lowercase label for CLI output.
+    #[doc = include_str!("document_symbol.doc/label.md")]
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -36,26 +32,21 @@ impl SymbolKind {
     }
 }
 
-/// A hierarchical outline entry for one element/component in a `.okui` document.
-///
-/// Produced by [`Analyzer::document_symbols`](crate::Analyzer::document_symbols),
-/// it carries the tag `name`, its [`SymbolKind`], the source `range` it covers,
-/// and its nested `children`, so a client can render a `textDocument/documentSymbol`
-/// outline.
+#[doc = include_str!("document_symbol.doc/DocumentSymbol.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentSymbol {
-    /// The element/component tag name.
+    #[doc = include_str!("document_symbol.doc/name.md")]
     pub name: Box<str>,
-    /// Whether the symbol is an element or a component.
+    #[doc = include_str!("document_symbol.doc/kind.md")]
     pub kind: SymbolKind,
-    /// The full source span the element covers.
+    #[doc = include_str!("document_symbol.doc/range.md")]
     pub range: Range,
-    /// The nested child symbols (elements/components inside this one).
+    #[doc = include_str!("document_symbol.doc/children.md")]
     pub children: Vec<DocumentSymbol>,
 }
 
 impl DocumentSymbol {
-    /// Creates a leaf symbol (no children) for `name` of `kind` over `range`.
+    #[doc = include_str!("document_symbol.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, kind: SymbolKind, range: Range) -> Self {
         Self {
@@ -66,7 +57,7 @@ impl DocumentSymbol {
         }
     }
 
-    /// Builder: sets the symbol's children.
+    #[doc = include_str!("document_symbol.doc/with_children.md")]
     #[must_use]
     pub fn with_children(mut self, children: Vec<DocumentSymbol>) -> Self {
         self.children = children;

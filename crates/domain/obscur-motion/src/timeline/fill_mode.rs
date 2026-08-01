@@ -1,45 +1,27 @@
-//! [`FillMode`] — whether a timeline's value applies outside its active period
-//! (spec §4.17; css-animations-1 §3.9 `animation-fill-mode`).
+#![doc = include_str!("fill_mode.doc/_module.md")]
 
-/// Whether a timeline applies its value outside the period it is actually
-/// running (css-animations-1 §3.9).
-///
-/// The only phase this engine distinguishes is the **delay** period before the
-/// first iteration: with [`Backwards`](Self::Backwards) or [`Both`](Self::Both)
-/// the value of the keyframe that will start the first iteration is applied
-/// during the delay; with [`None`](Self::None) or [`Forwards`](Self::Forwards)
-/// nothing is applied until the first iteration begins.
-///
-/// **Limitation.** The after-phase is *not* distinguished: a finished animation
-/// keeps applying the value it ended on regardless of this mode, so
-/// [`None`](Self::None) and [`Forwards`](Self::Forwards) behave identically once
-/// the last iteration completes — `forwards` is satisfied by construction and
-/// `none` over-applies. Only the backwards half of the property is modelled, and
-/// only [`fills_backwards`](Self::fills_backwards) has a consumer.
+#[doc = include_str!("fill_mode.doc/FillMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FillMode {
-    /// No fill: the value applies only while the timeline is running.
+    #[doc = include_str!("fill_mode.doc/None.md")]
     #[default]
     None,
-    /// Fills after the animation ends.
+    #[doc = include_str!("fill_mode.doc/Forwards.md")]
     Forwards,
-    /// Fills during the delay, with the keyframe that starts the first
-    /// iteration.
+    #[doc = include_str!("fill_mode.doc/Backwards.md")]
     Backwards,
-    /// Both [`Forwards`](Self::Forwards) and [`Backwards`](Self::Backwards).
+    #[doc = include_str!("fill_mode.doc/Both.md")]
     Both,
 }
 
 impl FillMode {
-    /// Returns whether this mode fills the delay period before the first
-    /// iteration (css-animations-1 §3.9 `backwards`).
+    #[doc = include_str!("fill_mode.doc/fills_backwards.md")]
     #[must_use]
     pub const fn fills_backwards(self) -> bool {
         matches!(self, Self::Backwards | Self::Both)
     }
 
-    /// Parses a CSS `<single-animation-fill-mode>` keyword, ASCII
-    /// case-insensitively; [`None`](Option::None) for anything else.
+    #[doc = include_str!("fill_mode.doc/from_keyword.md")]
     #[must_use]
     pub fn from_keyword(keyword: &str) -> Option<Self> {
         if keyword.eq_ignore_ascii_case("none") {

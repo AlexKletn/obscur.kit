@@ -1,4 +1,4 @@
-//! `TreeTransaction`: a validated, atomic batch of staged tree mutations.
+#![doc = include_str!("tree_transaction.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -9,52 +9,21 @@ use crate::tree::{RetainedTree, Subtree};
 
 use super::{StagedRef, TreeChange, TreeChangeSet, TreeCommit, TxError};
 
-/// A validated, atomic batch of tree mutations with provisional-cancel
-/// semantics (spec §3.2).
-///
-/// # Staging, not immediate mutation
-///
-/// The retained tree is a generational arena, so a *removed* node's `NodeId`
-/// cannot be cleanly restored. To get real atomicity *and* real provisional
-/// cancel without rolling back removals, a transaction **stages** its changes
-/// and does not touch the live tree until [`commit`](Self::commit):
-///
-/// - staging methods only append [`TreeChange`]s to an ordered
-///   [`TreeChangeSet`]; the tree is never borrowed while staging;
-/// - [`cancel`](Self::cancel) (or simply dropping the transaction) discards the
-///   staged changes — because the tree was never touched, this is the
-///   provisional-cancel path and it is guaranteed not to mutate anything;
-/// - [`commit`](Self::commit) first [`validate`](Self::validate)s the whole
-///   batch against the live tree; if anything is invalid it returns a
-///   [`TxError`] and the tree is left completely untouched (atomicity); only if
-///   the batch is fully valid are the changes applied in order.
-///
-/// Nodes created earlier in the batch are referenced by later changes through a
-/// [`StagedRef::New`] placeholder, resolved to a concrete [`NodeId`] at commit.
-///
-/// # Layering
-///
-/// This is the *tree-level* primitive. Provisional commit/cancel at the
-/// higher **UI-op** level lives in `obscur-runtime` later and builds on this.
-/// Wiring the reconciler to *emit* a [`TreeChangeSet`] (instead of mutating the
-/// tree directly) is likewise a later integration; for now this transaction is
-/// a self-contained tree-mutation primitive.
+#[doc = include_str!("tree_transaction.doc/TreeTransaction.md")]
 #[derive(Debug, Clone, Default)]
 pub struct TreeTransaction {
-    /// The ordered batch of staged changes.
+    #[doc = include_str!("tree_transaction.doc/change_set.md")]
     change_set: TreeChangeSet,
 }
 
 impl TreeTransaction {
-    /// Creates an empty transaction with no staged changes.
+    #[doc = include_str!("tree_transaction.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Stages creation of a node of `kind` under `parent` at child position
-    /// `index`, and returns a [`StagedRef::New`] naming it so later changes can
-    /// reference the not-yet-created node.
+    #[doc = include_str!("tree_transaction.doc/create_node.md")]
     pub fn create_node(&mut self, kind: NodeKind, parent: StagedRef, index: usize) -> StagedRef {
         let new_index = self.change_set.creation_count();
         self.change_set.push(TreeChange::CreateNode {
@@ -65,20 +34,18 @@ impl TreeTransaction {
         StagedRef::New(new_index)
     }
 
-    /// Stages removal of `target` and its whole subtree.
+    #[doc = include_str!("tree_transaction.doc/remove_subtree.md")]
     pub fn remove_subtree(&mut self, target: NodeId) {
         self.change_set.push(TreeChange::RemoveSubtree { target });
     }
 
-    /// Stages repositioning of the existing child `target` to `index` within
-    /// its current parent.
+    #[doc = include_str!("tree_transaction.doc/move_child.md")]
     pub fn move_child(&mut self, target: NodeId, index: usize) {
         self.change_set
             .push(TreeChange::MoveChild { target, index });
     }
 
-    /// Stages replacement of the text content of the existing text node
-    /// `target`.
+    #[doc = include_str!("tree_transaction.doc/set_text.md")]
     pub fn set_text(&mut self, target: NodeId, content: impl Into<Box<str>>) {
         self.change_set.push(TreeChange::SetText {
             target,
@@ -86,74 +53,36 @@ impl TreeTransaction {
         });
     }
 
-    /// Stages designation of `target` as the tree root.
+    #[doc = include_str!("tree_transaction.doc/set_root.md")]
     pub fn set_root(&mut self, target: StagedRef) {
         self.change_set.push(TreeChange::SetRoot { target });
     }
 
-    /// Returns the staged batch for inspection.
+    #[doc = include_str!("tree_transaction.doc/changes.md")]
     #[must_use]
     pub fn changes(&self) -> &TreeChangeSet {
         &self.change_set
     }
 
-    /// Returns the number of staged changes.
+    #[doc = include_str!("tree_transaction.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.change_set.len()
     }
 
-    /// Returns `true` if nothing has been staged.
+    #[doc = include_str!("tree_transaction.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.change_set.is_empty()
     }
 
-    /// Discards the transaction without touching any tree.
-    ///
-    /// This is the **provisional-cancel** path. Because staging never mutates
-    /// the live tree, cancelling (or dropping) a transaction is guaranteed to
-    /// leave every tree completely unmodified. Provided explicitly so intent is
-    /// clear at call sites.
+    #[doc = include_str!("tree_transaction.doc/cancel.md")]
     pub fn cancel(self) {
         // The staged `TreeChangeSet` is dropped here. Nothing else to do: the
         // tree was never borrowed, so there is nothing to roll back.
     }
 
-    /// Validates the whole staged batch against `tree` **without mutating it**.
-    ///
-    /// Checks, in stage order:
-    /// - every [`StagedRef::Existing`] / `NodeId` target resolves to a live
-    ///   node ([`TxError::StaleNode`]);
-    /// - every [`StagedRef::New`] reference points to a creation staged
-    ///   *earlier* in this transaction ([`TxError::UndefinedNewRef`]);
-    /// - each [`TreeChange::SetText`] targets a live text node
-    ///   ([`TxError::NotTextNode`]);
-    /// - child indices are within range ([`TxError::IndexOutOfRange`]).
-    ///
-    /// # Index-validation rule (projected child counts)
-    ///
-    /// For [`TreeChange::CreateNode`] the parent's *projected* child count is
-    /// tracked: it starts at the parent's live child count (for an
-    /// [`StagedRef::Existing`] parent) or `0` (for a [`StagedRef::New`] parent),
-    /// and grows by one after each valid create under that parent. A valid
-    /// insertion index is `0 ..= projected_count`. This precisely models
-    /// sequential inserts into the same parent within one batch (e.g. staging
-    /// two children into a fresh parent at indices `0` then `1`).
-    ///
-    /// For [`TreeChange::MoveChild`] the index is validated against the *live*
-    /// child count of `target`'s current logical parent (`index < count`); a
-    /// target that is not currently a child of any live parent accepts any
-    /// index. [`TreeChange::RemoveSubtree`] and [`TreeChange::MoveChild`] do not
-    /// adjust projected counts — only creates do — which keeps the model simple
-    /// and deterministic for the create-then-arrange batches this primitive is
-    /// built for. Application additionally clamps every index, so an index the
-    /// model does not reject can never cause a panic.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`TxError`] when a change references a stale or undefined node,
-    /// or supplies a child index outside the projected range.
+    #[doc = include_str!("tree_transaction.doc/validate.md")]
     pub fn validate(&self, tree: &RetainedTree) -> Result<(), TxError> {
         let mut creation_count: u32 = 0;
         // Projected child count per referenced node, populated lazily.
@@ -208,30 +137,7 @@ impl TreeTransaction {
         Ok(())
     }
 
-    /// Validates the batch, then applies it in order, returning a
-    /// [`TreeCommit`] recording the concrete effects.
-    ///
-    /// If [`validate`](Self::validate) fails, the error is returned and the tree
-    /// is left **completely untouched** (atomicity). Otherwise every change is
-    /// applied in stage order:
-    /// - [`StagedRef::New`] refs are resolved to the id returned by the matching
-    ///   allocation;
-    /// - a create allocates the node, sets its logical *and* visual parent to
-    ///   the resolved parent, and inserts it into the parent's children at the
-    ///   (clamped) index;
-    /// - a subtree removal detaches the target from its parent and removes the
-    ///   subtree leaves-first;
-    /// - a move repositions the child within its current parent;
-    /// - a set-text replaces the node's kind with the new text;
-    /// - a set-root designates the resolved node as root.
-    ///
-    /// Because application runs only after successful validation, and validated
-    /// tree operations do not fail, the apply phase is atomic in practice.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`TxError`] if validation of the staged change set fails; in
-    /// that case the tree is left unchanged.
+    #[doc = include_str!("tree_transaction.doc/commit.md")]
     pub fn commit(self, tree: &mut RetainedTree) -> Result<TreeCommit, TxError> {
         self.validate(tree)?;
 
@@ -329,8 +235,7 @@ impl TreeTransaction {
         ))
     }
 
-    /// Ensures a [`StagedRef`] is defined at this point in the batch: an
-    /// existing id must be live, a new ref must name an earlier creation.
+    #[doc = include_str!("tree_transaction.doc/require_defined.md")]
     fn require_defined(
         r: StagedRef,
         tree: &RetainedTree,
@@ -354,8 +259,7 @@ impl TreeTransaction {
         }
     }
 
-    /// Returns the projected child count for `r`, initializing it lazily from
-    /// the live tree (existing) or to `0` (new).
+    #[doc = include_str!("tree_transaction.doc/projected_count.md")]
     fn projected_count(
         projected: &mut HashMap<StagedRef, usize>,
         r: StagedRef,
@@ -372,14 +276,13 @@ impl TreeTransaction {
         base
     }
 
-    /// Returns the live child count of `target`'s logical parent, if that
-    /// parent is live; `None` when `target` has no live parent.
+    #[doc = include_str!("tree_transaction.doc/live_parent_child_count.md")]
     fn live_parent_child_count(tree: &RetainedTree, target: NodeId) -> Option<usize> {
         let parent_id = tree.get(target)?.logical_parent().parent()?;
         Some(tree.get(parent_id)?.child_nodes().len())
     }
 
-    /// Resolves a [`StagedRef`] to a concrete id at apply time.
+    #[doc = include_str!("tree_transaction.doc/resolve.md")]
     fn resolve(r: StagedRef, created: &[NodeId]) -> Option<NodeId> {
         match r {
             StagedRef::Existing(id) => Some(id),

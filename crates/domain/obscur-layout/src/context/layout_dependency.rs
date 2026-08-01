@@ -1,57 +1,19 @@
-//! What a layout context's output depends on, for incremental recomputation.
+#![doc = include_str!("layout_dependency.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use std::collections::HashSet;
 
-/// Records what a [`LayoutContext`](super::LayoutContext)'s layout output
-/// depends on, so incremental layout can decide precisely what to recompute
-/// (spec §4.3).
-///
-/// A dependency captures the two inputs to a context's measure:
-///
-/// - whether its measured size depends on the incoming constraints (so a
-///   **constraint change** forces a re-measure), and
-/// - which children's sizes feed its measure (so a **child size change** in one
-///   of those children forces a re-measure).
-///
-/// # Status: nothing populates this in production — read it as a contract
-///
-/// This type used to describe itself as "the structured replacement for
-/// scattered ad-hoc dirty flags, which §4.3 explicitly rejects as the
-/// architectural model". That was an over-claim about an unbuilt architecture:
-/// every call that sets a dependency ([`with_constraints_affect_size`], [`add_child`])
-/// is in a `#[cfg(test)]` module, so in production every [`LayoutContext`] carries
-/// the empty [`new`](Self::new) dependency and
-/// [`should_remeasure`](super::LayoutContext::should_remeasure) — along with the
-/// [`LayoutInvalidation`](crate::invalidation::LayoutInvalidation) `note_*` gates
-/// built on it — answers for a graph nothing filled in.
-///
-/// What *is* real is a different mechanism. Layout's incremental half
-/// (`LayoutCoordinator::layout_invalidated`) is driven by a per-node
-/// [`LayoutInvalidation`](crate::invalidation::LayoutInvalidation) and a measure
-/// cache, and it derives its two §4.3 gates without consulting this type at all:
-/// the **downward** gate is exact in the cache key (a child re-measures precisely
-/// when its constraints differ, because a different constraint is a different key),
-/// and the **upward** gate is a whole-ancestor-chain eviction rather than a
-/// dependency-driven early stop. This type is what would make that upward gate
-/// *precise* instead of conservative — the day something populates it.
-///
-/// So: a contract for a consumer that does not exist yet, not shipped behaviour.
-///
-/// [`with_constraints_affect_size`]: Self::with_constraints_affect_size
-/// [`add_child`]: Self::add_child
-/// [`LayoutContext`]: super::LayoutContext
+#[doc = include_str!("layout_dependency.doc/LayoutDependency.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LayoutDependency {
-    /// Whether the node's measured size depends on the incoming constraints.
+    #[doc = include_str!("layout_dependency.doc/constraints_affect_size.md")]
     constraints_affect_size: bool,
-    /// The children whose sizes feed this context's measure.
+    #[doc = include_str!("layout_dependency.doc/children.md")]
     children: HashSet<NodeId>,
 }
 
 impl LayoutDependency {
-    /// Creates an empty dependency: size does not depend on constraints and no
-    /// children feed the measure.
+    #[doc = include_str!("layout_dependency.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -60,41 +22,37 @@ impl LayoutDependency {
         }
     }
 
-    /// Returns a copy with `constraints_affect_size` set to the given value.
+    #[doc = include_str!("layout_dependency.doc/with_constraints_affect_size.md")]
     #[must_use]
     pub fn with_constraints_affect_size(mut self, affects: bool) -> Self {
         self.constraints_affect_size = affects;
         self
     }
 
-    /// Records that `child`'s size feeds this context's measure.
+    #[doc = include_str!("layout_dependency.doc/add_child.md")]
     pub fn add_child(&mut self, child: NodeId) {
         self.children.insert(child);
     }
 
-    /// Whether the node's measured size depends on the incoming constraints.
+    #[doc = include_str!("layout_dependency.doc/constraints_affect_size_2.md")]
     #[must_use]
     pub const fn constraints_affect_size(&self) -> bool {
         self.constraints_affect_size
     }
 
-    /// The set of children whose sizes feed this context's measure.
+    #[doc = include_str!("layout_dependency.doc/children_2.md")]
     #[must_use]
     pub const fn children(&self) -> &HashSet<NodeId> {
         &self.children
     }
 
-    /// Whether a **constraint change** requires re-measuring this context.
-    ///
-    /// Equal to [`constraints_affect_size`](Self::constraints_affect_size).
+    #[doc = include_str!("layout_dependency.doc/affected_by_constraint_change.md")]
     #[must_use]
     pub const fn affected_by_constraint_change(&self) -> bool {
         self.constraints_affect_size
     }
 
-    /// Whether a size change in `child` requires re-measuring this context.
-    ///
-    /// True iff `child` is one of the children this context's measure depends on.
+    #[doc = include_str!("layout_dependency.doc/affected_by_child.md")]
     #[must_use]
     pub fn affected_by_child(&self, child: NodeId) -> bool {
         self.children.contains(&child)

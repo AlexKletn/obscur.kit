@@ -1,4 +1,4 @@
-//! The selector-matcher's view of a retained-tree node: [`TreeElement`].
+#![doc = include_str!("tree_element.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_style::selector::{MatchElement, PseudoState};
@@ -7,64 +7,19 @@ use obscur_tree::tree::RetainedTree;
 
 use super::PseudoStates;
 
-/// A cheap cursor over one [`RetainedNode`] that implements
-/// [`MatchElement`](obscur_style::selector::MatchElement), the seam the
-/// `obscur-style` selector matcher walks.
-///
-/// A `TreeElement` is a shared reference to the [`RetainedTree`] plus the
-/// [`NodeId`] it points at, so it is `Copy` and allocation-free: navigation
-/// methods ([`parent`](MatchElement::parent),
-/// [`previous_sibling_element`](MatchElement::previous_sibling_element)) mint
-/// new cursors over the same borrowed tree rather than cloning node data. This
-/// is the integrating adapter that lets authored stylesheets match against the
-/// retained tree without `obscur-style` depending on `obscur-tree`.
-///
-/// # First-iteration limitations
-///
-/// - **Attributes** — the retained tree only preserves an element's `class`,
-///   `id`, and *type* (local name) via
-///   [`StyleAttributes`](obscur_view::view::StyleAttributes). Consequently
-///   [`attribute`](MatchElement::attribute) resolves only `"id"` and `"type"`;
-///   any other attribute selector (e.g. `[data-*]`, `[aria-*]`) matches nothing
-///   until the tree retains arbitrary attributes.
-/// - **Pseudo-state** — *interaction*-driven states (`:hover`, `:active`,
-///   `:focus`, …) are sourced from an optional per-node [`PseudoStates`] map the
-///   runtime owns. A cursor built with [`new`](Self::new) carries no source and
-///   reports no interaction state (the stateless matching path used by
-///   `run_matched`); a cursor built with
-///   [`with_pseudo`](Self::with_pseudo) reads that map, so `:hover`/`:focus`
-///   finally match once the runtime records the state. Navigation preserves the
-///   source, so ancestor/sibling combinators over pseudo-classes work too.
-///   *Structural* states (`:disabled`, `:checked`) are intrinsic to the element:
-///   they are read from the node's own
-///   [`StyleAttributes`](obscur_view::view::StyleAttributes) and reported on
-///   **both** paths, so a `:disabled`/`:checked` rule bites even with no
-///   interaction map.
-/// - **Top-level siblings** — an element whose logical parent is the synthetic
-///   [`Root`](obscur_tree::node::NodeKind::Root) grouping node is treated as
-///   top-level: it reports no [`parent`](MatchElement::parent) (so `:root` and
-///   child/descendant combinators behave) and is treated as the sole member of
-///   its sibling list (index `0`, count `1`).
+#[doc = include_str!("tree_element.doc/TreeElement.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct TreeElement<'a> {
-    /// The tree the cursor navigates; shared and borrowed for `'a`.
+    #[doc = include_str!("tree_element.doc/tree.md")]
     tree: &'a RetainedTree,
-    /// The node this cursor currently points at.
+    #[doc = include_str!("tree_element.doc/id.md")]
     id: NodeId,
-    /// The interaction-state source, or `None` for stateless matching (every
-    /// node then reports [`PseudoState::empty`]).
+    #[doc = include_str!("tree_element.doc/pseudo.md")]
     pseudo: Option<&'a PseudoStates>,
 }
 
 impl<'a> TreeElement<'a> {
-    /// Creates a **stateless** cursor over `id` within `tree`.
-    ///
-    /// The cursor carries no interaction-state source, so
-    /// [`pseudo_state`](MatchElement::pseudo_state) always reports
-    /// [`PseudoState::empty`]. This is the path `run_matched` uses, where no
-    /// live interaction state exists. A [`UiRuntime`](crate::UiRuntime) — and so
-    /// the headless host, which drives one — takes
-    /// [`with_pseudo`](Self::with_pseudo) instead.
+    #[doc = include_str!("tree_element.doc/new.md")]
     #[must_use]
     pub const fn new(tree: &'a RetainedTree, id: NodeId) -> Self {
         Self {
@@ -74,15 +29,7 @@ impl<'a> TreeElement<'a> {
         }
     }
 
-    /// Creates a cursor over `id` within `tree` that reads interaction state
-    /// from `pseudo`.
-    ///
-    /// [`pseudo_state`](MatchElement::pseudo_state) then reports the state the
-    /// runtime recorded for the node, so interaction-driven pseudo-classes
-    /// (`:hover`, `:focus`, …) match. Navigation
-    /// ([`parent`](MatchElement::parent),
-    /// [`previous_sibling_element`](MatchElement::previous_sibling_element))
-    /// preserves the source.
+    #[doc = include_str!("tree_element.doc/with_pseudo.md")]
     #[must_use]
     pub const fn with_pseudo(tree: &'a RetainedTree, id: NodeId, pseudo: &'a PseudoStates) -> Self {
         Self {
@@ -92,8 +39,7 @@ impl<'a> TreeElement<'a> {
         }
     }
 
-    /// Mints a sibling cursor over `id` in the same tree, preserving the
-    /// interaction-state source so pseudo-class matching survives navigation.
+    #[doc = include_str!("tree_element.doc/cursor.md")]
     const fn cursor(&self, id: NodeId) -> Self {
         Self {
             tree: self.tree,
@@ -102,28 +48,18 @@ impl<'a> TreeElement<'a> {
         }
     }
 
-    /// Returns the node id this cursor points at.
-    ///
-    /// Named `node_id` rather than `id` so it does not shadow the
-    /// [`MatchElement::id`] trait method (which returns the element's CSS `id`
-    /// attribute as `Option<&str>`).
+    #[doc = include_str!("tree_element.doc/node_id.md")]
     #[must_use]
     pub const fn node_id(&self) -> NodeId {
         self.id
     }
 
-    /// Resolves the backing node record, or `None` if the id is stale/absent.
+    #[doc = include_str!("tree_element.doc/node.md")]
     fn node(&self) -> Option<&'a RetainedNode> {
         self.tree.get(self.id)
     }
 
-    /// Returns the ordered element siblings this node participates in
-    /// (including itself), or a single-element list of just this node when the
-    /// node is top-level (its element parent is the synthetic root or absent).
-    ///
-    /// Only [`Element`](obscur_tree::node::NodeKind::Element) children count as
-    /// siblings; text, synthetic, and root nodes are excluded, matching CSS's
-    /// "element sibling" semantics.
+    #[doc = include_str!("tree_element.doc/element_siblings.md")]
     fn element_siblings(&self) -> Vec<NodeId> {
         let Some(parent) = self.parent() else {
             return vec![self.id];
@@ -153,10 +89,7 @@ impl MatchElement for TreeElement<'_> {
         self.node().is_some_and(|n| n.attributes().has_class(class))
     }
 
-    /// Resolves only the attributes the retained tree preserves: `"id"` and
-    /// `"type"` (the local name), both matched ASCII case-insensitively. Every
-    /// other attribute name returns `None` — see the type-level note on
-    /// first-iteration attribute limitations.
+    #[doc = include_str!("tree_element.doc/attribute.md")]
     fn attribute(&self, name: &str) -> Option<&str> {
         if name.eq_ignore_ascii_case("id") {
             self.id()
@@ -167,16 +100,7 @@ impl MatchElement for TreeElement<'_> {
         }
     }
 
-    /// Reports the node's active pseudo-state: the union of its *interaction*
-    /// states (`:hover`/`:focus`/…, from the cursor's [`PseudoStates`] source, or
-    /// empty when the cursor is stateless / the node has no recorded state) with
-    /// its *structural* states (`:disabled`/`:checked`), read directly from the
-    /// node's own [`StyleAttributes`](obscur_view::view::StyleAttributes).
-    ///
-    /// The structural bits are intrinsic to the element, so they are reported on
-    /// **both** the stateful ([`with_pseudo`](Self::with_pseudo)) and the
-    /// stateless ([`new`](Self::new)) paths — a `:disabled`/`:checked` rule bites
-    /// even without a live interaction map.
+    #[doc = include_str!("tree_element.doc/pseudo_state.md")]
     fn pseudo_state(&self) -> PseudoState {
         let interaction = self
             .pseudo
@@ -193,9 +117,7 @@ impl MatchElement for TreeElement<'_> {
         interaction.union(structural)
     }
 
-    /// Returns the logical parent **only when it is an element node**. When the
-    /// parent is the synthetic root (or the node is detached), returns `None`,
-    /// so the node reads as top-level and `:root`/child combinators behave.
+    #[doc = include_str!("tree_element.doc/parent.md")]
     fn parent(&self) -> Option<Self> {
         let parent_id = self.node()?.logical_parent().parent()?;
         let parent_node = self.tree.get(parent_id)?;
@@ -223,14 +145,12 @@ impl MatchElement for TreeElement<'_> {
         self.element_siblings().len().max(1)
     }
 
-    /// A node is the tree root (`:root`) when it has no element parent — its
-    /// logical parent is the synthetic root or it is detached.
+    #[doc = include_str!("tree_element.doc/is_root.md")]
     fn is_root(&self) -> bool {
         self.parent().is_none()
     }
 
-    /// Reports whether the node has any child node at all. Text children are
-    /// real nodes here, so an element containing only text is *not* `:empty`.
+    #[doc = include_str!("tree_element.doc/has_children.md")]
     fn has_children(&self) -> bool {
         self.node().is_some_and(|n| !n.child_nodes().is_empty())
     }

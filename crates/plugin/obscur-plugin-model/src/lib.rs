@@ -1,22 +1,22 @@
-//! Pure versioned plugin DTO and contracts.
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-/// What a plugin may ask the host for, as data.
+#[doc = include_str!("lib.doc/capability.md")]
 pub mod capability;
-/// What a plugin adds to the host: the declared extension points.
+#[doc = include_str!("lib.doc/contribution.md")]
 pub mod contribution;
-/// A plugin's stable name and version.
+#[doc = include_str!("lib.doc/identity.md")]
 pub mod identity;
-/// The states a plugin moves through, from discovered to unloaded.
+#[doc = include_str!("lib.doc/lifecycle.md")]
 pub mod lifecycle;
-/// The manifest a plugin ships: identity, capabilities, contributions.
+#[doc = include_str!("lib.doc/manifest.md")]
 pub mod manifest;
-/// The typed messages that cross the host/plugin boundary.
+#[doc = include_str!("lib.doc/message.md")]
 pub mod message;
-/// Services a host exposes to plugins, described as data.
+#[doc = include_str!("lib.doc/service.md")]
 pub mod service;
-/// A plugin's declared settings and their values.
+#[doc = include_str!("lib.doc/settings.md")]
 pub mod settings;
-/// A plugin's persisted state.
+#[doc = include_str!("lib.doc/state.md")]
 pub mod state;

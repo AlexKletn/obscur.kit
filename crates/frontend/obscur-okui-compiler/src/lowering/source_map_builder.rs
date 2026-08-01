@@ -1,21 +1,8 @@
-//! `SourceMapBuilder`: accumulates IR-node-id → source-span mappings during
-//! lowering, then produces a [`SourceMap`] (spec §2.15).
+#![doc = include_str!("source_map_builder.doc/_module.md")]
 
 use obscur_ui_ir::source::{SourceLocation, SourceMap, SourceReference};
 
-/// Accumulates the `node id → source span` links discovered while lowering a
-/// `.okui` document, then hands back a finished [`SourceMap`] (spec §2.15).
-///
-/// Each IR node the lowering pass creates is recorded here against the byte
-/// offset it originated from, so diagnostics raised later against the IR can be
-/// mapped back to the source the author wrote.
-///
-/// # Precision
-///
-/// Only the byte **offset** of a node's source is tracked for now: every
-/// recorded span is a zero-width point at that offset (`start == end`) with a
-/// placeholder `line`/`column` of `1`. Resolving offsets to real line/column
-/// positions is a future refinement and does not change the recorded ids.
+#[doc = include_str!("source_map_builder.doc/SourceMapBuilder.md")]
 #[derive(Debug, Clone)]
 pub struct SourceMapBuilder {
     source_name: Box<str>,
@@ -23,8 +10,7 @@ pub struct SourceMapBuilder {
 }
 
 impl SourceMapBuilder {
-    /// Creates a builder whose recorded spans name `source_name` (the logical
-    /// `.okui` source identifier).
+    #[doc = include_str!("source_map_builder.doc/new.md")]
     #[must_use]
     pub fn new(source_name: impl Into<Box<str>>) -> Self {
         Self {
@@ -33,12 +19,7 @@ impl SourceMapBuilder {
         }
     }
 
-    /// Records that the IR node `node_id` originated at byte `offset` in the
-    /// source.
-    ///
-    /// The recorded span is a point at `offset`; line/column resolution is a
-    /// future refinement (see the type docs), so both endpoints use line `1`,
-    /// column `1`.
+    #[doc = include_str!("source_map_builder.doc/record.md")]
     pub fn record(&mut self, node_id: u64, offset: u32) {
         let location = SourceLocation::new(offset, 1, 1);
         self.map.insert(
@@ -47,19 +28,19 @@ impl SourceMapBuilder {
         );
     }
 
-    /// Consumes the builder, returning the accumulated [`SourceMap`].
+    #[doc = include_str!("source_map_builder.doc/build.md")]
     #[must_use]
     pub fn build(self) -> SourceMap {
         self.map
     }
 
-    /// Returns the number of recorded node-id → span mappings.
+    #[doc = include_str!("source_map_builder.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
-    /// Returns whether no mappings have been recorded yet.
+    #[doc = include_str!("source_map_builder.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
@@ -67,7 +48,7 @@ impl SourceMapBuilder {
 }
 
 impl Default for SourceMapBuilder {
-    /// A builder whose recorded spans carry an empty source name.
+    #[doc = include_str!("source_map_builder.doc/default.md")]
     fn default() -> Self {
         Self::new("")
     }

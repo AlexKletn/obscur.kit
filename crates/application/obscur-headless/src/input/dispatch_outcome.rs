@@ -1,61 +1,36 @@
-//! `DispatchOutcome`: the typed result of dispatching one synthetic input.
+#![doc = include_str!("dispatch_outcome.doc/_module.md")]
 
 use obscur_identity::{InternedSymbol, NodeId};
 
-/// What a dispatched [`SyntheticInput`](crate::input::SyntheticInput) actually
-/// did (spec §7.4 "typed dispatch results").
-///
-/// Every field is observed from the *real* input path — the same
-/// [`UiRuntime`](obscur_runtime::UiRuntime) call a windowed host makes — so a
-/// headless assertion cannot pass while a real click would fail.
-///
-/// # What is and is not here
-///
-/// The spec lists target, propagation path, default action, focus changes, state
-/// changes and layout changes. This carries what the runtime genuinely reports
-/// today: the resolved [`target`](Self::target), the
-/// [`propagation_path`](Self::propagation_path) (target → root, the chain a
-/// command binding is looked up along), the dispatched
-/// [`command`](Self::command) — the default action of a completed click or a
-/// bound key — and whether [`hover`](Self::hover_changed) or
-/// [`focus`](Self::focus_changed) moved.
-///
-/// Explicit state-change and layout-change records are **not** included, because
-/// the runtime does not produce them: reporting them would mean inventing a
-/// second, unverified source of truth. A test asserts those by inspecting the
-/// tree and layout boxes it already has.
+#[doc = include_str!("dispatch_outcome.doc/DispatchOutcome.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DispatchOutcome {
-    /// The node the input landed on, or [`None`] when it resolved to nothing
-    /// (an unknown `test-id`, a coordinate over no box, a key with no focus).
+    #[doc = include_str!("dispatch_outcome.doc/target.md")]
     pub target: Option<NodeId>,
-    /// The chain from [`target`](Self::target) to the root, inclusive — the path
-    /// an event's default action is resolved along. Empty when there is no target.
+    #[doc = include_str!("dispatch_outcome.doc/propagation_path.md")]
     pub propagation_path: Vec<NodeId>,
-    /// The command the input dispatched, if it triggered one: a completed click
-    /// on a node with a binding in its propagation path, or a bound shortcut.
-    /// This is the event's *default action*.
+    #[doc = include_str!("dispatch_outcome.doc/command.md")]
     pub command: Option<InternedSymbol>,
-    /// Whether the hover chain changed.
+    #[doc = include_str!("dispatch_outcome.doc/hover_changed.md")]
     pub hover_changed: bool,
-    /// Whether the focus target changed.
+    #[doc = include_str!("dispatch_outcome.doc/focus_changed.md")]
     pub focus_changed: bool,
 }
 
 impl DispatchOutcome {
-    /// An outcome for an input that resolved to nothing and did nothing.
+    #[doc = include_str!("dispatch_outcome.doc/unresolved.md")]
     #[must_use]
     pub fn unresolved() -> Self {
         Self::default()
     }
 
-    /// Whether the input found a node to act on.
+    #[doc = include_str!("dispatch_outcome.doc/resolved.md")]
     #[must_use]
     pub const fn resolved(&self) -> bool {
         self.target.is_some()
     }
 
-    /// Whether `node` is on the propagation path.
+    #[doc = include_str!("dispatch_outcome.doc/propagates_through.md")]
     #[must_use]
     pub fn propagates_through(&self, node: NodeId) -> bool {
         self.propagation_path.contains(&node)

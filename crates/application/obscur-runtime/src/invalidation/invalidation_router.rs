@@ -1,28 +1,11 @@
-//! Routes classified invalidations to the domain accumulators and tracks which
-//! pipeline phases are dirty (Obscur Kit 2 specs §4.3).
+#![doc = include_str!("invalidation_router.doc/_module.md")]
 
 use obscur_layout::invalidation::{LayoutInvalidation, LayoutInvalidationReason};
 use obscur_style::invalidation::{StyleInvalidation, StyleInvalidationReason};
 
 use crate::invalidation::{Invalidation, InvalidationReason};
 
-/// Maps a runtime [`InvalidationReason`] to the [`StyleInvalidationReason`] the
-/// style domain should record for the affected node.
-///
-/// Only the style-affecting causes map to a concrete style reason:
-///
-/// | [`InvalidationReason`]              | [`StyleInvalidationReason`]        |
-/// |-------------------------------------|------------------------------------|
-/// | `StyleChanged`                      | `DeclarationsChanged`              |
-/// | `InlineStyleChanged`                | `InlineStyleChanged`              |
-/// | `PseudoStateChanged`                | `PseudoStateChanged`              |
-/// | `CustomPropertyChanged`             | `CustomPropertyChanged`           |
-/// | `TreeChanged` / `ContentChanged` / `EnvironmentChanged` | `None`         |
-///
-/// A `None` result means the change dirties the style phase (when its kind
-/// [`needs_restyle`](crate::invalidation::InvalidationKind::needs_restyle)) but
-/// does not correspond to a single-node style edit, so no per-node reason is
-/// recorded for it.
+#[doc = include_str!("invalidation_router.doc/style_reason.md")]
 fn style_reason(reason: InvalidationReason) -> Option<StyleInvalidationReason> {
     match reason {
         InvalidationReason::StyleChanged => Some(StyleInvalidationReason::DeclarationsChanged),
@@ -40,18 +23,7 @@ fn style_reason(reason: InvalidationReason) -> Option<StyleInvalidationReason> {
     }
 }
 
-/// Maps a runtime [`InvalidationReason`] to the [`LayoutInvalidationReason`] the
-/// layout domain should record for the affected node.
-///
-/// Every cause maps to a layout reason because each ultimately feeds layout:
-///
-/// | [`InvalidationReason`]  | [`LayoutInvalidationReason`] |
-/// |-------------------------|------------------------------|
-/// | `StyleChanged` / `InlineStyleChanged` / `PseudoStateChanged` / `CustomPropertyChanged` | `StyleChanged` |
-/// | `LayoutChanged`         | `Requested`                 |
-/// | `TreeChanged`           | `TreeChanged`               |
-/// | `ContentChanged`        | `ContentChanged`            |
-/// | `EnvironmentChanged`    | `EnvironmentChanged`        |
+#[doc = include_str!("invalidation_router.doc/layout_reason.md")]
 fn layout_reason(reason: InvalidationReason) -> LayoutInvalidationReason {
     match reason {
         InvalidationReason::StyleChanged
@@ -67,79 +39,27 @@ fn layout_reason(reason: InvalidationReason) -> LayoutInvalidationReason {
     }
 }
 
-/// Routes classified invalidations to the domain accumulators and tracks which
-/// pipeline phases are dirty for the current frame (§4.3).
-///
-/// The router does **not** walk the tree. It records node-level invalidations in
-/// the [`StyleInvalidation`] and [`LayoutInvalidation`] accumulators and flags
-/// which phases the frame pipeline must run.
-///
-/// # What its callers actually use
-///
-/// `FramePlan::for_frame` / `for_transaction` read the dirty-phase **booleans**
-/// only (`needs_style()`/`needs_layout()`/`needs_scene()`) and drop the
-/// accumulators unread. For `for_frame` that costs nothing — it routes only
-/// *global* invalidations (node `None`), which record no per-node entry. For
-/// `for_transaction` it is a real discard: `UiOperation::invalidation` names a
-/// node for everything but `ReplaceRoot`, so a per-node set is built there and
-/// thrown away. That is harmless today only because of what production actually
-/// emits — `drag_coordinator.rs:257` sends `Rerender`/`ReplaceRoot`, which *are*
-/// structural and relayout in full. It is **not** harmless in general: an
-/// `InvalidateLayout` commit is neither (`frame_plan.rs:313` asserts
-/// `!plan.reconcile()` for one), and `layout_phase`'s own router sees no computed-
-/// style delta for it — `LayoutChanged` means geometry moved *without* the style
-/// changing — so such a commit is silently skipped rather than relaid out. Nothing
-/// constructs one outside tests, which is why no frame is wrong; the gap predates
-/// the per-node set and is not closed by it.
-///
-/// `UiRuntime::layout_phase` uses both halves: it routes this frame's real
-/// per-node style deltas through here, reads `needs_layout()` to decide **whether**
-/// the layout phase runs, and hands the [`LayoutInvalidation`] this filled to
-/// `LayoutCoordinator::layout_invalidated` to decide **which** contexts it
-/// re-measures. So the spec's "recalculation starts at the nearest affected
-/// context" is realised through this router for layout's measure step.
-///
-/// The [`StyleInvalidation`] this fills is still dropped unread by every caller:
-/// the style phase's per-node restyle takes its set from `RestyleScope` reading the
-/// live interaction state, on a path that does not involve this router at all.
-///
-/// The dirty-phase flags accumulate across calls to [`route`](Self::route) within
-/// a frame and are cleared by [`reset`](Self::reset); the domain accumulators are
-/// owned and reset elsewhere.
+#[doc = include_str!("invalidation_router.doc/InvalidationRouter.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InvalidationRouter {
-    /// The style pass must run.
+    #[doc = include_str!("invalidation_router.doc/style_dirty.md")]
     style_dirty: bool,
-    /// The layout pass must run.
+    #[doc = include_str!("invalidation_router.doc/layout_dirty.md")]
     layout_dirty: bool,
-    /// The scene must be re-composed.
+    #[doc = include_str!("invalidation_router.doc/scene_dirty.md")]
     scene_dirty: bool,
-    /// The scene must be re-painted.
+    #[doc = include_str!("invalidation_router.doc/paint_dirty.md")]
     paint_dirty: bool,
 }
 
 impl InvalidationRouter {
-    /// Creates a router with no dirty phases.
+    #[doc = include_str!("invalidation_router.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Routes a single [`Invalidation`] to the domain accumulators and flags the
-    /// dirty pipeline phases.
-    ///
-    /// From the invalidation's [`InvalidationKind`](crate::invalidation::InvalidationKind):
-    /// a restyle-needing change flags the style phase; a relayout-needing change
-    /// flags the layout phase; every change flags the scene (recompose) phase; a
-    /// repaint-needing change flags the paint phase.
-    ///
-    /// When the invalidation carries a node (see [`Invalidation::node`]) the
-    /// change is forwarded to the domains: if it needs a restyle and maps to a
-    /// concrete [`StyleInvalidationReason`] (see [`style_reason`]) the node is
-    /// invalidated in `style`; if it needs a relayout the node is invalidated in
-    /// `layout` with the mapped [`LayoutInvalidationReason`] (see [`layout_reason`]).
-    /// A global change (node `None`) only sets the phase flags — the frame
-    /// pipeline invalidates the whole tree.
+    #[doc = include_str!("invalidation_router.doc/route.md")]
     pub fn route(
         &mut self,
         inv: Invalidation,
@@ -172,34 +92,31 @@ impl InvalidationRouter {
         }
     }
 
-    /// Returns whether the style pass is flagged dirty.
+    #[doc = include_str!("invalidation_router.doc/needs_style.md")]
     #[must_use]
     pub fn needs_style(&self) -> bool {
         self.style_dirty
     }
 
-    /// Returns whether the layout pass is flagged dirty.
+    #[doc = include_str!("invalidation_router.doc/needs_layout.md")]
     #[must_use]
     pub fn needs_layout(&self) -> bool {
         self.layout_dirty
     }
 
-    /// Returns whether the scene pass (recompose and/or paint) is flagged dirty.
+    #[doc = include_str!("invalidation_router.doc/needs_scene.md")]
     #[must_use]
     pub fn needs_scene(&self) -> bool {
         self.scene_dirty || self.paint_dirty
     }
 
-    /// Returns whether no pipeline phase is flagged dirty.
+    #[doc = include_str!("invalidation_router.doc/is_clean.md")]
     #[must_use]
     pub fn is_clean(&self) -> bool {
         !(self.style_dirty || self.layout_dirty || self.scene_dirty || self.paint_dirty)
     }
 
-    /// Clears the dirty-phase flags for the next frame.
-    ///
-    /// The domain accumulators ([`StyleInvalidation`] / [`LayoutInvalidation`])
-    /// are owned and reset elsewhere.
+    #[doc = include_str!("invalidation_router.doc/reset.md")]
     pub fn reset(&mut self) {
         self.style_dirty = false;
         self.layout_dirty = false;

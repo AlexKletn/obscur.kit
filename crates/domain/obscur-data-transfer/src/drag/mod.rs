@@ -1,4 +1,4 @@
-//! Drag module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod drag_autoscroll;
 pub use drag_autoscroll::DragAutoscroll;
 mod drag_effect;

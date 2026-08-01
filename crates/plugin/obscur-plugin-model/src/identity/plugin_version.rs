@@ -1,6 +1,5 @@
-//! `PluginVersion` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("plugin_version.doc/_module.md")]
 
-/// Placeholder for the `PluginVersion` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("plugin_version.doc/PluginVersion.md")]
 #[derive(Debug)]
 pub struct PluginVersion;

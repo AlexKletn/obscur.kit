@@ -1,65 +1,29 @@
-//! The [`TransitionInterruption`] redirect policy for a transition (spec §4.17
-//! "interruption").
+#![doc = include_str!("transition_interruption.doc/_module.md")]
 
 use crate::track::KeyframeTrack;
 use crate::value::MotionValue;
 
-/// What happens when a new transition targets an element that is *already*
-/// transitioning (spec §4.17 "interruption").
-///
-/// The motion engine must decide how an incoming transition reconciles with the
-/// one currently in flight on the same element. This enum names the four
-/// policies; the runtime reads it to either replace, turn around, blend into, or
-/// suppress the incoming transition. Choosing to continue from the element's
-/// present mid-animation value (rather than snapping) is what makes rapid,
-/// repeated interactions look seamless.
+#[doc = include_str!("transition_interruption.doc/TransitionInterruption.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransitionInterruption {
-    /// Discard the current transition and start the new one from its beginning
-    /// (spec §4.17). The element may visibly jump to the new start value.
+    #[doc = include_str!("transition_interruption.doc/Restart.md")]
     Restart,
-    /// Turn the current transition around so it plays back toward its origin
-    /// (spec §4.17). Continues from the present value — used to *undo* an
-    /// in-flight enter/exit.
+    #[doc = include_str!("transition_interruption.doc/Reverse.md")]
     Reverse,
-    /// Start the new transition *from* the element's current mid-animation value
-    /// (spec §4.17), producing a seamless redirect with no jump. The smoothest
-    /// option and the default.
+    #[doc = include_str!("transition_interruption.doc/Blend.md")]
     Blend,
-    /// Let the current transition finish and drop the new one (spec §4.17).
+    #[doc = include_str!("transition_interruption.doc/Ignore.md")]
     Ignore,
 }
 
 impl TransitionInterruption {
-    /// Returns `true` if this policy continues from the element's current value
-    /// rather than snapping to a fresh start (spec §4.17 "interruption").
-    ///
-    /// True for [`Blend`](Self::Blend) and [`Reverse`](Self::Reverse), which
-    /// both carry the present mid-animation state forward; false for
-    /// [`Restart`](Self::Restart) and [`Ignore`](Self::Ignore).
+    #[doc = include_str!("transition_interruption.doc/preserves_current_value.md")]
     #[must_use]
     pub const fn preserves_current_value(&self) -> bool {
         matches!(self, Self::Blend | Self::Reverse)
     }
 
-    /// Resolves the [`KeyframeTrack`] a *superseding* transition should actually
-    /// run, given the incoming `target` track, the element's `current` sampled
-    /// value and the interrupted transition's `origin` value (spec §4.17
-    /// "interruption / reversal / blend").
-    ///
-    /// Returns [`None`] only for [`Ignore`](Self::Ignore) — the signal to keep
-    /// the in-flight transition and drop the incoming one. Otherwise:
-    ///
-    /// - [`Restart`](Self::Restart): the incoming `target` track verbatim (a
-    ///   fresh play from its authored start; the element may visibly jump).
-    /// - [`Blend`](Self::Blend): `target` re-based to begin at `current` via
-    ///   [`KeyframeTrack::with_start_value`], so the redirect is seamless.
-    /// - [`Reverse`](Self::Reverse): a two-stop track from `current` back to
-    ///   `origin` ([`KeyframeTrack::from_endpoints`]), undoing the in-flight
-    ///   transition from the present value.
-    ///
-    /// Keeping this pure (no timeline, no clock, no CSS) lets both the runtime
-    /// and tests derive the redirect track deterministically.
+    #[doc = include_str!("transition_interruption.doc/resolve_track.md")]
     #[must_use]
     pub fn resolve_track(
         self,
@@ -77,8 +41,7 @@ impl TransitionInterruption {
 }
 
 impl Default for TransitionInterruption {
-    /// [`Blend`](Self::Blend) — the smoothest UI default: an incoming transition
-    /// redirects seamlessly from the element's current value (spec §4.17).
+    #[doc = include_str!("transition_interruption.doc/default.md")]
     fn default() -> Self {
         Self::Blend
     }

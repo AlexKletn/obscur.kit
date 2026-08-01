@@ -1,79 +1,4 @@
-//! End-to-end: an authored `<Card/>` **is** the author's component (spec §2.13,
-//! §2.14) — on both front ends.
-//!
-//! # What used to happen
-//!
-//! `name_binding::component_id_for` resolved every tag it did not recognise to
-//! the generic `Container` primitive. So `<Card/>` was not a mis-checked
-//! component and not a rejected one: it was a **box**. No diagnostic, no error,
-//! no mount — an author wrote a component and got an empty div. §2.13's contract
-//! validation "skips any tag with no registered contract" was checking nothing
-//! because the tag was never going to be a component in the first place.
-//!
-//! # What closes it
-//!
-//! The id a component tag binds to is derived from its **name**
-//! ([`name_binding::user_component_id`]), which is the very scheme
-//! `#[derive(Contract)]` already computes `ComponentContract::id` with. The
-//! registry (`ComponentRegistry`) is a *runtime* value holding
-//! `Box<dyn ComponentFactory>` trait objects and cannot be consulted by a code
-//! generator that runs while the host crate is still compiling — but it does not
-//! need to be, because both sides can compute the same id from the same string.
-//! `derived_contract_id_agrees_with_the_authored_tag` below is the drift guard on
-//! exactly that agreement.
-//!
-//! The runtime half was already real and already tested (`ComponentStore` mounts
-//! an instance for any node whose `ComponentId` is registered and splices its
-//! `render` output beneath it); the front ends were emitting the wrong id into
-//! it.
-//!
-//! # Why every end-to-end test here carries a sibling box
-//!
-//! Because the first draft of them did not, and passed with the fix reverted.
-//! The derive resolves a name through the *same* `component_id_for` the front
-//! ends do — so in a build where `Card` falls back to `Container`, the host
-//! registers Card under the container id, `<Card/>` emits the container id, they
-//! agree, and the component mounts and renders "card:Hi" exactly as it should.
-//! What that build also does is mount a Card for every `<div>` on the page.
-//!
-//! Agreement between the two sides is therefore not the property under test —
-//! *identity* is. The `<div>`/`<span>` siblings are what tell the two apart:
-//! exactly one of the three nodes may mount.
-//!
-//! # What is still open, and is not claimed here
-//!
-//! * **An unregistered component tag is still silent.** `<Crad/>` (a typo) now
-//!   binds to `user_component_id("Crad")`, nothing is registered under it, and it
-//!   mounts nothing — no diagnostic. It is not even visibly different: nothing in
-//!   matching, cascade, layout or paint reads a `ComponentId`, so it still renders
-//!   as the box it silently rendered as before. The file front end *could*
-//!   diagnose this (its `Compiler` takes a `ContractRegistry`); the `okui!` macro
-//!   provably cannot (`CardProps::contract_surface()` is a function that runs when
-//!   the built crate runs, and the macro runs while that crate is still being
-//!   compiled), so the rule cannot be shared and is not added to one front end
-//!   alone. See `an_unregistered_component_tag_mounts_nothing`, which pins the
-//!   residue rather than hiding it.
-//! * **A component that declares no outlet still drops its authored children**,
-//!   and this file's `Card` is one: it declares no slot and renders no
-//!   `ViewNode::slot(…)`, so the `<span slot="header"/>` beneath it reaches no
-//!   position and does not appear. That is §2.12 working, not §2.12 missing — a
-//!   slot is a declaration, and Card declares none.
-//!   `authored_children_under_a_component_that_declares_no_slot_are_dropped` pins
-//!   it; `okui_slot_projection.rs` is where a component that *does* declare one
-//!   receives its content.
-//!
-//! # Why there are computed-style assertions here now
-//!
-//! Because every test in this file asserted on rendered **text**, and text is
-//! exactly the half of "a component works" that cannot fail when its output is
-//! invisible to the cascade. The external consumer audit's finding 2-1 —
-//! "a component-rendered subtree is matched by no selector" — went straight
-//! through this file: `Card` mounts, `Card` renders, `card:Hi` appears, and the
-//! author's `.card { … }` reaches nothing. `component_output_is_styled.rs` is
-//! the dedicated pin on §4.15's two halves; the two tests at the end of this
-//! file are the habit itself, on the front ends, so a future front-end change
-//! that quietly stops a component's output from reaching the style pass fails
-//! *here* rather than in an external application.
+#![doc = include_str!("okui_user_component.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::geometry::Size;
@@ -95,18 +20,15 @@ use obscur_kit::widgets::button::Button;
 
 // --- The author's component: a props struct, a component, a factory. ---
 
-/// `Card`'s typed props. The `#[contract(name = "Card")]` override is what ties
-/// the Rust type to the authored tag — the derive hashes *that* string into the
-/// component id, and so does the front end when it meets `<Card/>`.
+#[doc = include_str!("okui_user_component.doc/CardProps.md")]
 #[derive(Contract)]
 #[contract(name = "Card")]
 struct CardProps {
-    /// A required prop, decoded from the authored `title="…"`.
+    #[doc = include_str!("okui_user_component.doc/title.md")]
     title: String,
 }
 
-/// The component itself: renders one text node naming its decoded prop, so the
-/// assertion below can tell "the component ran" from "a box appeared".
+#[doc = include_str!("okui_user_component.doc/Card.md")]
 struct Card;
 
 impl Component for Card {
@@ -138,8 +60,7 @@ impl ComponentFactory for CardFactory {
     }
 }
 
-/// A headless runtime with `Card` registered — the host half of §2.14's "static
-/// registration is the default".
+#[doc = include_str!("okui_user_component.doc/runtime_with_card.md")]
 fn runtime_with_card() -> UiRuntime {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
     runtime
@@ -151,9 +72,7 @@ fn runtime_with_card() -> UiRuntime {
     runtime
 }
 
-/// The text the component rendered underneath the node at `path` (child indices
-/// from the root), or `None` when that node has no text child — which is exactly
-/// what an unmounted box looks like.
+#[doc = include_str!("okui_user_component.doc/rendered_text_at.md")]
 fn rendered_text_at(runtime: &UiRuntime, path: &[usize]) -> Option<String> {
     let mut node = runtime.tree().root()?;
     for &index in path {
@@ -166,7 +85,7 @@ fn rendered_text_at(runtime: &UiRuntime, path: &[usize]) -> Option<String> {
     }
 }
 
-/// Parses and compiles `source` through the real `.okui` pipeline.
+#[doc = include_str!("okui_user_component.doc/compile.md")]
 fn compile(source: &str) -> obscur_kit::ui_ir::document::UiIrDocument {
     let parsed = Parser::new().parse(source);
     let document = Document::cast(parsed.tree().root().clone()).expect("a document");
@@ -407,18 +326,12 @@ fn authored_children_under_a_component_that_declares_no_slot_are_dropped() {
 
 // --- The other half of "a component works": it can be styled. -----------
 
-/// A `Panel` that renders a **classed element**, not a bare text node, and
-/// declares §4.15's explicitly-open style scope so the application's sheets
-/// reach it.
-///
-/// `Card` above cannot carry these assertions: it renders one text node, and a
-/// text node has no CSS identity at all. That is not an accident of the fixture
-/// — it is the reason the finding survived this file.
+#[doc = include_str!("okui_user_component.doc/PanelProps.md")]
 #[derive(Contract)]
 #[contract(name = "Panel")]
 #[contract(style_scope = open)]
 struct PanelProps {
-    /// A required prop, decoded from the authored `title="…"`.
+    #[doc = include_str!("okui_user_component.doc/title_2.md")]
     title: String,
 }
 
@@ -460,7 +373,7 @@ impl ComponentFactory for PanelFactory {
     }
 }
 
-/// A headless runtime with `Panel` registered.
+#[doc = include_str!("okui_user_component.doc/runtime_with_panel.md")]
 fn runtime_with_panel() -> UiRuntime {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
     runtime
@@ -472,15 +385,12 @@ fn runtime_with_panel() -> UiRuntime {
     runtime
 }
 
-/// `.panel-body { background-color: rgb(30, 38, 54) }` — one class, one
-/// declaration, one authored sheet.
+#[doc = include_str!("okui_user_component.doc/PANEL_CSS.md")]
 const PANEL_CSS: &str = ".panel-body { background-color: rgb(30, 38, 54); }";
-/// What [`PANEL_CSS`] paints.
+#[doc = include_str!("okui_user_component.doc/PANEL_FILL.md")]
 const PANEL_FILL: (f32, f32, f32) = (30.0 / 255.0, 38.0 / 255.0, 54.0 / 255.0);
 
-/// Renders one frame of `view` under [`PANEL_CSS`] and returns the computed
-/// `background-color` of the element the component rendered beneath the node at
-/// `path`.
+#[doc = include_str!("okui_user_component.doc/component_output_fill.md")]
 fn component_output_fill(runtime: &mut UiRuntime, view: &View, path: &[usize]) -> (f32, f32, f32) {
     let mut css = obscur_kit::bootstrap::CssPipeline::new();
     css.install(

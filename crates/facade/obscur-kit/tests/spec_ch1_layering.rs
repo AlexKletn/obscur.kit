@@ -1,16 +1,4 @@
-//! **SPECIFICATION-DERIVED** layering, versioning and linkage cases for
-//! obscur.kit §1.1–§1.3.
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §1
-//! (Architecture & boundaries) with **no access to this repository's source**.
-//! The cases are a statement of what the implementation owes the spec, not a
-//! record of what it currently does. A failure here is a defect report about the
-//! toolkit (or, occasionally, about the spec), and must not be "corrected" by
-//! editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch1_layering.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch1_support/mod.rs"]
@@ -20,8 +8,7 @@ use std::path::PathBuf;
 
 use support::{rust_files, without_test_modules, workspace_root};
 
-/// The upward/core domain crates §1.1 forbids platform types from reaching:
-/// core (geometry/identity), tree, style, layout, text, motion, scene.
+#[doc = include_str!("spec_ch1_layering.doc/UPWARD_CRATES.md")]
 const UPWARD_CRATES: [(&str, &str); 7] = [
     ("core", "crates/foundation/obscur-geometry"),
     ("tree", "crates/domain/obscur-tree"),
@@ -32,8 +19,7 @@ const UPWARD_CRATES: [(&str, &str); 7] = [
     ("scene", "crates/domain/obscur-scene"),
 ];
 
-/// Concrete window-system, GPU, filesystem and networking type roots that must
-/// never appear in one of those crates' public signatures.
+#[doc = include_str!("spec_ch1_layering.doc/FORBIDDEN.md")]
 const FORBIDDEN: [&str; 11] = [
     "winit::",
     "wgpu::",
@@ -48,7 +34,7 @@ const FORBIDDEN: [&str; 11] = [
     "std::os::",
 ];
 
-/// Whether `line` opens a public item whose signature is API surface.
+#[doc = include_str!("spec_ch1_layering.doc/opens_public_item.md")]
 fn opens_public_item(line: &str) -> bool {
     let t = line.trim_start();
     if t.starts_with("//") {
@@ -68,8 +54,7 @@ fn opens_public_item(line: &str) -> bool {
         || (t.starts_with("pub ") && t.contains(':') && !t.contains('('))
 }
 
-/// Collects every public-signature text fragment in `source`, joining a
-/// signature that spans several lines until its parentheses balance.
+#[doc = include_str!("spec_ch1_layering.doc/public_signatures.md")]
 fn public_signatures(source: &str) -> Vec<String> {
     let cleaned = without_test_modules(source);
     let mut out = Vec::new();
@@ -102,8 +87,7 @@ fn public_signatures(source: &str) -> Vec<String> {
     out
 }
 
-/// §1.1: "Dependencies point toward abstractions. Concrete window-system, GPU,
-/// filesystem, networking and platform types never leak upward."
+#[doc = include_str!("spec_ch1_layering.doc/arch_01_no_platform_types_appear_in_upward_crate_signatures.md")]
 #[test]
 fn arch_01_no_platform_types_appear_in_upward_crate_signatures() {
     let root = workspace_root();
@@ -151,22 +135,7 @@ fn arch_01_no_platform_types_appear_in_upward_crate_signatures() {
     );
 }
 
-/// §1.2: "Independent version domains: Rust public API; supported CSS subset;
-/// UI IR; diagnostics protocol; resource manifests; plugin contracts;
-/// extension/provider contracts."
-///
-/// WEAKENED 2026-07-19: this originally asserted `domains.len() == 7` — that all
-/// seven named domains expose a separately queryable version value. §1.2's
-/// heading is "Independent version domains:" followed by the seven bullets, and
-/// that is a *policy* statement: these things version independently of one
-/// another and of the kit. It does not say each is addressable at runtime, and
-/// three of the seven ("supported CSS subset", "resource manifests", "plugin
-/// contracts", "extension/provider contracts") have no artifact that could carry
-/// one today. What is kept is the half the policy really does assert, and the
-/// half that discriminates: no reachable domain version is the kit's own.
-/// Candidate spec amendment: state whether each version domain must expose a
-/// queryable version constant, and where — this is the difference between a
-/// documentation promise and a compatibility-negotiation surface.
+#[doc = include_str!("spec_ch1_layering.doc/arch_02_seven_version_domains_are_individually_addressable.md")]
 #[test]
 fn arch_02_seven_version_domains_are_individually_addressable() {
     // Each of the seven domains the spec names must report its own version,
@@ -204,20 +173,7 @@ fn arch_02_seven_version_domains_are_individually_addressable() {
     }
 }
 
-/// §1.3: "Unused backends and optional integrations must not be linked."
-///
-/// WEAKENED 2026-07-19: this originally required the umbrella crate to declare a
-/// feature literally named `headless` (`features.contains("headless =")`), and
-/// that assertion is what fired. §1.3's only normative sentence is the one
-/// quoted above; the rest of the section is an *indicative* crate list
-/// ("Indicative crates:") and names no feature at all — `obscur-kit-headless`
-/// is a crate in that list, not a Cargo feature of the umbrella. What is kept is
-/// the sentence's actual content, tested two ways that both discriminate: the
-/// default feature set drags in no GPU backend or window system, and every
-/// backend dependency is optional so linkage is gated by the feature rather than
-/// by dead-code elimination. Candidate spec amendment: if headless-only is a
-/// supported build configuration (§1.4 lists "headless mode"), name the feature
-/// or profile that selects it, so a consumer has something to ask for.
+#[doc = include_str!("spec_ch1_layering.doc/arch_03_a_headless_only_consumer_links_no_gpu_or_window_backend.md")]
 #[test]
 fn arch_03_a_headless_only_consumer_links_no_gpu_or_window_backend() {
     let manifest = workspace_root()

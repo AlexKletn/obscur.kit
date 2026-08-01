@@ -1,26 +1,17 @@
-//! Failures opening or driving a layer surface.
+#![doc = include_str!("layer_shell_error.doc/_module.md")]
 
 use core::fmt;
 
-/// What can go wrong between asking for a layer surface and having one.
-///
-/// Every variant carries the compositor's or the library's own message rather
-/// than a rewritten one: when a compositor refuses a protocol, its reason is the
-/// useful half.
+#[doc = include_str!("layer_shell_error.doc/LayerShellError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayerShellError {
-    /// No Wayland display to connect to — not a Wayland session at all.
+    #[doc = include_str!("layer_shell_error.doc/NoDisplay.md")]
     NoDisplay(String),
-    /// Connected, but the compositor does not implement `wlr-layer-shell`.
-    ///
-    /// This is the expected outcome on GNOME (Mutter), which has declined the
-    /// protocol, and on any non-wlroots compositor that has not adopted it. It is
-    /// a capability answer, not a bug: a host should fall back to an ordinary
-    /// window rather than treat it as a failure.
+    #[doc = include_str!("layer_shell_error.doc/Unsupported.md")]
     Unsupported,
-    /// A global the shell needs (`wl_compositor`, `wl_seat`) is missing.
+    #[doc = include_str!("layer_shell_error.doc/MissingGlobal.md")]
     MissingGlobal(String),
-    /// The connection failed while dispatching.
+    #[doc = include_str!("layer_shell_error.doc/Dispatch.md")]
     Dispatch(String),
 }
 

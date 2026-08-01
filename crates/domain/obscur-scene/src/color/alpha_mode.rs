@@ -1,23 +1,16 @@
-//! Whether a color's or image's alpha is premultiplied into its channels.
+#![doc = include_str!("alpha_mode.doc/_module.md")]
 
-/// Whether a color's or image's alpha is premultiplied into its color channels
-/// (spec §5.7).
-///
-/// Authored colors are [`AlphaMode::Straight`]: the color channels are
-/// independent of the alpha channel. Compositing operates on
-/// [`AlphaMode::Premultiplied`] data, where each color channel has already been
-/// scaled by alpha, which makes source-over blending a simple linear
-/// combination.
+#[doc = include_str!("alpha_mode.doc/AlphaMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlphaMode {
-    /// Color channels are independent of alpha (as authored).
+    #[doc = include_str!("alpha_mode.doc/Straight.md")]
     Straight,
-    /// Color channels have been multiplied by alpha (compositing form).
+    #[doc = include_str!("alpha_mode.doc/Premultiplied.md")]
     Premultiplied,
 }
 
 impl AlphaMode {
-    /// Returns whether the color channels are premultiplied by alpha.
+    #[doc = include_str!("alpha_mode.doc/is_premultiplied.md")]
     #[must_use]
     pub const fn is_premultiplied(self) -> bool {
         matches!(self, Self::Premultiplied)
@@ -25,8 +18,7 @@ impl AlphaMode {
 }
 
 impl Default for AlphaMode {
-    /// The default alpha mode is [`AlphaMode::Straight`], matching authored
-    /// colors.
+    #[doc = include_str!("alpha_mode.doc/default.md")]
     fn default() -> Self {
         Self::Straight
     }

@@ -1,56 +1,31 @@
-//! A single simple selector: [`SimpleSelector`] and its attribute forms.
+#![doc = include_str!("simple_selector.doc/_module.md")]
 
 use super::pseudo_class_selector::PseudoClassSelector;
 use super::selector_specificity::SelectorSpecificity;
 
-/// A single simple selector — the atomic unit of a compound selector.
-///
-/// This mirrors the parsed selector surface produced by `obscur-css`; a later
-/// sub-step lowers a parsed compound into a sequence of these. Names are stored
-/// as owned strings rather than interned symbols so that matching against tree
-/// nodes (which intern in a *different* table than CSS) is a plain string
-/// comparison — see the crate's interner-coherence note.
+#[doc = include_str!("simple_selector.doc/SimpleSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimpleSelector {
-    /// A type/element selector such as `div`; stores the local name.
+    #[doc = include_str!("simple_selector.doc/Type.md")]
     Type(Box<str>),
-    /// The universal selector `*`, matching every element.
+    #[doc = include_str!("simple_selector.doc/Universal.md")]
     Universal,
-    /// A class selector such as `.button`; stores the class name (no `.`).
+    #[doc = include_str!("simple_selector.doc/Class.md")]
     Class(Box<str>),
-    /// An id selector such as `#main`; stores the id (no `#`).
+    #[doc = include_str!("simple_selector.doc/Id.md")]
     Id(Box<str>),
-    /// An attribute selector such as `[data-x]` or `[type="text"]`.
+    #[doc = include_str!("simple_selector.doc/Attribute.md")]
     Attribute(AttributeSelector),
-    /// A pseudo-class such as `:hover` or `:nth-child(2n+1)`.
+    #[doc = include_str!("simple_selector.doc/PseudoClass.md")]
     PseudoClass(PseudoClassSelector),
-    /// A pseudo-element such as `::before`; stores the name (no `::`).
-    ///
-    /// Never matched by the ordinary single-element matcher: a pseudo-element
-    /// selects a *generated box* (§4.16 `::before`/`::after`), not the
-    /// originating element, so
-    /// [`SelectorMatcher`](super::selector_matcher::SelectorMatcher) fails
-    /// closed here rather than styling the originating element by mistake. The
-    /// runtime resolves generated-content rules through a dedicated
-    /// pseudo-element path (`matches_complex_for_pseudo`) that anchors the rule
-    /// on the originating element while keeping its declarations off that
-    /// element's own box.
+    #[doc = include_str!("simple_selector.doc/PseudoElement.md")]
     PseudoElement(Box<str>),
-    /// An exported style part such as `::part(label)`; stores the part name
-    /// (no `::part(` / `)`), §2.12 / §4.15.
-    ///
-    /// Like [`PseudoElement`](Self::PseudoElement) it is inert in the ordinary
-    /// single-element matcher: `Component::part(name)` matches an element in a
-    /// component's *scoped* render output that the component exports under
-    /// `name`, and deciding that needs the component-host boundary — tree
-    /// context the pure matcher does not have. The runtime's style-matching
-    /// coordinator matches it against the exported part while the rest of the
-    /// compound matches the host.
+    #[doc = include_str!("simple_selector.doc/Part.md")]
     Part(Box<str>),
 }
 
 impl SimpleSelector {
-    /// Returns the part name if this is a [`Part`](Self::Part) selector.
+    #[doc = include_str!("simple_selector.doc/part_name.md")]
     #[must_use]
     pub fn part_name(&self) -> Option<&str> {
         match self {
@@ -59,8 +34,7 @@ impl SimpleSelector {
         }
     }
 
-    /// Returns the pseudo-element name if this is a
-    /// [`PseudoElement`](Self::PseudoElement) selector.
+    #[doc = include_str!("simple_selector.doc/pseudo_element_name.md")]
     #[must_use]
     pub fn pseudo_element_name(&self) -> Option<&str> {
         match self {
@@ -71,16 +45,7 @@ impl SimpleSelector {
 }
 
 impl SimpleSelector {
-    /// Returns the specificity this simple selector contributes.
-    ///
-    /// Per CSS: id → `(1, 0, 0)`; class, attribute, and pseudo-class →
-    /// `(0, 1, 0)`; type and pseudo-element → `(0, 0, 1)`; the universal
-    /// selector contributes nothing.
-    ///
-    /// Pseudo-classes delegate to
-    /// [`PseudoClassSelector::specificity_contribution`], because the four
-    /// selectors-4 §15 "evaluation context" forms — `:is()`, `:not()`,
-    /// `:where()`, `:has()` — do **not** contribute a flat `(0, 1, 0)`.
+    #[doc = include_str!("simple_selector.doc/specificity_contribution.md")]
     #[must_use]
     pub fn specificity_contribution(&self) -> SelectorSpecificity {
         match self {
@@ -97,33 +62,29 @@ impl SimpleSelector {
     }
 }
 
-/// An attribute selector: a required attribute name plus an optional value test.
-///
-/// A [`None`] matcher is a bare presence test (`[disabled]`); otherwise the
-/// [`AttrMatch`] describes how the attribute's value must relate to a compared
-/// string.
+#[doc = include_str!("simple_selector.doc/AttributeSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttributeSelector {
-    /// The attribute name that must be present.
+    #[doc = include_str!("simple_selector.doc/name.md")]
     pub name: Box<str>,
-    /// The value test, or [`None`] for a bare presence test.
+    #[doc = include_str!("simple_selector.doc/matcher.md")]
     pub matcher: Option<AttrMatch>,
 }
 
-/// The value-comparison operator of an attribute selector.
+#[doc = include_str!("simple_selector.doc/AttrMatch.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttrMatch {
-    /// `[a=b]` — the value equals the operand exactly.
+    #[doc = include_str!("simple_selector.doc/Exact.md")]
     Exact(Box<str>),
-    /// `[a~=b]` — the value is a whitespace-separated list containing the operand.
+    #[doc = include_str!("simple_selector.doc/Includes.md")]
     Includes(Box<str>),
-    /// `[a|=b]` — the value equals the operand or begins with `operand-`.
+    #[doc = include_str!("simple_selector.doc/DashMatch.md")]
     DashMatch(Box<str>),
-    /// `[a^=b]` — the value begins with the operand.
+    #[doc = include_str!("simple_selector.doc/Prefix.md")]
     Prefix(Box<str>),
-    /// `[a$=b]` — the value ends with the operand.
+    #[doc = include_str!("simple_selector.doc/Suffix.md")]
     Suffix(Box<str>),
-    /// `[a*=b]` — the value contains the operand as a substring.
+    #[doc = include_str!("simple_selector.doc/Substring.md")]
     Substring(Box<str>),
 }
 

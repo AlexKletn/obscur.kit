@@ -1,4 +1,4 @@
-//! Model module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod align_items;
 pub use align_items::AlignItems;
 mod align_self;

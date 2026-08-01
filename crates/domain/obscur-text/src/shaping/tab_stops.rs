@@ -1,52 +1,13 @@
-//! CSS Text 3 `tab-size` (§4.3): a preserved tab (U+0009) advances the pen to
-//! the next tab stop.
-//!
-//! Like [`apply_spacing`](crate::shaping::apply_spacing), this is a **pure,
-//! width-independent** rewrite of a shaped paragraph's glyph advances that sits
-//! between the (cached) shaping result and the width-dependent line wrap, so the
-//! runtime's measure pass and its compose pass call the same seam with the same
-//! `tab_width` and can never drift.
-//!
-//! A tab stop is a multiple of the `tab_width` measured from the **start of the
-//! line**. Per §4.3 the pen advances to the next tab stop that is *strictly*
-//! greater than the current position, so a tab always advances at least a little:
-//!
-//! ```text
-//! next = (floor(pen / tab_width) + 1) · tab_width
-//! advance = next − pen
-//! ```
-//!
-//! (equivalently `ceil((pen + ε) / tab_width) · tab_width`). The pen is measured
-//! from the line start, so it is reset to zero after each preserved segment break
-//! (`\n`) — a documented single-line-per-segment approximation that is exact for
-//! the common case where a run of preserved text has no leading indentation.
-//!
-//! Only tabs that are still present in `text` are affected; under a collapsing
-//! `white-space` mode (`normal` / `nowrap` / `pre-line`) a tab has already become
-//! a space at the pre-shape seam, so `text` contains no `\t` and this pass is a
-//! byte-for-byte no-op (it early-returns before touching any run).
+#![doc = include_str!("tab_stops.doc/_module.md")]
 
 use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun};
 
-/// Returns the character at byte offset `cluster` in `text`, if any.
+#[doc = include_str!("tab_stops.doc/char_at.md")]
 fn char_at(text: &str, cluster: usize) -> Option<char> {
     text.get(cluster..).and_then(|rest| rest.chars().next())
 }
 
-/// Advances every preserved tab (U+0009) in already-shaped `runs` over the source
-/// `text` to the next `tab_width` tab stop (§4.3), returning the runs with the tab
-/// glyphs' advances rewritten.
-///
-/// `tab_width` is the resolved tab-stop width in logical pixels (`tab-size` as a
-/// `<number>` times the space advance, or a `<length>` verbatim). Runs are walked
-/// in logical order with a running pen measured from the line start; the pen is
-/// reset after each preserved `\n`. Only the advance of a tab glyph changes —
-/// glyph identity, cluster, offsets, font, direction, level, and synthesis are
-/// preserved.
-///
-/// The pass early-returns `runs` unchanged when `tab_width <= 0` or `text`
-/// contains no tab, so an unauthored or collapsing-mode text node is completely
-/// unaffected (byte-for-byte identical).
+#[doc = include_str!("tab_stops.doc/apply_tab_stops.md")]
 #[must_use]
 pub fn apply_tab_stops(runs: Vec<ShapedRun>, text: &str, tab_width: f32) -> Vec<ShapedRun> {
     if tab_width <= 0.0 || !text.contains('\t') {
@@ -58,8 +19,7 @@ pub fn apply_tab_stops(runs: Vec<ShapedRun>, text: &str, tab_width: f32) -> Vec<
         .collect()
 }
 
-/// Rebuilds one [`ShapedRun`], advancing its tab glyphs to the next stop and
-/// carrying the running `pen` across the run (resetting it after each `\n`).
+#[doc = include_str!("tab_stops.doc/retab_run.md")]
 fn retab_run(run: &ShapedRun, text: &str, tab_width: f32, pen: &mut f32) -> ShapedRun {
     let source = run.run();
     let retabbed: Vec<ShapedGlyph> = source

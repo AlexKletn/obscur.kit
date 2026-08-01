@@ -1,18 +1,8 @@
-//! The transferable content: a MIME offer plus an optional typed internal
-//! payload (spec §6.20 typed internal payload, §6.21).
+#![doc = include_str!("transfer_payload.doc/_module.md")]
 
 use crate::offer::DataOffer;
 
-/// The full content moved by a transfer (spec §6.20, §6.21).
-///
-/// A payload always carries a [`DataOffer`] — the system-facing MIME
-/// representations any application can consume. It may *additionally* carry a
-/// typed *internal* payload: an app-chosen type tag plus the app's serialized
-/// value. This is the fast path for same-application transfers (spec §6.21 "one
-/// drag may expose both an internal typed payload and system MIME"): the source
-/// and target app agree on the tag and exchange the serialized value directly,
-/// avoiding a round-trip through MIME serialization. The toolkit stores the
-/// internal type and data opaquely and never interprets them.
+#[doc = include_str!("transfer_payload.doc/TransferPayload.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferPayload {
     offer: DataOffer,
@@ -21,7 +11,7 @@ pub struct TransferPayload {
 }
 
 impl TransferPayload {
-    /// Creates a payload carrying only the system MIME `offer` (spec §6.20).
+    #[doc = include_str!("transfer_payload.doc/new.md")]
     #[must_use]
     pub fn new(offer: DataOffer) -> Self {
         Self {
@@ -31,10 +21,7 @@ impl TransferPayload {
         }
     }
 
-    /// Returns this payload with a typed internal path attached (spec §6.21).
-    ///
-    /// `type_tag` names the app-private type and `data` is its serialized value;
-    /// the toolkit stores both opaquely.
+    #[doc = include_str!("transfer_payload.doc/with_internal.md")]
     #[must_use]
     pub fn with_internal(
         mut self,
@@ -46,34 +33,31 @@ impl TransferPayload {
         self
     }
 
-    /// Returns the system MIME offer (spec §6.20).
+    #[doc = include_str!("transfer_payload.doc/offer.md")]
     #[must_use]
     pub fn offer(&self) -> &DataOffer {
         &self.offer
     }
 
-    /// Returns the internal type tag, if a typed internal path is present (spec
-    /// §6.21).
+    #[doc = include_str!("transfer_payload.doc/internal_type.md")]
     #[must_use]
     pub fn internal_type(&self) -> Option<&str> {
         self.internal_type.as_deref()
     }
 
-    /// Returns the serialized internal data, if a typed internal path is present
-    /// (spec §6.21).
+    #[doc = include_str!("transfer_payload.doc/internal_data.md")]
     #[must_use]
     pub fn internal_data(&self) -> Option<&str> {
         self.internal_data.as_deref()
     }
 
-    /// Returns whether a typed internal path is present (spec §6.21).
+    #[doc = include_str!("transfer_payload.doc/has_internal.md")]
     #[must_use]
     pub fn has_internal(&self) -> bool {
         self.internal_type.is_some()
     }
 
-    /// Returns whether the payload carries nothing — an empty offer and no
-    /// internal path (spec §6.20).
+    #[doc = include_str!("transfer_payload.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.offer.is_empty() && !self.has_internal()

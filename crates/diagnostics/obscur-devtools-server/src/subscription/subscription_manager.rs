@@ -1,18 +1,11 @@
-//! Per-topic subscription registry and event fan-out (spec §7.6/§7.7).
+#![doc = include_str!("subscription_manager.doc/_module.md")]
 
 use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
     EventKind, ProtocolEvent, SUBSCRIPTION_LIMIT, SubscriptionId, Topic,
 };
 
-/// Tracks active subscriptions per [`Topic`] and fans pushed events out to
-/// their subscribers.
-///
-/// The manager mints monotonically increasing [`SubscriptionId`]s and enforces
-/// the [`SUBSCRIPTION_LIMIT`]: an endpoint may hold at most that many concurrent
-/// subscriptions before [`subscribe`](Self::subscribe) fails with
-/// [`ProtocolError::LimitExceeded`] (spec §7.7). Records are kept in insertion
-/// order so fan-out is deterministic.
+#[doc = include_str!("subscription_manager.doc/SubscriptionManager.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SubscriptionManager {
     entries: Vec<(SubscriptionId, Topic)>,
@@ -20,7 +13,7 @@ pub struct SubscriptionManager {
 }
 
 impl SubscriptionManager {
-    /// Creates an empty subscription manager.
+    #[doc = include_str!("subscription_manager.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -29,12 +22,7 @@ impl SubscriptionManager {
         }
     }
 
-    /// Registers a new subscription to `topic`, returning its fresh id.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::LimitExceeded`] when the endpoint already holds
-    /// [`SUBSCRIPTION_LIMIT`] subscriptions (spec §7.7).
+    #[doc = include_str!("subscription_manager.doc/subscribe.md")]
     pub fn subscribe(&mut self, topic: Topic) -> Result<SubscriptionId, ProtocolError> {
         if self.entries.len() >= SUBSCRIPTION_LIMIT {
             return Err(ProtocolError::LimitExceeded {
@@ -47,14 +35,14 @@ impl SubscriptionManager {
         Ok(id)
     }
 
-    /// Cancels the subscription `id`, returning whether it was active.
+    #[doc = include_str!("subscription_manager.doc/unsubscribe.md")]
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
         let before = self.entries.len();
         self.entries.retain(|(existing, _)| *existing != id);
         self.entries.len() != before
     }
 
-    /// Returns the ids of every subscription to `topic`, in insertion order.
+    #[doc = include_str!("subscription_manager.doc/subscribers_of.md")]
     #[must_use]
     pub fn subscribers_of(&self, topic: Topic) -> Vec<SubscriptionId> {
         self.entries
@@ -64,10 +52,7 @@ impl SubscriptionManager {
             .collect()
     }
 
-    /// Builds one [`ProtocolEvent`] per subscriber of `topic`, carrying `kind`.
-    ///
-    /// Subscribers of other topics receive nothing. The returned events are in
-    /// subscription insertion order.
+    #[doc = include_str!("subscription_manager.doc/fan_out.md")]
     #[must_use]
     pub fn fan_out(&self, topic: Topic, kind: &EventKind) -> Vec<ProtocolEvent> {
         self.entries
@@ -77,13 +62,13 @@ impl SubscriptionManager {
             .collect()
     }
 
-    /// Returns the number of active subscriptions.
+    #[doc = include_str!("subscription_manager.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns whether there are no active subscriptions.
+    #[doc = include_str!("subscription_manager.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

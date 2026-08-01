@@ -1,4 +1,4 @@
-//! The [`FocusTree`] holding the live focus state (spec §7.1 focus).
+#![doc = include_str!("focus_tree.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
@@ -6,16 +6,7 @@ use obscur_identity::NodeId;
 
 use super::{FocusNode, FocusRequest, FocusResult, TabOrder};
 
-/// The live focus state: the registered focus nodes and which one is focused
-/// (spec §7.1).
-///
-/// This is the pure focus state machine. [`apply`](Self::apply) resolves a
-/// [`FocusRequest`] against the registered [`FocusNode`]s and the current focus,
-/// returning a [`FocusResult`] and updating the focused node. Tab navigation
-/// uses a [`TabOrder`] computed over the registered nodes in deterministic
-/// [`NodeId`] order. Scope containment and focus traps are *not* enforced here:
-/// the runtime layers those on top using
-/// [`FocusScope`](super::FocusScope) and [`FocusRestore`](super::FocusRestore).
+#[doc = include_str!("focus_tree.doc/FocusTree.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FocusTree {
     nodes: BTreeMap<NodeId, FocusNode>,
@@ -23,7 +14,7 @@ pub struct FocusTree {
 }
 
 impl FocusTree {
-    /// Creates an empty focus tree with nothing focused.
+    #[doc = include_str!("focus_tree.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -32,13 +23,12 @@ impl FocusTree {
         }
     }
 
-    /// Registers `node`'s focus properties, replacing any existing entry keyed by
-    /// the same [`NodeId`].
+    #[doc = include_str!("focus_tree.doc/register.md")]
     pub fn register(&mut self, node: FocusNode) {
         self.nodes.insert(node.node(), node);
     }
 
-    /// Unregisters `node`. If it was focused, focus is cleared.
+    #[doc = include_str!("focus_tree.doc/unregister.md")]
     pub fn unregister(&mut self, node: NodeId) {
         self.nodes.remove(&node);
         if self.focused == Some(node) {
@@ -46,55 +36,43 @@ impl FocusTree {
         }
     }
 
-    /// Returns the currently focused node, if any.
+    #[doc = include_str!("focus_tree.doc/focused.md")]
     #[must_use]
     pub fn focused(&self) -> Option<NodeId> {
         self.focused
     }
 
-    /// Returns the registered focus properties for `node`, if any.
+    #[doc = include_str!("focus_tree.doc/get.md")]
     #[must_use]
     pub fn get(&self, node: NodeId) -> Option<&FocusNode> {
         self.nodes.get(&node)
     }
 
-    /// Returns whether `node` is registered.
+    #[doc = include_str!("focus_tree.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.nodes.contains_key(&node)
     }
 
-    /// Returns the number of registered nodes.
+    #[doc = include_str!("focus_tree.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Returns whether no nodes are registered.
+    #[doc = include_str!("focus_tree.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    /// Removes all registered nodes and clears focus.
+    #[doc = include_str!("focus_tree.doc/clear.md")]
     pub fn clear(&mut self) {
         self.nodes.clear();
         self.focused = None;
     }
 
-    /// Resolves `request` against the current state, updating the focused node
-    /// and returning the [`FocusResult`].
-    ///
-    /// - [`Node`](FocusRequest::Node): `NoTarget` if unregistered, `Rejected` if
-    ///   registered but not focusable, `Unchanged` if already focused, else
-    ///   `Focused`.
-    /// - [`Clear`](FocusRequest::Clear): `Cleared` if something was focused, else
-    ///   `NoTarget`.
-    /// - [`Next`](FocusRequest::Next) / [`Previous`](FocusRequest::Previous) /
-    ///   [`First`](FocusRequest::First) / [`Last`](FocusRequest::Last): pick from
-    ///   the computed [`TabOrder`] relative to the current focus (directional
-    ///   steps wrap), focusing the result or returning `NoTarget` when the tab
-    ///   sequence is empty.
+    #[doc = include_str!("focus_tree.doc/apply.md")]
     pub fn apply(&mut self, request: FocusRequest) -> FocusResult {
         match request {
             FocusRequest::Node(node) => self.focus_node(node),

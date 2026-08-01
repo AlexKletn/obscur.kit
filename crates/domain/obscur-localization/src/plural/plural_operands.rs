@@ -1,62 +1,24 @@
-//! `PluralOperands`: the numeric features a CLDR plural rule is written against
-//! (spec §7.2).
+#![doc = include_str!("plural_operands.doc/_module.md")]
 
-/// The CLDR plural operands of a source number.
-///
-/// A plural rule is **not** written against a number — it is written against
-/// these features of how the number was *written*. That distinction is the whole
-/// game: `1` and `1.0` are the same value and different categories in English
-/// (`one` vs `other`), because `v` differs. A resolver that took an `f64` could
-/// not tell them apart, which is why this type exists and why
-/// [`PluralRules::select`](crate::plural::PluralRules::select) takes it rather
-/// than a number.
-///
-/// The fields are TR35's, transcribed from its *Plural Operand Meanings* table
-/// (see `specs/cldr/README.md` for the pinned source):
-///
-/// | Symbol | Value |
-/// |---|---|
-/// | `n` | the absolute value of the source number |
-/// | `i` | the integer digits |
-/// | `v` | the number of visible fraction digits, **with** trailing zeros |
-/// | `w` | the number of visible fraction digits, **without** trailing zeros |
-/// | `f` | the visible fraction digits with trailing zeros, as an integer |
-/// | `t` | the visible fraction digits without trailing zeros, as an integer |
-///
-/// # `c`/`e` is not modelled
-///
-/// TR35 defines a seventh operand, `c` (compact decimal exponent; `e` is its
-/// deprecated synonym), for numbers written as `1.2c6`. This type does not carry
-/// it, and the consequence is exact and worth stating rather than burying: the
-/// CLDR rule sets whose `many` category is defined in terms of `e` — French,
-/// Spanish, Portuguese, Italian, Catalan — are **not** among the rule sets
-/// [`PluralRules::cardinal`](crate::plural::PluralRules::cardinal) knows, because
-/// half of a rule set is worse than none. Compact decimal formatting is not built
-/// either, so nothing in this workspace can produce a number with a `c` operand
-/// to ask about.
+#[doc = include_str!("plural_operands.doc/PluralOperands.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PluralOperands {
-    /// `n`: the absolute value of the source number.
+    #[doc = include_str!("plural_operands.doc/n.md")]
     pub n: f64,
-    /// `i`: the integer digits of the source number.
+    #[doc = include_str!("plural_operands.doc/i.md")]
     pub i: u64,
-    /// `v`: the count of visible fraction digits, with trailing zeros.
+    #[doc = include_str!("plural_operands.doc/v.md")]
     pub v: u32,
-    /// `w`: the count of visible fraction digits, without trailing zeros.
+    #[doc = include_str!("plural_operands.doc/w.md")]
     pub w: u32,
-    /// `f`: the visible fraction digits with trailing zeros, as an integer.
+    #[doc = include_str!("plural_operands.doc/f.md")]
     pub f: u64,
-    /// `t`: the visible fraction digits without trailing zeros, as an integer.
+    #[doc = include_str!("plural_operands.doc/t.md")]
     pub t: u64,
 }
 
 impl PluralOperands {
-    /// The operands of an integer count — the overwhelmingly common case.
-    ///
-    /// A negative count uses its absolute value: CLDR defines `n` as *the
-    /// absolute value of N*, so −1 and 1 are the same category. There are no
-    /// visible fraction digits, so `v = w = f = t = 0` — which is what makes
-    /// Russian's `v = 0` guard true and lets 1, 21, 101 reach `one` at all.
+    #[doc = include_str!("plural_operands.doc/from_integer.md")]
     #[must_use]
     pub fn from_integer(count: i64) -> Self {
         let i = count.unsigned_abs();
@@ -74,17 +36,7 @@ impl PluralOperands {
         }
     }
 
-    /// The operands of a number as it is *written*, parsed from its decimal
-    /// spelling.
-    ///
-    /// The spelling is the input because the trailing zeros are the input:
-    /// `"1"`, `"1.0"` and `"1.00"` are one value and three distinct operand sets.
-    /// Accepts an optional sign, digits, and an optional `.` fraction; returns
-    /// `None` for anything else (an exponent, a grouping separator, an empty
-    /// fraction, a bare `.`).
-    ///
-    /// A fraction longer than 19 digits, or an integer part beyond [`u64::MAX`],
-    /// is refused rather than truncated into a different category.
+    #[doc = include_str!("plural_operands.doc/from_decimal.md")]
     #[must_use]
     pub fn from_decimal(text: &str) -> Option<Self> {
         let digits = text.strip_prefix(['-', '+']).unwrap_or(text);

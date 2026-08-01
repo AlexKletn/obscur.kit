@@ -1,36 +1,32 @@
-//! A syntactic error produced while parsing CSS (spec §4.13 diagnostics).
+#![doc = include_str!("css_parse_error.doc/_module.md")]
 
 use crate::source::SourceSpan;
 
-/// The category of a [`CssParseError`] (spec §4.13).
-///
-/// Each variant names a distinct way the CSS grammar can be violated, letting
-/// callers group or filter diagnostics without matching on message text.
+#[doc = include_str!("css_parse_error.doc/CssParseErrorKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CssParseErrorKind {
-    /// A token appeared where the grammar did not allow it.
+    #[doc = include_str!("css_parse_error.doc/UnexpectedToken.md")]
     UnexpectedToken,
-    /// Input ended while a construct was still open.
+    #[doc = include_str!("css_parse_error.doc/UnexpectedEof.md")]
     UnexpectedEof,
-    /// A selector could not be parsed.
+    #[doc = include_str!("css_parse_error.doc/InvalidSelector.md")]
     InvalidSelector,
-    /// A declaration value could not be parsed.
+    #[doc = include_str!("css_parse_error.doc/InvalidValue.md")]
     InvalidValue,
-    /// A `:` was expected (for example between a property and its value).
+    #[doc = include_str!("css_parse_error.doc/ExpectedColon.md")]
     ExpectedColon,
-    /// A `;` was expected to terminate a declaration.
+    #[doc = include_str!("css_parse_error.doc/ExpectedSemicolon.md")]
     ExpectedSemicolon,
-    /// A `{ ... }` block was left unterminated.
+    #[doc = include_str!("css_parse_error.doc/UnterminatedBlock.md")]
     UnterminatedBlock,
-    /// A quoted string was left unterminated.
+    #[doc = include_str!("css_parse_error.doc/UnterminatedString.md")]
     UnterminatedString,
-    /// An at-rule (for example `@media`) was malformed.
+    #[doc = include_str!("css_parse_error.doc/InvalidAtRule.md")]
     InvalidAtRule,
 }
 
 impl CssParseErrorKind {
-    /// Returns a short, stable label for this kind, used in [`CssParseError`]'s
-    /// [`std::fmt::Display`] output.
+    #[doc = include_str!("css_parse_error.doc/label.md")]
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -47,11 +43,7 @@ impl CssParseErrorKind {
     }
 }
 
-/// A syntactic error produced while parsing CSS (spec §4.13).
-///
-/// Pairs a [`CssParseErrorKind`] with a human-readable `message` and the
-/// [`SourceSpan`] the error covers. It implements [`std::error::Error`] so it
-/// composes with the standard error ecosystem while remaining I/O-free.
+#[doc = include_str!("css_parse_error.doc/CssParseError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CssParseError {
     kind: CssParseErrorKind,
@@ -60,7 +52,7 @@ pub struct CssParseError {
 }
 
 impl CssParseError {
-    /// Creates a parse error of `kind` with `message` covering `span`.
+    #[doc = include_str!("css_parse_error.doc/new.md")]
     #[must_use]
     pub fn new(kind: CssParseErrorKind, message: impl Into<Box<str>>, span: SourceSpan) -> Self {
         Self {
@@ -70,14 +62,13 @@ impl CssParseError {
         }
     }
 
-    /// Creates a [`CssParseErrorKind::UnexpectedToken`] error covering `span`.
+    #[doc = include_str!("css_parse_error.doc/unexpected_token.md")]
     #[must_use]
     pub fn unexpected_token(message: impl Into<Box<str>>, span: SourceSpan) -> Self {
         Self::new(CssParseErrorKind::UnexpectedToken, message, span)
     }
 
-    /// Creates a [`CssParseErrorKind::UnexpectedEof`] error at byte offset `at`
-    /// (an empty span), with a default message.
+    #[doc = include_str!("css_parse_error.doc/unexpected_eof.md")]
     #[must_use]
     pub fn unexpected_eof(at: u32) -> Self {
         Self::new(
@@ -87,19 +78,19 @@ impl CssParseError {
         )
     }
 
-    /// Returns the category of this error.
+    #[doc = include_str!("css_parse_error.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> CssParseErrorKind {
         self.kind
     }
 
-    /// Returns the human-readable message describing this error.
+    #[doc = include_str!("css_parse_error.doc/message.md")]
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
 
-    /// Returns the span this error covers.
+    #[doc = include_str!("css_parse_error.doc/span.md")]
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span

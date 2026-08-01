@@ -1,17 +1,4 @@
-//! A percentage size resolves against its **containing block's content box** —
-//! including inside a parent whose own width is a percentage (CSS 2.1 §10.2).
-//!
-//! The defect this pins: a box arranged at a decided size re-read its own
-//! authored `width: 100%` and resolved it against the constraint it had just
-//! been handed — its own border box — so it came back one padding wider, and the
-//! error compounded one nesting level at a time until the content walked out of
-//! the window. A fixed `px` width resolves to the same number against any basis,
-//! which is exactly why the bug hid: only percentages diverged, and only under a
-//! padded percentage-width ancestor.
-//!
-//! The fix states the containing block explicitly (`BoxConstraints::percent_basis`)
-//! rather than letting a decided box re-derive it — Servo's
-//! `SizeConstraint::Definite`, in its first half.
+#![doc = include_str!("percentage_in_padded_parent.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -40,7 +27,7 @@ fn el(class: &str, kids: Vec<ViewNode>) -> ViewNode {
         .with_children(ViewFragment::from_nodes(kids))
 }
 
-/// `outer > inner > deep`, so a compounding error shows up as growth per level.
+#[doc = include_str!("percentage_in_padded_parent.doc/view.md")]
 fn view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![el(
         "outer",
@@ -70,8 +57,7 @@ fn widths(css: &str) -> Vec<f32> {
     out
 }
 
-/// A percentage child of a padded percentage parent gets the parent's **content**
-/// width, and a third level gets the second's — no growth per level.
+#[doc = include_str!("percentage_in_padded_parent.doc/a_percentage_resolves_against_the_content_box_at_every_depth.md")]
 #[test]
 fn a_percentage_resolves_against_the_content_box_at_every_depth() {
     let widths = widths(
@@ -91,9 +77,7 @@ fn a_percentage_resolves_against_the_content_box_at_every_depth() {
     assert!((widths[2] - 1000.0).abs() < 0.01, "deep {}", widths[2]);
 }
 
-/// The same shape with a **fixed** parent width, which was always correct. It is
-/// here because it is the reason the bug survived: whichever basis a `px` width
-/// is resolved against it answers the same, so only percentages ever diverged.
+#[doc = include_str!("percentage_in_padded_parent.doc/a_fixed_width_parent_was_never_affected.md")]
 #[test]
 fn a_fixed_width_parent_was_never_affected() {
     let widths = widths(
@@ -107,8 +91,7 @@ fn a_fixed_width_parent_was_never_affected() {
     assert!((widths[2] - 800.0).abs() < 0.01, "deep {}", widths[2]);
 }
 
-/// A fractional percentage takes its share of the content box, where an
-/// off-by-a-padding is easier to mistake for rounding.
+#[doc = include_str!("percentage_in_padded_parent.doc/a_half_width_child_halves_the_content_box.md")]
 #[test]
 fn a_half_width_child_halves_the_content_box() {
     let widths = widths(
@@ -122,12 +105,7 @@ fn a_half_width_child_halves_the_content_box() {
     assert!((widths[2] - 500.0).abs() < 0.01, "deep {}", widths[2]);
 }
 
-/// Flex has its own sizing code and had the same defect. Measured on a
-/// **fixed-width** flex parent, which isolates the percentage rule from a
-/// separate flex bug: a flex container clamps its own border box to the space
-/// available instead of overflowing it, so `width: 100%` + padding comes out
-/// 1000 where the block path correctly gives 1040. That is not this fix's
-/// business and is deliberately not exercised here.
+#[doc = include_str!("percentage_in_padded_parent.doc/the_flex_path_resolves_a_percentage_against_the_content_box.md")]
 #[test]
 fn the_flex_path_resolves_a_percentage_against_the_content_box() {
     let widths = widths(
@@ -143,7 +121,7 @@ fn the_flex_path_resolves_a_percentage_against_the_content_box() {
     assert!((widths[2] - 800.0).abs() < 0.01, "deep {}", widths[2]);
 }
 
-/// Borders count toward the content box exactly as padding does.
+#[doc = include_str!("percentage_in_padded_parent.doc/a_border_is_subtracted_from_the_basis_too.md")]
 #[test]
 fn a_border_is_subtracted_from_the_basis_too() {
     let widths = widths(

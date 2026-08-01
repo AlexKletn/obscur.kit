@@ -1,23 +1,15 @@
-//! `Text`: a literal text-node primitive (spec §2.6).
+#![doc = include_str!("text.doc/_module.md")]
 
 use obscur_view::view::{View, ViewNode};
 
-/// A literal run of text placed into the view tree.
-///
-/// `Text` is one of the minimal built-in primitives (spec §2.6). It differs
-/// from the element primitives ([`Container`](crate::Container),
-/// [`Image`](crate::Image), …): text is *real structure* in the desired tree
-/// (spec §4.16), so it lowers to the dedicated [`ViewNode::Text`] variant
-/// rather than a [`ViewNode::Element`]. Because text is not a component
-/// element, `Text` carries no `COMPONENT_ID` and emits no properties — its only
-/// content is the string itself.
+#[doc = include_str!("text.doc/Text.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Text {
     content: Box<str>,
 }
 
 impl Text {
-    /// Creates a text primitive holding `content`.
+    #[doc = include_str!("text.doc/new.md")]
     #[must_use]
     pub fn new(content: impl Into<Box<str>>) -> Self {
         Self {
@@ -25,19 +17,19 @@ impl Text {
         }
     }
 
-    /// Returns the text content.
+    #[doc = include_str!("text.doc/content.md")]
     #[must_use]
     pub fn content(&self) -> &str {
         &self.content
     }
 
-    /// Lowers this primitive into a [`ViewNode::Text`] node.
+    #[doc = include_str!("text.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::text(self.content)
     }
 
-    /// Lowers this primitive into a single-node [`View`].
+    #[doc = include_str!("text.doc/view.md")]
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

@@ -1,20 +1,10 @@
-//! `SubscriptionScope`: owns subscriptions and releases them on drop.
+#![doc = include_str!("subscription_scope.doc/_module.md")]
 
 use crate::state::state_generation::StateGeneration;
 use crate::state::subscription::{Subscription, SubscriptionId};
 use obscur_identity::SignalId;
 
-/// Owns a group of [`Subscription`]s and guarantees they are released together.
-///
-/// Per spec §2.1 a component's subscriptions are *scoped* and *automatically
-/// cleaned up*. Since there is no runtime dispatcher yet, cleanup is modelled
-/// honestly through ownership: the scope holds the subscription tokens and
-/// releases them when it is dropped (see the [`Drop`] impl), or eagerly via
-/// [`SubscriptionScope::clear`]. Nothing outside the scope holds a token, so a
-/// scope going out of scope deterministically ends every subscription it owns.
-///
-/// Ids are minted monotonically and never reused within a scope's lifetime, so
-/// a stale [`SubscriptionId`] can never alias a later subscription.
+#[doc = include_str!("subscription_scope.doc/SubscriptionScope.md")]
 #[derive(Debug, Default)]
 pub struct SubscriptionScope {
     subscriptions: Vec<Subscription>,
@@ -22,7 +12,7 @@ pub struct SubscriptionScope {
 }
 
 impl SubscriptionScope {
-    /// Creates an empty scope.
+    #[doc = include_str!("subscription_scope.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -31,11 +21,7 @@ impl SubscriptionScope {
         }
     }
 
-    /// Records a dependency on `source`, which was at generation `observed` when
-    /// the dependency was taken, returning the subscription's freshly minted id.
-    ///
-    /// The scope keeps ownership of the token; the returned id lets the caller
-    /// refer to it later (for example to [`unsubscribe`](Self::unsubscribe)).
+    #[doc = include_str!("subscription_scope.doc/subscribe.md")]
     pub fn subscribe(&mut self, source: SignalId, observed: StateGeneration) -> SubscriptionId {
         let id = SubscriptionId::from_raw(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
@@ -44,9 +30,7 @@ impl SubscriptionScope {
         id
     }
 
-    /// Whether any subscription in this scope depends on `source` and is behind
-    /// its `current` generation — i.e. this scope's owner is a consumer of a
-    /// value that changed (spec §3.1).
+    #[doc = include_str!("subscription_scope.doc/is_stale_for.md")]
     #[must_use]
     pub fn is_stale_for(&self, source: SignalId, current: StateGeneration) -> bool {
         self.subscriptions
@@ -54,40 +38,36 @@ impl SubscriptionScope {
             .any(|s| s.source() == source && s.is_stale_against(current))
     }
 
-    /// Every source this scope depends on, in the order the dependencies were
-    /// recorded.
+    #[doc = include_str!("subscription_scope.doc/sources.md")]
     pub fn sources(&self) -> impl Iterator<Item = SignalId> + '_ {
         self.subscriptions.iter().map(Subscription::source)
     }
 
-    /// Releases a single subscription early, returning it if it was present.
+    #[doc = include_str!("subscription_scope.doc/unsubscribe.md")]
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> Option<Subscription> {
         let index = self.subscriptions.iter().position(|s| s.id() == id)?;
         Some(self.subscriptions.remove(index))
     }
 
-    /// Returns the subscription with `id`, if it is still active.
+    #[doc = include_str!("subscription_scope.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: SubscriptionId) -> Option<&Subscription> {
         self.subscriptions.iter().find(|s| s.id() == id)
     }
 
-    /// Number of active subscriptions in this scope.
+    #[doc = include_str!("subscription_scope.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.subscriptions.len()
     }
 
-    /// Returns `true` if the scope currently owns no subscriptions.
+    #[doc = include_str!("subscription_scope.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.subscriptions.is_empty()
     }
 
-    /// Releases every subscription this scope owns.
-    ///
-    /// Called automatically when the scope is dropped; exposed so a component
-    /// can also tear its subscriptions down eagerly without dropping the scope.
+    #[doc = include_str!("subscription_scope.doc/clear.md")]
     pub fn clear(&mut self) {
         self.subscriptions.clear();
     }

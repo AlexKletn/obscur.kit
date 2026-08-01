@@ -1,4 +1,4 @@
-//! Task module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod task_id;
 mod task_priority;
 mod task_scope;

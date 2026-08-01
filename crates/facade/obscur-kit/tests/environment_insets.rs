@@ -1,10 +1,4 @@
-//! §6.15 — the host reports its insets, CSS `env()` lays out around them.
-//!
-//! End-to-end through the real stack: authored CSS → the CSS frontend →
-//! computed style → layout. The interesting part is not that `env()` parses; it
-//! is that the value comes from the *host*, changes while the app runs, and that
-//! a change actually reaches the arranged geometry rather than being memoized
-//! away.
+#![doc = include_str!("environment_insets.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -67,7 +61,7 @@ fn origin_y(rt: &UiRuntime, node: NodeId) -> f32 {
         .y
 }
 
-/// A runtime reporting `insets` as its safe area, one frame rendered.
+#[doc = include_str!("environment_insets.doc/with_safe_area.md")]
 fn with_safe_area(insets: Insets) -> (UiRuntime, Stylesheet) {
     let sheet = compile(CSS);
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 800.0));
@@ -98,9 +92,7 @@ fn an_env_inset_resolves_to_what_the_host_reported() {
     );
 }
 
-/// The default is an answer, not a placeholder: a screen with no cutout has no
-/// insets, so a host that never mentions them lays out at zero — and the
-/// declaration is *not* dropped.
+#[doc = include_str!("environment_insets.doc/a_host_that_reports_nothing_lays_out_at_zero.md")]
 #[test]
 fn a_host_that_reports_nothing_lays_out_at_zero() {
     let sheet = compile(CSS);
@@ -117,11 +109,7 @@ fn a_host_that_reports_nothing_lays_out_at_zero() {
     assert_eq!(origin_y(&rt, at(&rt, &[0, 0])), 0.0);
 }
 
-/// §6.15 lists "dynamic changes" among the typed environment values, and this is
-/// the case that matters: a keyboard appears, a device rotates, and the layout
-/// has to follow. The style memo is keyed on the viewport and the sheets, so an
-/// environment it did not name would let the retained styles be reused and the
-/// padding would silently stay where it was.
+#[doc = include_str!("environment_insets.doc/a_later_report_moves_the_layout.md")]
 #[test]
 fn a_later_report_moves_the_layout() {
     let (mut rt, sheet) = with_safe_area(Insets::uniform(0.0));
@@ -151,9 +139,7 @@ fn reporting_the_same_values_again_changes_nothing() {
     assert_eq!(rt.environment().safe_area, NOTCHED);
 }
 
-/// The keyboard is a separate environment value from the safe area: content
-/// clears a home indicator *and* an on-screen keyboard, and they are different
-/// distances. Setting one must not disturb the other.
+#[doc = include_str!("environment_insets.doc/the_keyboard_inset_is_independent_of_the_safe_area.md")]
 #[test]
 fn the_keyboard_inset_is_independent_of_the_safe_area() {
     let css = "#root { width: 400px; height: 800px; \
@@ -186,9 +172,7 @@ fn the_keyboard_inset_is_independent_of_the_safe_area() {
     );
 }
 
-/// An unmodelled name with a fallback lays out at the fallback; without one the
-/// declaration is dropped. A typo must not read as an inset that happens to be
-/// absent.
+#[doc = include_str!("environment_insets.doc/an_unmodelled_name_falls_back_or_is_dropped.md")]
 #[test]
 fn an_unmodelled_name_falls_back_or_is_dropped() {
     let css = "#root { width: 400px; height: 800px; \

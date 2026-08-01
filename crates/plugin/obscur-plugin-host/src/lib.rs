@@ -1,26 +1,26 @@
-//! Plugin orchestration: discovery, policy, activation and lifecycle.
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-/// When and why a plugin is activated.
+#[doc = include_str!("lib.doc/activation.md")]
 pub mod activation;
-/// What a plugin may ask the host for.
+#[doc = include_str!("lib.doc/capability.md")]
 pub mod capability;
-/// What a plugin adds to the host.
+#[doc = include_str!("lib.doc/contribution.md")]
 pub mod contribution;
-/// Dependencies between plugins.
+#[doc = include_str!("lib.doc/dependency.md")]
 pub mod dependency;
-/// Finding plugins on disk.
+#[doc = include_str!("lib.doc/discovery.md")]
 pub mod discovery;
-/// The states a plugin moves through.
+#[doc = include_str!("lib.doc/lifecycle.md")]
 pub mod lifecycle;
-/// The host object that owns loaded plugins.
+#[doc = include_str!("lib.doc/manager.md")]
 pub mod manager;
-/// What the host measures about plugin cost.
+#[doc = include_str!("lib.doc/performance.md")]
 pub mod performance;
-/// The rules the host applies to plugins.
+#[doc = include_str!("lib.doc/policy.md")]
 pub mod policy;
-/// Where plugin state is kept.
+#[doc = include_str!("lib.doc/storage.md")]
 pub mod storage;
-/// Replacing a loaded plugin with a newer one.
+#[doc = include_str!("lib.doc/update.md")]
 pub mod update;

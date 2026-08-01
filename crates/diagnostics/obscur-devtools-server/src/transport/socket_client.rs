@@ -1,15 +1,4 @@
-//! `SocketClient`: the client end of a real DevTools socket connection
-//! (spec §7.6 local socket transport).
-//!
-//! A DevTools client process (CLI/GUI) connects to a [`SocketListener`]'s
-//! address, presents a handshake, and issues capability-scoped commands. This
-//! type is the minimal, std-only counterpart to
-//! [`SocketTransport`](crate::transport::SocketTransport): it frames a
-//! [`ServerBound`] with [`WireCodec`], writes it, and reads back the framed
-//! [`ClientBound`] reply. It carries no authority of its own — the server's
-//! endpoint decides what every message is allowed to do (spec §7.7).
-//!
-//! [`SocketListener`]: crate::transport::SocketListener
+#![doc = include_str!("socket_client.doc/_module.md")]
 
 use std::io;
 use std::net::{SocketAddr, TcpStream};
@@ -22,18 +11,14 @@ use obscur_devtools_protocol::message::{CommandMessage, HandshakeRequest, Handsh
 
 use crate::transport::{ClientBound, ServerBound, SocketStream, WireCodec};
 
-/// The client end of a framed DevTools socket connection.
+#[doc = include_str!("socket_client.doc/SocketClient.md")]
 #[derive(Debug)]
 pub struct SocketClient {
     stream: SocketStream,
 }
 
 impl SocketClient {
-    /// Connects to a loopback TCP address (the portable fallback).
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] if the connection cannot be established.
+    #[doc = include_str!("socket_client.doc/connect_loopback.md")]
     pub fn connect_loopback(addr: SocketAddr) -> io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
         Ok(Self {
@@ -41,11 +26,7 @@ impl SocketClient {
         })
     }
 
-    /// Connects to a Unix domain socket path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] if the connection cannot be established.
+    #[doc = include_str!("socket_client.doc/connect_unix.md")]
     #[cfg(unix)]
     pub fn connect_unix(path: impl AsRef<Path>) -> io::Result<Self> {
         let stream = UnixStream::connect(path)?;
@@ -54,12 +35,7 @@ impl SocketClient {
         })
     }
 
-    /// Performs the connection handshake and returns the server's response.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] on a socket failure, or if the server's reply is
-    /// not a handshake response (a protocol violation).
+    #[doc = include_str!("socket_client.doc/handshake.md")]
     pub fn handshake(&mut self, request: &HandshakeRequest) -> io::Result<HandshakeResponse> {
         match self.exchange(&ServerBound::Handshake(request.clone()))? {
             ClientBound::Handshake(response) => Ok(response),
@@ -69,26 +45,12 @@ impl SocketClient {
         }
     }
 
-    /// Issues one command and returns the server's raw client-bound reply
-    /// (snapshot, subscription, acknowledgement, or protocol error).
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] on any underlying socket failure.
+    #[doc = include_str!("socket_client.doc/command.md")]
     pub fn command(&mut self, command: &CommandMessage) -> io::Result<ClientBound> {
         self.exchange(&ServerBound::Command(command.clone()))
     }
 
-    /// Reads one **unsolicited** message the server pushed, without sending
-    /// anything (spec §7.6 live inspectable state).
-    ///
-    /// Every other method here writes then reads; a pushed event has no request to
-    /// pair with, so it needs its own read. Returns [`None`] when the server closed
-    /// the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] on a socket failure or an undecodable frame.
+    #[doc = include_str!("socket_client.doc/receive.md")]
     pub fn receive(&mut self) -> io::Result<Option<ClientBound>> {
         let Some(frame) = self.stream.read_frame()? else {
             return Ok(None);
@@ -98,16 +60,12 @@ impl SocketClient {
             .map_err(|error| unexpected(&error.to_string()))
     }
 
-    /// Sets how long a [`receive`](Self::receive) waits before giving up.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] if the underlying socket rejects the timeout.
+    #[doc = include_str!("socket_client.doc/set_read_timeout.md")]
     pub fn set_read_timeout(&mut self, timeout: Option<std::time::Duration>) -> io::Result<()> {
         self.stream.set_read_timeout(timeout)
     }
 
-    /// Writes one server-bound message and reads exactly one reply.
+    #[doc = include_str!("socket_client.doc/exchange.md")]
     fn exchange(&mut self, message: &ServerBound) -> io::Result<ClientBound> {
         self.stream
             .write_frame(&WireCodec::encode_server_bound(message))?;
@@ -119,7 +77,7 @@ impl SocketClient {
     }
 }
 
-/// Builds an `InvalidData` I/O error describing a protocol violation.
+#[doc = include_str!("socket_client.doc/unexpected.md")]
 fn unexpected(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_owned())
 }

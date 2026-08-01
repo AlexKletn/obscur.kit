@@ -1,47 +1,17 @@
-//! The replaceable hyphenation port and its no-op default (spec §5.10).
+#![doc = include_str!("hyphenator.doc/_module.md")]
 
-/// A hyphenation port: given a single word, returns the byte offsets **within**
-/// that word at which a hyphenation break is permitted (spec §5.10).
-///
-/// This is a pure, replaceable seam. The domain never embeds Knuth-Liang
-/// patterns or a language dictionary; a real adapter (behind the xtask boundary)
-/// implements this trait with actual hyphenation tables, while the domain wraps
-/// text through the trait object. It is deliberately **object-safe** so the
-/// runtime can hold a `Box<dyn Hyphenator>`.
-///
-/// # Contract
-///
-/// - The returned offsets are **byte** indices into `word` (UTF-8), each marking
-///   a position at which `word` may be split (the tail begins at that byte).
-/// - By convention an implementation returns only *interior* break points:
-///   never `0` (the very start) and never `word.len()` (the very end), and it
-///   should respect a sensible minimum prefix/suffix so a break does not strand
-///   a single letter. The domain additionally clamps any offset that is not
-///   strictly interior, so an over-eager adapter cannot corrupt wrapping.
-/// - The result must be **deterministic**: the same `word` always yields the
-///   same offsets, so measure and compose agree on the same lines.
-///
-/// Author soft hyphens (`U+00AD`) are handled separately by the wrapper and do
-/// **not** need to be reported here; this port only proposes *algorithmic*
-/// break points inside an otherwise unbroken word.
+#[doc = include_str!("hyphenator.doc/Hyphenator.md")]
 pub trait Hyphenator {
-    /// Returns the interior byte offsets within `word` where a hyphenation break
-    /// is permitted, in ascending order (spec §5.10).
+    #[doc = include_str!("hyphenator.doc/hyphenate.md")]
     fn hyphenate(&self, word: &str) -> Vec<usize>;
 }
 
-/// A [`Hyphenator`] that never proposes a break point (spec §5.10).
-///
-/// This is the domain default: wrapping through it reproduces the historical
-/// whitespace-only line breaking exactly, so a paragraph laid out with a
-/// `NullHyphenator` is byte-identical to one laid out before hyphenation existed.
-/// A host installs a real adapter to enable in-word breaking.
+#[doc = include_str!("hyphenator.doc/NullHyphenator.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NullHyphenator;
 
 impl Hyphenator for NullHyphenator {
-    /// Always returns an empty vector: no interior break points, so no word is
-    /// ever split by the hyphenator (spec §5.10).
+    #[doc = include_str!("hyphenator.doc/hyphenate_2.md")]
     fn hyphenate(&self, _word: &str) -> Vec<usize> {
         Vec::new()
     }

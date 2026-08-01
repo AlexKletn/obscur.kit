@@ -1,5 +1,4 @@
-//! Layer-surface module: shell surfaces that are part of the desktop itself
-//! rather than application windows (spec §6.5).
+#![doc = include_str!("mod.doc/_module.md")]
 mod layer_anchor;
 pub use layer_anchor::LayerAnchor;
 mod layer_exclusive_zone;

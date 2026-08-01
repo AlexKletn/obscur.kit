@@ -1,27 +1,4 @@
-//! Resolves a grid item's named line placement (`grid-column: <name>` /
-//! `grid-row: <name>`) against its container's `grid-template-columns` /
-//! `grid-template-rows` line names, patching the item's [`LayoutStyle`] placement.
-//!
-//! Named-line placement, like named-area placement, cannot be resolved on a single
-//! node in isolation: a child's `grid-column: sidebar-start / main-end` names lines
-//! declared with `[name]` groups on its **container**'s
-//! `grid-template-columns` / `grid-template-rows`, so the lines' numbers are only
-//! knowable with the tree in hand. The CSS layer therefore carries the child's
-//! reference unresolved — a [`GridLineValue::Named`] edge on one of the four
-//! `grid-*-start` / `-end` longhands — and
-//! [`grid_placement_of`](super::layout_coordinator) maps it to
-//! [`GridLine::Auto`]. This pass, which runs after
-//! [`layout_styles_from`](super::LayoutCoordinator::layout_styles_from), looks each
-//! named edge up against the parent's per-axis line-name map and overwrites just
-//! that edge of the item's [`GridPlacement`] with the concrete
-//! [`GridLine::Line`] the name resolves to (spec §4.13).
-//!
-//! A child with no named edge is untouched, and a named edge whose name is absent
-//! from the container's template (or whose parent authored no template) is left at
-//! its [`GridLine::Auto`] default, so it simply auto-places — keeping every
-//! non-named layout byte-for-byte identical. When a line name is declared more than
-//! once, the **first** (lowest-numbered) occurrence wins; a trailing `<integer>`
-//! disambiguator (`main 2`) is not yet modelled — see the crate follow-ups.
+#![doc = include_str!("grid_lines.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -32,22 +9,7 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutStyles};
 
-/// Resolves every grid item's named `grid-column` / `grid-row` line references
-/// against its container's `grid-template-columns` / `grid-template-rows` line
-/// names, patching the item's [`LayoutStyle`] placement in place.
-///
-/// For each node carrying a [`GridLineValue::Named`] edge, the node's **logical
-/// parent** supplies the containing grid; the parent's computed track lists provide
-/// the per-axis `name -> line number` map, and each named edge is rewritten to the
-/// concrete [`GridLine::Line`] it resolves to. A node without a named edge, without
-/// a logical parent, whose parent authored no line names, or that names an unknown
-/// line is left unchanged (auto placement).
-///
-/// This never adds or removes entries: it only overwrites the `grid_placement`
-/// field of items already present in `styles`, so it is a pure refinement of the
-/// table [`layout_styles_from`](super::LayoutCoordinator::layout_styles_from)
-/// built. Patches are independent per node, so the (unordered) iteration is
-/// deterministic in its result.
+#[doc = include_str!("grid_lines.doc/resolve_named_grid_lines.md")]
 pub fn resolve_named_grid_lines(
     styles: &mut LayoutStyles,
     tree: &RetainedTree,
@@ -96,8 +58,7 @@ pub fn resolve_named_grid_lines(
     }
 }
 
-/// Whether any of the four `grid-*-start` / `-end` longhands is a
-/// [`GridLineValue::Named`] edge (the only case this pass acts on).
+#[doc = include_str!("grid_lines.doc/has_named_edge.md")]
 fn has_named_edge(style: &ComputedStyle) -> bool {
     [
         PropertyId::GridColumnStart,
@@ -109,9 +70,7 @@ fn has_named_edge(style: &ComputedStyle) -> bool {
     .any(|id| matches!(grid_line_of(style, id), Some(GridLineValue::Named(_))))
 }
 
-/// Resolves one named edge against `map`, returning the concrete
-/// [`GridLine::Line`] it names; a non-named edge, or a name absent from `map`,
-/// keeps `current` (its already-computed value, `GridLine::Auto` for a name).
+#[doc = include_str!("grid_lines.doc/resolve_edge.md")]
 fn resolve_edge(
     style: &ComputedStyle,
     property: PropertyId,
@@ -126,8 +85,7 @@ fn resolve_edge(
     }
 }
 
-/// Reads one grid-line longhand as its style-local [`GridLineValue`], or [`None`]
-/// when the property is absent or not a grid-line value.
+#[doc = include_str!("grid_lines.doc/grid_line_of.md")]
 fn grid_line_of(style: &ComputedStyle, property: PropertyId) -> Option<&GridLineValue> {
     style
         .get(property)
@@ -135,13 +93,7 @@ fn grid_line_of(style: &ComputedStyle, property: PropertyId) -> Option<&GridLine
         .and_then(PropertyValue::as_grid_line)
 }
 
-/// Builds a `name -> 1-based line number` map from a container's
-/// `grid-template-columns` / `grid-template-rows` line names.
-///
-/// The track list's `line_names[i]` bucket holds the names on grid line `i + 1`
-/// (line `0` is the line before the first track). A name declared more than once
-/// keeps its **first** (lowest) line number, so a repeated name resolves to its
-/// earliest occurrence. An axis with no authored line names yields an empty map.
+#[doc = include_str!("grid_lines.doc/line_name_map.md")]
 fn line_name_map(style: &ComputedStyle, property: PropertyId) -> HashMap<Box<str>, i32> {
     let mut map = HashMap::new();
     let Some(list) = style

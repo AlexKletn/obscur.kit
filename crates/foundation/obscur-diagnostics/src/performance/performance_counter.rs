@@ -1,26 +1,20 @@
-//! A named monotonic performance counter.
+#![doc = include_str!("performance_counter.doc/_module.md")]
 
 use crate::diagnostic::DiagnosticSubsystem;
 
-/// A named monotonic counter attributed to a subsystem (spec §7.9).
-///
-/// Counters track cumulative event tallies for a subsystem — e.g. dispatch
-/// count, reconciliation passes, CSS matches, text shaping runs, layout passes,
-/// animation ticks or hit-tests. The value only ever grows via
-/// [`increment`](Self::increment)/[`add`](Self::add) until an explicit
-/// [`reset`](Self::reset) (typically at a frame boundary).
+#[doc = include_str!("performance_counter.doc/PerformanceCounter.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PerformanceCounter {
-    /// Subsystem the counter is attributed to.
+    #[doc = include_str!("performance_counter.doc/subsystem.md")]
     subsystem: DiagnosticSubsystem,
-    /// Stable, human-readable counter label.
+    #[doc = include_str!("performance_counter.doc/label.md")]
     label: Box<str>,
-    /// Current accumulated value.
+    #[doc = include_str!("performance_counter.doc/value.md")]
     value: u64,
 }
 
 impl PerformanceCounter {
-    /// Creates a counter for `subsystem` named `label`, starting at zero.
+    #[doc = include_str!("performance_counter.doc/new.md")]
     #[must_use]
     pub fn new(subsystem: DiagnosticSubsystem, label: impl Into<Box<str>>) -> Self {
         Self {
@@ -30,34 +24,34 @@ impl PerformanceCounter {
         }
     }
 
-    /// Increments the counter by one (saturating at [`u64::MAX`]).
+    #[doc = include_str!("performance_counter.doc/increment.md")]
     pub fn increment(&mut self) {
         self.value = self.value.saturating_add(1);
     }
 
-    /// Adds `n` to the counter (saturating at [`u64::MAX`]).
+    #[doc = include_str!("performance_counter.doc/add.md")]
     pub fn add(&mut self, n: u64) {
         self.value = self.value.saturating_add(n);
     }
 
-    /// Resets the counter back to zero.
+    #[doc = include_str!("performance_counter.doc/reset.md")]
     pub fn reset(&mut self) {
         self.value = 0;
     }
 
-    /// Returns the current value.
+    #[doc = include_str!("performance_counter.doc/value_2.md")]
     #[must_use]
     pub fn value(&self) -> u64 {
         self.value
     }
 
-    /// Returns the subsystem this counter is attributed to.
+    #[doc = include_str!("performance_counter.doc/subsystem_2.md")]
     #[must_use]
     pub fn subsystem(&self) -> DiagnosticSubsystem {
         self.subsystem
     }
 
-    /// Returns the counter label.
+    #[doc = include_str!("performance_counter.doc/label_2.md")]
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label

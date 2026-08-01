@@ -1,4 +1,4 @@
-//! Route module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod route;
 pub use route::Route;
 mod route_match;

@@ -1,5 +1,4 @@
-//! The runtime-owned [`TextEditSession`]: the caret + selection + text state for
-//! the currently focused editable field (spec §5.11, §6.7).
+#![doc = include_str!("text_edit_session.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_text::editing::TextBuffer;
@@ -7,72 +6,26 @@ use obscur_text::ime::{Composition, Preedit};
 use obscur_text::selection::TextSelection;
 use obscur_text::span::TextRange;
 
-/// The runtime's editing session for the focused text field.
-///
-/// Unlike the append-only per-keystroke model it replaces, the runtime is now
-/// the **source of truth** for the focused field's text, caret and selection
-/// (an *uncontrolled* input): a [`TextEditSession`] owns a deterministic
-/// [`TextBuffer`] (spec §5.11) that the keymap in
-/// [`UiRuntime::handle_key`](super::UiRuntime::handle_key) drives with
-/// [`EditCommand`](obscur_text::editing::EditCommand)s. The app is notified of
-/// the *resulting text* after each mutating edit; step-2 rendering reads the
-/// live [`text`](Self::text)/[`selection`](Self::selection) back to paint the
-/// caret and selection highlight.
-///
-/// A session is bound to one [`NodeId`] — the editable node whose ancestor chain
-/// binds [`EVENT_INPUT`](obscur_view::view::EVENT_INPUT). When focus leaves that
-/// node the session is dropped; when it lands on a *different* editable a fresh
-/// session is seeded (see
-/// [`UiRuntime::begin_text_editing`](super::UiRuntime::begin_text_editing)).
+use crate::orchestration::{EditingView, PreeditView};
+
+#[doc = include_str!("text_edit_session.doc/TextEditSession.md")]
 pub(crate) struct TextEditSession {
-    /// The editable node this session edits (the ancestor binding `EVENT_INPUT`).
+    #[doc = include_str!("text_edit_session.doc/node.md")]
     node: NodeId,
-    /// The pure editing engine holding the field's text, selection and undo/redo.
+    #[doc = include_str!("text_edit_session.doc/buffer.md")]
     buffer: TextBuffer,
-    /// The active IME composition anchored in `buffer`, if the field is composing
-    /// (spec §5.12). While `Some(_)` and active a preedit is shown inline (spliced
-    /// only for display) but kept OUT of `buffer` until it commits; a commit
-    /// replaces the anchor span in `buffer` with the committed text as one edit
-    /// (one composition = one undo unit).
+    #[doc = include_str!("text_edit_session.doc/composition.md")]
     composition: Option<Composition>,
-    /// The field's horizontal scroll offset (logical px, ≥ 0): how far the text
-    /// run is scrolled left within the field's content box so the caret stays in
-    /// view (the single-line text-control scroll model, CSS Overflow 3 §3.1
-    /// scroll-into-view). Recomputed after every caret move/edit by
-    /// [`UiRuntime::update_caret_scroll`](super::UiRuntime::update_caret_scroll)
-    /// and read back by the compose phase (via
-    /// [`EditingView::scroll_left`](crate::orchestration::EditingView::scroll_left))
-    /// and the click inverse. `0.0` for a value that fits its box and for any
-    /// wrapping (multi-line) field, which never scrolls horizontally.
+    #[doc = include_str!("text_edit_session.doc/scroll_left.md")]
     scroll_left: f32,
-    /// The last **committed** value — the baseline the HTML `change` event
-    /// compares against (WHATWG HTML §4.10.5.5 *Common input element APIs*: the
-    /// `change` event fires "when the user commits the value" and only when it
-    /// *differs* from the value the control had when it gained focus). Seeded to
-    /// the field's text at focus, advanced by an explicit commit (single-line
-    /// `Enter`) so a later blur without further edits does not re-fire, and
-    /// consulted by the runtime's blur/Enter commit path. Distinct from the live
-    /// [`buffer`](Self::buffer) text, which every keystroke mutates.
+    #[doc = include_str!("text_edit_session.doc/committed.md")]
     committed: String,
-    /// The **last retained value** the session reconciled against — the watermark
-    /// the controlled-input reseed compares the tree against (WHATWG HTML
-    /// §4.10.5.5 *value reflection*). Seeded to the field's text at focus and
-    /// advanced every structural frame the retained value the session sees
-    /// changes. It lets the runtime distinguish an EXTERNAL rewrite of the field
-    /// (a "Clear" button, or a normalizing `on-input` that writes back a
-    /// different value) — which must reseed the buffer so the field shows the
-    /// model value — from a field whose retained value simply never changes (a
-    /// static *uncontrolled* input), which must NEVER be reseeded lest it fight
-    /// the user's in-flight edit. Distinct from [`committed`](Self::committed)
-    /// (the `change` baseline) and from the live [`buffer`](Self::buffer) text.
+    #[doc = include_str!("text_edit_session.doc/mirror.md")]
     mirror: String,
 }
 
 impl TextEditSession {
-    /// Creates a session for `node` seeded with `initial_text` and the caret
-    /// placed at the **end** of that text (the natural focus point for a field a
-    /// user just tabbed/clicked into). The undo/redo history starts empty and no
-    /// composition is active.
+    #[doc = include_str!("text_edit_session.doc/seeded.md")]
     pub(crate) fn seeded(node: NodeId, initial_text: impl Into<String>) -> Self {
         // The seed text is the `change` baseline (the value at focus) *and* the
         // buffer's initial content — clone it once for both.
@@ -95,9 +48,7 @@ impl TextEditSession {
         }
     }
 
-    /// Replaces the session's text outright with `text`, caret at the end, clears
-    /// the undo/redo history, and drops any active composition — an explicit
-    /// re-seed from the app.
+    #[doc = include_str!("text_edit_session.doc/reseed.md")]
     pub(crate) fn reseed(&mut self, text: impl Into<String>) {
         // An explicit re-seed is a fresh value: it also resets the `change`
         // baseline, so a commit after re-seeding compares against the new value.
@@ -115,23 +66,7 @@ impl TextEditSession {
         self.scroll_left = 0.0;
     }
 
-    /// Re-seeds the buffer from an **external** rewrite of the field's retained
-    /// value while it stays focused — the controlled-input reseed (WHATWG HTML
-    /// §4.10.5.5: a text control reflects its `value`, so when the app rewrites the
-    /// value the control displays it).
-    ///
-    /// Unlike [`reseed`](Self::reseed) this **preserves the caret** at its current
-    /// byte offset, clamped into the new value and floored to a char boundary
-    /// (standard controlled-input behaviour: an `on-input` that normalizes — trim
-    /// / uppercase — should not fling the caret to the end mid-edit). The undo/redo
-    /// history is cleared and any composition dropped (the value is no longer the
-    /// one being composed), scroll is reset (re-derived on the next caret move),
-    /// and the retained-value [`mirror`](Self::mirror) watermark is advanced to the
-    /// new value.
-    ///
-    /// The `change` baseline [`committed`](Self::committed) is deliberately **left
-    /// untouched**: an external rewrite is not a user commit, so a later blur still
-    /// compares against the value the field had at focus.
+    #[doc = include_str!("text_edit_session.doc/reseed_controlled.md")]
     pub(crate) fn reseed_controlled(&mut self, text: impl Into<String>) {
         let text = text.into();
         // Keep the caret where it was, clamped into the new value at a char
@@ -144,93 +79,70 @@ impl TextEditSession {
         self.scroll_left = 0.0;
     }
 
-    /// Returns the last retained value the session reconciled against — the
-    /// watermark the controlled-input reseed compares the tree against.
+    #[doc = include_str!("text_edit_session.doc/mirror_2.md")]
     pub(crate) fn mirror(&self) -> &str {
         &self.mirror
     }
 
-    /// Advances the retained-value watermark to `retained` without touching the
-    /// buffer — used when the session's OWN edit reached the tree (a passthrough
-    /// controlled input), so no reseed is needed but the watermark must track the
-    /// value the tree now carries.
+    #[doc = include_str!("text_edit_session.doc/set_mirror.md")]
     pub(crate) fn set_mirror(&mut self, retained: String) {
         self.mirror = retained;
     }
 
-    /// Returns the editable node this session is bound to.
+    #[doc = include_str!("text_edit_session.doc/node_2.md")]
     pub(crate) const fn node(&self) -> NodeId {
         self.node
     }
 
-    /// Returns the field's current horizontal scroll offset (logical px, ≥ 0) —
-    /// how far the run is scrolled left so the caret stays in the content box.
+    #[doc = include_str!("text_edit_session.doc/scroll_left_2.md")]
     pub(crate) const fn scroll_left(&self) -> f32 {
         self.scroll_left
     }
 
-    /// Sets the field's horizontal scroll offset (logical px). The runtime clamps
-    /// it into `0 ..= max(0, content_width − W)` before calling this, so the paint
-    /// and click-inverse read a valid, in-range offset.
+    #[doc = include_str!("text_edit_session.doc/set_scroll_left.md")]
     pub(crate) const fn set_scroll_left(&mut self, scroll_left: f32) {
         self.scroll_left = scroll_left;
     }
 
-    /// Returns a mutable reference to the underlying editing engine, so the
-    /// runtime can [`apply`](TextBuffer::apply) an
-    /// [`EditCommand`](obscur_text::editing::EditCommand) or drive undo/redo.
+    #[doc = include_str!("text_edit_session.doc/buffer_mut.md")]
     pub(crate) fn buffer_mut(&mut self) -> &mut TextBuffer {
         &mut self.buffer
     }
 
-    /// Returns the session's current text.
+    #[doc = include_str!("text_edit_session.doc/text.md")]
     pub(crate) fn text(&self) -> &str {
         self.buffer.text()
     }
 
-    /// Returns whether the field's live text differs from the last committed
-    /// value — i.e. whether a commit (blur / single-line `Enter`) should fire a
-    /// `change` event (WHATWG HTML §4.10.5.5: `change` fires only when the value
-    /// actually changed since it was last committed / since focus).
+    #[doc = include_str!("text_edit_session.doc/is_dirty.md")]
     pub(crate) fn is_dirty(&self) -> bool {
         self.buffer.text() != self.committed
     }
 
-    /// Marks the live text as the committed baseline, so a subsequent commit
-    /// without further edits does not re-fire `change`. Called after a
-    /// single-line `Enter` commit that keeps the field focused.
+    #[doc = include_str!("text_edit_session.doc/mark_committed.md")]
     pub(crate) fn mark_committed(&mut self) {
         self.committed = self.buffer.text().to_owned();
     }
 
-    /// Returns the session's current selection (a collapsed selection is a plain
-    /// caret).
+    #[doc = include_str!("text_edit_session.doc/selection.md")]
     pub(crate) fn selection(&self) -> TextSelection {
         self.buffer.selection()
     }
 
-    /// Starts an IME composition anchored at the current selection/caret (spec
-    /// §5.12 "start"), replacing any prior composition. The preedit begins empty
-    /// and is shown inline (not inserted) at the anchor; a subsequent commit
-    /// replaces the anchor span with the committed text.
+    #[doc = include_str!("text_edit_session.doc/start_composition.md")]
     pub(crate) fn start_composition(&mut self) {
         let anchor = self.buffer.selection().range();
         self.composition = Some(Composition::start(anchor));
     }
 
-    /// Replaces the live composition's preedit with `preedit` (spec §5.12
-    /// "update"). A no-op when no composition is active — the preedit is stored on
-    /// the composition, never in the buffer.
+    #[doc = include_str!("text_edit_session.doc/update_composition.md")]
     pub(crate) fn update_composition(&mut self, preedit: Preedit) {
         if let Some(composition) = self.composition.as_mut() {
             composition.update(preedit);
         }
     }
 
-    /// Commits the live composition (spec §5.12 "commit"): marks it committed,
-    /// clears it, and returns the buffer byte range the caller must replace with
-    /// the committed text (the anchor span). Returns `None` when no composition is
-    /// active; the buffer replacement itself (one undo unit) is the caller's job.
+    #[doc = include_str!("text_edit_session.doc/commit_composition.md")]
     pub(crate) fn commit_composition(&mut self) -> Option<TextRange> {
         let composition = self.composition.as_mut()?;
         if !composition.is_active() {
@@ -246,8 +158,7 @@ impl TextEditSession {
         Some(anchor)
     }
 
-    /// Cancels the live composition (spec §5.12 "cancel"): drops the preedit with
-    /// no buffer change. A no-op when no composition is active.
+    #[doc = include_str!("text_edit_session.doc/cancel_composition.md")]
     pub(crate) fn cancel_composition(&mut self) {
         if let Some(composition) = self.composition.as_mut() {
             composition.cancel();
@@ -255,24 +166,43 @@ impl TextEditSession {
         self.composition = None;
     }
 
-    /// Returns whether an IME composition is currently live (composing).
+    #[doc = include_str!("text_edit_session.doc/is_composing.md")]
     pub(crate) fn is_composing(&self) -> bool {
         self.composition
             .as_ref()
             .is_some_and(Composition::is_active)
     }
 
-    /// Returns the active composition, if any — the source of the preedit the
-    /// compose phase splices for display.
+    #[doc = include_str!("text_edit_session.doc/composition_2.md")]
     pub(crate) fn composition(&self) -> Option<&Composition> {
         self.composition.as_ref()
     }
+
+    #[doc = include_str!("text_edit_session.doc/view.md")]
+    pub(crate) fn view(&self) -> EditingView<'_> {
+        // The field's live horizontal scroll offset, so compose translates the
+        // run/caret/selection/preedit by `−scroll_left` and the field's
+        // `overflow: hidden` clip hides the scrolled-out text (single-line
+        // text-control scroll model, CSS Overflow 3 §3.1). `0.0` for a fitting
+        // or wrapping field ⇒ byte-identical unscrolled paint. The measure pass
+        // ignores `scroll_left` (it does not change the shaped string).
+        let view = EditingView::new(self.node(), self.text(), self.selection())
+            .with_scroll_left(self.scroll_left());
+        // While composing, attach the live preedit so both passes splice it into
+        // the field for DISPLAY — the buffer text is untouched (spec §5.12).
+        match self.composition().filter(|c| c.is_active()) {
+            Some(comp) => view.with_preedit(PreeditView::new(
+                comp.preedit().text(),
+                comp.anchor().start,
+                comp.anchor().end,
+                comp.preedit().caret(),
+            )),
+            None => view,
+        }
+    }
 }
 
-/// Clamps a byte `offset` into `text`: capped at `text.len()` and floored to the
-/// nearest UTF-8 char boundary at or below it, so the result is always a valid
-/// caret position in `text` (an offset from a previous, differently-sized value
-/// may land past the end or mid-codepoint).
+#[doc = include_str!("text_edit_session.doc/clamp_to_char_boundary.md")]
 fn clamp_to_char_boundary(text: &str, offset: usize) -> usize {
     if offset >= text.len() {
         return text.len();

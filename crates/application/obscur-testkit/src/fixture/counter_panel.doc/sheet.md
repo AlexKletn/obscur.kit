@@ -1,0 +1,1 @@
+`.counter { background-color: red; width: 100px; height: 50px }`.

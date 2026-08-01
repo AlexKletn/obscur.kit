@@ -1,13 +1,4 @@
-//! Shared harness for the `spec_ch1_*` **specification-derived** test files.
-//!
-//! These tests are NOT implementation-derived. Every expected value in the
-//! `spec_ch1_*.rs` files was written by an agent reading obscur.kit §1
-//! (Architecture & boundaries) **without opening any source in this
-//! repository**. This module exists only to give those cases a compiling home;
-//! it contains no expectations of its own.
-//!
-//! Nothing here may be "fixed" to make a case pass. A failing `spec_ch1_*` test
-//! is a claim about the implementation, not about the test.
+#![doc = include_str!("harness.doc/_module.md")]
 #![allow(dead_code, unreachable_pub)]
 
 use std::cell::{Cell, RefCell};
@@ -40,8 +31,7 @@ use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, 
 // CSS / view / runtime plumbing
 // ---------------------------------------------------------------------------
 
-/// Compiles authored CSS text into a matchable stylesheet through the real CSS
-/// frontend (`source -> parse -> compile`).
+#[doc = include_str!("harness.doc/compile.md")]
 #[must_use]
 pub fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
@@ -49,7 +39,7 @@ pub fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// An element node carrying `class`, with `kids` as its children.
+#[doc = include_str!("harness.doc/el.md")]
 #[must_use]
 pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
@@ -57,31 +47,31 @@ pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
         .with_children(ViewFragment::from_nodes(kids))
 }
 
-/// A text node.
+#[doc = include_str!("harness.doc/txt.md")]
 #[must_use]
 pub fn txt(content: &str) -> ViewNode {
     ViewNode::text(content)
 }
 
-/// A view whose root fragment is `nodes`.
+#[doc = include_str!("harness.doc/view.md")]
 #[must_use]
 pub fn view(nodes: Vec<ViewNode>) -> View {
     View::from_fragment(ViewFragment::from_nodes(nodes))
 }
 
-/// A runtime with a `w x h` viewport and the given stable id.
+#[doc = include_str!("harness.doc/runtime_with_id.md")]
 #[must_use]
 pub fn runtime_with_id(id: u64, w: f32, h: f32) -> UiRuntime {
     UiRuntime::new(RuntimeId::from_raw(id), Size::new(w, h))
 }
 
-/// A runtime with a `w x h` viewport.
+#[doc = include_str!("harness.doc/runtime.md")]
 #[must_use]
 pub fn runtime(w: f32, h: f32) -> UiRuntime {
     runtime_with_id(1, w, h)
 }
 
-/// Walks from the tree root down `path` (child indices) to a [`NodeId`].
+#[doc = include_str!("harness.doc/at.md")]
 #[must_use]
 pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
     let mut node = rt.tree().root().expect("a root after a frame");
@@ -102,20 +92,20 @@ pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
     node
 }
 
-/// The absolute border-box `(x, y, w, h)` of a node, if it was arranged.
+#[doc = include_str!("harness.doc/try_geom.md")]
 #[must_use]
 pub fn try_geom(rt: &UiRuntime, node: NodeId) -> Option<(f32, f32, f32, f32)> {
     let b = rt.layout_boxes().get(&node).copied()?;
     Some((b.origin().x, b.origin().y, b.size().width, b.size().height))
 }
 
-/// The absolute border-box `(x, y, w, h)` of a node.
+#[doc = include_str!("harness.doc/geom.md")]
 #[must_use]
 pub fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
     try_geom(rt, node).expect("the node was arranged")
 }
 
-/// Asserts `actual ≈ expected` within a sub-hundredth-pixel tolerance.
+#[doc = include_str!("harness.doc/approx.md")]
 pub fn approx(actual: f32, expected: f32, what: &str) {
     assert!(
         (actual - expected).abs() < 1e-2,
@@ -123,7 +113,7 @@ pub fn approx(actual: f32, expected: f32, what: &str) {
     );
 }
 
-/// Every text-node content in the retained tree, in document order.
+#[doc = include_str!("harness.doc/all_text.md")]
 #[must_use]
 pub fn all_text(rt: &UiRuntime) -> Vec<String> {
     rt.tree()
@@ -132,14 +122,14 @@ pub fn all_text(rt: &UiRuntime) -> Vec<String> {
         .collect()
 }
 
-/// The text content of `node`'s single text child, if it has one.
+#[doc = include_str!("harness.doc/child_text.md")]
 #[must_use]
 pub fn child_text(rt: &UiRuntime, node: NodeId) -> Option<String> {
     let child = *rt.tree().get(node)?.child_nodes().first()?;
     rt.tree().get(child)?.kind().text().map(str::to_owned)
 }
 
-/// A left-button pointer event of `kind` at `(x, y)`.
+#[doc = include_str!("harness.doc/mouse.md")]
 #[must_use]
 pub fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     PointerEvent::new(
@@ -154,8 +144,7 @@ pub fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
 // Diagnostics capture
 // ---------------------------------------------------------------------------
 
-/// A [`DiagnosticSink`] that collects into a shared buffer so a test can read
-/// back what the runtime reported (the runtime takes its sink by value).
+#[doc = include_str!("harness.doc/Collected.md")]
 #[derive(Debug, Default, Clone)]
 pub struct Collected(pub Rc<RefCell<Vec<Diagnostic>>>);
 
@@ -166,7 +155,7 @@ impl DiagnosticSink for Collected {
 }
 
 impl Collected {
-    /// Installs a fresh collector on `rt` and returns the handle.
+    #[doc = include_str!("harness.doc/install.md")]
     #[must_use]
     pub fn install(rt: &mut UiRuntime) -> Self {
         let collected = Self::default();
@@ -174,13 +163,13 @@ impl Collected {
         collected
     }
 
-    /// Every diagnostic collected so far.
+    #[doc = include_str!("harness.doc/all.md")]
     #[must_use]
     pub fn all(&self) -> Vec<Diagnostic> {
         self.0.borrow().clone()
     }
 
-    /// Diagnostics from `subsystem`.
+    #[doc = include_str!("harness.doc/from.md")]
     #[must_use]
     pub fn from(&self, subsystem: DiagnosticSubsystem) -> Vec<Diagnostic> {
         self.0
@@ -191,14 +180,13 @@ impl Collected {
             .collect()
     }
 
-    /// The stable codes of every collected diagnostic, in emission order.
+    #[doc = include_str!("harness.doc/codes.md")]
     #[must_use]
     pub fn codes(&self) -> Vec<&'static str> {
         self.0.borrow().iter().map(|d| d.code.as_str()).collect()
     }
 
-    /// How many diagnostics record a §1.7 boundary decision — the observable
-    /// signal that a component error boundary *activated*.
+    #[doc = include_str!("harness.doc/boundary_activations.md")]
     #[must_use]
     pub fn boundary_activations(&self) -> Vec<Diagnostic> {
         self.0
@@ -214,7 +202,7 @@ impl Collected {
             .collect()
     }
 
-    /// Clears the buffer.
+    #[doc = include_str!("harness.doc/clear.md")]
     pub fn clear(&self) {
         self.0.borrow_mut().clear();
     }
@@ -224,27 +212,26 @@ impl Collected {
 // A scripted component: fails on demand, and reports whether it was remounted
 // ---------------------------------------------------------------------------
 
-/// Property naming the component's label (rendered as its text child).
+#[doc = include_str!("harness.doc/P_LABEL.md")]
 pub const P_LABEL: InternedSymbol = InternedSymbol::from_raw(0x0C01_0001);
-/// Property that, set to the text `"yes"`, makes the component's props fail to
-/// decode — the one component-failure origin the public API exposes.
+#[doc = include_str!("harness.doc/P_FAIL.md")]
 pub const P_FAIL: InternedSymbol = InternedSymbol::from_raw(0x0C01_0002);
-/// Property naming a child component kind to render, as a raw [`ComponentId`].
+#[doc = include_str!("harness.doc/P_CHILD.md")]
 pub const P_CHILD: InternedSymbol = InternedSymbol::from_raw(0x0C01_0003);
-/// Property that makes the rendered child's props fail to decode.
+#[doc = include_str!("harness.doc/P_CHILD_FAIL.md")]
 pub const P_CHILD_FAIL: InternedSymbol = InternedSymbol::from_raw(0x0C01_0004);
-/// Property naming an image source the component renders below its label.
+#[doc = include_str!("harness.doc/P_IMG.md")]
 pub const P_IMG: InternedSymbol = InternedSymbol::from_raw(0x0C01_0005);
 
-/// The typed props of [`Scripted`]. Decoding fails when `fail="yes"`.
+#[doc = include_str!("harness.doc/ScriptProps.md")]
 pub struct ScriptProps {
-    /// The label the component renders.
+    #[doc = include_str!("harness.doc/label.md")]
     pub label: String,
-    /// A child component kind to render, if any.
+    #[doc = include_str!("harness.doc/child.md")]
     pub child: Option<u64>,
-    /// Whether that child's own props should fail to decode.
+    #[doc = include_str!("harness.doc/child_fail.md")]
     pub child_fail: bool,
-    /// An image source to render below the label, if any.
+    #[doc = include_str!("harness.doc/image.md")]
     pub image: Option<String>,
 }
 
@@ -285,9 +272,7 @@ impl FromProps for ScriptProps {
     }
 }
 
-/// A component that renders `"<label>:<seed>"`, where `seed` is unique to this
-/// *instance*. A remount produces a new seed, so the rendered text is a direct
-/// probe of "was this component's local state preserved?".
+#[doc = include_str!("harness.doc/Scripted.md")]
 pub struct Scripted {
     seed: u32,
     policy: ErrorBoundaryPolicy,
@@ -326,8 +311,7 @@ impl Component for Scripted {
     }
 }
 
-/// Factory for [`Scripted`], counting how many instances it has created — the
-/// mount count a §1.7 case asserts on.
+#[doc = include_str!("harness.doc/ScriptedFactory.md")]
 #[derive(Debug)]
 pub struct ScriptedFactory {
     id: ComponentId,
@@ -337,7 +321,7 @@ pub struct ScriptedFactory {
 }
 
 impl ScriptedFactory {
-    /// A factory for component kind `id` with the default boundary policy.
+    #[doc = include_str!("harness.doc/new.md")]
     #[must_use]
     pub fn new(id: ComponentId) -> Self {
         Self {
@@ -348,22 +332,21 @@ impl ScriptedFactory {
         }
     }
 
-    /// Sets the boundary policy this component kind reports.
+    #[doc = include_str!("harness.doc/with_policy.md")]
     #[must_use]
     pub fn with_policy(mut self, policy: ErrorBoundaryPolicy) -> Self {
         self.policy = policy;
         self
     }
 
-    /// Sets the fallback view this component kind's boundary shows.
+    #[doc = include_str!("harness.doc/with_fallback.md")]
     #[must_use]
     pub fn with_fallback(mut self, fallback: View) -> Self {
         self.fallback = Some(fallback);
         self
     }
 
-    /// A handle to this factory's instance-creation counter, readable after the
-    /// factory has been handed to the runtime.
+    #[doc = include_str!("harness.doc/created_counter.md")]
     #[must_use]
     pub fn created_counter(&self) -> Rc<Cell<u32>> {
         Rc::clone(&self.created)
@@ -393,7 +376,7 @@ impl ComponentFactory for ScriptedFactory {
     }
 }
 
-/// Registers `factory` on `rt`, returning its instance-creation counter.
+#[doc = include_str!("harness.doc/register.md")]
 pub fn register(rt: &mut UiRuntime, factory: ScriptedFactory) -> Rc<Cell<u32>> {
     let counter = factory.created_counter();
     rt.register_component(ComponentRegistration::new(
@@ -404,7 +387,7 @@ pub fn register(rt: &mut UiRuntime, factory: ScriptedFactory) -> Rc<Cell<u32>> {
     counter
 }
 
-/// A `<component id=... label=... [fail]>` element node, classed `class`.
+#[doc = include_str!("harness.doc/component_node.md")]
 #[must_use]
 pub fn component_node(id: ComponentId, class: &str, label: &str, fail: bool) -> ViewNode {
     let mut node = ViewNode::element(id)
@@ -416,8 +399,7 @@ pub fn component_node(id: ComponentId, class: &str, label: &str, fail: bool) -> 
     node
 }
 
-/// A component node that renders a nested component of kind `child`, whose own
-/// props fail to decode when `child_fail`.
+#[doc = include_str!("harness.doc/nesting_node.md")]
 #[must_use]
 pub fn nesting_node(
     id: ComponentId,
@@ -439,7 +421,7 @@ pub fn nesting_node(
     node
 }
 
-/// A component node that renders an image sourced at `src` below its label.
+#[doc = include_str!("harness.doc/imaging_node.md")]
 #[must_use]
 pub fn imaging_node(id: ComponentId, class: &str, label: &str, src: &str) -> ViewNode {
     component_node(id, class, label, false)
@@ -450,8 +432,7 @@ pub fn imaging_node(id: ComponentId, class: &str, label: &str, src: &str) -> Vie
 // Resource ports: a loader that never finds anything, and one that always does
 // ---------------------------------------------------------------------------
 
-/// A [`ResourceLoader`] that reports every source as missing — the §1.6
-/// "invalid content or resource" path, driven deterministically.
+#[doc = include_str!("harness.doc/MissingLoader.md")]
 #[derive(Debug, Default)]
 pub struct MissingLoader;
 
@@ -465,7 +446,7 @@ impl ResourceLoader for MissingLoader {
     }
 }
 
-/// A [`ResourceDecoder`] that decodes nothing, honestly.
+#[doc = include_str!("harness.doc/NoDecoder.md")]
 #[derive(Debug, Default)]
 pub struct NoDecoder;
 
@@ -479,7 +460,7 @@ impl ResourceDecoder for NoDecoder {
     }
 }
 
-/// Installs the always-missing resource ports on `rt`.
+#[doc = include_str!("harness.doc/install_missing_resources.md")]
 pub fn install_missing_resources(rt: &mut UiRuntime) {
     rt.set_resource_providers(Arc::new(MissingLoader), Arc::new(NoDecoder));
 }
@@ -488,8 +469,7 @@ pub fn install_missing_resources(rt: &mut UiRuntime) {
 // Blocking executors: the two §1.5 adapter answers
 // ---------------------------------------------------------------------------
 
-/// A [`BlockingExecutor`] that runs every job inline on the caller — the
-/// "no parallelism available" adapter answer (a WASM build without workers).
+#[doc = include_str!("harness.doc/InlineExecutor.md")]
 #[derive(Debug, Default)]
 pub struct InlineExecutor;
 
@@ -499,9 +479,7 @@ impl BlockingExecutor for InlineExecutor {
     }
 }
 
-/// A [`BlockingExecutor`] that runs every job on a freshly spawned thread and
-/// joins it — the "parallelism available" adapter answer, with the completion
-/// order still under the caller's control.
+#[doc = include_str!("harness.doc/ThreadedExecutor.md")]
 #[derive(Debug, Default)]
 pub struct ThreadedExecutor;
 
@@ -513,8 +491,7 @@ impl BlockingExecutor for ThreadedExecutor {
     }
 }
 
-/// A [`BlockingExecutor`] that queues jobs instead of running them, so a test
-/// controls exactly when — and in what order — each completes.
+#[doc = include_str!("harness.doc/QueuedExecutor.md")]
 #[derive(Default)]
 pub struct QueuedExecutor {
     jobs: std::sync::Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
@@ -527,13 +504,13 @@ impl std::fmt::Debug for QueuedExecutor {
 }
 
 impl QueuedExecutor {
-    /// How many jobs are queued.
+    #[doc = include_str!("harness.doc/pending.md")]
     #[must_use]
     pub fn pending(&self) -> usize {
         self.jobs.lock().expect("queue lock").len()
     }
 
-    /// Runs the queued job at `index`, removing it.
+    #[doc = include_str!("harness.doc/run_at.md")]
     pub fn run_at(&self, index: usize) {
         let job = {
             let mut jobs = self.jobs.lock().expect("queue lock");
@@ -543,7 +520,7 @@ impl QueuedExecutor {
         job();
     }
 
-    /// Runs every queued job, in queue order.
+    #[doc = include_str!("harness.doc/run_all.md")]
     pub fn run_all(&self) {
         loop {
             let job = {
@@ -568,7 +545,7 @@ impl BlockingExecutor for QueuedExecutor {
 // Repository layout, for the §1.1–§1.3 build/API-surface cases
 // ---------------------------------------------------------------------------
 
-/// The workspace root, derived from this crate's manifest directory.
+#[doc = include_str!("harness.doc/workspace_root.md")]
 #[must_use]
 pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -577,7 +554,7 @@ pub fn workspace_root() -> PathBuf {
         .join("..")
 }
 
-/// Every `.rs` file under `dir`, recursively.
+#[doc = include_str!("harness.doc/rust_files.md")]
 #[must_use]
 pub fn rust_files(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
@@ -596,8 +573,7 @@ pub fn rust_files(dir: &std::path::Path) -> Vec<PathBuf> {
     out
 }
 
-/// Strips every `#[cfg(test)] mod tests { ... }` block from `source` by brace
-/// counting, so a scan of public API surface never reads unit-test code.
+#[doc = include_str!("harness.doc/without_test_modules.md")]
 #[must_use]
 pub fn without_test_modules(source: &str) -> String {
     let mut out = String::with_capacity(source.len());

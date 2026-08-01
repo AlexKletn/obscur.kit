@@ -1,0 +1,1 @@
+A node rendered conditionally.

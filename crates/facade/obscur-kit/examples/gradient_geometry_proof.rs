@@ -1,31 +1,4 @@
-//! **Proof: canonical CSS gradient GEOMETRY (corner direction, radial extent
-//! keywords, ellipse) via Vello.**
-//!
-//! Drives three stacked WIDE (non-square, 480 × 120) boxes end-to-end through the
-//! real `obscur-css` frontend + [`UiRuntime`] scene coordinator, then renders them
-//! through headless Vello/wgpu into `target/gradient_geometry_proof.png`:
-//!
-//! 1. `background-image: linear-gradient(to top right, #000, #fff)` — the gradient
-//!    line runs to the box's actual top-right corner. On the wide box its direction
-//!    is `normalize(h, −w) = normalize(120, −480)` (spec §3.1) — a *shallow* angle
-//!    (≈14° above horizontal), NOT a fixed 45°. The dark→light ramp therefore runs
-//!    nearly horizontally, tilting slightly up-right.
-//! 2. `radial-gradient(closest-side circle, …)` — a true circle whose radius is the
-//!    distance to the closest side (60px, the half-height), so a tight centered
-//!    disc that fades out well before the box's left/right edges.
-//! 3. `radial-gradient(ellipse farthest-corner, …)` — an ellipse reaching the
-//!    farthest corner, radii `(dx_far·√2, dy_far·√2) = (240√2, 60√2) ≈ (339, 85)`:
-//!    a horizontally STRETCHED oval (rx ≫ ry), not a circle.
-//!
-//! On the CPU backend every gradient flattens to its first stop per the GPU-class
-//! effect policy; the faithful geometry is the Vello proof.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. With none it prints a diagnostic and exits cleanly.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example gradient_geometry_proof --features render-vello`
+#![doc = include_str!("gradient_geometry_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -43,11 +16,10 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewProperty, ViewValue};
 
-/// The output image extent — deliberately WIDE so corner directions and ellipse
-/// radii are visibly aspect-ratio-dependent.
+#[doc = include_str!("gradient_geometry_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(480.0, 360.0);
 
-/// The authored stylesheet: three stacked 480 × 120 boxes, one per geometry case.
+#[doc = include_str!("gradient_geometry_proof.doc/CSS.md")]
 const CSS: &str = r"
 .app {
     display: block;
@@ -137,8 +109,7 @@ fn main() {
     );
 }
 
-/// Builds the three-band `.app` view: a corner-linear band, a circle-radial band,
-/// and an ellipse-radial band.
+#[doc = include_str!("gradient_geometry_proof.doc/build_view.md")]
 fn build_view() -> View {
     let band = |class: &str| {
         Container::new()
@@ -152,15 +123,14 @@ fn build_view() -> View {
     View::single(app)
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("gradient_geometry_proof.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Acquires a headless wgpu device + queue (no surface), or [`None`] when no
-/// adapter/device is available so the caller exits cleanly instead of panicking.
+#[doc = include_str!("gradient_geometry_proof.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -172,7 +142,7 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("gradient_geometry_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

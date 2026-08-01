@@ -1,10 +1,4 @@
-//! Per-frame pipeline-phase classification: [`FramePlan`].
-//!
-//! Spec §3.4 phase 5 ("classify invalidation") requires the frame loop to decide
-//! *which* pipeline phases a frame actually needs instead of re-running
-//! reconcile → match → style → layout → compose unconditionally. `FramePlan` is
-//! that decision: it maps the frame's [`FrameReason`] through the live
-//! [`InvalidationRouter`] to the set of phases the runtime must run this frame.
+#![doc = include_str!("frame_plan.doc/_module.md")]
 
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_style::invalidation::StyleInvalidation;
@@ -13,57 +7,21 @@ use crate::frame::FrameReason;
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 use crate::transaction::{TransactionCommit, UiOperation};
 
-/// The pipeline phases a single frame must run, classified from its
-/// [`FrameReason`] via the [`InvalidationRouter`] (spec §3.4 phase 5, §4.3).
-///
-/// Each frame the runtime builds a `FramePlan` and gates its phases on it: a
-/// phase whose inputs are unchanged is skipped and reuses the previous frame's
-/// retained output. The classification is conservative — when a phase cannot be
-/// proven unnecessary it is run — so correctness is preserved while clearly
-/// redundant work (e.g. re-reconciling on a hover-only frame) is elided.
-///
-/// The mapping from reason to invalidation cause is:
-///
-/// | [`FrameReason`]        | [`InvalidationReason`]   | reconcile |
-/// |------------------------|--------------------------|-----------|
-/// | `UiCommit`             | `TreeChanged`            | yes       |
-/// | `ExternalRender`       | `TreeChanged`            | yes       |
-/// | `ResourceCompletion`   | `TreeChanged`            | yes       |
-/// | `WindowChange`         | `EnvironmentChanged`     | no        |
-/// | `Input`                | `PseudoStateChanged`     | no        |
-/// | `TextEdit`             | *(compose-only)*         | no        |
-/// | `Animation`            | `StyleChanged`          | no        |
-/// | `DiagnosticsCapture`   | *(none — idle)*          | no        |
-///
-/// [`TextEdit`](FrameReason::TextEdit) bypasses the router entirely and maps
-/// straight to a [`compose_only`](Self::compose_only) plan (compose runs; style,
-/// layout and reconcile are all skipped): a same-size text edit re-shapes and
-/// repaints the field from the live editing session without disturbing any
-/// retained box, so it stays pixel-identical to the full frame while eliding the
-/// per-keystroke restyle + relayout.
-///
-/// The style/layout/compose flags are then read straight off the router's
-/// dirty-phase flags, so the router — previously orphaned — is the live source
-/// of truth for what a frame recalculates.
+#[doc = include_str!("frame_plan.doc/FramePlan.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FramePlan {
-    /// The desired view must be reconciled into the retained tree.
+    #[doc = include_str!("frame_plan.doc/reconcile.md")]
     reconcile: bool,
-    /// Styles must be re-matched and re-resolved.
+    #[doc = include_str!("frame_plan.doc/style.md")]
     style: bool,
-    /// Layout must be re-run.
+    #[doc = include_str!("frame_plan.doc/layout.md")]
     layout: bool,
-    /// The scene must be re-composed.
+    #[doc = include_str!("frame_plan.doc/compose.md")]
     compose: bool,
 }
 
 impl FramePlan {
-    /// Classifies the phases a frame produced for `reason` must run.
-    ///
-    /// When `first_frame` is set (the retained tree has never been built) the
-    /// plan is [`full`](Self::full) regardless of reason: the first frame — and
-    /// any frame over an empty tree — must run every phase so the tree, styles,
-    /// boxes and scene all exist before later frames can reuse them.
+    #[doc = include_str!("frame_plan.doc/for_frame.md")]
     #[must_use]
     pub(crate) fn for_frame(reason: FrameReason, first_frame: bool) -> Self {
         if first_frame {
@@ -96,49 +54,7 @@ impl FramePlan {
         }
     }
 
-    /// Classifies the phases a **committed transaction** requires, from its
-    /// operations rather than from a frame reason (spec §3.4 phases 4–5).
-    ///
-    /// # Why this is better information than a [`FrameReason`]
-    ///
-    /// [`for_frame`](Self::for_frame) derives the plan from the *category* of a
-    /// frame, which is a proxy: `UiCommit` means "something committed", so it
-    /// conservatively runs everything. A committed transaction lists what actually
-    /// changed, so the plan comes from [`UiOperation::invalidation`]. A transaction
-    /// of nothing but [`InvalidateStyle`](UiOperation::InvalidateStyle) restyles
-    /// **without reconciling**, because no operation in it claims the tree changed.
-    ///
-    /// # It decides WHICH PHASES run, not what they do
-    ///
-    /// The gain is one bit per phase and no more. Every operation's `node` payload
-    /// is **discarded here** — `Rerender { node }` and `ReplaceRoot` collapse to the
-    /// same `reconcile: true`, and a reconciling frame then reconciles the whole
-    /// desired [`View`]. So this narrows a frame from four phases to fewer; it does
-    /// not narrow any phase to a subtree.
-    ///
-    /// That is not a detail to fix here — narrowing a phase to a subtree is a change
-    /// to the phase, not to its classification. Where that has happened, it is driven
-    /// from the change itself rather than from this plan: the style phase now takes a
-    /// dirty set (`StyleCoordinator::resolve_incremental` consumes a
-    /// `StyleInvalidation` that `RestyleScope` derives from the per-node interaction
-    /// state), but it derives that set in `UiRuntime::restyle_scope`, which reads the
-    /// live [`PseudoStates`](crate::orchestration::PseudoStates) map — not the `node`
-    /// payloads here. Layout takes no dirty set at all.
-    ///
-    /// So these payloads remain written and never read. Routing them into the dirty
-    /// set an incremental pass consumes would mean an
-    /// [`InvalidateStyle`](UiOperation::InvalidateStyle) restyling one subtree instead
-    /// of the tree; that is the natural next step and is not taken here.
-    ///
-    /// An **empty** transaction yields an [idle](Self::is_idle) plan: nothing was
-    /// asked for, so nothing runs. That is what makes a cancelled provisional
-    /// transaction free — it stages operations, commits none, and no phase is
-    /// classified.
-    ///
-    /// Reconcile is flagged by the operations that can change tree structure
-    /// ([`ReplaceRoot`](UiOperation::ReplaceRoot) /
-    /// [`Rerender`](UiOperation::Rerender)); the style/layout/compose flags come
-    /// off the router, exactly as in [`for_frame`].
+    #[doc = include_str!("frame_plan.doc/for_transaction.md")]
     #[must_use]
     pub(crate) fn for_transaction(commit: &TransactionCommit) -> Self {
         let mut router = InvalidationRouter::new();
@@ -157,11 +73,7 @@ impl FramePlan {
         }
     }
 
-    /// The union of two plans: a phase runs if **either** asked for it.
-    ///
-    /// Union rather than intersection, because a plan is a statement of what must
-    /// run, not what may. Two transactions landing between frames each classified
-    /// their own work; the frame that serves both has to do all of it.
+    #[doc = include_str!("frame_plan.doc/merged_with.md")]
     #[must_use]
     pub(crate) const fn merged_with(self, other: Self) -> Self {
         Self {
@@ -172,7 +84,7 @@ impl FramePlan {
         }
     }
 
-    /// The full plan: every phase runs (first frame / structural rebuild).
+    #[doc = include_str!("frame_plan.doc/full.md")]
     #[must_use]
     pub(crate) const fn full() -> Self {
         Self {
@@ -183,11 +95,7 @@ impl FramePlan {
         }
     }
 
-    /// The compose-only plan: only the scene is re-composed; reconcile, style and
-    /// layout are all skipped and reuse the previous frame's retained tree,
-    /// computed styles and boxes. Used for a same-size text edit
-    /// ([`FrameReason::TextEdit`]) — the field re-shapes and repaints from the
-    /// live editing session while every box is provably unchanged.
+    #[doc = include_str!("frame_plan.doc/compose_only.md")]
     #[must_use]
     pub(crate) const fn compose_only() -> Self {
         Self {
@@ -198,19 +106,7 @@ impl FramePlan {
         }
     }
 
-    /// Maps a [`FrameReason`] to the global [`InvalidationReason`] the router
-    /// classifies for it, or `None` for an idle reason that recalculates nothing.
-    ///
-    /// The structural reasons (`UiCommit`/`ExternalRender`/`ResourceCompletion`)
-    /// map to [`TreeChanged`](InvalidationReason::TreeChanged) — the deepest
-    /// non-environment cause — so they dirty every phase; `WindowChange` maps to
-    /// [`EnvironmentChanged`](InvalidationReason::EnvironmentChanged) so media
-    /// queries re-evaluate without a tree diff; `Input` maps to
-    /// [`PseudoStateChanged`](InvalidationReason::PseudoStateChanged) so a
-    /// hover/focus change restyles without reconciling; `Animation` maps to
-    /// [`StyleChanged`](InvalidationReason::StyleChanged) (conservative: an
-    /// animated value can feed layout). `DiagnosticsCapture` maps to `None` — the
-    /// frame only re-presents the retained scene.
+    #[doc = include_str!("frame_plan.doc/invalidation_for.md")]
     const fn invalidation_for(reason: FrameReason) -> Option<InvalidationReason> {
         match reason {
             FrameReason::UiCommit
@@ -225,13 +121,7 @@ impl FramePlan {
         }
     }
 
-    /// Whether `reason` can change the retained tree's structure and therefore
-    /// requires a reconcile pass.
-    ///
-    /// Only a state commit, an external render request, or a resource completion
-    /// can alter the desired tree; input, animation, window and diagnostics
-    /// frames leave the structure untouched, so reconcile (an idempotent no-op
-    /// for them) is skipped.
+    #[doc = include_str!("frame_plan.doc/reason_is_structural.md")]
     const fn reason_is_structural(reason: FrameReason) -> bool {
         matches!(
             reason,
@@ -239,32 +129,31 @@ impl FramePlan {
         )
     }
 
-    /// Whether the reconcile phase must run this frame.
+    #[doc = include_str!("frame_plan.doc/reconcile_2.md")]
     #[must_use]
     pub(crate) const fn reconcile(self) -> bool {
         self.reconcile
     }
 
-    /// Whether the match + style phase must run this frame.
+    #[doc = include_str!("frame_plan.doc/style_2.md")]
     #[must_use]
     pub(crate) const fn style(self) -> bool {
         self.style
     }
 
-    /// Whether the layout phase must run this frame.
+    #[doc = include_str!("frame_plan.doc/layout_2.md")]
     #[must_use]
     pub(crate) const fn layout(self) -> bool {
         self.layout
     }
 
-    /// Whether the scene must be re-composed this frame.
+    #[doc = include_str!("frame_plan.doc/compose_2.md")]
     #[must_use]
     pub(crate) const fn compose(self) -> bool {
         self.compose
     }
 
-    /// Whether the frame recalculates nothing: no phase runs and the previous
-    /// frame's retained scene is simply re-presented.
+    #[doc = include_str!("frame_plan.doc/is_idle.md")]
     #[must_use]
     pub(crate) const fn is_idle(self) -> bool {
         !(self.reconcile || self.style || self.layout || self.compose)

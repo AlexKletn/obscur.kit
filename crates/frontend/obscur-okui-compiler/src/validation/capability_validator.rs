@@ -1,5 +1,4 @@
-//! `CapabilityValidator`: checks that each element's declared required
-//! capabilities are granted (spec §2.13).
+#![doc = include_str!("capability_validator.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
@@ -8,26 +7,14 @@ use obscur_okui_syntax::ast::{Document, Element};
 
 use crate::validation::ValidationDiagnostic;
 
-/// Validates that every capability an element declares it requires has been
-/// granted (spec §2.13).
-///
-/// # Declaration convention
-///
-/// An element declares a required capability via a `requires="cap.id"` **string**
-/// attribute — for example `<Camera requires="camera"/>`. The validator holds
-/// the set of *granted* capability ids and reports an element whose declared
-/// requirement is absent from that set. A dynamic `requires={..}` expression is
-/// not a static capability id and is ignored (it has no `string_value`).
-///
-/// The granted set is stored as a [`BTreeSet`] of ids so membership checks are
-/// ordered and deduplicated.
+#[doc = include_str!("capability_validator.doc/CapabilityValidator.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CapabilityValidator {
     granted: BTreeSet<Box<str>>,
 }
 
 impl CapabilityValidator {
-    /// Creates a validator whose granted set is `granted`.
+    #[doc = include_str!("capability_validator.doc/new.md")]
     #[must_use]
     pub fn new(granted: impl IntoIterator<Item = CapabilityId>) -> Self {
         Self {
@@ -35,19 +22,13 @@ impl CapabilityValidator {
         }
     }
 
-    /// Returns whether the capability id `id` is in the granted set.
+    #[doc = include_str!("capability_validator.doc/has_capability.md")]
     #[must_use]
     pub fn has_capability(&self, id: &str) -> bool {
         self.granted.contains(id)
     }
 
-    /// Validates every element in `doc`, recursively, reporting each declared
-    /// requirement that is not granted (spec §2.13).
-    ///
-    /// For each element carrying a `requires="cap"` string attribute whose value
-    /// `cap` is not in the granted set, a diagnostic
-    /// `"required capability '<cap>' is not granted"` is produced at the
-    /// element's byte offset.
+    #[doc = include_str!("capability_validator.doc/validate.md")]
     #[must_use]
     pub fn validate(&self, doc: &Document) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
@@ -57,8 +38,7 @@ impl CapabilityValidator {
         diagnostics
     }
 
-    /// Checks one element's `requires` declaration, then recurses into its
-    /// element-shaped children.
+    #[doc = include_str!("capability_validator.doc/validate_element.md")]
     fn validate_element(&self, element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         if let Some(cap) = element
             .attribute("requires")

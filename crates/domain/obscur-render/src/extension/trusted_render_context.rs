@@ -1,16 +1,8 @@
-//! The capability-checked grant a trusted extension holds (spec §5.3).
+#![doc = include_str!("trusted_render_context.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
-/// The capability-checked grant that a trusted rendering extension has been
-/// permitted privileged backend access (spec §5.3).
-///
-/// Spec §5.3 requires that trusted, privileged extensions pass **capability
-/// checks** before touching backend-specific GPU resources or restricted user
-/// shaders. This context records what the host actually granted: the set of
-/// capability ids, and whether custom shaders and raw GPU resources are allowed.
-/// A default context grants nothing and is therefore untrusted; an extension
-/// consults it via [`Self::has_capability`] and the allow flags before running.
+#[doc = include_str!("trusted_render_context.doc/TrustedRenderContext.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedRenderContext {
     granted_capabilities: BTreeSet<Box<str>>,
@@ -19,8 +11,7 @@ pub struct TrustedRenderContext {
 }
 
 impl TrustedRenderContext {
-    /// Creates an untrusted context: no granted capabilities and neither custom
-    /// shaders nor GPU resources allowed.
+    #[doc = include_str!("trusted_render_context.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -30,57 +21,52 @@ impl TrustedRenderContext {
         }
     }
 
-    /// Adds a granted capability `id`, returning the updated context.
+    #[doc = include_str!("trusted_render_context.doc/granting.md")]
     #[must_use]
     pub fn granting(mut self, id: impl Into<Box<str>>) -> Self {
         self.granted_capabilities.insert(id.into());
         self
     }
 
-    /// Sets whether custom shaders are allowed, returning the updated context
-    /// (spec §5.3).
+    #[doc = include_str!("trusted_render_context.doc/allow_custom_shaders.md")]
     #[must_use]
     pub fn allow_custom_shaders(mut self, allow: bool) -> Self {
         self.allow_custom_shaders = allow;
         self
     }
 
-    /// Sets whether raw GPU resources are allowed, returning the updated context
-    /// (spec §5.3).
+    #[doc = include_str!("trusted_render_context.doc/allow_gpu_resources.md")]
     #[must_use]
     pub fn allow_gpu_resources(mut self, allow: bool) -> Self {
         self.allow_gpu_resources = allow;
         self
     }
 
-    /// Whether the host granted the capability named `id`.
+    #[doc = include_str!("trusted_render_context.doc/has_capability.md")]
     #[must_use]
     pub fn has_capability(&self, id: &str) -> bool {
         self.granted_capabilities.contains(id)
     }
 
-    /// The set of granted capability ids.
+    #[doc = include_str!("trusted_render_context.doc/granted_capabilities.md")]
     #[must_use]
     pub const fn granted_capabilities(&self) -> &BTreeSet<Box<str>> {
         &self.granted_capabilities
     }
 
-    /// Whether custom shaders are allowed (spec §5.3).
+    #[doc = include_str!("trusted_render_context.doc/allows_custom_shaders.md")]
     #[must_use]
     pub const fn allows_custom_shaders(&self) -> bool {
         self.allow_custom_shaders
     }
 
-    /// Whether raw GPU resources are allowed (spec §5.3).
+    #[doc = include_str!("trusted_render_context.doc/allows_gpu_resources.md")]
     #[must_use]
     pub const fn allows_gpu_resources(&self) -> bool {
         self.allow_gpu_resources
     }
 
-    /// Whether this context confers any privilege at all.
-    ///
-    /// True when at least one capability was granted or either allow flag is set;
-    /// a freshly [`new`](Self::new)-constructed context is untrusted (spec §5.3).
+    #[doc = include_str!("trusted_render_context.doc/is_trusted.md")]
     #[must_use]
     pub fn is_trusted(&self) -> bool {
         !self.granted_capabilities.is_empty()

@@ -1,4 +1,4 @@
-//! Drives a drag-and-drop session from pointer input: [`DragCoordinator`].
+#![doc = include_str!("drag_coordinator.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -10,108 +10,57 @@ use crate::transaction::{
     ProvisionalTransaction, TransactionCommit, TransactionValidator, UiOperation,
 };
 
-/// How a drag ended.
-///
-/// Returned by [`DragCoordinator::release`] so the caller can tell the two apart
-/// without inspecting the session, and so the payload reaches the host on the one
-/// path where it means something.
+#[doc = include_str!("drag_coordinator.doc/DragOutcome.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DragOutcome {
-    /// The drop landed on `target`, and `commit` is the work it caused —
-    /// already validated, ready for
-    /// [`apply_transaction`](crate::runtime::UiRuntime::apply_transaction).
+    #[doc = include_str!("drag_coordinator.doc/Dropped.md")]
     Dropped {
-        /// The node that accepted the drop.
+        #[doc = include_str!("drag_coordinator.doc/target.md")]
         target: NodeId,
-        /// The negotiated effect (`Copy` / `Move` / …).
+        #[doc = include_str!("drag_coordinator.doc/effect.md")]
         effect: DragEffect,
-        /// The invalidation the drop caused, as one atomic transaction.
+        #[doc = include_str!("drag_coordinator.doc/commit.md")]
         commit: TransactionCommit,
     },
-    /// The drag ended without a valid drop: released over nothing, over a target
-    /// that refused the payload, or abandoned. **Nothing was applied.**
+    #[doc = include_str!("drag_coordinator.doc/Cancelled.md")]
     Cancelled,
 }
 
-/// Drives a [`DragSession`] from pointer input and gates its effect behind a
-/// [`ProvisionalTransaction`] (spec §3.2 provisional commit/cancel, §6.21 drag
-/// and drop).
-///
-/// The [`DragSession`] state machine already knows the lifecycle; what it
-/// deliberately leaves out — *"any provisional layout transaction that
-/// materialises placeholders or insertion slots while a drag hovers is the
-/// runtime's concern"* — is this type.
-///
-/// # What is provisional, and what is not
-///
-/// A drag's **live** state is not provisional: the pointer position and which
-/// target is hovered change every frame and are simply read off the
-/// [`session`](Self::session). Deferring those would mean a drag you cannot see.
-///
-/// What is provisional is the drop's **effect**. While the pointer is over an
-/// accepting target, this coordinator stages the work that landing there would
-/// cause — a [`Rerender`](UiOperation::Rerender) of that target, whose content
-/// changes when it receives the payload. That staging is what
-/// [`release`](Self::release) then either commits or throws away:
-///
-/// * a drop **commits** it — validated first, and applied as one transaction, so
-///   the frame does exactly the work the drop caused and no more;
-/// * a cancel **discards** it — and because
-///   [`ProvisionalTransaction::cancel`] consumes the transaction, a cancelled
-///   drag cannot later commit. The guarantee is in the type, not in a comment.
-///
-/// A drag that wanders across five targets and is then abandoned therefore
-/// applies nothing at all: each hover restages, and the final discard is free
-/// because nothing was ever applied.
-///
-/// # Not carried
-///
-/// The drag **preview** ([`DragPreview`](obscur_data_transfer::drag::DragPreview))
-/// is not painted — nothing here reaches the scene, so a host that wants a
-/// pointer-following preview must draw it. Autoscroll
-/// ([`DragAutoscroll`](obscur_data_transfer::drag::DragAutoscroll)) is likewise
-/// not driven. Both are scene/scroll concerns, and neither is what
-/// commit/cancel is about.
+#[doc = include_str!("drag_coordinator.doc/DragCoordinator.md")]
 #[derive(Debug, Default)]
 pub struct DragCoordinator {
-    /// The live session, or [`None`] when no drag is in flight.
+    #[doc = include_str!("drag_coordinator.doc/session.md")]
     session: Option<DragSession>,
-    /// The drop targets a host registered, by node.
+    #[doc = include_str!("drag_coordinator.doc/targets.md")]
     targets: HashMap<NodeId, DropTarget>,
-    /// The work the current hover would cause, staged and unapplied. Rebuilt on
-    /// every enter/leave, because only the target the drop *lands* on does any.
+    #[doc = include_str!("drag_coordinator.doc/provisional.md")]
     provisional: ProvisionalTransaction,
 }
 
 impl DragCoordinator {
-    /// Creates a coordinator with no session and no registered targets.
+    #[doc = include_str!("drag_coordinator.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers `target` as a drop site, replacing any previous registration for
-    /// its node.
+    #[doc = include_str!("drag_coordinator.doc/register_target.md")]
     pub fn register_target(&mut self, target: DropTarget) {
         self.targets.insert(target.node(), target);
     }
 
-    /// Removes the drop target registered for `node`, if any.
+    #[doc = include_str!("drag_coordinator.doc/unregister_target.md")]
     pub fn unregister_target(&mut self, node: NodeId) {
         self.targets.remove(&node);
     }
 
-    /// Whether `node` is a registered drop target.
+    #[doc = include_str!("drag_coordinator.doc/is_target.md")]
     #[must_use]
     pub fn is_target(&self, node: NodeId) -> bool {
         self.targets.contains_key(&node)
     }
 
-    /// Begins a drag from `source`.
-    ///
-    /// Returns `false` — starting nothing — when a drag is already in flight: two
-    /// concurrent sessions would each stage their own provisional work and there
-    /// would be no answer to which one a drop commits.
+    #[doc = include_str!("drag_coordinator.doc/begin.md")]
     pub fn begin(&mut self, source: DragSource) -> bool {
         if self.is_active() {
             return false;
@@ -121,7 +70,7 @@ impl DragCoordinator {
         true
     }
 
-    /// Whether a drag is in flight.
+    #[doc = include_str!("drag_coordinator.doc/is_active.md")]
     #[must_use]
     pub fn is_active(&self) -> bool {
         self.session
@@ -129,20 +78,13 @@ impl DragCoordinator {
             .is_some_and(|session| session.phase().is_active())
     }
 
-    /// The live session, for a host that wants to draw the drag.
+    #[doc = include_str!("drag_coordinator.doc/session_2.md")]
     #[must_use]
     pub fn session(&self) -> Option<&DragSession> {
         self.session.as_ref()
     }
 
-    /// Tracks the pointer to `position`, with `under` the node it is currently
-    /// over (as hit-tested by the caller).
-    ///
-    /// Drives the session's `enter` / `leave` and restages the provisional work
-    /// for the new hover. Returns whether anything observable changed, so a caller
-    /// can request a frame only when the drag actually moved between targets.
-    ///
-    /// A no-op when no drag is in flight.
+    #[doc = include_str!("drag_coordinator.doc/pointer_moved.md")]
     pub fn pointer_moved(&mut self, position: Point, under: Option<NodeId>) -> bool {
         let Some(session) = self.session.as_mut() else {
             return false;
@@ -184,17 +126,7 @@ impl DragCoordinator {
         false
     }
 
-    /// Ends the drag as the pointer is released.
-    ///
-    /// A drop over an accepting target **commits** the staged work: it is
-    /// validated and returned as a [`TransactionCommit`] for the caller to apply.
-    /// Anything else **cancels**: the staged work is discarded and nothing is
-    /// applied.
-    ///
-    /// A commit whose validation fails also cancels rather than half-applying —
-    /// which is the atomicity [`ProvisionalTransaction::commit`] exists to give.
-    ///
-    /// Returns [`None`] when no drag was in flight.
+    #[doc = include_str!("drag_coordinator.doc/release.md")]
     pub fn release(
         &mut self,
         validator: &TransactionValidator,
@@ -230,10 +162,7 @@ impl DragCoordinator {
         Some(outcome)
     }
 
-    /// Abandons the drag (Esc, focus loss, a cancelled pointer), discarding the
-    /// staged work.
-    ///
-    /// Returns whether a drag was in flight to abandon.
+    #[doc = include_str!("drag_coordinator.doc/cancel.md")]
     pub fn cancel(&mut self) -> bool {
         let Some(session) = self.session.as_mut() else {
             return false;
@@ -246,19 +175,14 @@ impl DragCoordinator {
         true
     }
 
-    /// The work a drop on `node` would cause: that node re-renders, because it is
-    /// about to receive the payload and its content changes.
-    ///
-    /// Deliberately narrow. The drag's *source* is not staged: whether the item
-    /// leaves its origin is the application's decision (a `Copy` leaves it in
-    /// place), and the runtime does not get to assume it.
+    #[doc = include_str!("drag_coordinator.doc/stage_for.md")]
     fn stage_for(node: NodeId) -> ProvisionalTransaction {
         let mut provisional = ProvisionalTransaction::new();
         provisional.stage(UiOperation::Rerender { node });
         provisional
     }
 
-    /// The phase of the live session, for tests and diagnostics.
+    #[doc = include_str!("drag_coordinator.doc/phase.md")]
     #[must_use]
     pub fn phase(&self) -> Option<DragPhase> {
         self.session.as_ref().map(DragSession::phase)

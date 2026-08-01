@@ -1,49 +1,4 @@
-//! `DslMacro`: expansion logic for the TSX-like Rust DSL (spec §2.8).
-//!
-//! This module parses a JSX/TSX-like element tree into a
-//! [`UiIrDocument`] **while the macro runs**. The document is not emitted or
-//! interpreted: `okui!` hands it straight to `ViewCodegen`, which lowers it to
-//! ordinary `View`-building Rust, so no IR survives into the built crate.
-//!
-//! # Grammar
-//!
-//! - Element: `<Tag ...attrs> ...children </Tag>` or self-closing
-//!   `<Tag ...attrs />`.
-//! - Tag naming (TSX convention): an UPPERCASE-initial identifier (`Button`) is
-//!   a component, a lowercase-initial identifier (`div`) is an element.
-//! - Attributes:
-//!   - An attribute (or event) **name** is `ident ('-' ident)*`, joined into one
-//!     hyphenated string — see [`parse_dashed_name`] for why the join is a parse
-//!     step and not a lexical one.
-//!   - `name="literal"` → [`UiIrProperty::text`](::obscur_ui_ir::document::UiIrProperty).
-//!   - `name={expr}` → a literal when `expr` is a literal, a
-//!     [`binding`](::obscur_ui_ir::document::UiIrProperty::binding) when it is a
-//!     single ident or dotted field-access path, else a `binding` whose path is
-//!     the stringified expression.
-//!   - `name` (bare) → boolean-true literal property.
-//!   - `on:click={handler}` → an [`UiIrEvent`](::obscur_ui_ir::document::UiIrEvent).
-//! - Children (in order): nested elements, bare string literals (text nodes),
-//!   and `{expr}` interpolations.
-//!
-//! # Representation choices
-//!
-//! - Binding/handler paths are normalised to a dotted, space-free string:
-//!   `{user.name}` becomes the path `"user.name"` (not `"user . name"`).
-//! - Interpolated `{expr}` children lower to an
-//!   [`interpolation`](::obscur_ui_ir::document::UiIrNode::interpolation) node
-//!   carrying the expression — the *same* node the `.okui` file lowering builds,
-//!   so `ViewCodegen` emits the same text node from either front end. They used
-//!   to disagree: this one built a literal text node holding the path's spelling,
-//!   so `<div>{user.name}</div>` rendered the characters `user.name`.
-//! - A lone top-level element is emitted as the document root directly; any
-//!   other top level (multiple siblings, or a single text/interpolation node)
-//!   is wrapped in a [`fragment`](::obscur_ui_ir::document::UiIrNode::fragment)
-//!   root.
-//!
-//! # Id scheme
-//!
-//! Every node is assigned a stable sequential `u64` id during a single
-//! pre-order walk (root = `0`, incrementing).
+#![doc = include_str!("dsl_macro.doc/_module.md")]
 
 use obscur_okui_compiler::compile::ContractRegistry;
 use obscur_okui_compiler::validation::{
@@ -62,25 +17,12 @@ use syn::{
     token,
 };
 
-/// Expander for the TSX-like Rust DSL (spec §2.8).
-///
-/// [`DslMacro::to_document`] parses the DSL into a real [`UiIrDocument`] during
-/// expansion; `okui!` then lowers that document through `ViewCodegen`, so the
-/// emitted code builds a `View` directly and no IR exists at runtime.
+#[doc = include_str!("dsl_macro.doc/DslMacro.md")]
 #[derive(Debug)]
 pub(crate) struct DslMacro;
 
 impl DslMacro {
-    /// Parses the DSL token stream into a [`UiIrDocument`] at expansion time.
-    ///
-    /// The document is built, not emitted, so the caller can lower it further
-    /// while the macro is still running.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`syn::Error`] on empty input, on malformed element syntax, on
-    /// a mismatched closing tag, when a braced value is not a [`syn::Expr`], or
-    /// when an element breaks its component's contract (§2.12, §2.13).
+    #[doc = include_str!("dsl_macro.doc/to_document.md")]
     pub(crate) fn to_document(input: TokenStream) -> Result<UiIrDocument, syn::Error> {
         let nodes = parse_nodes(input)?;
         validate_contracts(&nodes)?;
@@ -98,11 +40,7 @@ impl DslMacro {
     }
 }
 
-/// Parses the whole DSL token stream into its top-level nodes.
-///
-/// # Errors
-///
-/// Returns a [`syn::Error`] on empty input or malformed element syntax.
+#[doc = include_str!("dsl_macro.doc/parse_nodes.md")]
 fn parse_nodes(input: TokenStream) -> Result<Vec<DslNode>, syn::Error> {
     let parser = |stream: ParseStream| -> syn::Result<Vec<DslNode>> {
         let mut nodes = Vec::new();
@@ -121,32 +59,17 @@ fn parse_nodes(input: TokenStream) -> Result<Vec<DslNode>, syn::Error> {
     Ok(nodes)
 }
 
-/// Whether `tag` names a conditional control-flow construct rather than an
-/// element (spec §2.11).
-///
-/// The same three names the `.okui` file parser reserves, so the inline macro and
-/// a compiled file classify a document identically — two front ends, one meaning.
+#[doc = include_str!("dsl_macro.doc/is_conditional_tag.md")]
 fn is_conditional_tag(tag: &str) -> bool {
     matches!(tag, "If" | "ElseIf" | "Else")
 }
 
-/// Whether `tag` names a collection construct rather than an element
-/// (spec §2.11).
-///
-/// `VirtualFor` is classified with `For` — §2.11 says it is a collection, and
-/// misclassifying it as an element would render a node called `VirtualFor`. The
-/// two are *not* emitted alike, though: a `<For>` lowers to a loop node the
-/// codegen emits as a real per-item `for`, while a `<VirtualFor>` keeps its tag
-/// so the codegen/bridge lower it to a virtual-collection marker the runtime
-/// realizes into a viewport-bounded window (spec §4.9). This predicate keeps
-/// both names so each reads as "a loop", the tag downstream then telling them
-/// apart.
+#[doc = include_str!("dsl_macro.doc/is_loop_tag.md")]
 fn is_loop_tag(tag: &str) -> bool {
     matches!(tag, "For" | "VirtualFor")
 }
 
-/// Builds the [`UiIrNode`] for `node`, threading `counter` to assign pre-order
-/// ids (root = 0, incrementing).
+#[doc = include_str!("dsl_macro.doc/build_node.md")]
 fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
     match node {
         DslNode::Text(content) => UiIrNode::text(take_id(counter), content.as_str()),
@@ -196,9 +119,7 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
     }
 }
 
-/// Builds the [`UiIrProperty`] for one attribute.
-/// Builds the [`UiIrExpression`] for a bare attribute value, with no property
-/// name around it — for the places a value stands alone, such as a `<For>`'s key.
+#[doc = include_str!("dsl_macro.doc/build_expression.md")]
 fn build_expression(value: &PropValue) -> UiIrExpression {
     match value {
         PropValue::BareTrue => UiIrExpression::literal(UiIrValue::Bool(true)),
@@ -221,68 +142,65 @@ fn build_property(name: &str, value: &PropValue) -> UiIrProperty {
     }
 }
 
-/// One parsed node of the DSL tree.
+#[doc = include_str!("dsl_macro.doc/DslNode.md")]
 enum DslNode {
-    /// A nested element or component.
+    #[doc = include_str!("dsl_macro.doc/Element.md")]
     Element(DslElement),
-    /// A bare string literal child, lowered to a literal text node.
+    #[doc = include_str!("dsl_macro.doc/Text.md")]
     Text(String),
-    /// A `{expr}` interpolation child, holding the resolved expression the
-    /// interpolation node carries.
+    #[doc = include_str!("dsl_macro.doc/Interpolation.md")]
     Interpolation(PropValue),
 }
 
-/// A parsed element (or component instance) with its attributes and children.
+#[doc = include_str!("dsl_macro.doc/DslElement.md")]
 struct DslElement {
-    /// Whether the tag names a component (uppercase-initial) rather than an
-    /// element.
+    #[doc = include_str!("dsl_macro.doc/is_component.md")]
     is_component: bool,
-    /// The tag or component name.
+    #[doc = include_str!("dsl_macro.doc/tag.md")]
     tag: String,
-    /// The tag identifier's span, so a contract violation about the element as a
-    /// whole lands on the tag the author wrote.
+    #[doc = include_str!("dsl_macro.doc/span.md")]
     span: Span,
-    /// The parsed attributes, in source order.
+    #[doc = include_str!("dsl_macro.doc/attrs.md")]
     attrs: Vec<DslAttr>,
-    /// The parsed children, in source order.
+    #[doc = include_str!("dsl_macro.doc/children.md")]
     children: Vec<DslNode>,
 }
 
-/// A parsed attribute: either a property or an `on:` event binding.
+#[doc = include_str!("dsl_macro.doc/DslAttr.md")]
 enum DslAttr {
-    /// A named property with a resolved value.
+    #[doc = include_str!("dsl_macro.doc/Prop.md")]
     Prop {
-        /// The property name.
+        #[doc = include_str!("dsl_macro.doc/name.md")]
         name: String,
-        /// The name identifier's span.
+        #[doc = include_str!("dsl_macro.doc/span_2.md")]
         span: Span,
-        /// The resolved property value.
+        #[doc = include_str!("dsl_macro.doc/value.md")]
         value: PropValue,
     },
-    /// An `on:<event>={handler}` event binding.
+    #[doc = include_str!("dsl_macro.doc/Event.md")]
     Event {
-        /// The event name (the part after `on:`).
+        #[doc = include_str!("dsl_macro.doc/event.md")]
         event: String,
-        /// The event identifier's span.
+        #[doc = include_str!("dsl_macro.doc/span_3.md")]
         span: Span,
-        /// The handler name, normalised to a string.
+        #[doc = include_str!("dsl_macro.doc/handler.md")]
         handler: String,
     },
 }
 
-/// A resolved attribute value.
+#[doc = include_str!("dsl_macro.doc/PropValue.md")]
 enum PropValue {
-    /// A bare attribute (`disabled`), meaning boolean-true.
+    #[doc = include_str!("dsl_macro.doc/BareTrue.md")]
     BareTrue,
-    /// A literal string value.
+    #[doc = include_str!("dsl_macro.doc/Text_2.md")]
     Text(String),
-    /// A literal boolean value.
+    #[doc = include_str!("dsl_macro.doc/Bool.md")]
     Bool(bool),
-    /// A literal integer value.
+    #[doc = include_str!("dsl_macro.doc/Int.md")]
     Int(i64),
-    /// A literal float value.
+    #[doc = include_str!("dsl_macro.doc/Float.md")]
     Float(f64),
-    /// A dynamic binding to a state/prop path (or stringified expression).
+    #[doc = include_str!("dsl_macro.doc/Binding.md")]
     Binding(String),
 }
 
@@ -374,50 +292,7 @@ impl Parse for DslElement {
     }
 }
 
-/// Parses an attribute (or event) name: `ident ('-' ident)*`, joined into the one
-/// hyphenated string both front ends spell a reserved §7.5 identifier with.
-///
-/// # Why the join has to happen at all
-///
-/// `okui!` is a proc-macro over **Rust** tokens, where `-` is punctuation and can
-/// never be part of an identifier, so `test-id="a"` arrived here as three tokens
-/// and died on `Ident::parse_any` with `expected ident`. The `.okui` file front
-/// end has its own lexer, whose identifier rule admits `-`
-/// (`obscur_okui_syntax`'s `is_ident_continue`), so it accepted the very same
-/// markup. The two front ends therefore disagreed about what an attribute may be
-/// *called* — and §7.5's `test-id` / `automation-id`, which
-/// `App::on_command_at` and `App::add_event_listener` name their target with,
-/// were authorable from the fallback front end only. `data-*` and every future
-/// hyphenated reserved name were unreachable the same way.
-///
-/// # Why joining here is safe and joining anywhere else would not be
-///
-/// The join is confined to **name position**: at the head of an attribute inside
-/// an opening tag, and immediately after `on:`. No expression can appear in
-/// either place, so a `-` there has no other meaning to steal. Subtraction lives
-/// inside `{ … }`, which arrives as a single brace group that `syn::Expr` parses
-/// and this function never looks into, so `{a - b}` means exactly what it meant
-/// before (pinned by `subtraction_is_still_subtraction_everywhere`).
-///
-/// A **tag** is deliberately not joined. The file lexer would admit `<my-tag>`
-/// the same way it admits `my-attr`, but a hyphenated tag names no primitive, no
-/// widget and no component — it would hash to a component id nothing registers —
-/// so widening this front end to accept one would buy a second spelling for
-/// "unmounted box". It is recorded rather than closed; see
-/// `the_names_only_the_file_front_end_admits_are_recorded_not_imagined` in
-/// `obscur-kit`'s `okui_macro.rs` for the rest of that ledger.
-///
-/// # Why adjacency is not checked
-///
-/// It cannot be, from here. `Punct::spacing()` reports `Joint` only when the
-/// *next character is itself punctuation* (`proc_macro2`'s `parse::punct`), so
-/// the `-` in `test-id` and the one in `test - id` are both `Alone`: spacing
-/// distinguishes `-=` from `-`, not `a-b` from `a - b`. `Span::source_text()`
-/// could see the difference in a real expansion but answers `None` under
-/// `quote!`, i.e. in every unit test below. Nothing is lost by not checking:
-/// the grammar position is unambiguous, and a name a stray space produced is
-/// still a name that has to match a reserved spelling or a contract to mean
-/// anything.
+#[doc = include_str!("dsl_macro.doc/parse_dashed_name.md")]
 fn parse_dashed_name(input: ParseStream) -> syn::Result<(String, Span)> {
     let head = Ident::parse_any(input)?;
     let span = head.span();
@@ -439,7 +314,7 @@ fn parse_dashed_name(input: ParseStream) -> syn::Result<(String, Span)> {
     Ok((name, span))
 }
 
-/// Parses a single attribute (property or `on:` event) from `input`.
+#[doc = include_str!("dsl_macro.doc/parse_attr.md")]
 fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
     let (name, span) = parse_dashed_name(input)?;
 
@@ -490,46 +365,7 @@ fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
     }
 }
 
-/// Checks every element in the parsed tree against its component's contract
-/// (spec §2.12, §2.13), reporting each violation at the token that caused it.
-///
-/// # This front end used to check nothing
-///
-/// `okui!` calls itself the spec's *primary* authoring surface, and it ran **no**
-/// contract validation at all: `okui! { <Button laebl="OK"/> }` compiled clean
-/// while the very same document in a `.okui` file was rejected. §2.13's "unknown
-/// attributes, events and string method names are compile errors" held on the
-/// fallback path only. The rule was never the problem — it was written against
-/// the file parser's AST, which this front end does not have — so it now lives in
-/// [`check_contract`] over plain data and both front ends reach it.
-///
-/// # What a proc-macro can and cannot see
-///
-/// The registry is [`ContractRegistry::builtins`]: the primitives and shipped
-/// widgets, whose surfaces are compiled into this macro. A **user** component's
-/// contract cannot be *seen* here and no amount of wiring will change that —
-/// `MyProps::contract_surface()` is a function that runs when the built crate
-/// runs, and this code runs while that crate is still being compiled.
-///
-/// The asymmetry with the file front end is **narrower than this doc used to
-/// claim**. It said the file front end "takes its registry as an argument and so
-/// can be handed one; a macro has no argument to take it in", which is true about
-/// the argument and misleading about the reachability: on the `.okui` **build**
-/// path there is nothing in scope to pass. `build.rs` of crate X cannot call
-/// `X::CardProps::contract_surface()` either, and the edge that would let it —
-/// `[build-dependencies] X` inside X — is rejected by cargo as a `cyclic package
-/// dependency`. For a component defined in the same crate as the document that
-/// uses it, both front ends are equally blind. The file path wins only when the
-/// component lives in a *different* crate, or when the consumer is a running
-/// binary rather than a compiler (the `.okui` language server, which is where
-/// [`ContractRegistry::register_surface`] is actually reachable).
-///
-/// None of that means a user contract is unenforceable here — only unreadable.
-/// A macro can *emit* a check the host crate's own `rustc` resolves (a
-/// field-access probe against the props type yields a real `E0609` at the
-/// author's typo, in the same crate). That is deferral rather than
-/// introspection; it needs a tag→type mapping this repo does not have, and it is
-/// noted in the audit's §2-A rather than attempted here.
+#[doc = include_str!("dsl_macro.doc/validate_contracts.md")]
 fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
     let registry = ContractRegistry::builtins();
     let mut error: Option<syn::Error> = None;
@@ -541,17 +377,7 @@ fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
     error.map_or(Ok(()), Err)
 }
 
-/// Checks `element` and its element descendants, accumulating every violation
-/// into `error` rather than stopping at the first — the same
-/// report-them-all policy `Compiler::compile` follows.
-///
-/// Three rules run here, and all three are the compiler's own: the §2.12/§2.13
-/// contract ([`check_contract`]), the §2.11 collection rule
-/// ([`check_collection`]), which honours both `<For>` and `<VirtualFor>`, and the
-/// §2.12 outlet rule ([`check_outlet`]), which polices an authored
-/// `<slot name="…"/>`. The
-/// macro adds the [`Span`], which is the whole reason this front end reports
-/// better than the file one — the author's build stops on the tag they wrote.
+#[doc = include_str!("dsl_macro.doc/validate_element.md")]
 fn validate_element(
     element: &DslElement,
     registry: &ContractRegistry,
@@ -591,8 +417,7 @@ fn validate_element(
     }
 }
 
-/// Folds `reported` into the accumulated `error`, so one expansion reports every
-/// violation it found rather than only the first.
+#[doc = include_str!("dsl_macro.doc/push_error.md")]
 fn push_error(error: &mut Option<syn::Error>, reported: syn::Error) {
     match error {
         Some(existing) => existing.combine(reported),
@@ -600,25 +425,19 @@ fn push_error(error: &mut Option<syn::Error>, reported: syn::Error) {
     }
 }
 
-/// The strings and spans one [`DslElement`] contributes to an [`ElementUse`].
-///
-/// The mirror of the file front end's `AstInstance`, and for the same two
-/// reasons: the rule borrows `&str` from storage that must outlive it, and a
-/// [`ViolationAnchor`] has to be resolved back to something the author can be
-/// pointed at — a [`Span`] here, a byte offset there.
+#[doc = include_str!("dsl_macro.doc/DslInstance.md")]
 struct DslInstance<'a> {
     tag: &'a str,
     attributes: Vec<(&'a str, bool)>,
     attribute_spans: Vec<Span>,
     members: Vec<(&'a str, Option<SlotUse<'a>>, MemberArity)>,
     member_spans: Vec<Span>,
-    /// Whether a text or `{expr}` child reaches this instance — content, which is
-    /// not a member because it carries no tag.
+    #[doc = include_str!("dsl_macro.doc/content.md")]
     content: bool,
 }
 
 impl<'a> DslInstance<'a> {
-    /// Describes `element` for the rule.
+    #[doc = include_str!("dsl_macro.doc/of.md")]
     fn of(element: &'a DslElement) -> Self {
         let mut instance = Self {
             tag: element.tag.as_str(),
@@ -640,16 +459,7 @@ impl<'a> DslInstance<'a> {
         instance
     }
 
-    /// Appends `element`'s members, looking through the control flow that
-    /// splices into it — the same walk the file front end makes, because the
-    /// emitter makes no distinction between the two front ends' output.
-    ///
-    /// The same walk records [`ElementUse::content`]: a `"text"` child or a
-    /// `{expr}` interpolation, which is not a member because it has no tag to be
-    /// checked against an allowed-children list. A contract declaring *no*
-    /// children refuses it all the same — that is what makes
-    /// `okui! { <Button label="x">"OK"</Button> }` a compile error rather than a
-    /// text run nothing mounts.
+    #[doc = include_str!("dsl_macro.doc/collect_members.md")]
     fn collect_members(&mut self, element: &'a DslElement, arity: MemberArity) {
         for child in &element.children {
             let DslNode::Element(child) = child else {
@@ -676,7 +486,7 @@ impl<'a> DslInstance<'a> {
         }
     }
 
-    /// Borrows this instance as the plain [`ElementUse`] the rule takes.
+    #[doc = include_str!("dsl_macro.doc/as_use.md")]
     fn as_use(&self) -> ElementUse<'_> {
         ElementUse {
             tag: self.tag,
@@ -701,7 +511,7 @@ impl<'a> DslInstance<'a> {
         }
     }
 
-    /// Resolves an anchor to the span its error is reported at.
+    #[doc = include_str!("dsl_macro.doc/span_of.md")]
     fn span_of(&self, anchor: ViolationAnchor, element: Span) -> Span {
         match anchor {
             ViolationAnchor::Element => element,
@@ -715,11 +525,7 @@ impl<'a> DslInstance<'a> {
     }
 }
 
-/// Returns `element`'s slot assignment, if it carries one.
-///
-/// Only a string literal is a slot *name*; `slot={expr}` is a name that does not
-/// exist until runtime, and the rule says so rather than this front end deciding
-/// it alone.
+#[doc = include_str!("dsl_macro.doc/slot_of.md")]
 fn slot_of(element: &DslElement) -> Option<SlotUse<'_>> {
     element.attrs.iter().find_map(|attr| match attr {
         DslAttr::Prop { name, value, .. } if name == "slot" => Some(match value {
@@ -730,14 +536,7 @@ fn slot_of(element: &DslElement) -> Option<SlotUse<'_>> {
     })
 }
 
-/// Every attribute on an authored `<slot …/>` that is not its `name`, spelled as
-/// the author wrote it.
-///
-/// An `on:` binding is spelled back whole (`on:click`) rather than as the bare
-/// event: the message quotes the attribute, and an author looking for `on:click`
-/// must find `on:click`. `DslAttr::Event` keeps only the part after the colon, so
-/// the prefix is put back here — the same repair the file front end's
-/// `authored_spelling` makes.
+#[doc = include_str!("dsl_macro.doc/outlet_extras.md")]
 fn outlet_extras(element: &DslElement) -> Vec<String> {
     element
         .attrs
@@ -750,12 +549,7 @@ fn outlet_extras(element: &DslElement) -> Vec<String> {
         .collect()
 }
 
-/// Classifies an authored `<slot …/>`'s `name` for the §2.12 outlet rule.
-///
-/// Only a string literal is an outlet *name*; `name={expr}` is a name that does
-/// not exist until runtime, and the rule says so rather than this front end
-/// deciding it alone. The mirror of [`slot_of`] on the other side of the same
-/// join.
+#[doc = include_str!("dsl_macro.doc/outlet_name_of.md")]
 fn outlet_name_of(element: &DslElement) -> OutletName<'_> {
     element
         .attrs
@@ -770,8 +564,7 @@ fn outlet_name_of(element: &DslElement) -> OutletName<'_> {
         .unwrap_or(OutletName::Missing)
 }
 
-/// Weakens `arity` to `inner`, keeping the weaker of the two: nesting only ever
-/// loosens the bound.
+#[doc = include_str!("dsl_macro.doc/degrade.md")]
 const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
     match arity {
         MemberArity::Any => MemberArity::Any,
@@ -779,22 +572,13 @@ const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
     }
 }
 
-/// Rejects an expression outside the pure-read subset §2.10 allows, as a
-/// `syn::Error` spanned at the offending expression.
-///
-/// The rule itself lives in the compiler
-/// ([`check_expression`](::obscur_okui_compiler::validation::check_expression)) —
-/// the same function a compiled `.okui` file is checked with. Two copies of a
-/// restriction is one too many: they drift, and the looser one is the one that
-/// decides. What this adds is the span, which is the whole reason the macro path
-/// reports better than the file path can: the author's build stops on the
-/// expression they wrote.
+#[doc = include_str!("dsl_macro.doc/check_expression.md")]
 fn check_expression(expr: &Expr) -> syn::Result<()> {
     ::obscur_okui_compiler::validation::check_expression(expr)
         .map_err(|message| syn::Error::new_spanned(expr, message))
 }
 
-/// Classifies a braced attribute expression into a resolved [`PropValue`].
+#[doc = include_str!("dsl_macro.doc/classify_prop_value.md")]
 fn classify_prop_value(expr: &Expr) -> syn::Result<PropValue> {
     check_expression(expr)?;
     if let Expr::Lit(ExprLit { lit, .. }) = expr {
@@ -811,8 +595,7 @@ fn classify_prop_value(expr: &Expr) -> syn::Result<PropValue> {
     ))
 }
 
-/// Returns a normalised binding path for a simple ident or dotted field-access
-/// expression, else `None`.
+#[doc = include_str!("dsl_macro.doc/path_string.md")]
 fn path_string(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Path(ExprPath {
@@ -833,18 +616,17 @@ fn path_string(expr: &Expr) -> Option<String> {
     }
 }
 
-/// Returns the normalised binding path for `expr`, falling back to its
-/// stringified token form for anything that is not a simple path.
+#[doc = include_str!("dsl_macro.doc/binding_or_string.md")]
 fn binding_or_string(expr: &Expr) -> String {
     path_string(expr).unwrap_or_else(|| stringify_expr(expr))
 }
 
-/// Stringifies an expression to its (space-separated) token form.
+#[doc = include_str!("dsl_macro.doc/stringify_expr.md")]
 fn stringify_expr(expr: &Expr) -> String {
     quote!(#expr).to_string()
 }
 
-/// Takes the current id from `counter` and advances it.
+#[doc = include_str!("dsl_macro.doc/take_id.md")]
 fn take_id(counter: &mut u64) -> u64 {
     let id = *counter;
     *counter += 1;

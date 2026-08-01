@@ -1,5 +1,4 @@
-//! Analysis: the [`Analyzer`] core plus its result types — [`DocumentSymbol`]
-//! outlines and [`Hover`] information.
+#![doc = include_str!("mod.doc/_module.md")]
 mod analyzer;
 pub use analyzer::Analyzer;
 mod document_symbol;

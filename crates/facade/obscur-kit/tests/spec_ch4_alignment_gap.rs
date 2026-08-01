@@ -1,19 +1,4 @@
-//! **SPECIFICATION-DERIVED** distributed-alignment and gutter cases for
-//! obscur.kit §4.1 ("alignment", "gap").
-//!
-//! Every expected number below was produced by an agent reading the
-//! specification — obscur.kit §4 and the W3C css-align-3 text it normatively
-//! cites — with **no access to this repository's source**. A failure here is a
-//! defect report about the engine, and must not be "corrected" by editing the
-//! expected value.
-//!
-//! Translation note: the deriver's `column-gap` is authored here as the `gap`
-//! shorthand, because `column-gap` / `row-gap` are not modelled as properties in
-//! this workspace. Every assertion in this file reads only main-axis geometry of
-//! a single-line row flex container, which the shorthand sets identically. The
-//! `gap: normal` case inherits a caveat from that: if `normal` fails to parse,
-//! `gap` falls back to its initial value and the test can pass for the wrong
-//! reason — see the test's own comment.
+#![doc = include_str!("spec_ch4_alignment_gap.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch4_support/mod.rs"]
@@ -24,21 +9,18 @@ use support::{approx, at, drive, el, geom, view};
 
 const VW: f32 = 1000.0;
 
-/// A `.c` flex container holding `n` items all classed `.i`.
+#[doc = include_str!("spec_ch4_alignment_gap.doc/items.md")]
 fn items(n: usize) -> View {
     let kids = (0..n).map(|i| el(100 + i as u64, "i", vec![])).collect();
     view(vec![el(10, "c", kids)])
 }
 
-/// The x origin of each item, in order.
+#[doc = include_str!("spec_ch4_alignment_gap.doc/xs.md")]
 fn xs(rt: &obscur_kit::runtime::UiRuntime, n: usize) -> Vec<f32> {
     (0..n).map(|i| geom(rt, at(rt, &[0, i])).0).collect()
 }
 
-/// css-align-3 §4.3, `space-around`: "The alignment subjects are distributed so
-/// that the spacing between any two adjacent alignment subjects is the same, and
-/// the spacing before the first and after the last alignment subject is half the
-/// size of the other spacing."
+#[doc = include_str!("spec_ch4_alignment_gap.doc/space_around_puts_half_size_gaps_at_the_ends.md")]
 #[test]
 fn space_around_puts_half_size_gaps_at_the_ends() {
     let rt = drive(
@@ -54,11 +36,7 @@ fn space_around_puts_half_size_gaps_at_the_ends() {
     approx(x[2], 283.333, "third item");
 }
 
-/// css-align-3 §4.3, `space-evenly`: "The alignment subjects are evenly
-/// distributed in the alignment container, with a full-size space on either end.
-/// The alignment subjects are distributed so that the spacing between any two
-/// adjacent alignment subjects, before the first alignment subject, and after the
-/// last alignment subject is the same."
+#[doc = include_str!("spec_ch4_alignment_gap.doc/space_evenly_puts_full_size_gaps_at_the_ends.md")]
 #[test]
 fn space_evenly_puts_full_size_gaps_at_the_ends() {
     let rt = drive(
@@ -74,9 +52,7 @@ fn space_evenly_puts_full_size_gaps_at_the_ends() {
     approx(x[2], 275.0, "third item");
 }
 
-/// css-align-3 §4.3: "When space cannot be distributed in this way, these values
-/// behave as their fallback alignment." and "The default fallback alignment for
-/// this value is safe flex-start."
+#[doc = include_str!("spec_ch4_alignment_gap.doc/space_between_falls_back_to_start_on_negative_free_space.md")]
 #[test]
 fn space_between_falls_back_to_start_on_negative_free_space() {
     let rt = drive(
@@ -97,9 +73,7 @@ fn space_between_falls_back_to_start_on_negative_free_space() {
     );
 }
 
-/// css-align-3 §8.1: "Gutters effect a minimum spacing between items: additional
-/// spacing may be added by justify-content/align-content. Such additional space
-/// effectively increases the size of these gutters."
+#[doc = include_str!("spec_ch4_alignment_gap.doc/a_gutter_is_a_floor_that_justify_content_grows.md")]
 #[test]
 fn a_gutter_is_a_floor_that_justify_content_grows() {
     let rt = drive(
@@ -120,13 +94,7 @@ fn a_gutter_is_a_floor_that_justify_content_grows() {
     approx(x[2], 300.0, "third item; nothing overflows");
 }
 
-/// css-align-3 §8.1: "The value normal represents a used value of 1em on
-/// multi-column containers, and a used value of 0px in all other contexts."
-///
-/// Caveat recorded honestly: `gap` has no `normal` keyword in this workspace's
-/// property model, so a parse failure would also yield 0 and pass this test for
-/// the wrong reason. The `font-size: 32px` is retained from the deriver's setup
-/// precisely because it makes the *wrong* answer (132) far from the right one.
+#[doc = include_str!("spec_ch4_alignment_gap.doc/gap_normal_is_zero_outside_multicol.md")]
 #[test]
 fn gap_normal_is_zero_outside_multicol() {
     let rt = drive(

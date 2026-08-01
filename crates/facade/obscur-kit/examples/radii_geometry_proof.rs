@@ -1,28 +1,4 @@
-//! **Proof: canonical CSS radii geometry (headless CPU).**
-//!
-//! Renders two panels that exercise the two fixes and writes
-//! `target/radii_geometry_proof.png`:
-//!
-//! - **Left — border-radius overlapping-radius clamp (css-backgrounds §4.5).** A
-//!   wide-short `200×40` box with `border-radius: 30px` on all four corners. Each
-//!   corner (30) is below `min(w,h)/2 = 20`? No — the LEFT/RIGHT sides sum to
-//!   `30+30 = 60 > 40` (the height), so the spec's single uniform scale
-//!   `f = 40/60` shrinks ALL four corners to `20px`, preserving proportions. The
-//!   panel fills the box with the §4.5-normalized radii; the corners fit and never
-//!   overflow the box.
-//! - **Right — box-shadow spread → radii (css-backgrounds §6.1.1).** A rounded
-//!   `border-radius: 10px` box with an outset `box-shadow` of `spread: 8px`. The
-//!   shadow's corner radii are the box radii grown by `+spread` → `18px`, so the
-//!   shadow's rounded corners are visibly LARGER than the box's and stay
-//!   concentric with them.
-//!
-//! It rasterizes through the software [`CpuRenderer`] (no GPU). Before writing, it
-//! asserts (left) the normalized radius is `20px` and the box corner is rounded away
-//! while the mid-edges reach the box bounds, and (right) that the shadow extends
-//! beyond the box corner (a larger, concentric round).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example radii_geometry_proof --features render-cpu`
+#![doc = include_str!("radii_geometry_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -38,7 +14,7 @@ use obscur_kit::scene::paint::Brush;
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// The output image extent.
+#[doc = include_str!("radii_geometry_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(420.0, 240.0);
 
 fn main() {
@@ -114,7 +90,7 @@ fn main() {
     );
 }
 
-/// Renders `list` through the software renderer into a pixmap at [`VIEWPORT`].
+#[doc = include_str!("radii_geometry_proof.doc/render.md")]
 fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -127,9 +103,7 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Left panel: the normalized radius is 20 (f applied uniformly), the extreme box
-/// corner is rounded away (page grey, not box blue), and the mid-height left edge
-/// reaches the box bound (box blue).
+#[doc = include_str!("radii_geometry_proof.doc/verify_left.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn verify_left(pixmap: &tiny_skia::Pixmap, box_rect: Rect, radius: CornerRadius) {
     assert!(
@@ -165,9 +139,7 @@ fn verify_left(pixmap: &tiny_skia::Pixmap, box_rect: Rect, radius: CornerRadius)
     );
 }
 
-/// Right panel: the shadow extends beyond the box straight edge by ~`spread`, and
-/// the shadow's rounded corner reaches further out than the box's corner would with
-/// its own (smaller) radius — proving concentric, larger shadow corners.
+#[doc = include_str!("radii_geometry_proof.doc/verify_right.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn verify_right(pixmap: &tiny_skia::Pixmap, box_rect: Rect, spread: f32) {
     // The software backend fills the drop shadow at half alpha, so a shadow pixel
@@ -207,7 +179,7 @@ fn verify_right(pixmap: &tiny_skia::Pixmap, box_rect: Rect, spread: f32) {
     );
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("radii_geometry_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

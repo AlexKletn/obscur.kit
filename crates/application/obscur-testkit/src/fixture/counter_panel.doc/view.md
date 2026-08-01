@@ -1,0 +1,1 @@
+The lone `.counter` element.

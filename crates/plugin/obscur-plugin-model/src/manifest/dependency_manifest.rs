@@ -1,6 +1,5 @@
-//! `DependencyManifest` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("dependency_manifest.doc/_module.md")]
 
-/// Placeholder for the `DependencyManifest` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("dependency_manifest.doc/DependencyManifest.md")]
 #[derive(Debug)]
 pub struct DependencyManifest;

@@ -1,47 +1,39 @@
-//! A type-safe handle denoting a CSS stylesheet resource (spec §5.15).
+#![doc = include_str!("stylesheet_handle.doc/_module.md")]
 
 use obscur_identity::ResourceId;
 
 use crate::handle::{ResourceHandle, ResourceKind};
 
-/// A type-safe handle to a CSS stylesheet resource (spec §5.15).
-///
-/// `StylesheetHandle` is a distinct newtype over [`ResourceId`] so that, at
-/// compile time, it can only denote a stylesheet. It converts to and from the
-/// generic [`ResourceHandle`] via [`Self::into_handle`] and
-/// [`Self::from_handle`]. Like all handles it is a pure identifier: cheap,
-/// `Copy`, and owning no data.
+#[doc = include_str!("stylesheet_handle.doc/StylesheetHandle.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct StylesheetHandle(ResourceId);
 
 impl StylesheetHandle {
-    /// Creates a stylesheet handle for the given resource id.
+    #[doc = include_str!("stylesheet_handle.doc/new.md")]
     pub const fn new(id: ResourceId) -> Self {
         Self(id)
     }
 
-    /// Returns the resource identity this handle refers to.
+    #[doc = include_str!("stylesheet_handle.doc/id.md")]
     #[must_use]
     pub const fn id(self) -> ResourceId {
         self.0
     }
 
-    /// Returns the [`ResourceKind`] this handle type denotes
-    /// ([`ResourceKind::Stylesheet`]).
+    #[doc = include_str!("stylesheet_handle.doc/kind.md")]
     #[must_use]
     pub const fn kind() -> ResourceKind {
         ResourceKind::Stylesheet
     }
 
-    /// Converts this typed handle into a generic [`ResourceHandle`].
+    #[doc = include_str!("stylesheet_handle.doc/into_handle.md")]
     #[must_use]
     pub const fn into_handle(self) -> ResourceHandle {
         ResourceHandle::new(self.0, ResourceKind::Stylesheet)
     }
 
-    /// Recovers a `StylesheetHandle` from a generic [`ResourceHandle`], or
-    /// `None` if the handle does not denote a stylesheet.
+    #[doc = include_str!("stylesheet_handle.doc/from_handle.md")]
     #[must_use]
     pub const fn from_handle(handle: ResourceHandle) -> Option<Self> {
         match handle.kind() {

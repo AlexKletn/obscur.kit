@@ -1,39 +1,20 @@
-//! Choosing which cache entry to evict (spec §5.19 eviction).
+#![doc = include_str!("eviction_policy.doc/_module.md")]
 
 use crate::cache::CacheEntry;
 
-/// The strategy a cache uses to choose an eviction victim (spec §5.19 eviction).
-///
-/// Every policy is **deterministic**: given the same slice of entries it always
-/// selects the same victim, breaking every tie down to the entry's
-/// [`CacheKey`](crate::cache::CacheKey) so the result never depends on slice
-/// order alone. This keeps eviction reproducible for tests and snapshots.
-///
-/// - [`Lru`](EvictionPolicy::Lru) — evict the least recently used entry.
-/// - [`Lfu`](EvictionPolicy::Lfu) — evict the least frequently used entry.
-/// - [`VisibilityAware`](EvictionPolicy::VisibilityAware) — evict the least
-///   visible entry first (spec §5.19 *visibility priority*), then fall back to
-///   recency. This is the default.
+#[doc = include_str!("eviction_policy.doc/EvictionPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EvictionPolicy {
-    /// Least Recently Used: evict the smallest `last_access` (ties → smallest key).
+    #[doc = include_str!("eviction_policy.doc/Lru.md")]
     Lru,
-    /// Least Frequently Used: evict the smallest `hits` (ties → smallest
-    /// `last_access`, then key).
+    #[doc = include_str!("eviction_policy.doc/Lfu.md")]
     Lfu,
-    /// Visibility-aware: evict the smallest [`VisibilityPriority`] (spec §5.19),
-    /// then the smallest `last_access`, then key.
+    #[doc = include_str!("eviction_policy.doc/VisibilityAware.md")]
     VisibilityAware,
 }
 
 impl EvictionPolicy {
-    /// Chooses the entry to evict from `entries`, or `None` if it is empty (spec
-    /// §5.19 eviction).
-    ///
-    /// The choice is deterministic: each policy's primary key is compared first,
-    /// and every tie is broken by successively finer keys down to the entry's
-    /// [`CacheKey`](crate::cache::CacheKey), so the outcome never depends on the
-    /// order of `entries`.
+    #[doc = include_str!("eviction_policy.doc/choose_victim.md")]
     #[must_use]
     pub fn choose_victim<'a>(&self, entries: &'a [CacheEntry]) -> Option<&'a CacheEntry> {
         entries.iter().min_by(|a, b| match self {
@@ -56,7 +37,7 @@ impl EvictionPolicy {
 }
 
 impl Default for EvictionPolicy {
-    /// The default policy is [`EvictionPolicy::VisibilityAware`].
+    #[doc = include_str!("eviction_policy.doc/default.md")]
     fn default() -> Self {
         Self::VisibilityAware
     }

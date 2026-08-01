@@ -1,5 +1,4 @@
-//! `UiIrViewBridge`: lowers compiled UI IR into a desired-view [`View`]
-//! (spec §2.15, §2.11).
+#![doc = include_str!("ui_ir_view_bridge.doc/_module.md")]
 
 use obscur_ui_ir::document::{
     UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrProperty, UiIrValue,
@@ -9,55 +8,12 @@ use obscur_view::view::{
     View, ViewEventBinding, ViewFragment, ViewKey, ViewNode, ViewProperty, ViewValue,
 };
 
-/// Lowers a compiled [`UiIrDocument`] (or a bare [`UiIrNode`] subtree) into the
-/// runtime desired [`View`], connecting the frontend IR to the reconciler
-/// (spec §2.15).
-///
-/// # Mapping
-///
-/// - **Element / Component** → a [`ViewNode::Element`] whose
-///   [`ComponentId`](obscur_identity::ComponentId) is resolved through the shared
-///   [`name_binding`] registry: a built-in widget/primitive tag binds to its real
-///   `COMPONENT_ID`; otherwise the node's **kind** decides — an
-///   [`Element`](UiIrNodeKind::Element) binds to the generic `Container`, a
-///   [`Component`](UiIrNodeKind::Component) to its own
-///   [`user_component_id`](name_binding::user_component_id), which is the id
-///   `#[derive(Contract)]` gives the same name and therefore the id a host
-///   registers the component under. IR
-///   [`properties`](UiIrNode::properties) become [`ViewProperty`]s (the reserved
-///   `class`/`id`/`type`/`src`/`disabled`/`checked` attributes map to the
-///   `obscur-view` symbols the reconciler/matcher read; every other name is
-///   deterministically hashed). IR [`events`](UiIrNode::events) become
-///   [`ViewEventBinding`]s (`click`/`input`/`change` bind to the reserved
-///   `EVENT_*` symbols the runtime dispatcher resolves) and the node's optional
-///   [`key`](UiIrNode::key) becomes a [`ViewKey`]. An **element** tag additionally
-///   becomes the node's *local name* — the reserved `TYPE` property a §4.13 type
-///   selector matches, so `button { … }` styles an authored `<button>` — under
-///   [`name_binding::local_name_for`], which also decides that an authored
-///   `type="…"` wins that slot and that a component tag contributes no name.
-/// - **Text** → a [`ViewNode::Text`] carrying the literal content (and key, if
-///   any).
-/// - **Fragment** → its children spliced into the surrounding fragment (a
-///   fragment is transparent).
-/// - **Conditional / Loop** → *static materialization*: the desired tree is
-///   concrete data with no conditional or loop node, so a
-///   [`Conditional`](UiIrNodeKind::Conditional) lowers to its guarded body and a
-///   [`Loop`](UiIrNodeKind::Loop) lowers to its template body, both spliced into
-///   the surrounding fragment. Evaluating a condition's truth or materializing a
-///   `<For>` per collection item needs runtime data (the bound values), which
-///   the IR does not carry; that dynamic expansion is the runtime's job. The
-///   loop's mandatory `key` and `each` binding are preserved on the IR node for
-///   that later expansion.
-///
-/// A property or event value that is a literal lowers to the matching
-/// [`ViewValue`]; a dynamic [`Binding`](UiIrExpression::Binding) lowers to its
-/// path as placeholder text (its real value needs runtime resolution) and a
-/// [`Call`](UiIrExpression::Call) lowers to [`ViewValue::Null`].
+#[doc = include_str!("ui_ir_view_bridge.doc/UiIrViewBridge.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UiIrViewBridge;
 
 impl UiIrViewBridge {
-    /// Lowers a whole [`UiIrDocument`] into a [`View`].
+    #[doc = include_str!("ui_ir_view_bridge.doc/document_to_view.md")]
     #[must_use]
     pub fn document_to_view(document: &UiIrDocument) -> View {
         View::from_fragment(ViewFragment::from_nodes(Self::node_to_view_nodes(
@@ -65,12 +21,7 @@ impl UiIrViewBridge {
         )))
     }
 
-    /// Lowers one IR `node` into the desired-view node(s) it produces.
-    ///
-    /// Most kinds produce exactly one [`ViewNode`]; a transparent
-    /// [`Fragment`](UiIrNodeKind::Fragment) and the statically materialized
-    /// [`Conditional`](UiIrNodeKind::Conditional)/[`Loop`](UiIrNodeKind::Loop)
-    /// splice their children, so the return is a `Vec`.
+    #[doc = include_str!("ui_ir_view_bridge.doc/node_to_view_nodes.md")]
     #[must_use]
     pub fn node_to_view_nodes(node: &UiIrNode) -> Vec<ViewNode> {
         match node.kind() {
@@ -99,22 +50,7 @@ impl UiIrViewBridge {
     }
 }
 
-/// Lowers an element/component IR node into a single [`ViewNode::Element`].
-///
-/// Names bind through the shared [`name_binding`] registry: the tag resolves to
-/// a real [`ComponentId`](obscur_identity::ComponentId) (a built-in widget or
-/// primitive; else the generic `Container` for an element, or the component's own
-/// name-derived id for a component), reserved attributes/events resolve to the
-/// `obscur-view` symbols the reconciler/matcher/dispatcher read, and the handler
-/// command resolves to a deterministic hashed symbol.
-///
-/// An element tag is *also* the node's local name (the §4.13 type selector's
-/// input), which is what makes `<button>` a base element rather than an anonymous
-/// box; see [`name_binding::local_name_for`].
-///
-/// `position` comes from the caller's [`UiIrNodeKind`] rather than from the tag's
-/// spelling: the front ends already decided component-vs-element and recorded it
-/// on the node, and re-deriving it here would be a second copy of their rule.
+#[doc = include_str!("ui_ir_view_bridge.doc/lower_element.md")]
 fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
     let mut view = ViewNode::element(name_binding::component_id_for(node.tag(), position));
     for property in node.properties() {
@@ -161,15 +97,7 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
     view
 }
 
-/// Lowers a `<VirtualFor>` [`Loop`](UiIrNodeKind::Loop) node into a
-/// virtual-collection marker (spec §2.11, §4.9).
-///
-/// The loop's template body becomes the marker's per-row template — lowered
-/// once, not once per item — and the marker carries the default estimated row
-/// extent. The runtime substitutes the marker away before reconcile, replacing
-/// it with as many template clones as the viewport-bounded window holds; the
-/// realized count is therefore a function of the viewport, not of the
-/// collection's length, which is the promise a `<For>` cannot keep.
+#[doc = include_str!("ui_ir_view_bridge.doc/lower_virtual_collection.md")]
 fn lower_virtual_collection(node: &UiIrNode) -> ViewNode {
     let template: ViewFragment = node
         .children()
@@ -179,7 +107,7 @@ fn lower_virtual_collection(node: &UiIrNode) -> ViewNode {
     ViewNode::virtual_collection(obscur_view::view::DEFAULT_VIRTUAL_ROW_EXTENT, template)
 }
 
-/// Lowers an IR value expression into a concrete [`ViewValue`].
+#[doc = include_str!("ui_ir_view_bridge.doc/lower_value.md")]
 fn lower_value(expression: &UiIrExpression) -> ViewValue {
     match expression {
         UiIrExpression::Literal(value) => lower_literal(value),
@@ -190,7 +118,7 @@ fn lower_value(expression: &UiIrExpression) -> ViewValue {
     }
 }
 
-/// Lowers an IR literal into the matching [`ViewValue`].
+#[doc = include_str!("ui_ir_view_bridge.doc/lower_literal.md")]
 fn lower_literal(value: &UiIrValue) -> ViewValue {
     match value {
         UiIrValue::Null => ViewValue::Null,
@@ -201,8 +129,7 @@ fn lower_literal(value: &UiIrValue) -> ViewValue {
     }
 }
 
-/// Lowers an IR key expression into a [`ViewKey`]. Literal ints become index
-/// keys; every other shape becomes a name key over its textual form.
+#[doc = include_str!("ui_ir_view_bridge.doc/lower_key.md")]
 fn lower_key(expression: &UiIrExpression) -> ViewKey {
     match expression {
         UiIrExpression::Literal(UiIrValue::Int(number)) => ViewKey::from(number.cast_unsigned()),

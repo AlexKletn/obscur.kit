@@ -1,4 +1,4 @@
-//! `MessageCatalog`: the reference in-memory [`MessageProvider`] (spec §7.2).
+#![doc = include_str!("message_catalog.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -8,38 +8,20 @@ use crate::catalog::MessageProvider;
 use crate::locale::LanguageTag;
 use crate::message::{MessageKey, MessagePattern, MessagePatternError};
 
-/// An in-memory table of patterns, keyed by locale and message key.
-///
-/// The reference [`MessageProvider`]: a host builds one at start-up from whatever
-/// its translations live in, and hands it to a
-/// [`Localizer`](crate::catalog::Localizer). It reports
-/// [`SupportLevel::Native`] once it holds anything and
-/// [`SupportLevel::Unavailable`] while empty — an empty catalogue and no
-/// catalogue are the same capability, and saying otherwise would be the kind of
-/// cheerful lie this workspace's ports are built to avoid.
-///
-/// Patterns are parsed on insert, not on lookup: [`insert`](Self::insert) returns
-/// the [`MessagePatternError`] so a broken translation is caught when the
-/// catalogue is loaded rather than on the frame that first needs it.
+#[doc = include_str!("message_catalog.doc/MessageCatalog.md")]
 #[derive(Debug, Default)]
 pub struct MessageCatalog {
     locales: HashMap<LanguageTag, HashMap<MessageKey, MessagePattern>>,
 }
 
 impl MessageCatalog {
-    /// Creates an empty catalogue.
+    #[doc = include_str!("message_catalog.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Parses `source` and registers it for `key` in `locale`, replacing any
-    /// previous pattern.
-    ///
-    /// # Errors
-    ///
-    /// Returns the [`MessagePatternError`] when `source` is not a valid pattern;
-    /// nothing is registered in that case.
+    #[doc = include_str!("message_catalog.doc/insert.md")]
     pub fn insert(
         &mut self,
         locale: &LanguageTag,
@@ -54,13 +36,13 @@ impl MessageCatalog {
         Ok(())
     }
 
-    /// Returns how many locales hold at least one message.
+    #[doc = include_str!("message_catalog.doc/locale_count.md")]
     #[must_use]
     pub fn locale_count(&self) -> usize {
         self.locales.len()
     }
 
-    /// Returns whether the catalogue holds no messages at all.
+    #[doc = include_str!("message_catalog.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.locales.values().all(HashMap::is_empty)

@@ -1,5 +1,4 @@
-//! The [`Selection`] holding the set of selected nodes and the range anchor
-//! (item-selection model).
+#![doc = include_str!("selection.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
@@ -7,19 +6,7 @@ use obscur_identity::NodeId;
 
 use super::SelectionAnchor;
 
-/// The set of currently selected items plus the range-selection anchor.
-///
-/// The selected items live in a [`BTreeSet`], so iteration is deterministic
-/// (ascending [`NodeId`] order) regardless of the order they were selected in.
-/// The optional [`SelectionAnchor`] records the fixed anchor and moving lead
-/// used to extend a range with shift-selection; it is `None` exactly when the
-/// selection is empty.
-///
-/// This is the *item* selection model — list rows, canvas objects, tree nodes —
-/// and is distinct from text-caret selection in `obscur-text`. Higher-level
-/// rules (mode, toggle-on-click, non-empty enforcement) live in
-/// [`SelectionPolicy`](super::SelectionPolicy); this type is the raw mutable
-/// state it drives.
+#[doc = include_str!("selection.doc/Selection.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Selection {
     items: BTreeSet<NodeId>,
@@ -27,7 +14,7 @@ pub struct Selection {
 }
 
 impl Selection {
-    /// Creates an empty selection with no anchor.
+    #[doc = include_str!("selection.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -36,19 +23,14 @@ impl Selection {
         }
     }
 
-    /// Replaces the selection with just `node` and collapses the anchor onto it.
-    ///
-    /// This models a plain click: whatever was selected before is discarded.
+    #[doc = include_str!("selection.doc/select.md")]
     pub fn select(&mut self, node: NodeId) {
         self.items.clear();
         self.items.insert(node);
         self.anchor = Some(SelectionAnchor::collapsed(node));
     }
 
-    /// Adds `node` to the selection and moves the lead onto it.
-    ///
-    /// The existing anchor endpoint is preserved (so a subsequent range still
-    /// extends from it); if there was no anchor, one is collapsed onto `node`.
+    #[doc = include_str!("selection.doc/add.md")]
     pub fn add(&mut self, node: NodeId) {
         self.items.insert(node);
         self.anchor = Some(match self.anchor {
@@ -57,11 +39,7 @@ impl Selection {
         });
     }
 
-    /// Toggles `node`'s membership: adds it if absent, removes it if present.
-    ///
-    /// Returns the resulting membership — `true` if `node` is now selected,
-    /// `false` if it was just removed. Adding goes through [`add`](Self::add)
-    /// (so the lead follows); removing goes through [`remove`](Self::remove).
+    #[doc = include_str!("selection.doc/toggle.md")]
     pub fn toggle(&mut self, node: NodeId) -> bool {
         if self.items.contains(&node) {
             self.remove(node);
@@ -72,9 +50,7 @@ impl Selection {
         }
     }
 
-    /// Removes `node` from the selection, returning whether it was present.
-    ///
-    /// If this empties the selection, the anchor is cleared.
+    #[doc = include_str!("selection.doc/remove.md")]
     pub fn remove(&mut self, node: NodeId) -> bool {
         let removed = self.items.remove(&node);
         if self.items.is_empty() {
@@ -83,53 +59,48 @@ impl Selection {
         removed
     }
 
-    /// Clears the selection and the anchor.
+    #[doc = include_str!("selection.doc/clear.md")]
     pub fn clear(&mut self) {
         self.items.clear();
         self.anchor = None;
     }
 
-    /// Returns whether `node` is currently selected.
+    #[doc = include_str!("selection.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.items.contains(&node)
     }
 
-    /// Returns the selected items in ascending [`NodeId`] order.
+    #[doc = include_str!("selection.doc/items.md")]
     pub fn items(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.items.iter().copied()
     }
 
-    /// Returns the number of selected items.
+    #[doc = include_str!("selection.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    /// Returns whether nothing is selected.
+    #[doc = include_str!("selection.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
-    /// Returns the current range anchor, if any.
+    #[doc = include_str!("selection.doc/anchor.md")]
     #[must_use]
     pub fn anchor(&self) -> Option<SelectionAnchor> {
         self.anchor
     }
 
-    /// Returns the current lead item (the anchor's lead), if any.
+    #[doc = include_str!("selection.doc/lead.md")]
     #[must_use]
     pub fn lead(&self) -> Option<NodeId> {
         self.anchor.map(|a| a.lead())
     }
 
-    /// Replaces the selection with exactly `range`, setting the anchor to span
-    /// from the first to the last element.
-    ///
-    /// An empty `range` clears the selection and the anchor. This models a
-    /// shift-selection: the anchor's `anchor` is the first item and its `lead`
-    /// is the last.
+    #[doc = include_str!("selection.doc/set_range.md")]
     pub fn set_range(&mut self, range: &[NodeId]) {
         self.items.clear();
         self.items.extend(range.iter().copied());

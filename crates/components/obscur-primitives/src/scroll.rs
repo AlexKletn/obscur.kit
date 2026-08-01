@@ -1,16 +1,9 @@
-//! `Scroll`: a scrollable-viewport primitive (spec §2.6, §4.8).
+#![doc = include_str!("scroll.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A scrollable viewport wrapping a set of children.
-///
-/// `Scroll` is one of the minimal built-in primitives (spec §2.6). It clips its
-/// children to a viewport and offers scrolling along the enabled axes
-/// (spec §4.8). By default it scrolls vertically only; either axis can be
-/// toggled. It is a leaf element primitive: it lowers to a
-/// [`ViewNode::Element`] carrying its per-axis flags as properties and its
-/// children as the element's fragment.
+#[doc = include_str!("scroll.doc/Scroll.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scroll {
     children: Vec<ViewNode>,
@@ -19,7 +12,7 @@ pub struct Scroll {
 }
 
 impl Default for Scroll {
-    /// A vertical-only viewport with no children.
+    #[doc = include_str!("scroll.doc/default.md")]
     fn default() -> Self {
         Self {
             children: Vec::new(),
@@ -30,51 +23,42 @@ impl Default for Scroll {
 }
 
 impl Scroll {
-    /// Stable component id for the scroll primitive (see
-    /// [`Container::COMPONENT_ID`] for the shared id scheme).
-    ///
-    /// [`Container::COMPONENT_ID`]: crate::Container::COMPONENT_ID
+    #[doc = include_str!("scroll.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0004);
 
-    /// Property name for the horizontal-scroll flag (see [`Image::PROP_SRC`]
-    /// for the shared prop-symbol scheme).
-    ///
-    /// [`Image::PROP_SRC`]: crate::Image::PROP_SRC
+    #[doc = include_str!("scroll.doc/PROP_SCROLL_X.md")]
     pub const PROP_SCROLL_X: InternedSymbol = InternedSymbol::from_raw(0x00C1_0401);
-    /// Property name for the vertical-scroll flag.
+    #[doc = include_str!("scroll.doc/PROP_SCROLL_Y.md")]
     pub const PROP_SCROLL_Y: InternedSymbol = InternedSymbol::from_raw(0x00C1_0402);
 
-    /// Creates a default scroll viewport (vertical only, no children).
+    #[doc = include_str!("scroll.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Appends a child node, returning the updated viewport.
+    #[doc = include_str!("scroll.doc/child.md")]
     #[must_use]
     pub fn child(mut self, node: ViewNode) -> Self {
         self.children.push(node);
         self
     }
 
-    /// Sets whether the viewport scrolls horizontally, returning the updated
-    /// viewport.
+    #[doc = include_str!("scroll.doc/horizontal.md")]
     #[must_use]
     pub const fn horizontal(mut self, enabled: bool) -> Self {
         self.horizontal = enabled;
         self
     }
 
-    /// Sets whether the viewport scrolls vertically, returning the updated
-    /// viewport.
+    #[doc = include_str!("scroll.doc/vertical.md")]
     #[must_use]
     pub const fn vertical(mut self, enabled: bool) -> Self {
         self.vertical = enabled;
         self
     }
 
-    /// Lowers this viewport into its [`ViewNode::Element`], emitting both axis
-    /// flags as properties and its children as the fragment.
+    #[doc = include_str!("scroll.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::element(Self::COMPONENT_ID)
@@ -89,7 +73,7 @@ impl Scroll {
             .with_children(ViewFragment::from_nodes(self.children))
     }
 
-    /// Lowers this viewport into a single-node [`View`].
+    #[doc = include_str!("scroll.doc/view.md")]
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

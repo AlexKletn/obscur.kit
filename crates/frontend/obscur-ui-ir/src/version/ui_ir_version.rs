@@ -1,18 +1,6 @@
-//! The versioned IR format version [`UiIrVersion`] (spec §2.5 versioned IR).
+#![doc = include_str!("ui_ir_version.doc/_module.md")]
 
-/// The format version of a UI intermediate-representation document (spec §2.5).
-///
-/// A `UiIrVersion` is a `major.minor` pair identifying the IR schema a document
-/// was written against. It follows a semver-style compatibility rule:
-///
-/// - The **major** component gates breaking changes: documents with different
-///   majors are mutually incompatible.
-/// - The **minor** component gates backward-compatible additions: a reader can
-///   read any document whose minor is less than or equal to its own, as long as
-///   the majors match.
-///
-/// See [`UiIrVersion::is_compatible_with`] for the exact rule. Ordering is
-/// lexicographic by `major` then `minor`.
+#[doc = include_str!("ui_ir_version.doc/UiIrVersion.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UiIrVersion {
     major: u16,
@@ -20,35 +8,28 @@ pub struct UiIrVersion {
 }
 
 impl UiIrVersion {
-    /// The current IR format version emitted by this crate.
+    #[doc = include_str!("ui_ir_version.doc/CURRENT.md")]
     pub const CURRENT: UiIrVersion = UiIrVersion::new(1, 0);
 
-    /// Creates a version from its `major` and `minor` components.
+    #[doc = include_str!("ui_ir_version.doc/new.md")]
     #[must_use]
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
     }
 
-    /// Returns the major component (breaking-change gate).
+    #[doc = include_str!("ui_ir_version.doc/major.md")]
     #[must_use]
     pub const fn major(self) -> u16 {
         self.major
     }
 
-    /// Returns the minor component (backward-compatible-addition gate).
+    #[doc = include_str!("ui_ir_version.doc/minor.md")]
     #[must_use]
     pub const fn minor(self) -> u16 {
         self.minor
     }
 
-    /// Returns whether a reader at `self` can read a document written at
-    /// `other` (spec §2.5).
-    ///
-    /// This is the semver-style rule: the majors must be equal, and `self`'s
-    /// minor must be at least `other`'s. A newer reader can read an older
-    /// document (additive minor changes are backward-compatible), but an older
-    /// reader cannot read a document that uses newer minor features, and no
-    /// reader can cross a major boundary.
+    #[doc = include_str!("ui_ir_version.doc/is_compatible_with.md")]
     #[must_use]
     pub const fn is_compatible_with(self, other: UiIrVersion) -> bool {
         self.major == other.major && self.minor >= other.minor

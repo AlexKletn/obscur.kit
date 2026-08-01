@@ -1,46 +1,22 @@
-//! `SpanAttribution`: what a performance span is *about* (spec §7.9).
+#![doc = include_str!("span_attribution.doc/_module.md")]
 
 use obscur_identity::{FrameId, NodeId, ResourceId, WindowId};
 
-/// What a [`PerformanceSpan`](crate::performance::PerformanceSpan) is attributed
-/// to, beyond its subsystem (spec §7.9).
-///
-/// §7.9 lists frame, window, subsystem, node, layout context, resource,
-/// invalidation cause and plugin contribution. Subsystem lives on the span
-/// itself; the rest that this crate can *name* live here.
-///
-/// # Every field is optional, and that is the honest shape
-///
-/// A span is attributed to what its emitter actually knows. A frame-phase span
-/// knows its frame and nothing narrower — there is no single node a whole layout
-/// phase is "about". A per-node span would set `node`; a resource load would set
-/// `resource`. Forcing a value where the emitter has none would mean inventing
-/// attribution, which is worse than reporting none: a consumer cannot tell an
-/// invented answer from a measured one.
-///
-/// # What is deliberately absent
-///
-/// **Layout context**, **invalidation cause** and **plugin contribution** from
-/// §7.9's list are not here. Each is named by a type that lives *above* this
-/// foundation crate (`InvalidationReason` is a runtime concept, a layout context
-/// a layout one), so carrying them would mean either a dependency inversion or a
-/// duplicated enum that silently drifts from the real one. They wait for their
-/// owners to expose an identity this tier can hold.
+#[doc = include_str!("span_attribution.doc/SpanAttribution.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SpanAttribution {
-    /// The frame this span was recorded during.
+    #[doc = include_str!("span_attribution.doc/frame.md")]
     pub frame: Option<FrameId>,
-    /// The window the work belongs to, for a multi-surface host.
+    #[doc = include_str!("span_attribution.doc/window.md")]
     pub window: Option<WindowId>,
-    /// The node the work is about, for a span narrow enough to have one.
+    #[doc = include_str!("span_attribution.doc/node.md")]
     pub node: Option<NodeId>,
-    /// The resource the work is about, for a load/decode span.
+    #[doc = include_str!("span_attribution.doc/resource.md")]
     pub resource: Option<ResourceId>,
 }
 
 impl SpanAttribution {
-    /// Attributed to nothing — the honest default for an emitter that knows no
-    /// more than its subsystem.
+    #[doc = include_str!("span_attribution.doc/none.md")]
     #[must_use]
     pub const fn none() -> Self {
         Self {
@@ -51,7 +27,7 @@ impl SpanAttribution {
         }
     }
 
-    /// Attributed to `frame` — what every frame-phase span can state.
+    #[doc = include_str!("span_attribution.doc/frame_2.md")]
     #[must_use]
     pub const fn frame(frame: FrameId) -> Self {
         Self {
@@ -60,28 +36,28 @@ impl SpanAttribution {
         }
     }
 
-    /// Returns this attribution narrowed to `node` (fluent).
+    #[doc = include_str!("span_attribution.doc/with_node.md")]
     #[must_use]
     pub const fn with_node(mut self, node: NodeId) -> Self {
         self.node = Some(node);
         self
     }
 
-    /// Returns this attribution narrowed to `resource` (fluent).
+    #[doc = include_str!("span_attribution.doc/with_resource.md")]
     #[must_use]
     pub const fn with_resource(mut self, resource: ResourceId) -> Self {
         self.resource = Some(resource);
         self
     }
 
-    /// Returns this attribution narrowed to `window` (fluent).
+    #[doc = include_str!("span_attribution.doc/with_window.md")]
     #[must_use]
     pub const fn with_window(mut self, window: WindowId) -> Self {
         self.window = Some(window);
         self
     }
 
-    /// Whether nothing is attributed.
+    #[doc = include_str!("span_attribution.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.frame.is_none()

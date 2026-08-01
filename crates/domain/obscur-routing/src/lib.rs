@@ -1,4 +1,4 @@
-//! URL-like router with typed params and history abstraction.
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

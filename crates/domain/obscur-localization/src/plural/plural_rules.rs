@@ -1,71 +1,23 @@
-//! `PluralRules`: a locale's cardinal plural rule set, transcribed from CLDR
-//! (spec §7.2).
-//!
-//! Every rule function here is a line-by-line transcription of one
-//! `<pluralRules locales="…">` element of `specs/cldr/plurals.xml` (CLDR
-//! release-48, vendored). Each carries its CLDR source verbatim in its doc
-//! comment and is tested against that element's own `@integer` sample list, so
-//! the transcription is checkable by `grep` and by test rather than by trust.
+#![doc = include_str!("plural_rules.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 
 use crate::locale::LanguageTag;
 use crate::plural::{PluralCategory, PluralOperands};
 
-/// The cardinal plural rules of one locale (spec §7.2).
-///
-/// `PluralRules` answers exactly one question — [`select`](Self::select): which
-/// [`PluralCategory`] do these [`PluralOperands`] fall into for this locale? It
-/// is the piece §7.2 names Russian to guard: `if n == 1 { singular } else {
-/// plural }` is not a simplification of this, it is a different and wrong
-/// function that happens to agree in English.
-///
-/// # Honest capability
-///
-/// The rule sets are a **documented subset** of CLDR, not all of it — see
-/// [`cardinal`](Self::cardinal). A locale outside the subset gets the root rules
-/// (everything is `other`) and says so through
-/// [`availability`](Self::availability), which answers
-/// [`SupportLevel::Unavailable`]. It does not guess, and it does not fall back to
-/// English.
+#[doc = include_str!("plural_rules.doc/PluralRules.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct PluralRules {
-    /// The transcribed CLDR rule for this locale.
+    #[doc = include_str!("plural_rules.doc/select.md")]
     select: fn(&PluralOperands) -> PluralCategory,
-    /// The categories this rule set can actually produce, in canonical order.
+    #[doc = include_str!("plural_rules.doc/categories.md")]
     categories: &'static [PluralCategory],
-    /// Whether a real rule set was found for the requested locale.
+    #[doc = include_str!("plural_rules.doc/availability.md")]
     availability: SupportLevel,
 }
 
 impl PluralRules {
-    /// Returns the cardinal rules for `locale`, walking its
-    /// [`fallback_chain`](LanguageTag::fallback_chain).
-    ///
-    /// Lookup is by the chain, not by the language alone, so a locale whose rules
-    /// differ from its language's (CLDR spells one such group `pt_PT`) can be
-    /// registered and found. The first link with a registered rule set wins.
-    ///
-    /// # Which locales are transcribed
-    ///
-    /// The six `<pluralRules>` groups of `specs/cldr/plurals.xml` listed below —
-    /// chosen to span every distinct *shape* CLDR uses (1, 2, 4 and 6 categories;
-    /// rules keyed on `i`, on `n`, on `v`, and on `i % 100`), with Russian's
-    /// four-category rule the one §7.2 names:
-    ///
-    /// - **root** and 34 languages including `ja`, `zh`, `ko`, `th`, `vi`, `id` —
-    ///   one category;
-    /// - 18 languages including `en`, `de`, `nl`, `sv`, `fi` — two;
-    /// - `ru`, `uk` — four;
-    /// - `pl` — four, and *not* Russian's four;
-    /// - `cs`, `sk` — four, keyed differently again;
-    /// - `ar`, `ars` — all six.
-    ///
-    /// Everything else — including French, Spanish, Portuguese and Italian, whose
-    /// CLDR rules are written in terms of the compact-decimal exponent operand
-    /// that [`PluralOperands`] does not model — is **not** transcribed and reports
-    /// [`SupportLevel::Unavailable`]. Adding a group is one function, its CLDR
-    /// line, its sample list, and a row in [`RULE_SETS`].
+    #[doc = include_str!("plural_rules.doc/cardinal.md")]
     #[must_use]
     pub fn cardinal(locale: &LanguageTag) -> Self {
         for link in locale.fallback_chain() {
@@ -94,58 +46,35 @@ impl PluralRules {
         }
     }
 
-    /// Returns the category `operands` fall into under these rules.
+    #[doc = include_str!("plural_rules.doc/select_2.md")]
     #[must_use]
     pub fn select(&self, operands: &PluralOperands) -> PluralCategory {
         (self.select)(operands)
     }
 
-    /// Returns the category the integer `count` falls into — the common case,
-    /// spelled out.
+    #[doc = include_str!("plural_rules.doc/select_integer.md")]
     #[must_use]
     pub fn select_integer(&self, count: i64) -> PluralCategory {
         self.select(&PluralOperands::from_integer(count))
     }
 
-    /// Returns the categories these rules can produce, in CLDR's canonical order.
-    ///
-    /// A message catalogue can check its arms against this: a Russian message
-    /// with only `one`/`other` arms is missing two, and this is what tells it so.
+    #[doc = include_str!("plural_rules.doc/categories_2.md")]
     #[must_use]
     pub fn categories(&self) -> &'static [PluralCategory] {
         self.categories
     }
 
-    /// Returns whether CLDR rules were found for the requested locale
-    /// (spec §7.2).
-    ///
-    /// [`SupportLevel::Native`] means a transcribed rule set answered.
-    /// [`SupportLevel::Unavailable`] means none did and
-    /// [`select`](Self::select) is answering [`PluralCategory::Other`] for
-    /// everything — correct for `und`, and a *known* gap for anything else.
+    #[doc = include_str!("plural_rules.doc/availability_2.md")]
     #[must_use]
     pub const fn availability(&self) -> SupportLevel {
         self.availability
     }
 }
 
-/// The categories of a language that makes no plural distinction at all.
+#[doc = include_str!("plural_rules.doc/OTHER_ONLY.md")]
 const OTHER_ONLY: &[PluralCategory] = &[PluralCategory::Other];
 
-/// The registry of transcribed CLDR rule sets, keyed by the exact canonical
-/// locale spellings of each `<pluralRules locales="…">` element.
-///
-/// Order is irrelevant: the groups are disjoint (CLDR lists each locale once).
-///
-/// # The root must never be registered here
-///
-/// CLDR lists `root` in the one-category group's `locales`, and it is left out on
-/// purpose — enforced by `the_root_is_never_a_registered_rule_set`. Every
-/// [`LanguageTag::fallback_chain`] *ends* at the root, so a root entry would be
-/// found for every locale on earth and [`PluralRules::cardinal`] would report
-/// [`SupportLevel::Native`] for all of them. The root's rules are the tail of
-/// `cardinal` instead, where reaching them is correctly an admission that nothing
-/// matched.
+#[doc = include_str!("plural_rules.doc/RULE_SETS.md")]
 #[allow(clippy::type_complexity)]
 static RULE_SETS: &[(
     &[&str],
@@ -202,34 +131,12 @@ static RULE_SETS: &[(
     (&["ar", "ars"], arabic, &PluralCategory::ALL),
 ];
 
-/// CLDR `<pluralRules locales="bm bo dz hnj id ig ii in ja jbo jv jw kde kea km
-/// ko lkt lo ms my nqo osa root sah ses sg su th to tpi vi wo yo yue zh">`:
-///
-/// ```text
-/// other:  @integer 0~15, 100, 1000, 10000, 100000, 1000000, …
-/// ```
-///
-/// One category.
-///
-/// CLDR lists the undetermined locale as `root` in this element's `locales`
-/// attribute. It is absent from [`RULE_SETS`] and handled by
-/// [`PluralRules::cardinal`]'s tail instead, because the root is where *every*
-/// fallback chain ends: registering it as a match would make a locale nobody
-/// transcribed report [`SupportLevel::Native`] on its way past.
+#[doc = include_str!("plural_rules.doc/root.md")]
 fn root(_: &PluralOperands) -> PluralCategory {
     PluralCategory::Other
 }
 
-/// CLDR `<pluralRules locales="ast de en et fi fy gl ia ie io ji lij nl sc sv sw
-/// ur yi">`:
-///
-/// ```text
-/// one:    i = 1 and v = 0   @integer 1
-/// other:                    @integer 0, 2~16, 100, 1000, …
-/// ```
-///
-/// Two categories — and note that even *this* is not `n == 1`: `1.0` is `other`,
-/// because `v = 1`.
+#[doc = include_str!("plural_rules.doc/english.md")]
 fn english(op: &PluralOperands) -> PluralCategory {
     if op.i == 1 && op.v == 0 {
         PluralCategory::One
@@ -238,23 +145,7 @@ fn english(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-/// CLDR `<pluralRules locales="ru uk">`:
-///
-/// ```text
-/// one:    v = 0 and i % 10 = 1 and i % 100 != 11
-///           @integer 1, 21, 31, 41, 51, 61, 71, 81, 101, 1001, …
-/// few:    v = 0 and i % 10 = 2..4 and i % 100 != 12..14
-///           @integer 2~4, 22~24, 32~34, 42~44, 52~54, 62, 102, 1002, …
-/// many:   v = 0 and i % 10 = 0 or v = 0 and i % 10 = 5..9 or v = 0 and i % 100 = 11..14
-///           @integer 0, 5~19, 100, 1000, 10000, 100000, 1000000, …
-/// other:    @decimal 0.0~1.5, 10.0, 100.0, 1000.0, …
-/// ```
-///
-/// The rule §7.2 names. Read what it keys on: **not** the value, and **not** the
-/// last digit alone. 21 is `one` and 11 is `many` though both end in 1; 111 is
-/// `many` though it ends in 1 *and* `i % 10 = 1`, because `i % 100 = 11`. And
-/// every one of the three conditions is guarded by `v = 0`, which is why `1.5`
-/// файла is `other` and not `one`.
+#[doc = include_str!("plural_rules.doc/russian.md")]
 fn russian(op: &PluralOperands) -> PluralCategory {
     if op.v != 0 {
         // All three named categories require `v = 0`; a written fraction can only
@@ -274,22 +165,7 @@ fn russian(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-/// CLDR `<pluralRules locales="pl">`:
-///
-/// ```text
-/// one:    i = 1 and v = 0   @integer 1
-/// few:    v = 0 and i % 10 = 2..4 and i % 100 != 12..14
-///           @integer 2~4, 22~24, 32~34, 42~44, 52~54, 62, 102, 1002, …
-/// many:   v = 0 and i != 1 and i % 10 = 0..1 or v = 0 and i % 10 = 5..9 or v = 0 and i % 100 = 12..14
-///           @integer 0, 5~19, 100, 1000, 10000, 100000, 1000000, …
-/// other:    @decimal 0.0~1.5, 10.0, 100.0, 1000.0, …
-/// ```
-///
-/// Four categories, like Russian's, and **not** Russian's: Polish `one` is 1
-/// alone (21 is `many`, where Russian's is `one`), and its `many` excludes 11
-/// from the `i % 100` clause that Russian includes. Sharing a rule function
-/// between them because "both are Slavic and both have four" would be wrong for
-/// every number ending in 1 except 1 itself.
+#[doc = include_str!("plural_rules.doc/polish.md")]
 fn polish(op: &PluralOperands) -> PluralCategory {
     if op.v != 0 {
         return PluralCategory::Other;
@@ -310,18 +186,7 @@ fn polish(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-/// CLDR `<pluralRules locales="cs sk">`:
-///
-/// ```text
-/// one:    i = 1 and v = 0   @integer 1
-/// few:    i = 2..4 and v = 0   @integer 2~4
-/// many:   v != 0   @decimal 0.0~1.5, 10.0, 100.0, …
-/// other:    @integer 0, 5~19, 100, 1000, …
-/// ```
-///
-/// Four categories again, and different again — here `many` is the category of
-/// *written fractions*, and the integers Russian calls `many` are `other`. Three
-/// four-category Slavic languages, three incompatible rules.
+#[doc = include_str!("plural_rules.doc/czech.md")]
 fn czech(op: &PluralOperands) -> PluralCategory {
     if op.i == 1 && op.v == 0 {
         PluralCategory::One
@@ -334,25 +199,7 @@ fn czech(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-/// CLDR `<pluralRules locales="ar ars">`:
-///
-/// ```text
-/// zero:   n = 0        @integer 0        @decimal 0.0, 0.00, …
-/// one:    n = 1        @integer 1        @decimal 1.0, 1.00, …
-/// two:    n = 2        @integer 2        @decimal 2.0, 2.00, …
-/// few:    n % 100 = 3..10    @integer 3~10, 103~110, 1003, …
-/// many:   n % 100 = 11..99   @integer 11~26, 111, 1011, …
-/// other:                     @integer 100~102, 200~202, …
-/// ```
-///
-/// All six categories, and the only rule set here written against `n` rather than
-/// `i` — so unlike Russian, Arabic's `1.0` **is** `one`.
-///
-/// `n % 100 = 3..10` is a range relation, and TR35 defines `a..b` as *"listing
-/// all the **integers** between a and b, inclusive"*: for `n = 3.5` the modulus
-/// is 3.5, which is not one of those integers, so the relation is false. That is
-/// why the modulus is compared as an integer only when `n` has no fractional
-/// part.
+#[doc = include_str!("plural_rules.doc/arabic.md")]
 fn arabic(op: &PluralOperands) -> PluralCategory {
     if op.n == 0.0 {
         return PluralCategory::Zero;
@@ -377,10 +224,7 @@ fn arabic(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-/// Returns `n % modulus` when `n` is a non-negative integer value, else `None`.
-///
-/// TR35's range relations enumerate integers, so a non-integral `n` matches no
-/// range and the caller must treat it as a miss rather than rounding into one.
+#[doc = include_str!("plural_rules.doc/integer_modulus.md")]
 fn integer_modulus(n: f64, modulus: u64) -> Option<u64> {
     if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
         return None;

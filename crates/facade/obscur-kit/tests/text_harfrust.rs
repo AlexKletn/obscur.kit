@@ -1,10 +1,4 @@
-//! Proves the real HarfRust text shaper is wired through the facade: the
-//! `text-harfrust` feature re-exports the adapter, `KitBootstrap` builds one from
-//! font bytes, and installing it on a [`UiRuntime`] via the public
-//! `set_text_shaper` seam changes the composed `DrawText` run.
-//!
-//! This whole file only compiles under the `text-harfrust` feature (implied by
-//! `full`); it is skipped otherwise.
+#![doc = include_str!("text_harfrust.doc/_module.md")]
 #![cfg(feature = "text-harfrust")]
 
 use obscur_kit::bootstrap::KitBootstrap;
@@ -14,7 +8,7 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::view::view::{View, ViewFragment, ViewNode};
 
-/// A single text node "AB", laid out and composed into a `DrawText` run.
+#[doc = include_str!("text_harfrust.doc/text_view.md")]
 fn text_view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(10))
@@ -22,7 +16,7 @@ fn text_view() -> View {
     ]))
 }
 
-/// Collects the glyph count of the first `DrawText` run in the last frame.
+#[doc = include_str!("text_harfrust.doc/drawtext_glyph_count.md")]
 fn drawtext_glyph_count(runtime: &UiRuntime) -> Option<usize> {
     runtime
         .snapshot()

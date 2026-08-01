@@ -1,46 +1,4 @@
-//! **Headless Browser-Elements-Wireframe-Kit → PNG (faithful GPU render via Vello).**
-//!
-//! The GPU sibling of `wireframe_png.rs`: it renders the *very same* shared
-//! [`wireframe`] scene and the *very same* wireframe user-agent stylesheet, but
-//! through **Vello/wgpu** into an offscreen texture that is then **read back** to
-//! CPU pixels and encoded to a PNG — with no window on screen. This is the
-//! *faithful* render: the GPU-class effects the CPU backend only approximates paint
-//! for real here.
-//!
-//! Concretely, the sheet's `repeating-linear-gradient()` layers paint as REAL tiled
-//! stripes on the GPU (the CPU PNG shows only the flat first stop, by policy):
-//!
-//! - the **graph-paper page grid** — two crossing `repeating-linear-gradient()`s in
-//!   one `background-image` comma list — draws its real 24px `#e2e0d9` grid;
-//! - the **indeterminate progress** hatch and the **meter** stripe fills draw their
-//!   real 45°/90° stripes;
-//! - the **colour-swatch** checker draws its real hatch.
-//!
-//! Everything else (real dashed disabled borders, real `outline` focus rings, the
-//! CSS border-triangle arrows, the wrapping textarea, the inset error ring, and the
-//! `overflow: hidden` corner-clipping) renders identically on both backends.
-//!
-//! The output is `target/wireframe_kit_vello.png`.
-//!
-//! # Wiring
-//!
-//! A thin driver over the shared scene and the existing runtime + Vello APIs (a
-//! faithful copy of `uikit_vello_png.rs`'s harness, retargeted at the wireframe
-//! scene). It acquires a **headless** wgpu device (no surface), builds a
-//! [`VelloDevice`] + [`VelloRenderer`], wires the same host text stack as
-//! `wireframe_png.rs`, runs one frame through [`UiRuntime`], and calls
-//! [`VelloRenderer::render_to_image`] to obtain `(w, h, rgba8)`, encoded with
-//! `tiny_skia`.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. In a truly headless environment with no adapter it
-//! prints a diagnostic and exits cleanly (no panic); it never fabricates a device.
-//! The CPU approximation is always available via `wireframe_png`.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example wireframe_vello_png \
-//!   --features "render-vello resource-fs resource-decode text-harfrust text-unicode"`
+#![doc = include_str!("wireframe_vello_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -62,8 +20,7 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "wireframe/scene.rs"]
 mod wireframe;
 
-/// The layout + rasterization viewport: identical to `wireframe_png.rs` so the two
-/// renders (CPU approximation vs faithful Vello) frame the exact same sheet.
+#[doc = include_str!("wireframe_vello_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1200.0, 4160.0);
 
 fn main() {
@@ -155,16 +112,10 @@ fn main() {
     );
 }
 
-/// The largest offscreen texture dimension this harness will ask the GPU for. The
-/// hard `wgpu` limit is 8192, but the tall wireframe sheet (4160px logical × 2× =
-/// 8320) loses the device near that ceiling on some drivers, so we keep a safe
-/// working margin: `VIEWPORT × scale` is capped to this on the longest axis.
+#[doc = include_str!("wireframe_vello_png.doc/MAX_TEXTURE_DIM.md")]
 const MAX_TEXTURE_DIM: f32 = 7000.0;
 
-/// The supersample render scale: the `UIKIT_SCALE` env var parsed as a float and
-/// clamped to `1.0..=4.0` (default `2.0`), then further capped so `VIEWPORT × scale`
-/// fits [`MAX_TEXTURE_DIM`] on both axes (the sheet is tall enough that a full 2×
-/// overflows the GPU texture ceiling).
+#[doc = include_str!("wireframe_vello_png.doc/render_scale.md")]
 fn render_scale() -> f32 {
     let requested = std::env::var("UIKIT_SCALE")
         .ok()
@@ -176,10 +127,7 @@ fn render_scale() -> f32 {
     requested.min(cap).max(1.0)
 }
 
-/// Acquires a **headless** wgpu device + queue (no surface), driving the async
-/// `request_adapter` / `request_device` to completion with `pollster`. Returns
-/// [`None`] when no compatible adapter or device is available (a headless box with
-/// no GPU), so the caller can exit cleanly rather than panic.
+#[doc = include_str!("wireframe_vello_png.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -191,14 +139,14 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("wireframe_vello_png.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("wireframe_vello_png.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -206,8 +154,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the full text stack and registers `bytes` under the `sans-serif` generic
-/// family on both the resolver and the Vello renderer.
+#[doc = include_str!("wireframe_vello_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -225,12 +172,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes:
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("wireframe_vello_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("wireframe_vello_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

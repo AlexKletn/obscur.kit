@@ -1,13 +1,8 @@
-//! `ExpressionType`: the inferred type of an expression's result (spec §2.10).
+#![doc = include_str!("expression_type.doc/_module.md")]
 
 use crate::typing::ValueType;
 
-/// The inferred type of an expression's result (spec §2.10).
-///
-/// Beyond the [`ValueType`], this records whether the result `is_constant` — a
-/// compile-time-constant literal (for example `42` or `"hi"`) as opposed to a
-/// dynamic value read from a prop or state binding. The lowering step uses that
-/// flag to decide whether an expression can be folded to a constant.
+#[doc = include_str!("expression_type.doc/ExpressionType.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpressionType {
     value_type: ValueType,
@@ -15,8 +10,7 @@ pub struct ExpressionType {
 }
 
 impl ExpressionType {
-    /// Creates an expression type with the given `value_type` and `is_constant`
-    /// flag.
+    #[doc = include_str!("expression_type.doc/new.md")]
     #[must_use]
     pub const fn new(value_type: ValueType, is_constant: bool) -> Self {
         Self {
@@ -25,39 +19,37 @@ impl ExpressionType {
         }
     }
 
-    /// Creates a constant expression type of `value_type` (`is_constant` true).
+    #[doc = include_str!("expression_type.doc/constant.md")]
     #[must_use]
     pub const fn constant(value_type: ValueType) -> Self {
         Self::new(value_type, true)
     }
 
-    /// Creates a dynamic expression type of `value_type` (`is_constant` false).
+    #[doc = include_str!("expression_type.doc/dynamic.md")]
     #[must_use]
     pub const fn dynamic(value_type: ValueType) -> Self {
         Self::new(value_type, false)
     }
 
-    /// Creates an unknown, non-constant expression type
-    /// ([`ValueType::Unknown`]).
+    #[doc = include_str!("expression_type.doc/unknown.md")]
     #[must_use]
     pub const fn unknown() -> Self {
         Self::new(ValueType::Unknown, false)
     }
 
-    /// Returns the result's [`ValueType`].
+    #[doc = include_str!("expression_type.doc/value_type.md")]
     #[must_use]
     pub const fn value_type(&self) -> &ValueType {
         &self.value_type
     }
 
-    /// Returns whether the result is a compile-time constant.
+    #[doc = include_str!("expression_type.doc/is_constant.md")]
     #[must_use]
     pub const fn is_constant(&self) -> bool {
         self.is_constant
     }
 
-    /// Returns whether this result may be assigned to a slot of `target`;
-    /// delegates to [`ValueType::is_assignable_to`].
+    #[doc = include_str!("expression_type.doc/is_assignable_to.md")]
     #[must_use]
     pub fn is_assignable_to(&self, target: &ValueType) -> bool {
         self.value_type.is_assignable_to(target)

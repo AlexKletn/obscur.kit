@@ -1,25 +1,18 @@
-//! Connection handshake: version negotiation + auth result (spec §7.6/§7.7).
+#![doc = include_str!("handshake.doc/_module.md")]
 
 use super::{ProtocolVersion, ScopeSet, VersionRange};
 
-/// A client's request to open a DevTools connection.
-///
-/// Carries the versions the client can speak and an opaque authentication
-/// token/capability. Version negotiation and token validation both happen on
-/// the server; this crate only models the envelope.
+#[doc = include_str!("handshake.doc/HandshakeRequest.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandshakeRequest {
-    /// The range of protocol versions the client supports.
+    #[doc = include_str!("handshake.doc/client_versions.md")]
     pub client_versions: VersionRange,
-    /// An opaque authentication token/capability presented by the client.
-    ///
-    /// This crate treats the token as opaque; the server validates it against
-    /// its own auth store and must never log it (spec §7.7).
+    #[doc = include_str!("handshake.doc/token.md")]
     pub token: Box<str>,
 }
 
 impl HandshakeRequest {
-    /// Creates a handshake request.
+    #[doc = include_str!("handshake.doc/new.md")]
     #[must_use]
     pub fn new(client_versions: VersionRange, token: impl Into<Box<str>>) -> Self {
         Self {
@@ -29,49 +22,46 @@ impl HandshakeRequest {
     }
 }
 
-/// Why a handshake was rejected.
+#[doc = include_str!("handshake.doc/HandshakeRejection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandshakeRejection {
-    /// No mutually supported protocol version exists.
+    #[doc = include_str!("handshake.doc/VersionUnsupported.md")]
     VersionUnsupported,
-    /// The presented token was missing, invalid, or insufficient.
+    #[doc = include_str!("handshake.doc/Unauthorized.md")]
     Unauthorized,
 }
 
-/// The server's response to a [`HandshakeRequest`].
-///
-/// Combines the negotiation outcome and the authorization result into a single
-/// connect envelope.
+#[doc = include_str!("handshake.doc/HandshakeResponse.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HandshakeResponse {
-    /// The connection was accepted at a negotiated version with granted scopes.
+    #[doc = include_str!("handshake.doc/Accepted.md")]
     Accepted {
-        /// The negotiated protocol version both sides will speak.
+        #[doc = include_str!("handshake.doc/version.md")]
         version: ProtocolVersion,
-        /// The scopes granted to this endpoint.
+        #[doc = include_str!("handshake.doc/granted.md")]
         granted: ScopeSet,
     },
-    /// The connection was refused.
+    #[doc = include_str!("handshake.doc/Rejected.md")]
     Rejected {
-        /// Why the handshake was refused.
+        #[doc = include_str!("handshake.doc/reason.md")]
         reason: HandshakeRejection,
     },
 }
 
 impl HandshakeResponse {
-    /// Creates an acceptance response.
+    #[doc = include_str!("handshake.doc/accepted.md")]
     #[must_use]
     pub const fn accepted(version: ProtocolVersion, granted: ScopeSet) -> Self {
         Self::Accepted { version, granted }
     }
 
-    /// Creates a rejection response.
+    #[doc = include_str!("handshake.doc/rejected.md")]
     #[must_use]
     pub const fn rejected(reason: HandshakeRejection) -> Self {
         Self::Rejected { reason }
     }
 
-    /// Returns whether the handshake was accepted.
+    #[doc = include_str!("handshake.doc/is_accepted.md")]
     #[must_use]
     pub const fn is_accepted(&self) -> bool {
         matches!(self, Self::Accepted { .. })

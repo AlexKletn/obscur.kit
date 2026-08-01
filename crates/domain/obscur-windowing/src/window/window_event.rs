@@ -1,43 +1,36 @@
-//! Events a backend reports up to the application about a window (spec §6.1).
+#![doc = include_str!("window_event.doc/_module.md")]
 
 use obscur_geometry::{Point, ScaleFactor, Size};
 
 use crate::window::WindowState;
 
-/// An event describing a change to a window, reported by a backend up to the
-/// application (spec §6.1).
-///
-/// These are the inter-window state and lifecycle notifications a backend
-/// surfaces: creation and destruction, geometry and presentation changes, focus
-/// transitions, scale-factor changes, and occlusion. Each variant is a plain,
-/// backend-agnostic value.
+#[doc = include_str!("window_event.doc/WindowEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WindowEvent {
-    /// The window was created and is now available.
+    #[doc = include_str!("window_event.doc/Created.md")]
     Created,
-    /// The user or system requested that the window close; the application
-    /// decides whether to honor it.
+    #[doc = include_str!("window_event.doc/CloseRequested.md")]
     CloseRequested,
-    /// The window was destroyed and is no longer valid.
+    #[doc = include_str!("window_event.doc/Destroyed.md")]
     Destroyed,
-    /// The window's content size changed to the given size.
+    #[doc = include_str!("window_event.doc/Resized.md")]
     Resized(Size),
-    /// The window's top-left position changed to the given point.
+    #[doc = include_str!("window_event.doc/Moved.md")]
     Moved(Point),
-    /// The window's presentation state changed to the given state.
+    #[doc = include_str!("window_event.doc/StateChanged.md")]
     StateChanged(WindowState),
-    /// The window gained input focus.
+    #[doc = include_str!("window_event.doc/FocusGained.md")]
     FocusGained,
-    /// The window lost input focus.
+    #[doc = include_str!("window_event.doc/FocusLost.md")]
     FocusLost,
-    /// The window's display scale factor changed to the given value.
+    #[doc = include_str!("window_event.doc/ScaleFactorChanged.md")]
     ScaleFactorChanged(ScaleFactor),
-    /// The window's occlusion changed; `true` means it is now fully occluded.
+    #[doc = include_str!("window_event.doc/Occluded.md")]
     Occluded(bool),
 }
 
 impl WindowEvent {
-    /// Returns the new size for a [`WindowEvent::Resized`] event, else `None`.
+    #[doc = include_str!("window_event.doc/resized_size.md")]
     #[must_use]
     pub const fn resized_size(&self) -> Option<Size> {
         match self {
@@ -46,7 +39,7 @@ impl WindowEvent {
         }
     }
 
-    /// Returns the new position for a [`WindowEvent::Moved`] event, else `None`.
+    #[doc = include_str!("window_event.doc/moved_position.md")]
     #[must_use]
     pub const fn moved_position(&self) -> Option<Point> {
         match self {
@@ -55,8 +48,7 @@ impl WindowEvent {
         }
     }
 
-    /// Returns the new state for a [`WindowEvent::StateChanged`] event, else
-    /// `None`.
+    #[doc = include_str!("window_event.doc/changed_state.md")]
     #[must_use]
     pub const fn changed_state(&self) -> Option<WindowState> {
         match self {
@@ -65,8 +57,7 @@ impl WindowEvent {
         }
     }
 
-    /// Returns the new scale factor for a [`WindowEvent::ScaleFactorChanged`]
-    /// event, else `None`.
+    #[doc = include_str!("window_event.doc/changed_scale_factor.md")]
     #[must_use]
     pub const fn changed_scale_factor(&self) -> Option<ScaleFactor> {
         match self {
@@ -75,7 +66,7 @@ impl WindowEvent {
         }
     }
 
-    /// Returns whether this event requests that the window close.
+    #[doc = include_str!("window_event.doc/is_close_requested.md")]
     #[must_use]
     pub const fn is_close_requested(&self) -> bool {
         matches!(self, Self::CloseRequested)

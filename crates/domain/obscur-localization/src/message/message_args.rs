@@ -1,30 +1,21 @@
-//! `MessageArgs`: the named parameters a message is formatted with (spec §7.2).
+#![doc = include_str!("message_args.doc/_module.md")]
 
 use crate::message::{GrammaticalCase, GrammaticalGender, MessageValue};
 
-/// The parameters half of §7.2's *key + parameters* abstraction: values bound to
-/// names.
-///
-/// Arguments are **named**, not positional, because word order is exactly what
-/// translation changes. A positional `{0} {1}` forces every language to keep
-/// English's order or silently swap meanings; `{name} {count}` lets a translation
-/// put them wherever its grammar wants.
-///
-/// Backed by a flat vector: a message has a handful of arguments, and a linear
-/// scan over three of them beats hashing every one of them.
+#[doc = include_str!("message_args.doc/MessageArgs.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MessageArgs {
     bindings: Vec<(Box<str>, MessageValue)>,
 }
 
 impl MessageArgs {
-    /// Creates an empty argument set.
+    #[doc = include_str!("message_args.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Binds `name` to `value`, replacing any previous binding of that name.
+    #[doc = include_str!("message_args.doc/set.md")]
     pub fn set(&mut self, name: impl Into<Box<str>>, value: MessageValue) {
         let name = name.into();
         if let Some(slot) = self.bindings.iter_mut().find(|(n, _)| *n == name) {
@@ -34,39 +25,38 @@ impl MessageArgs {
         }
     }
 
-    /// Binds `name` to `value` (fluent builder).
+    #[doc = include_str!("message_args.doc/with.md")]
     #[must_use]
     pub fn with(mut self, name: impl Into<Box<str>>, value: MessageValue) -> Self {
         self.set(name, value);
         self
     }
 
-    /// Binds `name` to an integer count (fluent builder).
+    #[doc = include_str!("message_args.doc/with_integer.md")]
     #[must_use]
     pub fn with_integer(self, name: impl Into<Box<str>>, count: i64) -> Self {
         self.with(name, MessageValue::integer(count))
     }
 
-    /// Binds `name` to a literal string (fluent builder).
+    #[doc = include_str!("message_args.doc/with_text.md")]
     #[must_use]
     pub fn with_text(self, name: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         self.with(name, MessageValue::text(text))
     }
 
-    /// Binds `name` to a grammatical gender (fluent builder; spec §7.2 gender).
+    #[doc = include_str!("message_args.doc/with_gender.md")]
     #[must_use]
     pub fn with_gender(self, name: impl Into<Box<str>>, gender: &GrammaticalGender) -> Self {
         self.with(name, MessageValue::gender(gender))
     }
 
-    /// Binds `name` to a grammatical case (fluent builder; spec §7.2 case
-    /// variants).
+    #[doc = include_str!("message_args.doc/with_case.md")]
     #[must_use]
     pub fn with_case(self, name: impl Into<Box<str>>, case: &GrammaticalCase) -> Self {
         self.with(name, MessageValue::grammatical_case(case))
     }
 
-    /// Returns the value bound to `name`, if any.
+    #[doc = include_str!("message_args.doc/get.md")]
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&MessageValue> {
         self.bindings
@@ -75,13 +65,13 @@ impl MessageArgs {
             .map(|(_, v)| v)
     }
 
-    /// Returns how many names are bound.
+    #[doc = include_str!("message_args.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
 
-    /// Returns whether nothing is bound.
+    #[doc = include_str!("message_args.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()

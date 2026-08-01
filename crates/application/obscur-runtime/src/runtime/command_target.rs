@@ -1,35 +1,18 @@
-//! The [`CommandTarget`] links of §2.6's command routing chain.
+#![doc = include_str!("command_target.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_interaction::focus::FocusScopeId;
 
-/// One link of the §2.6 command routing chain.
-///
-/// The spec's chain is *"focused node; focus scope; ancestors; window;
-/// application fallback"*. A `CommandTarget` names one of those levels for a
-/// concrete dispatch, and
-/// [`UiRuntime::command_route`](super::UiRuntime::command_route) returns them in
-/// the spec's order. A dispatch offers the command to each link in turn and
-/// stops at the first that has a handler registered for it — the first link to
-/// *claim* the command handles it, and no later link sees it.
-///
-/// [`Node`](Self::Node) covers **two** of the spec's five levels: the route's
-/// first `Node` is the focused node (level 1), and every `Node` after the
-/// [`Scope`](Self::Scope) links is an ancestor (level 3). They are the same kind
-/// of link — a handler registered at a node — so they share a variant; their
-/// *order* in the route is what distinguishes them.
+#[doc = include_str!("command_target.doc/CommandTarget.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandTarget {
-    /// A node in the tree: the focused node itself (level 1) or one of its
-    /// ancestors (level 3), depending on its position in the route.
+    #[doc = include_str!("command_target.doc/Node.md")]
     Node(NodeId),
-    /// A focus scope containing the focused node (level 2), innermost first.
+    #[doc = include_str!("command_target.doc/Scope.md")]
     Scope(FocusScopeId),
-    /// The window surface this runtime *is* (level 4) — the handlers registered
-    /// by [`on_command`](super::UiRuntime::on_command).
+    #[doc = include_str!("command_target.doc/Window.md")]
     Window,
-    /// The application fallback (level 5) — the
-    /// [`AppCommands`](super::AppCommands) registry shared across windows.
+    #[doc = include_str!("command_target.doc/App.md")]
     App,
 }
 

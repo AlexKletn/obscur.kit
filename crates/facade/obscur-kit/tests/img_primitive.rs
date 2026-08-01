@@ -1,13 +1,4 @@
-//! End-to-end verification that the **`Image` primitive's `src`** reaches paint
-//! through the *real* live pipeline: an `Image::new("logo.png")` node carries its
-//! source through reconciliation (as the retained node's `image_source`), the
-//! runtime loads it with a sandbox-rooted `FsResourceLoader`, decodes it with the
-//! `image`-crate `ImageDecoder`, caches it as a `SceneImage`, and the coordinator
-//! paints it as a `DrawImage` over the element's box as the element's CONTENT,
-//! sized by `object-fit` (spec §2.6, §5.15 load, §5.16 decode, §5.2 paint).
-//!
-//! This closes the gap that the `Image` primitive built a node whose `src` never
-//! became painted pixels: the primitive now RENDERS.
+#![doc = include_str!("img_primitive.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(
     feature = "resource-fs",
@@ -34,23 +25,20 @@ use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under, so geometry is deterministic.
+#[doc = include_str!("img_primitive.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 64.0;
 
-/// A real 2×2 opaque-red PNG (RGB), embedded so the test needs no image-encoding
-/// dependency: the fs loader reads these exact bytes off disk and the `image`-crate
-/// decoder turns them into RGBA8.
+#[doc = include_str!("img_primitive.doc/RED_2X2_PNG.md")]
 const RED_2X2_PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
     0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 218, 99, 248, 207, 192, 0, 68, 12,
     16, 10, 0, 31, 238, 3, 253, 99, 94, 187, 91, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
 
-/// Process-unique counter so concurrent tests never collide on a temp name.
+#[doc = include_str!("img_primitive.doc/COUNTER.md")]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Creates a fresh temp directory holding `logo.png` (the embedded red PNG), and
-/// returns the directory path (the loader's sandbox root).
+#[doc = include_str!("img_primitive.doc/temp_asset_dir.md")]
 fn temp_asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-img-prim-{}-{n}", std::process::id()));
@@ -59,15 +47,14 @@ fn temp_asset_dir() -> PathBuf {
     dir
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("img_primitive.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// An `Image` primitive referencing `logo.png`, classed `.img` (so CSS can size
-/// it) — the primitive lowered to its element node plus a class attribute.
+#[doc = include_str!("img_primitive.doc/img_view.md")]
 fn img_view() -> View {
     let node = Image::new("logo.png")
         .into_view_node()

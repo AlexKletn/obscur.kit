@@ -1,49 +1,24 @@
-//! The [`Command`] unified action descriptor (spec §6.7).
+#![doc = include_str!("command.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
 use crate::command::Shortcut;
 
-/// A unified action descriptor (spec §6.7).
-///
-/// A `Command` is the single declarative descriptor of an action. The same
-/// command drives menus, toolbars, the command palette, keyboard shortcuts, and
-/// accessibility — a stable [`id`](Command::id) links every surface to one
-/// action. This type carries only the static description (identity, title,
-/// shortcut, icon); the dynamic runtime state (enabled/checked/visible) lives in
-/// [`CommandState`](crate::command::CommandState), and dispatch lives in a
-/// handler outside this pure-domain crate.
-///
-/// # Why the id is an `InternedSymbol`
-///
-/// The id is the **app-owned command symbol** every live surface already routes:
-/// the symbol [`CommandRouter`](crate::command::CommandRouter) resolves a
-/// shortcut to, the symbol a `MenuItem` fires, and the symbol the runtime
-/// registers a handler for. It is deliberately *not* a string. This crate has no
-/// string→symbol interner and cannot reach one — [`InternedSymbol::from_raw`] is
-/// the type's only constructor, and the workspace's single interner belongs to
-/// the CSS compiler (a `frontend` crate this `domain` crate may not depend on),
-/// mints sequential ids that would collide with app-assigned symbols, and
-/// documents itself as not shared. A string-keyed id could therefore never name
-/// the thing that routes: it would be a parallel identity no surface could act
-/// on. Keying on the routed symbol is what lets one `Command` drive every
-/// surface.
+#[doc = include_str!("command.doc/Command.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
-    /// The stable command symbol linking every surface to this action; the same
-    /// symbol shortcuts resolve to and handlers are registered for.
+    #[doc = include_str!("command.doc/id.md")]
     id: InternedSymbol,
-    /// The human-readable title shown in menus, palettes, and toolbars.
+    #[doc = include_str!("command.doc/title.md")]
     title: Box<str>,
-    /// The keyboard shortcut, if any, that triggers this command.
+    #[doc = include_str!("command.doc/shortcut.md")]
     shortcut: Option<Shortcut>,
-    /// The icon name/id, if any, for toolbar and menu presentation.
+    #[doc = include_str!("command.doc/icon.md")]
     icon: Option<Box<str>>,
 }
 
 impl Command {
-    /// Creates a command with the app-owned command symbol `id` and
-    /// human-readable `title`, with no shortcut or icon.
+    #[doc = include_str!("command.doc/new.md")]
     #[must_use]
     pub fn new(id: InternedSymbol, title: impl Into<Box<str>>) -> Self {
         Self {
@@ -54,39 +29,39 @@ impl Command {
         }
     }
 
-    /// Returns this command with its keyboard `shortcut` set.
+    #[doc = include_str!("command.doc/with_shortcut.md")]
     #[must_use]
     pub fn with_shortcut(mut self, shortcut: Shortcut) -> Self {
         self.shortcut = Some(shortcut);
         self
     }
 
-    /// Returns this command with its `icon` name/id set.
+    #[doc = include_str!("command.doc/with_icon.md")]
     #[must_use]
     pub fn with_icon(mut self, icon: impl Into<Box<str>>) -> Self {
         self.icon = Some(icon.into());
         self
     }
 
-    /// Returns the stable command symbol every surface routes.
+    #[doc = include_str!("command.doc/id_2.md")]
     #[must_use]
     pub const fn id(&self) -> InternedSymbol {
         self.id
     }
 
-    /// Returns the human-readable title.
+    #[doc = include_str!("command.doc/title_2.md")]
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    /// Returns the keyboard shortcut, if any.
+    #[doc = include_str!("command.doc/shortcut_2.md")]
     #[must_use]
     pub const fn shortcut(&self) -> Option<Shortcut> {
         self.shortcut
     }
 
-    /// Returns the icon name/id, if any.
+    #[doc = include_str!("command.doc/icon_2.md")]
     #[must_use]
     pub fn icon(&self) -> Option<&str> {
         self.icon.as_deref()

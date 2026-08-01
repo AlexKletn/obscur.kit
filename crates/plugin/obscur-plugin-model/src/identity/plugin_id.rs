@@ -1,6 +1,5 @@
-//! `PluginId` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("plugin_id.doc/_module.md")]
 
-/// Placeholder for the `PluginId` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("plugin_id.doc/PluginId.md")]
 #[derive(Debug)]
 pub struct PluginId;

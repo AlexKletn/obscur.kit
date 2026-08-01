@@ -1,15 +1,10 @@
-//! A single invalidation record (Obscur Kit 2 specs §4.3).
+#![doc = include_str!("invalidation.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use crate::invalidation::{InvalidationKind, InvalidationReason};
 
-/// A single invalidation record: a runtime-level [`InvalidationReason`] together
-/// with the [`NodeId`] it applies to.
-///
-/// The node is `None` for a global change (such as
-/// [`InvalidationReason::EnvironmentChanged`]) that is not scoped to a single
-/// node; in that case the frame pipeline invalidates the whole tree.
+#[doc = include_str!("invalidation.doc/Invalidation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Invalidation {
     node: Option<NodeId>,
@@ -17,35 +12,31 @@ pub struct Invalidation {
 }
 
 impl Invalidation {
-    /// Creates an invalidation record for `node` (or a global change when
-    /// `node` is `None`) with the given `reason`.
+    #[doc = include_str!("invalidation.doc/new.md")]
     #[must_use]
     pub fn new(node: Option<NodeId>, reason: InvalidationReason) -> Self {
         Self { node, reason }
     }
 
-    /// Creates a global invalidation record (`node = None`) with the given
-    /// `reason`, for changes not scoped to a single node.
+    #[doc = include_str!("invalidation.doc/global.md")]
     #[must_use]
     pub fn global(reason: InvalidationReason) -> Self {
         Self { node: None, reason }
     }
 
-    /// Returns the node this invalidation applies to, or `None` for a global
-    /// change.
+    #[doc = include_str!("invalidation.doc/node.md")]
     #[must_use]
     pub fn node(self) -> Option<NodeId> {
         self.node
     }
 
-    /// Returns the runtime-level cause of this invalidation.
+    #[doc = include_str!("invalidation.doc/reason.md")]
     #[must_use]
     pub fn reason(self) -> InvalidationReason {
         self.reason
     }
 
-    /// Returns the classified [`InvalidationKind`], delegating to
-    /// [`self.reason().kind()`](InvalidationReason::kind).
+    #[doc = include_str!("invalidation.doc/kind.md")]
     #[must_use]
     pub fn kind(self) -> InvalidationKind {
         self.reason.kind()

@@ -1,0 +1,1 @@
+Wraps a [`Size`].

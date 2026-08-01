@@ -1,5 +1,4 @@
-//! Filesystem persistent cache adapter.
-
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 pub mod store;

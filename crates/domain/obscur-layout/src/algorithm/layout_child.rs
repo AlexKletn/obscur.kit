@@ -1,46 +1,32 @@
-//! `LayoutChild`: a child's identity and style, as seen by a layout algorithm.
+#![doc = include_str!("layout_child.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use crate::model::LayoutStyle;
 
-/// One child of a node, presented to a [`LayoutAlgorithm`] as identity + style.
-///
-/// [`LayoutAlgorithm`]: super::LayoutAlgorithm
-///
-/// Layout algorithms in this crate never walk the retained tree themselves — the
-/// runtime does (spec §4.2). An algorithm receives the parent's style, the slice
-/// of its children (each a `LayoutChild`), and a [`ChildMeasurer`] callback used
-/// to size a child under chosen constraints. This type carries exactly what an
-/// algorithm needs about a child *before* measuring it: which node it is and the
-/// style that drives its participation (flex basis, grow/shrink, explicit sizes,
-/// alignment overrides, ...).
-///
-/// [`ChildMeasurer`]: super::ChildMeasurer
-///
-/// All fields are `Copy`; the whole value is cheap to pass by value.
+#[doc = include_str!("layout_child.doc/LayoutChild.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutChild {
-    /// Stable identity of the child node.
+    #[doc = include_str!("layout_child.doc/node.md")]
     pub node: NodeId,
-    /// The child's own layout input style.
+    #[doc = include_str!("layout_child.doc/style.md")]
     pub style: LayoutStyle,
 }
 
 impl LayoutChild {
-    /// Creates a child descriptor from its node identity and layout style.
+    #[doc = include_str!("layout_child.doc/new.md")]
     #[must_use]
     pub const fn new(node: NodeId, style: LayoutStyle) -> Self {
         Self { node, style }
     }
 
-    /// The child's node identity.
+    #[doc = include_str!("layout_child.doc/node_2.md")]
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    /// The child's layout input style.
+    #[doc = include_str!("layout_child.doc/style_2.md")]
     #[must_use]
     pub const fn style(self) -> LayoutStyle {
         self.style

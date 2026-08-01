@@ -1,34 +1,31 @@
-//! A frame/subsystem time budget.
+#![doc = include_str!("performance_budget.doc/_module.md")]
 
 use std::time::Duration;
 
 use crate::diagnostic::DiagnosticSubsystem;
 use crate::performance::BudgetViolation;
 
-/// A time budget for a subsystem. Exceeding a budget produces a diagnostic, not
-/// a crash (spec §7.9).
+#[doc = include_str!("performance_budget.doc/PerformanceBudget.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PerformanceBudget {
-    /// Maximum allotted duration.
+    #[doc = include_str!("performance_budget.doc/limit.md")]
     pub limit: Duration,
 }
 
 impl PerformanceBudget {
-    /// Creates a budget with the given limit.
+    #[doc = include_str!("performance_budget.doc/new.md")]
     #[must_use]
     pub const fn new(limit: Duration) -> Self {
         Self { limit }
     }
 
-    /// Returns whether `elapsed` exceeds this budget.
+    #[doc = include_str!("performance_budget.doc/is_exceeded.md")]
     #[must_use]
     pub fn is_exceeded(self, elapsed: Duration) -> bool {
         elapsed > self.limit
     }
 
-    /// Checks `measured` against this budget for `subsystem`, yielding a
-    /// [`BudgetViolation`] when the measurement exceeds the limit and `None`
-    /// otherwise (spec §7.9).
+    #[doc = include_str!("performance_budget.doc/check.md")]
     #[must_use]
     pub fn check(
         self,

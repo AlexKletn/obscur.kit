@@ -1,6 +1,5 @@
-//! `PluginManager` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("plugin_manager.doc/_module.md")]
 
-/// Placeholder for the `PluginManager` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("plugin_manager.doc/PluginManager.md")]
 #[derive(Debug)]
 pub struct PluginManager;

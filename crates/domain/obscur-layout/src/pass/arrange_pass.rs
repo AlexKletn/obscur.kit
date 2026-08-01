@@ -1,40 +1,34 @@
-//! The arrange-phase input for a node.
+#![doc = include_str!("arrange_pass.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
-/// The **arrange** phase input for a node (spec §4.2): the final region
-/// (a rectangle in parent-relative space) the parent assigns to the node.
-///
-/// Arrange positions a node (and recursively its children) into its assigned
-/// region, producing a [`LayoutBox`](crate::model::LayoutBox). It runs after
-/// the measure phase ([`MeasurePass`](super::MeasurePass)), which decides sizes
-/// without positioning.
+#[doc = include_str!("arrange_pass.doc/ArrangePass.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ArrangePass {
-    /// The parent-relative region assigned to the node.
+    #[doc = include_str!("arrange_pass.doc/region.md")]
     region: Rect,
 }
 
 impl ArrangePass {
-    /// Creates an arrange input carrying the assigned `region`.
+    #[doc = include_str!("arrange_pass.doc/new.md")]
     #[must_use]
     pub const fn new(region: Rect) -> Self {
         Self { region }
     }
 
-    /// The parent-relative region assigned to the node.
+    #[doc = include_str!("arrange_pass.doc/region_2.md")]
     #[must_use]
     pub const fn region(self) -> Rect {
         self.region
     }
 
-    /// The size of the assigned region.
+    #[doc = include_str!("arrange_pass.doc/size.md")]
     #[must_use]
     pub const fn size(self) -> Size {
         self.region.size
     }
 
-    /// The origin of the assigned region, relative to the parent.
+    #[doc = include_str!("arrange_pass.doc/origin.md")]
     #[must_use]
     pub const fn origin(self) -> Point {
         self.region.origin

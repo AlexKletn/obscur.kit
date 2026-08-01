@@ -1,39 +1,25 @@
-//! The [`SpringTrack`] spring-shaped from→to track (spec §4.17).
+#![doc = include_str!("spring_track.doc/_module.md")]
 
 use crate::track::MotionTrack;
 use crate::value::MotionValue;
 
-/// A `from` → `to` motion shaped by a normalized spring curve (spec §4.17).
-///
-/// This is the native compile target of a spring `animation`: rather than a
-/// fixed easing table, the progress is the analytic displacement of a damped
-/// harmonic oscillator (`m·x'' + c·x' + k·x = 0`) mapped onto `t ∈ [0, 1]`. A
-/// *full* velocity-carrying physical spring — one that accepts an initial
-/// velocity and integrates real time to rest — is a driver-level concern; here
-/// the spring is a pure, deterministic **normalized curve** with `f(0) == 0` and
-/// `f(1) ≈ 1`.
-///
-/// Springs overshoot: for an underdamped configuration the progress can exceed
-/// `1.0` (and dip back) before settling. That is intentional and desirable — the
-/// underlying [`MotionValue`] interpolation does not clamp, so the sampled value
-/// overshoots its target the way a physical spring would.
+#[doc = include_str!("spring_track.doc/SpringTrack.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpringTrack {
-    /// The value at rest at the start (`t == 0`).
+    #[doc = include_str!("spring_track.doc/from.md")]
     from: MotionValue,
-    /// The target the spring settles toward (`t ≈ 1`).
+    #[doc = include_str!("spring_track.doc/to.md")]
     to: MotionValue,
-    /// Spring constant `k`: higher is stiffer / faster.
+    #[doc = include_str!("spring_track.doc/stiffness.md")]
     stiffness: f32,
-    /// Damping coefficient `c`: higher settles sooner with less overshoot.
+    #[doc = include_str!("spring_track.doc/damping.md")]
     damping: f32,
-    /// Oscillator mass `m`: higher is heavier / slower.
+    #[doc = include_str!("spring_track.doc/mass.md")]
     mass: f32,
 }
 
 impl SpringTrack {
-    /// Creates a spring from `from` to `to` with common UI defaults
-    /// (stiffness `170`, damping `26`, mass `1`).
+    #[doc = include_str!("spring_track.doc/new.md")]
     #[must_use]
     pub const fn new(from: MotionValue, to: MotionValue) -> Self {
         Self {
@@ -45,63 +31,58 @@ impl SpringTrack {
         }
     }
 
-    /// Returns this spring with `stiffness` set (fluent setter).
+    #[doc = include_str!("spring_track.doc/with_stiffness.md")]
     #[must_use]
     pub const fn with_stiffness(mut self, stiffness: f32) -> Self {
         self.stiffness = stiffness;
         self
     }
 
-    /// Returns this spring with `damping` set (fluent setter).
+    #[doc = include_str!("spring_track.doc/with_damping.md")]
     #[must_use]
     pub const fn with_damping(mut self, damping: f32) -> Self {
         self.damping = damping;
         self
     }
 
-    /// Returns this spring with `mass` set (fluent setter).
+    #[doc = include_str!("spring_track.doc/with_mass.md")]
     #[must_use]
     pub const fn with_mass(mut self, mass: f32) -> Self {
         self.mass = mass;
         self
     }
 
-    /// Returns the start (`t == 0`) value.
+    #[doc = include_str!("spring_track.doc/from_2.md")]
     #[must_use]
     pub const fn from(&self) -> MotionValue {
         self.from
     }
 
-    /// Returns the target value.
+    #[doc = include_str!("spring_track.doc/to_2.md")]
     #[must_use]
     pub const fn to(&self) -> MotionValue {
         self.to
     }
 
-    /// Returns the spring constant `k`.
+    #[doc = include_str!("spring_track.doc/stiffness_2.md")]
     #[must_use]
     pub const fn stiffness(&self) -> f32 {
         self.stiffness
     }
 
-    /// Returns the damping coefficient `c`.
+    #[doc = include_str!("spring_track.doc/damping_2.md")]
     #[must_use]
     pub const fn damping(&self) -> f32 {
         self.damping
     }
 
-    /// Returns the oscillator mass `m`.
+    #[doc = include_str!("spring_track.doc/mass_2.md")]
     #[must_use]
     pub const fn mass(&self) -> f32 {
         self.mass
     }
 
-    /// Computes normalized spring displacement in `[0, ~1]` at progress `t`.
-    ///
-    /// The analytic solution of `m·x'' + c·x' + k·x = 0` gives the *remaining*
-    /// displacement `r(t)`; progress is `1 − r(t)`. Time is `T = t · 6` so the
-    /// spring mostly settles within `t ∈ [0, 1]`. `f(0)` is exactly `0`;
-    /// underdamped springs overshoot past `1` before settling.
+    #[doc = include_str!("spring_track.doc/spring_progress.md")]
     fn spring_progress(&self, t: f32) -> f32 {
         if t <= 0.0 {
             return 0.0;
@@ -123,11 +104,7 @@ impl SpringTrack {
 }
 
 impl MotionTrack for SpringTrack {
-    /// Samples the spring blend from `from` toward `to` at progress `t`.
-    ///
-    /// `t` is passed through the spring curve *without* clamping so overshoot is
-    /// preserved; `t <= 0` yields exactly `from`. On a variant mismatch between
-    /// the endpoints the blend is undefined and this falls back to `to`.
+    #[doc = include_str!("spring_track.doc/sample.md")]
     fn sample(&self, t: f32) -> MotionValue {
         self.from
             .interpolate_checked(&self.to, self.spring_progress(t))

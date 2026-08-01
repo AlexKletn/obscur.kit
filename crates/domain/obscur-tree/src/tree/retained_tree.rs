@@ -1,37 +1,24 @@
-//! The retained-node arena — the sole owner and minter of UI identity.
+#![doc = include_str!("retained_tree.doc/_module.md")]
 
 use obscur_identity::{NodeId, VersionStamp};
 
 use crate::node::{NodeGeneration, NodeKind, RetainedNode};
 
-/// One addressable slot in the [`RetainedTree`] arena.
-///
-/// A slot carries its own authoritative [`NodeGeneration`] independent of any
-/// occupant, so that after a node is removed and the slot is later reused, ids
-/// minted against the previous occupant can be recognised as stale. The
-/// generation is advanced both when a slot is vacated and when it is reused.
+#[doc = include_str!("retained_tree.doc/Slot.md")]
 #[derive(Debug, Clone)]
 struct Slot {
-    /// The slot's current generation; authoritative for stale-id detection.
+    #[doc = include_str!("retained_tree.doc/generation.md")]
     generation: NodeGeneration,
-    /// The live node occupying this slot, or `None` when the slot is vacant.
+    #[doc = include_str!("retained_tree.doc/node.md")]
     node: Option<RetainedNode>,
 }
 
-/// Packs a slot `index` and `generation` into the opaque `u64` of a [`NodeId`].
-///
-/// The index occupies the low 32 bits and the generation the high 32 bits. This
-/// packing is an arena-private encoding: callers only ever see an opaque
-/// [`NodeId`] and must not depend on its layout.
+#[doc = include_str!("retained_tree.doc/pack_node_id.md")]
 fn pack_node_id(index: u32, generation: u32) -> NodeId {
     NodeId::from_raw((u64::from(generation) << 32) | u64::from(index))
 }
 
-/// Unpacks a [`NodeId`] into its `(index, generation)` pair.
-///
-/// Inverse of [`pack_node_id`]. The masked/shifted halves always fit in a `u32`
-/// by construction, so the conversions never fail; the `unwrap_or(0)` fallbacks
-/// exist only to keep the function total and panic-free.
+#[doc = include_str!("retained_tree.doc/unpack_node_id.md")]
 fn unpack_node_id(id: NodeId) -> (u32, u32) {
     let raw = id.raw();
     let index = u32::try_from(raw & u64::from(u32::MAX)).unwrap_or(0);
@@ -39,56 +26,29 @@ fn unpack_node_id(id: NodeId) -> (u32, u32) {
     (index, generation)
 }
 
-/// A generational arena that owns every [`RetainedNode`] in a retained tree.
-///
-/// This is the **single owner of UI identity** (spec §1.5): it is the only thing
-/// that mints [`NodeId`]s, and every node record lives here. Layout boxes, paint
-/// data, accessibility nodes and backend handles do **not** live here — they live
-/// in [`SecondaryMap`](super::SecondaryMap)s keyed by the `NodeId` this arena
-/// mints, and never replace that identity.
-///
-/// Internally the arena is a `Vec` of slots plus a free-list of vacated indices.
-/// Each minted `NodeId` packs the slot index together with that slot's
-/// generation (see [`pack_node_id`]); on every access the encoded generation is
-/// validated against the slot's current generation, so a stale `NodeId` whose
-/// slot has since been reused resolves to `None` rather than aliasing a
-/// different node.
-///
-/// This Phase-1 implementation is a self-contained `std` arena. It is designed to
-/// be swappable for a `slotmap`-backed store later behind this same public API;
-/// the generational packing is deliberately kept private so that swap is
-/// invisible to callers.
+#[doc = include_str!("retained_tree.doc/RetainedTree.md")]
 #[derive(Debug, Clone, Default)]
 pub struct RetainedTree {
-    /// Backing storage; the slot at index `i` is addressed by ids with index `i`.
+    #[doc = include_str!("retained_tree.doc/slots.md")]
     slots: Vec<Slot>,
-    /// Indices of vacated slots available for reuse (LIFO).
+    #[doc = include_str!("retained_tree.doc/free.md")]
     free: Vec<u32>,
-    /// Count of currently live (occupied) slots.
+    #[doc = include_str!("retained_tree.doc/live.md")]
     live: usize,
-    /// The tree root, if one has been designated.
+    #[doc = include_str!("retained_tree.doc/root.md")]
     root: Option<NodeId>,
-    /// Monotonically advancing version, bumped on every structural mutation.
+    #[doc = include_str!("retained_tree.doc/version.md")]
     version: VersionStamp,
 }
 
 impl RetainedTree {
-    /// Creates an empty arena with no nodes, no root, and the initial version.
+    #[doc = include_str!("retained_tree.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Allocates a fresh node of the given `kind`, minting a new [`NodeId`] and
-    /// returning it.
-    ///
-    /// A vacated slot is reused when one is available (advancing that slot's
-    /// generation), otherwise a new slot is appended. The stored
-    /// [`RetainedNode`] is constructed with the freshly minted id. This is a
-    /// structural mutation and advances the tree [`version`](Self::version).
-    ///
-    /// The arena addresses at most `u32::MAX` slots; this bound is far beyond any
-    /// realistic UI tree and cannot be reached in practice.
+    #[doc = include_str!("retained_tree.doc/alloc.md")]
     pub fn alloc(&mut self, kind: NodeKind) -> NodeId {
         let id = if let Some(index) = self.free.pop() {
             // Reuse a vacated slot, advancing its generation on reuse.
@@ -111,7 +71,7 @@ impl RetainedTree {
         id
     }
 
-    /// Appends a brand-new slot at the initial generation and returns its id.
+    #[doc = include_str!("retained_tree.doc/push_fresh_slot.md")]
     fn push_fresh_slot(&mut self, kind: NodeKind) -> NodeId {
         let index = u32::try_from(self.slots.len()).unwrap_or(u32::MAX);
         let generation = NodeGeneration::FIRST;
@@ -123,8 +83,7 @@ impl RetainedTree {
         id
     }
 
-    /// Returns a shared reference to the node for `id`, or `None` if the id is
-    /// stale (its slot was reused) or was never valid.
+    #[doc = include_str!("retained_tree.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&RetainedNode> {
         let (index, generation) = unpack_node_id(id);
@@ -135,13 +94,7 @@ impl RetainedTree {
         slot.node.as_ref()
     }
 
-    /// Returns a mutable reference to the node for `id`, or `None` if the id is
-    /// stale or was never valid.
-    ///
-    /// Note that mutating a node through this reference does not itself advance
-    /// the tree version; only structural arena mutations
-    /// ([`alloc`](Self::alloc), [`remove`](Self::remove),
-    /// [`set_root`](Self::set_root)) do.
+    #[doc = include_str!("retained_tree.doc/get_mut.md")]
     #[must_use]
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut RetainedNode> {
         let (index, generation) = unpack_node_id(id);
@@ -152,15 +105,7 @@ impl RetainedTree {
         slot.node.as_mut()
     }
 
-    /// Removes and returns the node for `id`, vacating its slot.
-    ///
-    /// The slot's generation is advanced and its index pushed onto the free-list
-    /// for reuse, so the removed `id` (and any copy of it) becomes stale and will
-    /// resolve to `None` thereafter. Returns `None` if the id was already stale
-    /// or never valid. This is a structural mutation and advances the tree
-    /// [`version`](Self::version).
-    ///
-    /// If the removed node was the current root, the root is cleared.
+    #[doc = include_str!("retained_tree.doc/remove.md")]
     pub fn remove(&mut self, id: NodeId) -> Option<RetainedNode> {
         let (index, generation) = unpack_node_id(id);
         let slot = self.slots.get_mut(index as usize)?;
@@ -178,14 +123,7 @@ impl RetainedTree {
         Some(node)
     }
 
-    /// Recomputes `parent`'s element-only child projection
-    /// ([`RetainedNode::children`]) from its all-nodes child list, keeping the
-    /// two in step. The arena is the only place that knows every child's
-    /// [`NodeKind`], so it — not a bare node — owns this derivation. Callers must
-    /// invoke it after any change to `parent.children` (link, unlink, reorder) or
-    /// after a child's kind changes. A no-op if `parent` is stale.
-    ///
-    /// [`RetainedNode::children`]: crate::node::RetainedNode::children
+    #[doc = include_str!("retained_tree.doc/sync_element_children.md")]
     pub fn sync_element_children(&mut self, parent: NodeId) {
         let Some(child_ids) = self.get(parent).map(|node| node.children.clone()) else {
             return;
@@ -199,60 +137,50 @@ impl RetainedTree {
         }
     }
 
-    /// Returns `true` if `id` currently resolves to a live node.
+    #[doc = include_str!("retained_tree.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.get(id).is_some()
     }
 
-    /// Returns the number of live nodes in the arena.
+    #[doc = include_str!("retained_tree.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.live
     }
 
-    /// Returns `true` if the arena contains no live nodes.
+    #[doc = include_str!("retained_tree.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.live == 0
     }
 
-    /// Returns the designated tree root, if any.
+    #[doc = include_str!("retained_tree.doc/root_2.md")]
     #[must_use]
     pub fn root(&self) -> Option<NodeId> {
         self.root
     }
 
-    /// Designates `id` as the tree root.
-    ///
-    /// The id is stored as-is; callers are responsible for passing a live id.
-    /// This is a structural mutation and advances the tree
-    /// [`version`](Self::version).
+    #[doc = include_str!("retained_tree.doc/set_root.md")]
     pub fn set_root(&mut self, id: NodeId) {
         self.root = Some(id);
         self.version = self.version.bump();
     }
 
-    /// Returns the tree's current version stamp.
-    ///
-    /// The version advances on every structural mutation
-    /// ([`alloc`](Self::alloc), [`remove`](Self::remove),
-    /// [`set_root`](Self::set_root)), so two [`TreeSnapshot`](super::TreeSnapshot)s
-    /// taken at different states carry different versions.
+    #[doc = include_str!("retained_tree.doc/version_2.md")]
     #[must_use]
     pub fn version(&self) -> VersionStamp {
         self.version
     }
 
-    /// Iterates over every live `(NodeId, &RetainedNode)` in slot order.
+    #[doc = include_str!("retained_tree.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &RetainedNode)> {
         self.slots
             .iter()
             .filter_map(|slot| slot.node.as_ref().map(|node| (node.id(), node)))
     }
 
-    /// Captures an immutable, versioned [`TreeSnapshot`](super::TreeSnapshot) of
-    /// the current live nodes for hand-off to heavy subsystems (spec §1.6).
+    #[doc = include_str!("retained_tree.doc/snapshot.md")]
     #[must_use]
     pub fn snapshot(&self) -> super::TreeSnapshot {
         super::TreeSnapshot::from_tree(self)

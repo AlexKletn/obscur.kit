@@ -1,33 +1,18 @@
-//! The [`TimelinePosition`] snapshot of where a timeline sits (spec §4.17).
+#![doc = include_str!("timeline_position.doc/_module.md")]
 
-/// Where a [`Timeline`](super::Timeline) currently is within its current
-/// iteration (spec §4.17).
-///
-/// A position is a pure snapshot: how far the current iteration has run
-/// ([`elapsed`](Self::elapsed) logical seconds), the normalized point reached
-/// ([`progress`](Self::progress) in `0..=1`), and how many iterations have
-/// already completed ([`iteration`](Self::iteration), 0-based, for repeats).
-///
-/// `progress` is the **raw linear** position within the iteration. Easing is
-/// *not* applied here: tracks and interpolators downstream shape this linear
-/// progress into eased output, keeping the timeline itself a plain integrator.
-///
-/// Time is measured in unspecified "logical seconds" (`f32`): the engine is
-/// time-agnostic, so these units mean whatever the driver's `delta` supplies.
+#[doc = include_str!("timeline_position.doc/TimelinePosition.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimelinePosition {
-    /// Logical seconds elapsed since the start of the *current* iteration.
+    #[doc = include_str!("timeline_position.doc/elapsed.md")]
     elapsed: f32,
-    /// Normalized progress within the current iteration, in `0..=1` (raw and
-    /// linear; easing is applied downstream, not here).
+    #[doc = include_str!("timeline_position.doc/progress.md")]
     progress: f32,
-    /// The number of iterations already completed (0-based), used for repeats.
+    #[doc = include_str!("timeline_position.doc/iteration.md")]
     iteration: u32,
 }
 
 impl TimelinePosition {
-    /// The position at the very start of playback: zero elapsed, zero progress,
-    /// no completed iterations.
+    #[doc = include_str!("timeline_position.doc/start.md")]
     #[must_use]
     pub const fn start() -> Self {
         Self {
@@ -37,9 +22,7 @@ impl TimelinePosition {
         }
     }
 
-    /// Creates a position from explicit `elapsed`, `progress` and `iteration`
-    /// components. The caller is responsible for supplying consistent values;
-    /// no normalization is performed.
+    #[doc = include_str!("timeline_position.doc/new.md")]
     #[must_use]
     pub const fn new(elapsed: f32, progress: f32, iteration: u32) -> Self {
         Self {
@@ -49,34 +32,31 @@ impl TimelinePosition {
         }
     }
 
-    /// Returns the logical seconds elapsed within the current iteration.
+    #[doc = include_str!("timeline_position.doc/elapsed_2.md")]
     #[must_use]
     pub const fn elapsed(&self) -> f32 {
         self.elapsed
     }
 
-    /// Returns the raw, linear normalized progress within the current iteration
-    /// (`0..=1`).
+    #[doc = include_str!("timeline_position.doc/progress_2.md")]
     #[must_use]
     pub const fn progress(&self) -> f32 {
         self.progress
     }
 
-    /// Returns the number of iterations already completed (0-based).
+    #[doc = include_str!("timeline_position.doc/iteration_2.md")]
     #[must_use]
     pub const fn iteration(&self) -> u32 {
         self.iteration
     }
 
-    /// Returns whether this is the position at the very start of playback:
-    /// progress at (or below) zero and no iterations completed yet.
+    #[doc = include_str!("timeline_position.doc/at_start.md")]
     #[must_use]
     pub const fn at_start(&self) -> bool {
         self.progress <= 0.0 && self.iteration == 0
     }
 
-    /// Returns whether the current iteration has reached its end
-    /// (`progress >= 1.0`).
+    #[doc = include_str!("timeline_position.doc/is_complete_iteration.md")]
     #[must_use]
     pub const fn is_complete_iteration(&self) -> bool {
         self.progress >= 1.0

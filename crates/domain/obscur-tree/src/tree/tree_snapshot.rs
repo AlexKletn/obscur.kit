@@ -1,4 +1,4 @@
-//! An immutable, versioned snapshot of the retained tree for heavy subsystems.
+#![doc = include_str!("tree_snapshot.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -8,34 +8,19 @@ use crate::node::RetainedNode;
 
 use super::RetainedTree;
 
-/// An immutable, versioned snapshot of a [`RetainedTree`].
-///
-/// Heavy subsystems (layout, paint, accessibility) receive immutable, versioned
-/// snapshots rather than borrowing the live tree (spec §1.6). A snapshot clones
-/// the live node records into an owned map, captures the root, and stamps the
-/// tree's [`VersionStamp`] at the moment of capture. It is **immutable after
-/// construction**: it exposes only read accessors and no mutators.
-///
-/// A snapshot may be freely retained and later discarded as stale: because the
-/// live tree advances its version on every structural mutation, a consumer can
-/// compare [`version`](Self::version) against the live tree's current version to
-/// decide whether its snapshot is out of date.
+#[doc = include_str!("tree_snapshot.doc/TreeSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TreeSnapshot {
-    /// Owned copies of the live node records, keyed by their stable `NodeId`.
+    #[doc = include_str!("tree_snapshot.doc/nodes.md")]
     nodes: HashMap<NodeId, RetainedNode>,
-    /// The tree root at the moment of capture, if any.
+    #[doc = include_str!("tree_snapshot.doc/root.md")]
     root: Option<NodeId>,
-    /// The tree version at the moment of capture.
+    #[doc = include_str!("tree_snapshot.doc/version.md")]
     version: VersionStamp,
 }
 
 impl TreeSnapshot {
-    /// Builds a snapshot from the current state of `tree`.
-    ///
-    /// Clones every live node record, captures the root, and records the tree's
-    /// current [`VersionStamp`]. Prefer [`RetainedTree::snapshot`], which calls
-    /// this.
+    #[doc = include_str!("tree_snapshot.doc/from_tree.md")]
     #[must_use]
     pub fn from_tree(tree: &RetainedTree) -> Self {
         let nodes = tree.iter().map(|(id, node)| (id, node.clone())).collect();
@@ -46,44 +31,43 @@ impl TreeSnapshot {
         }
     }
 
-    /// Returns the captured tree root, if any.
+    #[doc = include_str!("tree_snapshot.doc/root_2.md")]
     #[must_use]
     pub fn root(&self) -> Option<NodeId> {
         self.root
     }
 
-    /// Returns the captured node record for `id`, if it was live at capture.
+    #[doc = include_str!("tree_snapshot.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&RetainedNode> {
         self.nodes.get(&id)
     }
 
-    /// Returns `true` if `id` was present in the tree at capture.
+    #[doc = include_str!("tree_snapshot.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.nodes.contains_key(&id)
     }
 
-    /// Returns the version stamp captured with this snapshot.
+    #[doc = include_str!("tree_snapshot.doc/version_2.md")]
     #[must_use]
     pub fn version(&self) -> VersionStamp {
         self.version
     }
 
-    /// Returns the number of nodes captured in this snapshot.
+    #[doc = include_str!("tree_snapshot.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Returns `true` if the snapshot captured no nodes.
+    #[doc = include_str!("tree_snapshot.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    /// Iterates over every captured `(NodeId, &RetainedNode)`, in unspecified
-    /// order.
+    #[doc = include_str!("tree_snapshot.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &RetainedNode)> {
         self.nodes.iter().map(|(id, node)| (*id, node))
     }

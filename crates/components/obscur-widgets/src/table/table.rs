@@ -1,16 +1,11 @@
-//! `Table`: a headless columns/rows data table with single-column sort
-//! (spec §2.6).
+#![doc = include_str!("table.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A single column definition in a [`Table`].
-///
-/// Each column carries a display `title` and whether it is
-/// [`sortable`](Self::is_sortable). Non-sortable columns are ignored by
-/// [`Table::sort_by`].
+#[doc = include_str!("table.doc/Column.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
     title: Box<str>,
@@ -18,7 +13,7 @@ pub struct Column {
 }
 
 impl Column {
-    /// Creates a non-sortable column showing `title`.
+    #[doc = include_str!("table.doc/new.md")]
     #[must_use]
     pub fn new(title: impl Into<Box<str>>) -> Self {
         Self {
@@ -27,37 +22,37 @@ impl Column {
         }
     }
 
-    /// Sets whether the column is sortable, returning it (fluent builder).
+    #[doc = include_str!("table.doc/sortable.md")]
     #[must_use]
     pub fn sortable(mut self, sortable: bool) -> Self {
         self.sortable = sortable;
         self
     }
 
-    /// Returns the column title.
+    #[doc = include_str!("table.doc/title.md")]
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    /// Returns whether the column is sortable.
+    #[doc = include_str!("table.doc/is_sortable.md")]
     #[must_use]
     pub const fn is_sortable(&self) -> bool {
         self.sortable
     }
 }
 
-/// The direction of a [`Table`]'s active sort.
+#[doc = include_str!("table.doc/SortDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortDirection {
-    /// Ascending order (A→Z).
+    #[doc = include_str!("table.doc/Ascending.md")]
     Ascending,
-    /// Descending order (Z→A).
+    #[doc = include_str!("table.doc/Descending.md")]
     Descending,
 }
 
 impl SortDirection {
-    /// Returns the opposite direction.
+    #[doc = include_str!("table.doc/reversed.md")]
     #[must_use]
     pub const fn reversed(self) -> Self {
         match self {
@@ -67,20 +62,7 @@ impl SortDirection {
     }
 }
 
-/// A headless columns/rows data table with single-column sort (spec §2.6).
-///
-/// `Table` owns its [`Column`] definitions, its `rows` (each row is a [`Vec`] of
-/// cell strings, one per column), and the active [`sort`](Self::sorted_column)
-/// (a column index plus a [`SortDirection`], if any). It bakes in **no** visual
-/// theme: [`view`](Self::view) derives a [`SemanticRole::Table`] element carrying
-/// the sorted column index, a header [`SemanticRole::Row`] child (one
-/// [`SemanticRole::Cell`] per column, carrying its title and sortable flag), and
-/// one row child per data row (one cell child per cell), rendered by the style
-/// layer keyed on [`COMPONENT_ID`](Self::COMPONENT_ID).
-///
-/// The state machine is [`sort_by`](Self::sort_by): sorting by a sortable column
-/// stable-sorts the rows by that column's cell text ascending; sorting by the
-/// same column again flips the direction.
+#[doc = include_str!("table.doc/Table.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     columns: Vec<Column>,
@@ -89,27 +71,22 @@ pub struct Table {
 }
 
 impl Table {
-    /// Stable component id for the table widget (see [`Button::COMPONENT_ID`] for
-    /// the shared `0x00D0_00NN` scheme).
-    ///
-    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    #[doc = include_str!("table.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_000A);
 
-    /// Stable component id shared by header and data row child elements.
+    #[doc = include_str!("table.doc/TABLE_ROW_ID.md")]
     const TABLE_ROW_ID: ComponentId = ComponentId::from_raw(0x00D0_001A);
-    /// Stable component id shared by header and data cell child elements.
+    #[doc = include_str!("table.doc/TABLE_CELL_ID.md")]
     const TABLE_CELL_ID: ComponentId = ComponentId::from_raw(0x00D0_002A);
 
-    /// Interned name of the semantic-role property (`role`); shares the
-    /// `0x00D1_NNXX` scheme with `NN = 0A` (table): role=`00`, sort-col=`01`,
-    /// sortable=`02` (on header cells).
+    #[doc = include_str!("table.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0A00);
-    /// Interned name of the sorted-column-index property (`-1` = unsorted).
+    #[doc = include_str!("table.doc/PROP_SORT_COL.md")]
     const PROP_SORT_COL: InternedSymbol = InternedSymbol::from_raw(0x00D1_0A01);
-    /// Interned name of the per-header-cell `sortable` state property.
+    #[doc = include_str!("table.doc/PROP_SORTABLE.md")]
     const PROP_SORTABLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0A02);
 
-    /// Creates an empty, unsorted table.
+    #[doc = include_str!("table.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -119,14 +96,14 @@ impl Table {
         }
     }
 
-    /// Appends a single column, returning the updated table (fluent builder).
+    #[doc = include_str!("table.doc/column.md")]
     #[must_use]
     pub fn column(mut self, column: Column) -> Self {
         self.columns.push(column);
         self
     }
 
-    /// Appends every column from `columns`, returning the updated table.
+    #[doc = include_str!("table.doc/with_columns.md")]
     #[must_use]
     pub fn with_columns<I>(mut self, columns: I) -> Self
     where
@@ -136,8 +113,7 @@ impl Table {
         self
     }
 
-    /// Appends a single data row (one cell string per column), returning the
-    /// updated table (fluent builder).
+    #[doc = include_str!("table.doc/row.md")]
     #[must_use]
     pub fn row<I, S>(mut self, cells: I) -> Self
     where
@@ -148,7 +124,7 @@ impl Table {
         self
     }
 
-    /// Appends every row from `rows`, returning the updated table.
+    #[doc = include_str!("table.doc/with_rows.md")]
     #[must_use]
     pub fn with_rows<I, R, S>(mut self, rows: I) -> Self
     where
@@ -162,11 +138,7 @@ impl Table {
         self
     }
 
-    /// Sorts the rows by the cell text of column `column`, returning `true` on
-    /// success. Sorting by a fresh column sorts ascending; sorting by the
-    /// already-active column flips the direction. The sort is **stable**.
-    /// Returns `false` (leaving state untouched) when `column` is out of range or
-    /// its column is not [`sortable`](Column::is_sortable).
+    #[doc = include_str!("table.doc/sort_by.md")]
     pub fn sort_by(&mut self, column: usize) -> bool {
         if !self.columns.get(column).is_some_and(Column::is_sortable) {
             return false;
@@ -188,48 +160,43 @@ impl Table {
         true
     }
 
-    /// Returns the index of the sorted column, if any.
+    #[doc = include_str!("table.doc/sorted_column.md")]
     #[must_use]
     pub fn sorted_column(&self) -> Option<usize> {
         self.sort.map(|(column, _)| column)
     }
 
-    /// Returns the active sort direction, if any.
+    #[doc = include_str!("table.doc/sort_direction.md")]
     #[must_use]
     pub fn sort_direction(&self) -> Option<SortDirection> {
         self.sort.map(|(_, direction)| direction)
     }
 
-    /// Returns the number of data rows.
+    #[doc = include_str!("table.doc/row_count.md")]
     #[must_use]
     pub fn row_count(&self) -> usize {
         self.rows.len()
     }
 
-    /// Returns the number of columns.
+    #[doc = include_str!("table.doc/column_count.md")]
     #[must_use]
     pub fn column_count(&self) -> usize {
         self.columns.len()
     }
 
-    /// Returns whether the table has no columns and no rows.
+    #[doc = include_str!("table.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.columns.is_empty() && self.rows.is_empty()
     }
 
-    /// Returns the accessible role of this control ([`SemanticRole::Table`]).
+    #[doc = include_str!("table.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Table
     }
 
-    /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role
-    /// and sorted-column index (`-1` when unsorted), a header row child (one cell
-    /// per column, each carrying its title and sortable flag), then one row child
-    /// per data row (one cell child per cell).
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[doc = include_str!("table.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let sort_col = self

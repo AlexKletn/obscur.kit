@@ -1,0 +1,140 @@
+#![doc = include_str!("background_work.doc/_module.md")]
+
+#[doc = include_str!("background_work.doc/BackgroundServiced.md")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackgroundServiced {
+    #[doc = include_str!("background_work.doc/More.md")]
+    More,
+    #[doc = include_str!("background_work.doc/Drained.md")]
+    Drained,
+}
+
+#[doc = include_str!("background_work.doc/BackgroundWork.md")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct BackgroundWork {
+    #[doc = include_str!("background_work.doc/pending.md")]
+    pending: usize,
+    #[doc = include_str!("background_work.doc/serviced.md")]
+    serviced: u64,
+}
+
+impl BackgroundWork {
+    #[doc = include_str!("background_work.doc/new.md")]
+    pub(crate) const fn new() -> Self {
+        Self {
+            pending: 0,
+            serviced: 0,
+        }
+    }
+
+    #[doc = include_str!("background_work.doc/request.md")]
+    pub(crate) const fn request(&mut self) -> bool {
+        self.pending = self.pending.saturating_add(1);
+        self.pending == 1
+    }
+
+    #[doc = include_str!("background_work.doc/pending_2.md")]
+    pub(crate) const fn pending(&self) -> usize {
+        self.pending
+    }
+
+    #[doc = include_str!("background_work.doc/serviced_2.md")]
+    pub(crate) const fn serviced(&self) -> u64 {
+        self.serviced
+    }
+
+    #[doc = include_str!("background_work.doc/service.md")]
+    pub(crate) const fn service(&mut self) -> Option<BackgroundServiced> {
+        if self.pending == 0 {
+            return None;
+        }
+        self.pending -= 1;
+        self.serviced = self.serviced.saturating_add(1);
+        Some(if self.pending == 0 {
+            BackgroundServiced::Drained
+        } else {
+            BackgroundServiced::More
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BackgroundServiced, BackgroundWork};
+
+    #[test]
+    fn an_empty_queue_services_nothing() {
+        let mut work = BackgroundWork::new();
+        assert_eq!(work.pending(), 0);
+        assert_eq!(work.serviced(), 0);
+        assert!(
+            work.service().is_none(),
+            "no unit ran, so the scheduler must not be told one did"
+        );
+        // And nothing was invented on the way out.
+        assert_eq!(work.serviced(), 0);
+    }
+
+    #[test]
+    fn only_the_first_request_and_the_last_service_report_an_edge() {
+        // The signal is edge-triggered in both directions. Re-announcing "pending"
+        // on the second unit would restart the fairness count the first is waiting
+        // on; missing "drained" on the last one leaves the scheduler reporting
+        // starvation for work that no longer exists.
+        let mut work = BackgroundWork::new();
+        assert!(work.request(), "0 → 1 is the announcement");
+        assert!(
+            !work.request(),
+            "a second unit joins a queue already announced"
+        );
+        assert!(!work.request());
+        assert_eq!(work.pending(), 3);
+
+        assert_eq!(work.service(), Some(BackgroundServiced::More));
+        assert_eq!(work.service(), Some(BackgroundServiced::More));
+        assert_eq!(work.service(), Some(BackgroundServiced::Drained));
+        assert_eq!(work.pending(), 0);
+        // Drained means drained: the next request announces again.
+        assert!(work.request());
+    }
+
+    #[test]
+    fn a_serviced_unit_leaves_the_queue_exactly_as_it_enters_the_total() {
+        // The pairing itself: after any number of requests and services, the two
+        // tallies must still add up to what was enqueued.
+        let mut work = BackgroundWork::new();
+        let mut enqueued = 0_u64;
+        for round in 1..=5_u64 {
+            for _ in 0..round {
+                let _ = work.request();
+                enqueued += 1;
+            }
+            let _ = work.service();
+            assert_eq!(
+                work.pending() as u64 + work.serviced(),
+                enqueued,
+                "round {round}: a unit is either waiting or counted, never both or neither"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tallies_saturate_rather_than_wrap() {
+        // Unreachable through the runtime — a u64 of serviced units is not
+        // countable in a session — but a wrap here would turn the progress proof
+        // into a claim that background work went backwards.
+        let mut work = BackgroundWork {
+            pending: 1,
+            serviced: u64::MAX,
+        };
+        assert_eq!(work.service(), Some(BackgroundServiced::Drained));
+        assert_eq!(work.serviced(), u64::MAX);
+
+        let mut full = BackgroundWork {
+            pending: usize::MAX,
+            serviced: 0,
+        };
+        assert!(!full.request());
+        assert_eq!(full.pending(), usize::MAX);
+    }
+}

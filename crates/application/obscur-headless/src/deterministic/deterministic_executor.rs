@@ -1,89 +1,47 @@
-//! A fully deterministic, single-threaded job runner (spec §7.4).
+#![doc = include_str!("deterministic_executor.doc/_module.md")]
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use obscur_task::BlockingExecutor;
 
-/// A deterministic, single-threaded executor: jobs run in strict FIFO order,
-/// exactly when the test drives them — never on a background thread and never
-/// reordered.
-///
-/// Jobs are enqueued by [`spawn`](Self::spawn) (or via the
-/// [`BlockingExecutor`] port) and only run when the test calls
-/// [`run`](Self::run) or [`run_next`](Self::run_next). Because a job may itself
-/// `spawn` more jobs, the internal queue lives behind a [`Mutex`] and jobs are
-/// popped out of the guard before they are invoked ("pop-then-run"), so a job
-/// that spawns during its own run never deadlocks on the lock it already holds.
-///
-/// The queue is a [`Mutex`] rather than a `RefCell`, and jobs are required to be
-/// [`Send`], purely so this type satisfies the `BlockingExecutor + Send + Sync`
-/// bound on
-/// [`UiRuntime::set_blocking_executor`](obscur_runtime::UiRuntime::set_blocking_executor).
-/// That bound is what a real thread-pool adapter needs; without it the *only*
-/// executor a headless test could install would be a hand-rolled double, and the
-/// deterministic one — the one §7.4 actually specifies — could not be wired to a
-/// runtime at all. Nothing here ever touches a second thread.
-///
-/// This is the Phase 1 model of controlled execution using [`FnOnce`] jobs. A
-/// full [`Future`](std::future::Future)-based spawner (polling with a waker) is
-/// a later addition; here "blocking" work is simply queued and run inline when
-/// the test drives it, so there is never any real blocking or thread.
+#[doc = include_str!("deterministic_executor.doc/DeterministicExecutor.md")]
 #[derive(Default)]
 pub struct DeterministicExecutor {
-    /// Pending jobs, drained front-to-back to guarantee FIFO ordering.
+    #[doc = include_str!("deterministic_executor.doc/queue.md")]
     queue: Mutex<VecDeque<Box<dyn FnOnce() + Send>>>,
 }
 
 impl DeterministicExecutor {
-    /// Creates an executor with an empty job queue.
+    #[doc = include_str!("deterministic_executor.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Enqueues `job` to run later. This does **not** run the job; call
-    /// [`run`](Self::run) or [`run_next`](Self::run_next) to drive execution.
-    ///
-    /// `job` must be [`Send`] because the same queue backs the
-    /// [`BlockingExecutor`] port, whose jobs are `Send`. Nothing is ever sent
-    /// anywhere: the job runs on the calling thread, when the test says so.
+    #[doc = include_str!("deterministic_executor.doc/spawn.md")]
     pub fn spawn(&self, job: impl FnOnce() + Send + 'static) {
         self.enqueue(Box::new(job));
     }
 
-    /// Pushes an already-boxed job onto the tail of the queue.
+    #[doc = include_str!("deterministic_executor.doc/enqueue.md")]
     fn enqueue(&self, job: Box<dyn FnOnce() + Send>) {
         self.lock().push_back(job);
     }
 
-    /// Locks the queue, recovering from a poisoned lock.
-    ///
-    /// A job that panics while the queue is *unlocked* cannot poison it, but a
-    /// panic elsewhere holding the guard would; recovering keeps a test's failure
-    /// message the original panic rather than a confusing poison error.
+    #[doc = include_str!("deterministic_executor.doc/lock.md")]
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<Box<dyn FnOnce() + Send>>> {
         self.queue
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Runs queued jobs in FIFO order until the queue is empty.
-    ///
-    /// A job may itself [`spawn`](Self::spawn) more jobs; those run later within
-    /// the same drain, after all jobs already ahead of them, preserving order.
-    /// Each job is popped out of the lock before being invoked, so spawning
-    /// during a run never contends with the guard.
+    #[doc = include_str!("deterministic_executor.doc/run.md")]
     pub fn run(&self) {
         while self.run_next() {}
     }
 
-    /// Runs exactly one queued job (the front of the queue).
-    ///
-    /// Returns `true` if a job was run, or `false` if the queue was empty. The
-    /// job is popped while the lock is held, the guard is dropped, and only
-    /// then is the job invoked — so a job that `spawn`s during its run does not
-    /// deadlock on the queue.
+    #[doc = include_str!("deterministic_executor.doc/run_next.md")]
     pub fn run_next(&self) -> bool {
         let job = self.lock().pop_front();
         match job {
@@ -95,13 +53,13 @@ impl DeterministicExecutor {
         }
     }
 
-    /// Returns the number of jobs waiting to run.
+    #[doc = include_str!("deterministic_executor.doc/pending.md")]
     #[must_use]
     pub fn pending(&self) -> usize {
         self.lock().len()
     }
 
-    /// Returns `true` when no jobs are waiting to run.
+    #[doc = include_str!("deterministic_executor.doc/is_idle.md")]
     #[must_use]
     pub fn is_idle(&self) -> bool {
         self.lock().is_empty()
@@ -109,19 +67,14 @@ impl DeterministicExecutor {
 }
 
 impl BlockingExecutor for DeterministicExecutor {
-    /// Enqueues the (already-boxed) blocking `job`.
-    ///
-    /// This executor is deterministic and single-threaded: "blocking" work is
-    /// just queued and run inline when the test drives execution via
-    /// [`run`](Self::run) / [`run_next`](Self::run_next). There is never any
-    /// real blocking or a background thread.
+    #[doc = include_str!("deterministic_executor.doc/run_blocking.md")]
     fn run_blocking(&self, job: Box<dyn FnOnce() + Send + 'static>) {
         self.enqueue(job);
     }
 }
 
 impl std::fmt::Debug for DeterministicExecutor {
-    /// Reports the pending job count; the boxed closures themselves are opaque.
+    #[doc = include_str!("deterministic_executor.doc/fmt.md")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeterministicExecutor")
             .field("pending", &self.pending())

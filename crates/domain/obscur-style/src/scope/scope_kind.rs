@@ -1,40 +1,20 @@
-//! How a style scope behaves with respect to isolation.
-//!
-//! Per §4.15, global stylesheets are allowed but component stylesheets are
-//! scoped by default; a component may additionally opt into CSS-module
-//! isolation of its local identifiers, or explicitly declare itself open /
-//! global. [`ScopeKind`] models that four-way behaviour classification.
+#![doc = include_str!("scope_kind.doc/_module.md")]
 
-/// The behaviour of a style scope with respect to isolation (§4.15).
-///
-/// `Copy + Eq + Hash` so it can be stored on [`crate::scope::StyleScope`] and
-/// used as a map key.
+#[doc = include_str!("scope_kind.doc/ScopeKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScopeKind {
-    /// The global application scope: no isolation. Global stylesheets live here
-    /// and everything is visible (§4.15).
+    #[doc = include_str!("scope_kind.doc/Global.md")]
     Global,
-    /// A component scope: scoped by default, so non-inherited properties are
-    /// contained at the boundary while inherited and custom properties still
-    /// cross (§4.15).
+    #[doc = include_str!("scope_kind.doc/Component.md")]
     Component,
-    /// A component scope in CSS-module mode: like [`ScopeKind::Component`] but
-    /// additionally isolating its local identifiers so internal class names need
-    /// not be globally unique (§4.15).
+    #[doc = include_str!("scope_kind.doc/Module.md")]
     Module,
-    /// A component scope that is explicitly opened / made global despite being a
-    /// component: it performs no isolation, matching [`ScopeKind::Global`]'s
-    /// visibility (§4.15).
+    #[doc = include_str!("scope_kind.doc/Open.md")]
     Open,
 }
 
 impl ScopeKind {
-    /// Returns `true` when this kind isolates its scope's non-inherited
-    /// properties at the boundary.
-    ///
-    /// Isolated for [`ScopeKind::Component`] and [`ScopeKind::Module`]; not
-    /// isolated for [`ScopeKind::Global`] and [`ScopeKind::Open`], which are
-    /// deliberately open (§4.15).
+    #[doc = include_str!("scope_kind.doc/is_isolated.md")]
     #[must_use]
     pub const fn is_isolated(self) -> bool {
         matches!(self, Self::Component | Self::Module)

@@ -1,6 +1,5 @@
-//! `PluginActivation` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("plugin_activation.doc/_module.md")]
 
-/// Placeholder for the `PluginActivation` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("plugin_activation.doc/PluginActivation.md")]
 #[derive(Debug)]
 pub struct PluginActivation;

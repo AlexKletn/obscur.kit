@@ -1,10 +1,4 @@
-//! **SPECIFICATION-DERIVED** editing-engine and IME cases for obscur.kit §5.11
-//! ("Editing engine") and §5.12 ("IME").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §5 (and
-//! UAX#29 as referenced through css-text-3) with **no access to this repository's
-//! source**. A failure here is a defect report about the engine and must not be
-//! "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch5_editing_ime.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch5_support/mod.rs"]
@@ -26,20 +20,20 @@ use obscur_kit::widgets::input::Input;
 
 use support::compile;
 
-/// The app-owned command symbol the field's `input` / `change` events bind to.
+#[doc = include_str!("spec_ch5_editing_ime.doc/CMD.md")]
 const CMD: InternedSymbol = InternedSymbol::from_raw(0x0E01);
 
-/// The viewport every case in this file renders under.
+#[doc = include_str!("spec_ch5_editing_ime.doc/VW.md")]
 const VW: f32 = 400.0;
 
-/// Everything a driven field reports: its input and change events, in order.
+#[doc = include_str!("spec_ch5_editing_ime.doc/Events.md")]
 #[derive(Default)]
 struct Events {
     input: Vec<String>,
     change: Vec<String>,
 }
 
-/// A live field: a runtime with one focused [`Input`] and its event log.
+#[doc = include_str!("spec_ch5_editing_ime.doc/Field.md")]
 struct Field {
     runtime: UiRuntime,
     events: Rc<RefCell<Events>>,
@@ -49,12 +43,12 @@ struct Field {
 }
 
 impl Field {
-    /// Builds a focused single-line field seeded with `value`.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/single_line.md")]
     fn single_line(value: &str) -> Self {
         Self::build(Input::with_value(CMD, value).view(), 200.0)
     }
 
-    /// Builds a focused multi-line field seeded with `value`, `width` wide.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/multiline.md")]
     fn multiline(value: &str, width: f32) -> Self {
         Self::build(Input::with_value(CMD, value).multiline(true).view(), width)
     }
@@ -88,8 +82,7 @@ impl Field {
         field
     }
 
-    /// Clicks the field through the real pointer path so focus (and the editing
-    /// session) land on it exactly as they would for a user.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/focus.md")]
     fn focus(&mut self) {
         let target = support::at(&self.runtime, &[0]);
         self.node = target;
@@ -117,12 +110,7 @@ impl Field {
         ));
     }
 
-    /// Types one printable character through the real keyboard path.
-    ///
-    /// Unused since `ime_05_a_key_plus_a_text_delivery_inserts_once` was deleted
-    /// (see the note where that case stood). Kept because it is half of the
-    /// two-channel input surface the §5.12 duplicate-delivery rule is about, and
-    /// whatever replaces that case will want it.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/type_char.md")]
     #[allow(dead_code)]
     fn type_char(&mut self, ch: char) {
         let logical = Some(LogicalKey::character(ch));
@@ -132,7 +120,7 @@ impl Field {
             .handle_key(KeyEvent::release(PhysicalKey::KeyA, logical));
     }
 
-    /// Presses a named key through the real keyboard path.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/press.md")]
     fn press(&mut self, key: NamedKey) {
         let logical = Some(LogicalKey::named(key));
         self.runtime
@@ -141,32 +129,32 @@ impl Field {
             .handle_key(KeyEvent::release(PhysicalKey::KeyA, logical));
     }
 
-    /// The field's current committed value.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/value.md")]
     fn value(&self) -> String {
         self.runtime.editing_text().unwrap_or_default().to_owned()
     }
 
-    /// The caret's focus offset.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/caret.md")]
     fn caret(&self) -> usize {
         self.runtime.editing_selection().map_or(0, |s| s.focus())
     }
 
-    /// How many `input` events the field has fired.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/inputs.md")]
     fn inputs(&self) -> usize {
         self.events.borrow().input.len()
     }
 
-    /// How many `change` events the field has fired.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/changes.md")]
     fn changes(&self) -> usize {
         self.events.borrow().change.len()
     }
 
-    /// Renders the next frame, so the scene reflects the current state.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/frame.md")]
     fn frame(&mut self) {
         let _ = self.runtime.render_now(&self.view, &self.sheets);
     }
 
-    /// The text of every `DrawText` run in the last frame, in paint order.
+    #[doc = include_str!("spec_ch5_editing_ime.doc/painted_runs.md")]
     fn painted_runs(&self) -> Vec<String> {
         self.runtime
             .snapshot()
@@ -181,9 +169,7 @@ impl Field {
     }
 }
 
-/// §5.11 "- deletion semantics;" with §5.10 "- Unicode;". A ZWJ emoji sequence is
-/// five code points and **one** user-perceived grapheme cluster (UAX#29), so one
-/// Backspace removes all of it.
+#[doc = include_str!("spec_ch5_editing_ime.doc/ed_01_backspace_deletes_one_grapheme_cluster.md")]
 #[test]
 fn ed_01_backspace_deletes_one_grapheme_cluster() {
     let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
@@ -206,9 +192,7 @@ fn ed_01_backspace_deletes_one_grapheme_cluster() {
     );
 }
 
-/// §5.11 "- word/line/document navigation;" / "- Home/End;". Home and End are
-/// **visual-line** operations, not paragraph ones: on wrapped text they must stop
-/// at the wrap, not at a `\n` or the buffer end.
+#[doc = include_str!("spec_ch5_editing_ime.doc/ed_02_home_and_end_are_visual_line_not_paragraph.md")]
 #[test]
 fn ed_02_home_and_end_are_visual_line_not_paragraph() {
     // One paragraph with no newline, narrow enough to wrap into at least two line
@@ -270,9 +254,7 @@ fn ed_02_home_and_end_are_visual_line_not_paragraph() {
     );
 }
 
-/// §5.12 "Rules: … - preedit is separate from committed text;" with §5.14's event
-/// vocabulary ("- current value; - committed value; - input event; - change
-/// event;").
+#[doc = include_str!("spec_ch5_editing_ime.doc/ime_01_a_preedit_is_never_in_the_value.md")]
 #[test]
 fn ime_01_a_preedit_is_never_in_the_value() {
     let mut field = Field::single_line("");
@@ -306,7 +288,7 @@ fn ime_01_a_preedit_is_never_in_the_value() {
     );
 }
 
-/// §5.12 "- one composition is one undo unit;".
+#[doc = include_str!("spec_ch5_editing_ime.doc/ime_02_one_composition_is_one_undo_unit.md")]
 #[test]
 fn ime_02_one_composition_is_one_undo_unit() {
     let mut field = Field::single_line("ab");
@@ -343,7 +325,7 @@ fn ime_02_one_composition_is_one_undo_unit() {
     );
 }
 
-/// §5.12 "- external edits validate the composition range;".
+#[doc = include_str!("spec_ch5_editing_ime.doc/ime_03_an_external_edit_cancels_the_composition.md")]
 #[test]
 fn ime_03_an_external_edit_cancels_the_composition() {
     let mut field = Field::single_line("hello world");
@@ -421,9 +403,7 @@ fn ime_03_an_external_edit_cancels_the_composition() {
 // Driving helpers. These DRIVE; they carry no expectations.
 // ---------------------------------------------------------------------------
 
-/// Seats the caret at `offset` (in characters) by re-seeding the session and
-/// walking left with the arrow key — grapheme navigation, which is independent of
-/// the Home/End behaviour under test.
+#[doc = include_str!("spec_ch5_editing_ime.doc/seat_caret.md")]
 fn seat_caret(field: &mut Field, offset: usize) {
     let text = field.value();
     let node = field.node;
@@ -434,7 +414,7 @@ fn seat_caret(field: &mut Field, offset: usize) {
     }
 }
 
-/// Presses the platform undo chord (`Ctrl` held, then `Z`).
+#[doc = include_str!("spec_ch5_editing_ime.doc/undo.md")]
 fn undo(field: &mut Field) {
     field
         .runtime

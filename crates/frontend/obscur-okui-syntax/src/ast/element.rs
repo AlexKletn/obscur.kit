@@ -1,29 +1,14 @@
-//! `Element`: the typed AST view of an element node (spec §2.2).
+#![doc = include_str!("element.doc/_module.md")]
 
 use crate::ast::Attribute;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-/// Typed AST wrapper over an element-shaped syntax node (spec §2.2).
-///
-/// [`cast`](Self::cast) accepts any of the three element-shaped node kinds —
-/// [`Element`](SyntaxKind::Element), [`Conditional`](SyntaxKind::Conditional)
-/// (`<If>`/`<ElseIf>`/`<Else>`) and [`ForLoop`](SyntaxKind::ForLoop)
-/// (`<For>`/`<VirtualFor>`) — because they all share the `<Tag …>…</Tag>`
-/// shape: an [`OpenTag`](SyntaxKind::OpenTag) node holding the tag name and
-/// attributes, optional content children, and (unless self-closing) a
-/// [`CloseTag`](SyntaxKind::CloseTag) node.
-///
-/// [`is_conditional`](Self::is_conditional) / [`is_loop`](Self::is_loop) recover
-/// the control-flow classification; the dedicated
-/// [`Conditional`](crate::ast::Conditional) / [`LoopExpression`](crate::ast::LoopExpression)
-/// wrappers expose their extra accessors.
+#[doc = include_str!("element.doc/Element.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Element(SyntaxNode);
 
 impl Element {
-    /// Casts a syntax node to an `Element`, returning `Some` iff its kind is
-    /// element-shaped ([`Element`](SyntaxKind::Element),
-    /// [`Conditional`](SyntaxKind::Conditional) or [`ForLoop`](SyntaxKind::ForLoop)).
+    #[doc = include_str!("element.doc/cast.md")]
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if matches!(
@@ -36,21 +21,20 @@ impl Element {
         }
     }
 
-    /// Returns the wrapped syntax node.
+    #[doc = include_str!("element.doc/syntax.md")]
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    /// Returns the element's `<Tag …>` open-tag node, if present.
+    #[doc = include_str!("element.doc/open_tag.md")]
     fn open_tag(&self) -> Option<&SyntaxNode> {
         self.0
             .child_nodes()
             .find(|n| n.kind() == SyntaxKind::OpenTag)
     }
 
-    /// Returns the element's tag name — the first [`Ident`](SyntaxKind::Ident)
-    /// token inside the [`OpenTag`](SyntaxKind::OpenTag) node.
+    #[doc = include_str!("element.doc/tag_name.md")]
     #[must_use]
     pub fn tag_name(&self) -> Option<String> {
         self.open_tag()?
@@ -59,22 +43,19 @@ impl Element {
             .map(|t| t.text().to_owned())
     }
 
-    /// Returns `true` if this element is a [`Conditional`](SyntaxKind::Conditional)
-    /// (`<If>`/`<ElseIf>`/`<Else>`).
+    #[doc = include_str!("element.doc/is_conditional.md")]
     #[must_use]
     pub const fn is_conditional(&self) -> bool {
         matches!(self.0.kind(), SyntaxKind::Conditional)
     }
 
-    /// Returns `true` if this element is a [`ForLoop`](SyntaxKind::ForLoop)
-    /// (`<For>`/`<VirtualFor>`).
+    #[doc = include_str!("element.doc/is_loop.md")]
     #[must_use]
     pub const fn is_loop(&self) -> bool {
         matches!(self.0.kind(), SyntaxKind::ForLoop)
     }
 
-    /// Iterates the element's attributes — the [`Attribute`](SyntaxKind::Attribute)
-    /// child nodes of its [`OpenTag`](SyntaxKind::OpenTag) node.
+    #[doc = include_str!("element.doc/attributes.md")]
     pub fn attributes(&self) -> impl Iterator<Item = Attribute> + '_ {
         self.open_tag()
             .into_iter()
@@ -83,22 +64,14 @@ impl Element {
             .filter_map(Attribute::cast)
     }
 
-    /// Returns the first attribute whose [`name`](Attribute::name) equals `name`.
+    #[doc = include_str!("element.doc/attribute.md")]
     #[must_use]
     pub fn attribute(&self, name: &str) -> Option<Attribute> {
         self.attributes()
             .find(|attr| attr.name().as_deref() == Some(name))
     }
 
-    /// Iterates the element's content children — the direct child nodes between
-    /// its open and close tags.
-    ///
-    /// Only content-shaped kinds are returned ([`Element`](SyntaxKind::Element),
-    /// [`Conditional`](SyntaxKind::Conditional), [`ForLoop`](SyntaxKind::ForLoop),
-    /// [`Expression`](SyntaxKind::Expression), [`TextNode`](SyntaxKind::TextNode));
-    /// the structural [`OpenTag`](SyntaxKind::OpenTag) and
-    /// [`CloseTag`](SyntaxKind::CloseTag) nodes are skipped. The nodes are cloned
-    /// so the returned iterator is owned and outlives this borrow.
+    #[doc = include_str!("element.doc/children.md")]
     pub fn children(&self) -> impl Iterator<Item = SyntaxNode> + use<> {
         self.0
             .child_nodes()
@@ -117,8 +90,7 @@ impl Element {
             .into_iter()
     }
 
-    /// Returns `true` if the element is self-closing (`<Tag …/>`): it has an
-    /// [`OpenTag`](SyntaxKind::OpenTag) but no [`CloseTag`](SyntaxKind::CloseTag).
+    #[doc = include_str!("element.doc/is_self_closing.md")]
     #[must_use]
     pub fn is_self_closing(&self) -> bool {
         self.open_tag().is_some()

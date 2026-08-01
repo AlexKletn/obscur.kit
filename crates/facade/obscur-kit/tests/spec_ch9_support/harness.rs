@@ -1,14 +1,4 @@
-//! Shared harness for the `spec_ch9_*` **specification-derived** test files.
-//!
-//! These tests are NOT implementation-derived. Every expected value in the
-//! `spec_ch9_*.rs` files was written by an agent reading obscur.kit §9
-//! ("Roadmap & non-goals") together with the §1–§8 clause that turns each
-//! non-goal into a normative rule, **without opening any source in this
-//! repository**. This module exists only to give those cases a compiling home;
-//! it contains no expectations of its own.
-//!
-//! Nothing here may be "fixed" to make a case pass. A failing `spec_ch9_*` test
-//! is a claim about the implementation, not about the test.
+#![doc = include_str!("harness.doc/_module.md")]
 #![allow(dead_code, unreachable_pub)]
 
 use std::cell::RefCell;
@@ -32,8 +22,7 @@ use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, 
 // CSS + view plumbing (same shape as the §4 harness)
 // ---------------------------------------------------------------------------
 
-/// Parses and compiles authored CSS through the real frontend, keeping the whole
-/// [`CompiledStylesheet`] so a case can read its unsupported-feature reports.
+#[doc = include_str!("harness.doc/compile_full.md")]
 #[must_use]
 pub fn compile_full(css: &str) -> CompiledStylesheet {
     let src = CssSource::anonymous(css);
@@ -41,19 +30,19 @@ pub fn compile_full(css: &str) -> CompiledStylesheet {
     StylesheetCompiler::new().compile(&parsed)
 }
 
-/// Compiles authored CSS text into a matchable stylesheet.
+#[doc = include_str!("harness.doc/compile.md")]
 #[must_use]
 pub fn compile(css: &str) -> Stylesheet {
     compile_full(css).matchable
 }
 
-/// The unsupported-feature reports the CSS frontend produced for `css`.
+#[doc = include_str!("harness.doc/unsupported.md")]
 #[must_use]
 pub fn unsupported(css: &str) -> Vec<UnsupportedCssFeature> {
     compile_full(css).unsupported
 }
 
-/// An element node carrying `class`, with `kids` as its children.
+#[doc = include_str!("harness.doc/el.md")]
 #[must_use]
 pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
@@ -61,31 +50,31 @@ pub fn el(id: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
         .with_children(ViewFragment::from_nodes(kids))
 }
 
-/// A text node.
+#[doc = include_str!("harness.doc/txt.md")]
 #[must_use]
 pub fn txt(content: &str) -> ViewNode {
     ViewNode::text(content)
 }
 
-/// A view whose root fragment is `nodes`.
+#[doc = include_str!("harness.doc/view.md")]
 #[must_use]
 pub fn view(nodes: Vec<ViewNode>) -> View {
     View::from_fragment(ViewFragment::from_nodes(nodes))
 }
 
-/// A runtime with a `w x h` viewport.
+#[doc = include_str!("harness.doc/runtime.md")]
 #[must_use]
 pub fn runtime(w: f32, h: f32) -> UiRuntime {
     UiRuntime::new(RuntimeId::from_raw(1), Size::new(w, h))
 }
 
-/// A runtime with a `w x h` viewport under an explicit runtime id.
+#[doc = include_str!("harness.doc/runtime_id.md")]
 #[must_use]
 pub fn runtime_id(id: u64, w: f32, h: f32) -> UiRuntime {
     UiRuntime::new(RuntimeId::from_raw(id), Size::new(w, h))
 }
 
-/// Renders one real frame of `v` under `sheets` in a fresh `w x h` runtime.
+#[doc = include_str!("harness.doc/drive_sheets.md")]
 #[must_use]
 pub fn drive_sheets(w: f32, h: f32, sheets: &[Stylesheet], v: &View) -> UiRuntime {
     let mut rt = runtime(w, h);
@@ -93,14 +82,14 @@ pub fn drive_sheets(w: f32, h: f32, sheets: &[Stylesheet], v: &View) -> UiRuntim
     rt
 }
 
-/// Renders one real frame of `v` under a single authored stylesheet.
+#[doc = include_str!("harness.doc/drive.md")]
 #[must_use]
 pub fn drive(w: f32, h: f32, css: &str, v: &View) -> UiRuntime {
     let sheet = compile(css);
     drive_sheets(w, h, std::slice::from_ref(&sheet), v)
 }
 
-/// Walks from the tree root down `path` (child indices) to a [`NodeId`].
+#[doc = include_str!("harness.doc/at.md")]
 #[must_use]
 pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
     let mut node = rt.tree().root().expect("a root after a frame");
@@ -121,7 +110,7 @@ pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
     node
 }
 
-/// The absolute border-box `(x, y, w, h)` of a node.
+#[doc = include_str!("harness.doc/geom.md")]
 #[must_use]
 pub fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
     let b = rt
@@ -132,7 +121,7 @@ pub fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
     (b.origin().x, b.origin().y, b.size().width, b.size().height)
 }
 
-/// Asserts `actual ≈ expected` within a sub-hundredth-pixel tolerance.
+#[doc = include_str!("harness.doc/approx.md")]
 pub fn approx(actual: f32, expected: f32, what: &str) {
     assert!(
         (actual - expected).abs() < 1e-2,
@@ -140,7 +129,7 @@ pub fn approx(actual: f32, expected: f32, what: &str) {
     );
 }
 
-/// A node's computed `color`.
+#[doc = include_str!("harness.doc/color_of.md")]
 #[must_use]
 pub fn color_of(rt: &UiRuntime, node: NodeId) -> Option<StyleColor> {
     rt.computed_style(node)?
@@ -148,7 +137,7 @@ pub fn color_of(rt: &UiRuntime, node: NodeId) -> Option<StyleColor> {
         .and_then(obscur_kit::style::computed::ComputedValue::as_color)
 }
 
-/// Asserts a node's computed `color` is the 8-bit sRGB triple `(r, g, b)`.
+#[doc = include_str!("harness.doc/assert_color.md")]
 pub fn assert_color(rt: &UiRuntime, node: NodeId, r: u8, g: u8, b: u8, what: &str) {
     let actual = color_of(rt, node).unwrap_or_else(|| panic!("{what}: no computed color"));
     let expected = StyleColor::rgba(
@@ -171,36 +160,36 @@ pub fn assert_color(rt: &UiRuntime, node: NodeId, r: u8, g: u8, b: u8, what: &st
 // Diagnostics capture (§1.6: severity, subsystem, stable code, context)
 // ---------------------------------------------------------------------------
 
-/// A [`DiagnosticSink`] that keeps every diagnostic it is handed.
+#[doc = include_str!("harness.doc/CapturedDiagnostics.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CapturedDiagnostics(Arc<Mutex<Vec<Diagnostic>>>);
 
 impl CapturedDiagnostics {
-    /// A fresh, empty capture buffer.
+    #[doc = include_str!("harness.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// A boxed sink writing into this buffer, for [`UiRuntime::set_diagnostic_sink`].
+    #[doc = include_str!("harness.doc/sink.md")]
     #[must_use]
     pub fn sink(&self) -> Box<dyn DiagnosticSink> {
         Box::new(Self(Arc::clone(&self.0)))
     }
 
-    /// Every diagnostic captured so far, in emission order.
+    #[doc = include_str!("harness.doc/all.md")]
     #[must_use]
     pub fn all(&self) -> Vec<Diagnostic> {
         self.0.lock().expect("diagnostics mutex").clone()
     }
 
-    /// How many diagnostics have been captured.
+    #[doc = include_str!("harness.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.0.lock().expect("diagnostics mutex").len()
     }
 
-    /// Whether nothing has been captured.
+    #[doc = include_str!("harness.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -220,7 +209,7 @@ impl DiagnosticSink for CapturedDiagnostics {
 // Repository-shaped helpers, for the API-surface / build-graph cases
 // ---------------------------------------------------------------------------
 
-/// The workspace root (`crates/facade/obscur-kit` → three levels up).
+#[doc = include_str!("harness.doc/workspace_root.md")]
 #[must_use]
 pub fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -231,7 +220,7 @@ pub fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Every `.rs` file under `dir`, recursively.
+#[doc = include_str!("harness.doc/rust_sources.md")]
 #[must_use]
 pub fn rust_sources(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
@@ -253,11 +242,7 @@ pub fn rust_sources(dir: &std::path::Path) -> Vec<PathBuf> {
     out
 }
 
-/// The lines of every public (`pub fn` / `pub struct` field / `pub const fn`)
-/// item in `crate_dir`'s `src`, paired with their file and 1-based line number.
-///
-/// Test-only code (`#[cfg(test)]` modules) is excluded by dropping everything
-/// from the first `mod tests` marker in a file onward.
+#[doc = include_str!("harness.doc/public_api_lines.md")]
 #[must_use]
 pub fn public_api_lines(crate_dir: &std::path::Path) -> Vec<(PathBuf, usize, String)> {
     let mut out = Vec::new();
@@ -287,7 +272,7 @@ pub fn public_api_lines(crate_dir: &std::path::Path) -> Vec<(PathBuf, usize, Str
 // Small shared cells, for the multi-runtime / binding cases
 // ---------------------------------------------------------------------------
 
-/// A shared, cloneable cell of `T` for driving root-view builders from a test.
+#[doc = include_str!("harness.doc/Shared.md")]
 #[derive(Debug)]
 pub struct Shared<T>(Rc<RefCell<T>>);
 
@@ -298,19 +283,19 @@ impl<T> Clone for Shared<T> {
 }
 
 impl<T> Shared<T> {
-    /// Wraps `value`.
+    #[doc = include_str!("harness.doc/new_2.md")]
     pub fn new(value: T) -> Self {
         Self(Rc::new(RefCell::new(value)))
     }
 
-    /// Replaces the held value.
+    #[doc = include_str!("harness.doc/set.md")]
     pub fn set(&self, value: T) {
         *self.0.borrow_mut() = value;
     }
 }
 
 impl<T: Clone> Shared<T> {
-    /// A clone of the held value.
+    #[doc = include_str!("harness.doc/get.md")]
     pub fn get(&self) -> T {
         self.0.borrow().clone()
     }

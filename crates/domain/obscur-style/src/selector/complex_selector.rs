@@ -1,36 +1,22 @@
-//! A complex selector: compounds joined by combinators ([`ComplexSelector`]).
+#![doc = include_str!("complex_selector.doc/_module.md")]
 
 use super::compound_selector::CompoundSelector;
 use super::selector_specificity::SelectorSpecificity;
 
-/// A combinator linking two compound selectors in a complex selector.
-///
-/// Each combinator constrains the relationship (read left-to-right) between the
-/// compound *before* it and the compound *after* it.
+#[doc = include_str!("complex_selector.doc/Combinator.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Combinator {
-    /// Descendant combinator (whitespace): the right compound is a descendant
-    /// of the left.
+    #[doc = include_str!("complex_selector.doc/Descendant.md")]
     Descendant,
-    /// Child combinator (`>`): the right compound is a direct child of the left.
+    #[doc = include_str!("complex_selector.doc/Child.md")]
     Child,
-    /// Next-sibling combinator (`+`): the right compound immediately follows the
-    /// left among element siblings.
+    #[doc = include_str!("complex_selector.doc/NextSibling.md")]
     NextSibling,
-    /// Subsequent-sibling combinator (`~`): the right compound follows the left
-    /// among element siblings (not necessarily immediately).
+    #[doc = include_str!("complex_selector.doc/SubsequentSibling.md")]
     SubsequentSibling,
 }
 
-/// A complex selector — a lead compound followed by combinator-linked compounds
-/// (`div > .a + span`).
-///
-/// The compounds are stored left-to-right: `head` is the leftmost compound and
-/// each `tail` entry pairs the combinator that *precedes* a compound with that
-/// compound. The **rightmost** compound (the last `tail` entry, or `head` when
-/// `tail` is empty) is the **subject**: the element being tested must match the
-/// subject, while the earlier compounds constrain its ancestors/siblings. This
-/// is why the matcher evaluates right-to-left, starting from the subject.
+#[doc = include_str!("complex_selector.doc/ComplexSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComplexSelector {
     head: CompoundSelector,
@@ -38,34 +24,31 @@ pub struct ComplexSelector {
 }
 
 impl ComplexSelector {
-    /// Creates a complex selector from its lead compound and combinator-linked
-    /// tail (both stored left-to-right).
+    #[doc = include_str!("complex_selector.doc/new.md")]
     #[must_use]
     pub const fn new(head: CompoundSelector, tail: Vec<(Combinator, CompoundSelector)>) -> Self {
         Self { head, tail }
     }
 
-    /// Returns the lead (leftmost) compound selector.
+    #[doc = include_str!("complex_selector.doc/head.md")]
     #[must_use]
     pub const fn head(&self) -> &CompoundSelector {
         &self.head
     }
 
-    /// Returns the combinator-linked tail compounds, left-to-right.
+    #[doc = include_str!("complex_selector.doc/tail.md")]
     #[must_use]
     pub fn tail(&self) -> &[(Combinator, CompoundSelector)] {
         &self.tail
     }
 
-    /// Returns the subject compound: the rightmost compound, which the tested
-    /// element itself must match.
+    #[doc = include_str!("complex_selector.doc/subject.md")]
     #[must_use]
     pub fn subject(&self) -> &CompoundSelector {
         self.tail.last().map_or(&self.head, |(_, c)| c)
     }
 
-    /// Returns the specificity of this complex selector: the sum over all its
-    /// compounds (combinators contribute nothing).
+    #[doc = include_str!("complex_selector.doc/specificity.md")]
     #[must_use]
     pub fn specificity(&self) -> SelectorSpecificity {
         self.tail

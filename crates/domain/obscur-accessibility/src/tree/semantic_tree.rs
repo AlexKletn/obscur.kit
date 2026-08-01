@@ -1,4 +1,4 @@
-//! The semantic accessibility tree linked to the retained UI tree (spec §7.1).
+#![doc = include_str!("semantic_tree.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
@@ -6,31 +6,16 @@ use obscur_identity::NodeId;
 
 use crate::semantic::SemanticNode;
 
-/// The semantic accessibility tree linked to the retained UI tree (spec §7.1).
-///
-/// Accessibility is projected through a **semantic tree** whose nodes are keyed
-/// by the retained-tree [`NodeId`]s they describe. Platform adapters target UI
-/// Automation, AX, AT-SPI, or web accessibility APIs from this shared structure;
-/// they never touch the retained tree directly.
-///
-/// The tree owns a [`SemanticNode`] per id, an ordered child list per parent,
-/// an optional [`root`](Self::root), and a monotonic [`version`](Self::version)
-/// counter that is bumped on every structural or content mutation. The version
-/// is a plain counter — never a wall-clock value — so a [`SemanticSnapshot`]
-/// taken from this tree can be compared against the live version to detect
-/// staleness (spec §7.1).
-///
-/// [`SemanticSnapshot`]: crate::tree::SemanticSnapshot
+#[doc = include_str!("semantic_tree.doc/SemanticTree.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticTree {
-    /// The semantic nodes, keyed by the retained [`NodeId`] each describes.
+    #[doc = include_str!("semantic_tree.doc/nodes.md")]
     nodes: BTreeMap<NodeId, SemanticNode>,
-    /// Ordered child id lists, keyed by parent [`NodeId`].
+    #[doc = include_str!("semantic_tree.doc/children.md")]
     children: BTreeMap<NodeId, Vec<NodeId>>,
-    /// The tree root, if one has been designated.
+    #[doc = include_str!("semantic_tree.doc/root.md")]
     root: Option<NodeId>,
-    /// The monotonic mutation counter, bumped on every structural or content
-    /// change; used for snapshot staleness rather than any wall-clock value.
+    #[doc = include_str!("semantic_tree.doc/version.md")]
     version: u64,
 }
 
@@ -41,7 +26,7 @@ impl Default for SemanticTree {
 }
 
 impl SemanticTree {
-    /// Creates an empty tree with no nodes, no root, and version `0`.
+    #[doc = include_str!("semantic_tree.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -52,26 +37,19 @@ impl SemanticTree {
         }
     }
 
-    /// Designates `id` as the tree [`root`](Self::root) and bumps the version.
+    #[doc = include_str!("semantic_tree.doc/set_root.md")]
     pub fn set_root(&mut self, id: NodeId) {
         self.root = Some(id);
         self.version += 1;
     }
 
-    /// Returns the tree root, if one has been designated.
+    #[doc = include_str!("semantic_tree.doc/root_2.md")]
     #[must_use]
     pub const fn root(&self) -> Option<NodeId> {
         self.root
     }
 
-    /// Inserts `node`, keyed by its own [`node`](SemanticNode::node) id, and
-    /// bumps the version (spec §7.1).
-    ///
-    /// When `parent` is `Some`, the node's id is appended to that parent's
-    /// ordered child list. Re-inserting the same id **updates** the stored node
-    /// in place; the child list is only appended to when a `parent` is supplied,
-    /// so callers updating an already-linked node should pass `None` to avoid a
-    /// duplicate child entry.
+    #[doc = include_str!("semantic_tree.doc/insert.md")]
     pub fn insert(&mut self, node: SemanticNode, parent: Option<NodeId>) {
         let id = node.node();
         self.nodes.insert(id, node);
@@ -81,23 +59,19 @@ impl SemanticTree {
         self.version += 1;
     }
 
-    /// Returns the semantic node for `id`, if present.
+    #[doc = include_str!("semantic_tree.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&SemanticNode> {
         self.nodes.get(&id)
     }
 
-    /// Returns the ordered child ids of `id`, or an empty slice if it has none.
+    #[doc = include_str!("semantic_tree.doc/children_2.md")]
     #[must_use]
     pub fn children(&self, id: NodeId) -> &[NodeId] {
         self.children.get(&id).map_or(&[], Vec::as_slice)
     }
 
-    /// Removes and returns the node for `id`, unlinking it from its parent's
-    /// child list and dropping its own child list, then bumps the version.
-    ///
-    /// Returns `None` (without bumping the version) if no such node exists. If
-    /// the removed node was the [`root`](Self::root), the root is cleared.
+    #[doc = include_str!("semantic_tree.doc/remove.md")]
     pub fn remove(&mut self, id: NodeId) -> Option<SemanticNode> {
         let removed = self.nodes.remove(&id)?;
         self.children.remove(&id);
@@ -111,32 +85,31 @@ impl SemanticTree {
         Some(removed)
     }
 
-    /// Returns whether a node for `id` is present.
+    #[doc = include_str!("semantic_tree.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.nodes.contains_key(&id)
     }
 
-    /// Returns the number of nodes in the tree.
+    #[doc = include_str!("semantic_tree.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Returns whether the tree holds no nodes.
+    #[doc = include_str!("semantic_tree.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    /// Returns the current monotonic version counter.
+    #[doc = include_str!("semantic_tree.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> u64 {
         self.version
     }
 
-    /// Iterates over every `(NodeId, &SemanticNode)` in deterministic ascending
-    /// id order.
+    #[doc = include_str!("semantic_tree.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &SemanticNode)> {
         self.nodes.iter().map(|(id, node)| (*id, node))
     }

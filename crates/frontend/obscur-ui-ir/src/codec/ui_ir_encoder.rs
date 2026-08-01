@@ -1,57 +1,24 @@
-//! `UiIrEncoder`: the deterministic binary encoder for [`UiIrDocument`]
-//! (spec §2.5 codecs).
-//!
-//! # Binary format (version 1)
-//!
-//! All multi-byte integers and floats are **little-endian**, written via
-//! `to_le_bytes`. The encoding is total: it never fails.
-//!
-//! - **Header**: magic `b"OKIR"` (4 bytes), then the format version `u16` = 1.
-//! - **Document**: the [`UiIrVersion`] (`major` u16, then `minor` u16); the
-//!   `required_capabilities` as a `u32` count followed by each id as a
-//!   length-prefixed string; then the root [`UiIrNode`].
-//! - **Node**: `id` u64; `kind` u8 (Element=0, Text=1, Component=2, Fragment=3,
-//!   Conditional=4, Loop=5); `tag` string; `content` string; `properties`
-//!   (`u32` count, each = name string + expression); `events` (`u32` count,
-//!   each = event string + handler string); `children` (`u32` count, each a
-//!   node, recursive).
-//! - **Expression**: a `u8` tag — 0 `Literal` (+ value), 1 `Binding`
-//!   (+ string), 2 `Call` (+ name string + `u32` arg count + each arg an
-//!   expression, recursive).
-//! - **Value**: a `u8` tag — 0 `Null`, 1 `Bool` (+ u8), 2 `Int` (+ i64),
-//!   3 `Float` (+ f64), 4 `Text` (+ string).
-//! - **String**: a `u32` byte-length then the UTF-8 bytes.
-//!
-//! The layout is fixed and field order is stable, so encoding is deterministic:
-//! `encode(doc)` is byte-identical across runs. Decode it with
-//! [`UiIrDecoder`](crate::codec::UiIrDecoder); the round-trip
-//! `decode(encode(doc)) == doc` is the contract.
+#![doc = include_str!("ui_ir_encoder.doc/_module.md")]
 
 use crate::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrValue};
 
-/// Magic bytes marking an Obscur Kit UI IR stream.
+#[doc = include_str!("ui_ir_encoder.doc/MAGIC.md")]
 pub(crate) const MAGIC: [u8; 4] = *b"OKIR";
-/// The binary format version this codec reads and writes.
+#[doc = include_str!("ui_ir_encoder.doc/FORMAT_VERSION.md")]
 pub(crate) const FORMAT_VERSION: u16 = 1;
 
-/// A stateless, deterministic binary encoder for [`UiIrDocument`] (spec §2.5).
-///
-/// The encoder serializes a document into the compact little-endian layout
-/// documented at the [module level](self). It holds no state — every call is
-/// independent — and encoding is total (it never fails). Decode the produced
-/// bytes with [`UiIrDecoder`](crate::codec::UiIrDecoder).
+#[doc = include_str!("ui_ir_encoder.doc/UiIrEncoder.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UiIrEncoder;
 
 impl UiIrEncoder {
-    /// Creates a new encoder.
+    #[doc = include_str!("ui_ir_encoder.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Encodes `doc` into a fresh byte buffer in the format documented at the
-    /// [module level](self). Encoding is total and never fails.
+    #[doc = include_str!("ui_ir_encoder.doc/encode.md")]
     #[must_use]
     pub fn encode(&self, doc: &UiIrDocument) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -73,49 +40,49 @@ impl UiIrEncoder {
     }
 }
 
-/// Narrows a `usize` length to `u32`, saturating at `u32::MAX` (no `as` cast).
+#[doc = include_str!("ui_ir_encoder.doc/len_u32.md")]
 fn len_u32(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
 
-/// Pushes a single byte.
+#[doc = include_str!("ui_ir_encoder.doc/push_u8.md")]
 fn push_u8(buf: &mut Vec<u8>, value: u8) {
     buf.push(value);
 }
 
-/// Pushes a little-endian `u16`.
+#[doc = include_str!("ui_ir_encoder.doc/push_u16.md")]
 fn push_u16(buf: &mut Vec<u8>, value: u16) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// Pushes a little-endian `u32`.
+#[doc = include_str!("ui_ir_encoder.doc/push_u32.md")]
 fn push_u32(buf: &mut Vec<u8>, value: u32) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// Pushes a little-endian `u64`.
+#[doc = include_str!("ui_ir_encoder.doc/push_u64.md")]
 fn push_u64(buf: &mut Vec<u8>, value: u64) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// Pushes a little-endian `i64`.
+#[doc = include_str!("ui_ir_encoder.doc/push_i64.md")]
 fn push_i64(buf: &mut Vec<u8>, value: i64) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// Pushes a little-endian `f64`.
+#[doc = include_str!("ui_ir_encoder.doc/push_f64.md")]
 fn push_f64(buf: &mut Vec<u8>, value: f64) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// Pushes a string as a `u32` byte-length prefix followed by its UTF-8 bytes.
+#[doc = include_str!("ui_ir_encoder.doc/push_str.md")]
 fn push_str(buf: &mut Vec<u8>, value: &str) {
     let bytes = value.as_bytes();
     push_u32(buf, len_u32(bytes.len()));
     buf.extend_from_slice(bytes);
 }
 
-/// Maps a node kind to its wire tag byte.
+#[doc = include_str!("ui_ir_encoder.doc/kind_tag.md")]
 fn kind_tag(kind: crate::document::UiIrNodeKind) -> u8 {
     use crate::document::UiIrNodeKind;
     match kind {
@@ -128,7 +95,7 @@ fn kind_tag(kind: crate::document::UiIrNodeKind) -> u8 {
     }
 }
 
-/// Writes a node and, recursively, its whole subtree.
+#[doc = include_str!("ui_ir_encoder.doc/push_node.md")]
 fn push_node(buf: &mut Vec<u8>, node: &UiIrNode) {
     push_u64(buf, node.id());
     push_u8(buf, kind_tag(node.kind()));
@@ -156,7 +123,7 @@ fn push_node(buf: &mut Vec<u8>, node: &UiIrNode) {
     }
 }
 
-/// Writes an expression and, recursively, any argument expressions.
+#[doc = include_str!("ui_ir_encoder.doc/push_expr.md")]
 fn push_expr(buf: &mut Vec<u8>, expr: &UiIrExpression) {
     match expr {
         UiIrExpression::Literal(value) => {
@@ -178,7 +145,7 @@ fn push_expr(buf: &mut Vec<u8>, expr: &UiIrExpression) {
     }
 }
 
-/// Writes a literal value.
+#[doc = include_str!("ui_ir_encoder.doc/push_value.md")]
 fn push_value(buf: &mut Vec<u8>, value: &UiIrValue) {
     match value {
         UiIrValue::Null => push_u8(buf, 0),

@@ -1,14 +1,31 @@
-//! Orchestration module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod animation_binding;
 pub use animation_binding::{AnimatedKind, AnimationBinding};
+mod arrange_cache;
+pub use arrange_cache::ArrangeCache;
+mod arrange_pass;
+mod background_paint;
+mod border_paint;
+mod box_shadow_paint;
+mod caret_geometry;
+pub(crate) use caret_geometry::{
+    caret_advance_x, caret_line_move, caret_line_scroll_geometry, caret_offset_at_point,
+    caret_visual_line_bound,
+};
+mod composite_effects;
 mod css_motion_rules;
 pub use css_motion_rules::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
 mod drag_coordinator;
 pub use drag_coordinator::{DragCoordinator, DragOutcome};
+mod editing_role;
+pub(crate) use editing_role::editing_override;
 mod editing_view;
 pub use editing_view::{EditingView, PreeditView};
+mod filter_color_matrix;
 mod font_families;
+mod formatting_context;
 pub(crate) use font_families::families_for;
+mod gradient_brush;
 mod grid_areas;
 pub use grid_areas::resolve_named_grid_areas;
 mod grid_lines;
@@ -18,21 +35,33 @@ pub use grid_templates::{GridTemplates, grid_template_for, grid_templates_from};
 mod inspect;
 pub use inspect::{InspectInfo, NodeInspection, TreeInspection, overlay_commands};
 mod layout_coordinator;
-pub use layout_coordinator::{
-    ArrangeCache, LayoutBoxes, LayoutCoordinator, LayoutStyles, MeasureCache, root_font_size,
-};
+pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles};
+mod layout_eviction;
+mod layout_style_mapping;
+mod length_resolution;
+pub use length_resolution::root_font_size;
+mod measure_cache;
+pub use measure_cache::MeasureCache;
+mod measure_pass;
 mod motion_coordinator;
 pub use motion_coordinator::MotionCoordinator;
 mod motion_playback;
 pub use motion_playback::MotionPlayback;
+mod paint_color;
+mod paint_transform;
+mod paragraph_shaping;
 mod pseudo_states;
 pub use pseudo_states::PseudoStates;
 mod render_coordinator;
 pub use render_coordinator::RenderCoordinator;
+mod replaced_content;
 mod scene_coordinator;
-pub(crate) use scene_coordinator::scrollbar_rects;
-pub use scene_coordinator::{SceneCoordinator, ScrollPaint};
+pub use scene_coordinator::SceneCoordinator;
 mod scroll;
+mod scroll_container_paint;
+pub(crate) use scroll_container_paint::scrollbar_rects;
+mod scroll_paint;
+pub use scroll_paint::ScrollPaint;
 mod shaped_ch_metrics;
 pub(crate) use scroll::{ScrollContainer, overflow_scrolls, scroll_containers};
 pub use shaped_ch_metrics::ShapedChMetrics;
@@ -48,6 +77,7 @@ pub(crate) use style_scoping::{component_host, part_specificity_for, subject_par
 mod generated_content;
 pub(crate) use generated_content::resolve_generated_content;
 pub use generated_content::{GeneratedContent, GeneratedRun};
+mod subtree_brackets;
 mod text_attributes;
 pub(crate) use text_attributes::{
     TabSize, alignment_for, attributes_for, direction_for, display_text, letter_spacing_for,
@@ -56,5 +86,7 @@ pub(crate) use text_attributes::{
 };
 mod text_coordinator;
 pub use text_coordinator::TextCoordinator;
+mod text_leaf_measure;
+mod text_painter;
 mod tree_element;
 pub use tree_element::TreeElement;

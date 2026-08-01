@@ -1,25 +1,13 @@
-//! The AccessKit accessibility adapter's own error type (spec §7.1).
+#![doc = include_str!("accesskit_bridge_error.doc/_module.md")]
 
-/// A failure raised while converting the domain semantic tree into AccessKit
-/// types (spec §7.1, §2.7).
-///
-/// This is the adapter's own diagnostic, surfaced instead of a panic when a
-/// conversion cannot faithfully produce an [`accesskit::TreeUpdate`]. The
-/// determinism boundary of spec §7.1 requires the tree structure, roles, and
-/// states to map faithfully; when that is impossible the adapter reports the
-/// concrete cause here.
+#[doc = include_str!("accesskit_bridge_error.doc/AccessKitBridgeError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccessKitBridgeError {
-    /// The semantic snapshot has no root node, so AccessKit — which requires a
-    /// single root for every [`accesskit::Tree`] — cannot be built from it.
+    #[doc = include_str!("accesskit_bridge_error.doc/MissingRoot.md")]
     MissingRoot,
-    /// A semantic role had no AccessKit equivalent and could not be mapped. The
-    /// payload names the offending role for diagnostics. The built-in
-    /// [`RoleConverter`](crate::conversion::RoleConverter) never produces this
-    /// (it always falls back to [`accesskit::Role::Unknown`]); it exists for
-    /// stricter callers that reject approximations.
+    #[doc = include_str!("accesskit_bridge_error.doc/UnmappableRole.md")]
     UnmappableRole(Box<str>),
-    /// A generic AccessKit backend failure, carrying a human-readable reason.
+    #[doc = include_str!("accesskit_bridge_error.doc/Backend.md")]
     Backend(Box<str>),
 }
 

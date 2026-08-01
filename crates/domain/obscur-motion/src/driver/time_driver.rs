@@ -1,41 +1,21 @@
-//! The [`TimeDriver`] time-driven motion source (spec §4.17).
+#![doc = include_str!("time_driver.doc/_module.md")]
 
 use crate::driver::MotionDriver;
 
-/// A time-driven [`MotionDriver`]: normalized progress from accumulated logical
-/// time (spec §4.17 "time-driven motion").
-///
-/// The driver holds an `elapsed` count of logical seconds and a fixed
-/// `duration`; its progress is `elapsed / duration`, clamped to `[0, 1]`. It is
-/// **time-agnostic and deterministic**: it never reads a clock. Callers push in
-/// an explicit `delta` via [`advance`](Self::advance), so a **skipped frame** is
-/// simply a bigger delta that still clamps to `1.0` — the same math with no
-/// per-frame assumption baked in.
+#[doc = include_str!("time_driver.doc/TimeDriver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeDriver {
-    /// Accumulated logical seconds since the last [`reset`](Self::reset)
-    /// (or construction). Never decreases through normal advancing.
+    #[doc = include_str!("time_driver.doc/elapsed.md")]
     elapsed: f32,
-    /// Logical seconds the driver spans. Always strictly positive: a zero,
-    /// negative or `NaN` `duration` passed to [`new`](Self::new) is clamped up
-    /// to [`MIN_DURATION`](Self::MIN_DURATION) to keep the progress division
-    /// well-defined.
+    #[doc = include_str!("time_driver.doc/duration.md")]
     duration: f32,
 }
 
 impl TimeDriver {
-    /// The smallest permitted `duration`, in logical seconds.
-    ///
-    /// A non-positive duration would make the `progress = elapsed / duration`
-    /// division ill-defined, so [`new`](Self::new) clamps up to this tiny
-    /// positive epsilon instead.
+    #[doc = include_str!("time_driver.doc/MIN_DURATION.md")]
     pub const MIN_DURATION: f32 = f32::EPSILON;
 
-    /// Creates a time driver that spans `duration` logical seconds, starting at
-    /// `elapsed` `0` (progress `0`).
-    ///
-    /// A `duration` that is zero, negative or `NaN` is clamped up to
-    /// [`MIN_DURATION`](Self::MIN_DURATION).
+    #[doc = include_str!("time_driver.doc/new.md")]
     #[must_use]
     pub fn new(duration: f32) -> Self {
         Self {
@@ -44,32 +24,25 @@ impl TimeDriver {
         }
     }
 
-    /// Advances the driver by `delta` logical seconds (spec §4.17).
-    ///
-    /// Only a strictly positive `delta` accumulates; a negative delta (and
-    /// `NaN`) is ignored, since time never runs backward here — reversal is a
-    /// timeline concern, not a driver one. A single large `delta` from a skipped
-    /// frame simply pushes `elapsed` past `duration`, where
-    /// [`progress`](MotionDriver::progress) clamps it to `1.0`.
+    #[doc = include_str!("time_driver.doc/advance.md")]
     pub fn advance(&mut self, delta: f32) {
         if delta > 0.0 {
             self.elapsed += delta;
         }
     }
 
-    /// Resets accumulated time back to `0` (progress `0`), leaving `duration`
-    /// unchanged so the driver can be replayed.
+    #[doc = include_str!("time_driver.doc/reset.md")]
     pub fn reset(&mut self) {
         self.elapsed = 0.0;
     }
 
-    /// Returns the accumulated logical seconds.
+    #[doc = include_str!("time_driver.doc/elapsed_2.md")]
     #[must_use]
     pub const fn elapsed(&self) -> f32 {
         self.elapsed
     }
 
-    /// Returns the span in logical seconds (always strictly positive).
+    #[doc = include_str!("time_driver.doc/duration_2.md")]
     #[must_use]
     pub const fn duration(&self) -> f32 {
         self.duration
@@ -77,13 +50,12 @@ impl TimeDriver {
 }
 
 impl MotionDriver for TimeDriver {
-    /// Returns `(elapsed / duration).clamp(0.0, 1.0)` (spec §4.17).
+    #[doc = include_str!("time_driver.doc/progress.md")]
     fn progress(&self) -> f32 {
         (self.elapsed / self.duration).clamp(0.0, 1.0)
     }
 
-    /// Returns `elapsed < duration`: the driver is active until accumulated time
-    /// reaches its span, after which it has settled.
+    #[doc = include_str!("time_driver.doc/is_active.md")]
     fn is_active(&self) -> bool {
         self.elapsed < self.duration
     }

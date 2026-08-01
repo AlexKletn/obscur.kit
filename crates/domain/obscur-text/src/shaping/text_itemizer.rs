@@ -1,43 +1,21 @@
-//! The port that splits text into uniform script + direction runs (spec §5.10).
+#![doc = include_str!("text_itemizer.doc/_module.md")]
 
 use crate::shaping::{ScriptTag, TextDirection, TextItem};
 use crate::span::TextRange;
 
-/// A port that splits text into uniform runs for shaping (spec §5.10).
-///
-/// An itemizer walks the source text in *logical* order and cuts it into
-/// [`TextItem`]s that are each uniform in script and bidirectional direction.
-/// The returned items tile the whole input: their byte ranges are contiguous,
-/// non-overlapping, and together cover `0..text.len()` with no gaps. Splitting
-/// happens before shaping so a [`TextShaper`](crate::shaping::TextShaper) only
-/// ever sees a single-script, single-direction run.
-///
-/// The Unicode-driven adapter that consults real script and bidi tables lives
-/// outside the domain; [`SingleRunItemizer`] is the deterministic, table-free
-/// reference implementation used to exercise the port.
+#[doc = include_str!("text_itemizer.doc/TextItemizer.md")]
 pub trait TextItemizer {
-    /// Splits `text` into uniform script + direction runs in logical order,
-    /// seeded by the paragraph `base_direction`.
-    ///
-    /// The returned items cover `0..text.len()` contiguously with no gaps or
-    /// overlaps. An empty `text` yields a single empty item `0..0`.
+    #[doc = include_str!("text_itemizer.doc/itemize.md")]
     #[must_use]
     fn itemize(&self, text: &str, base_direction: TextDirection) -> Vec<TextItem>;
 }
 
-/// The trivial reference [`TextItemizer`]: the whole text as one run (spec §5.10).
-///
-/// `SingleRunItemizer` performs no script or bidi analysis at all. It returns
-/// exactly one [`TextItem`] spanning `0..text.len()` (or `0..0` for an empty
-/// string), with script [`ScriptTag::COMMON`], the given base direction, and
-/// embedding level `0` for left-to-right or `1` for right-to-left. It exists so
-/// the port can be tested and wired without any Unicode tables; the real,
-/// table-driven itemizer arrives in a later step.
+#[doc = include_str!("text_itemizer.doc/SingleRunItemizer.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SingleRunItemizer;
 
 impl SingleRunItemizer {
-    /// Creates a `SingleRunItemizer`.
+    #[doc = include_str!("text_itemizer.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self

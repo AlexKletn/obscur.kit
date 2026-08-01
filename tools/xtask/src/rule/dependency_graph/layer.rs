@@ -1,35 +1,32 @@
-//! Architectural layer of a workspace crate and its allowed dependency
-//! directions (spec §2.11, §5.9).
+#![doc = include_str!("layer.doc/_module.md")]
 
-/// One architectural layer, derived from a crate's location in the workspace
-/// (`crates/<layer>/…` or `tools/…`).
+#[doc = include_str!("layer.doc/Layer.md")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Layer {
-    /// `crates/foundation/*` — platform-neutral primitives.
+    #[doc = include_str!("layer.doc/Foundation.md")]
     Foundation,
-    /// `crates/domain/*` — pure UI domain models and ports.
+    #[doc = include_str!("layer.doc/Domain.md")]
     Domain,
-    /// `crates/application/*` — runtime, headless, testkit.
+    #[doc = include_str!("layer.doc/Application.md")]
     Application,
-    /// `crates/frontend/*` — IR, CSS, `.okui`, DSL macros.
+    #[doc = include_str!("layer.doc/Frontend.md")]
     Frontend,
-    /// `crates/components/*` — primitives, widgets, theme system.
+    #[doc = include_str!("layer.doc/Components.md")]
     Components,
-    /// `crates/adapters/*` — platform/GPU/IO implementations.
+    #[doc = include_str!("layer.doc/Adapters.md")]
     Adapters,
-    /// `crates/diagnostics/*` — devtools protocol and server.
+    #[doc = include_str!("layer.doc/Diagnostics.md")]
     Diagnostics,
-    /// `crates/plugin/*` — plugin model/host/executors.
+    #[doc = include_str!("layer.doc/Plugin.md")]
     Plugin,
-    /// `crates/facade/*` — the `obscur-kit` umbrella crate.
+    #[doc = include_str!("layer.doc/Facade.md")]
     Facade,
-    /// `tools/*` — developer tools (xtask, lsp, cli, devtools).
+    #[doc = include_str!("layer.doc/Tools.md")]
     Tools,
 }
 
 impl Layer {
-    /// Maps the directory name directly under `crates/` (or the synthetic
-    /// `tools` bucket) to a layer.
+    #[doc = include_str!("layer.doc/from_dir.md")]
     pub(crate) fn from_dir(dir: &str) -> Option<Self> {
         Some(match dir {
             "foundation" => Self::Foundation,
@@ -46,12 +43,7 @@ impl Layer {
         })
     }
 
-    /// Whether a crate in `self` is allowed to depend on a crate in `target`,
-    /// per the allowed dependency directions of spec §2.11 / §5.9.
-    ///
-    /// Note: the facade (`obscur-kit`) is the apex of the graph and the ban on
-    /// non-facade crates depending on it is enforced separately, so no layer
-    /// here lists `Facade` as an allowed target.
+    #[doc = include_str!("layer.doc/allows.md")]
     pub(crate) fn allows(self, target: Self) -> bool {
         match self {
             // foundation -> foundation only.
@@ -100,7 +92,7 @@ impl Layer {
         }
     }
 
-    /// Human-readable label for diagnostic messages.
+    #[doc = include_str!("layer.doc/label.md")]
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Foundation => "foundation",

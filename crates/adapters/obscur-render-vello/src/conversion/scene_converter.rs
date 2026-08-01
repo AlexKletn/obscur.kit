@@ -1,172 +1,43 @@
-//! Converts an obscur-scene [`DisplayList`] into a [`vello::Scene`].
-//!
-//! This is the top-level pure conversion of the adapter (spec §2.7): it walks the
-//! display list's commands **in paint order** and replays them onto a
-//! `vello::Scene`, delegating geometry/paint/clip translation to the other
-//! converters in this module. Paint order, clipping, and layer nesting are
-//! preserved exactly; only rasterization is Vello's (spec §5.2 determinism
-//! boundary).
+#![doc = include_str!("scene_converter.doc/_module.md")]
 
 use std::collections::HashMap;
 
 use obscur_scene::clip::Clip;
-use obscur_scene::color::AlphaMode;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, LayerEffect, SceneLayer};
-use obscur_scene::paint::{BlendMode, Brush, Paint, SceneImage};
+use obscur_scene::paint::{BlendMode, Brush, Paint};
 use obscur_scene::text::GlyphRun;
-use vello::kurbo::{Affine, Diagonal2, Rect as KurboRect};
-use vello::peniko::{self, Blob, FontData, ImageAlphaType, ImageData, ImageFormat};
+use vello::kurbo::{Affine, Diagonal2};
+use vello::peniko::{self, FontData};
 use vello::{FontEmbolden, Scene};
 
 use super::blur_layer::BlurLayer;
 use super::brush_converter::BrushConverter;
 use super::clip_converter::ClipConverter;
 use super::color_converter::ColorConverter;
+use super::image_painter::draw_image;
 use super::path_converter::PathConverter;
+use super::scene_segment::SceneSegment;
+use super::shadow_painter::draw_shadow;
 
-/// The synthetic-oblique shear factor: the standard faux-italic skew of `0.25`
-/// (`tan ≈ 14°`) applied as a per-glyph shear so above-baseline points slide
-/// right and the glyph leans forward (spec §5.18). Matches the CPU backend's
-/// factor so both fake the same slant.
+#[doc = include_str!("scene_converter.doc/FAUX_ITALIC_SKEW.md")]
 const FAUX_ITALIC_SKEW: f64 = 0.25;
 
-/// The synthetic-embolden amount as a fraction of the run's font size, fed to
-/// Vello's [`FontEmbolden`] to thicken outlines and fake a heavier weight
-/// (spec §5.18).
+#[doc = include_str!("scene_converter.doc/FAUX_BOLD_EMBOLDEN_FRACTION.md")]
 const FAUX_BOLD_EMBOLDEN_FRACTION: f64 = 0.02;
 
-/// One segment of a display list split at [`BackdropFilter`] boundaries by
-/// [`SceneConverter::convert_segments`] (spec §5.2, CSS `backdrop-filter`).
-///
-/// A `backdrop-filter` frosts the frame accumulated so far, so the renderer must
-/// composite content and frost the backdrop **in order**. The converter emits an
-/// alternating sequence: content to render, a backdrop to frost, more content, …
-///
-/// [`BackdropFilter`]: PaintCommand::BackdropFilter
-// A `Content` segment owns a `vello::Scene` (inherently large, like `BlurLayer`),
-// while `Backdrop` is a few floats; boxing the scene would only add an allocation
-// to the common variant. The size difference is expected.
-#[allow(clippy::large_enum_variant)]
-pub enum SceneSegment {
-    /// A run of drawable content (between two backdrop boundaries) as a Vello
-    /// [`Scene`] plus any `filter: blur` layers extracted from it (composited on
-    /// top exactly as the non-segmented path does).
-    Content {
-        /// The converted sub-scene for this run, in absolute coordinates.
-        scene: Scene,
-        /// The `filter: blur` layers extracted from this run.
-        blurs: Vec<BlurLayer>,
-    },
-    /// A `backdrop-filter` boundary: frost (gaussian-blur) the accumulated frame
-    /// within `bounds`, clipped to the rounded `radii`, by `blur` logical pixels.
-    Backdrop {
-        /// The panel's border box (the frost region), absolute logical pixels.
-        bounds: obscur_geometry::Rect,
-        /// The panel's per-corner radii (the frost is clipped to this shape).
-        radii: obscur_geometry::CornerRadii,
-        /// The CSS blur radius in logical pixels (`> 0`).
-        blur: f32,
-    },
-}
-
-impl std::fmt::Debug for SceneSegment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Content { blurs, .. } => f
-                .debug_struct("SceneSegment::Content")
-                .field("blurs", &blurs.len())
-                .field("scene", &"<vello::Scene>")
-                .finish(),
-            Self::Backdrop {
-                bounds,
-                radii,
-                blur,
-            } => f
-                .debug_struct("SceneSegment::Backdrop")
-                .field("bounds", bounds)
-                .field("radii", radii)
-                .field("blur", blur)
-                .finish(),
-        }
-    }
-}
-
-/// A converter from an obscur-scene [`DisplayList`] to a [`vello::Scene`].
-///
-/// It owns the leaf converters ([`PathConverter`], [`BrushConverter`],
-/// [`ClipConverter`]) and drives them while replaying the command stream.
-///
-/// # Command mapping
-///
-/// - [`PaintCommand::DrawPath`] → [`Scene::fill`] (for a
-///   [`Paint::Fill`], using the path's own fill rule) or [`Scene::stroke`] (for a
-///   [`Paint::Stroke`]), each with the identity transform.
-/// - [`PaintCommand::DrawImage`] → [`Scene::draw_image`]: the decoded RGBA8 pixels
-///   become a [`peniko::ImageData`] (zero-copy from the image's `Arc<[u8]>`, tagged
-///   with its own alpha encoding) drawn at its intrinsic size, with a transform
-///   that scales each copy to its tile rect. The tile is placed / sized
-///   (`background-position` / `-size`), clipped to the paint region (border box)
-///   with a pushed clip layer, and tiled along the `repeat_x` / `repeat_y` axes
-///   (`background-repeat`) with a bounded per-copy loop.
-/// - [`PaintCommand::PushClip`] → [`Scene::push_layer`] with a neutral blend and
-///   the clip's shape, which Vello treats as a clip region.
-/// - [`PaintCommand::PushLayer`] → [`Scene::push_layer`] with the layer's blend,
-///   composition, and opacity. The layer's clip shape is used when present;
-///   otherwise a large finite rectangle stands in for an unbounded layer.
-/// - [`PaintCommand::PopClip`] / [`PaintCommand::PopLayer`] → [`Scene::pop_layer`],
-///   guarded by a depth counter so an unbalanced list never triggers a stray pop.
-///
-/// # Layer approximations (spec §5.2)
-///
-/// A [`SceneLayer`] carries a transform, opacity, blend mode, Porter-Duff
-/// operator, and effects. This converter maps opacity, blend mode, and operator
-/// (see [`BlendMode`] / [`CompositionMode`] mapping) and clips to the layer's
-/// shape. The layer transform and additional effects (e.g. blur) are **not**
-/// applied here; they are the renderer sub-step's concern. Paint order and
-/// nesting — the properties the determinism boundary requires — are preserved.
-///
-/// # Text
-///
-/// [`PaintCommand::DrawText`] carries a pre-shaped
-/// [`GlyphRun`](obscur_scene::text::GlyphRun): text is shaped **once**, in the
-/// `obscur-text` domain, so this adapter never re-shapes — it consumes the run's
-/// glyph positions verbatim (the same run the software backend consumes, spec
-/// §5.2). Rasterizing to *real* outlines still needs host fonts, supplied via
-/// [`Self::register_font`] / [`Self::set_font`] (fonts are a host resource,
-/// mirroring host-provides-device); with no font registered the converter
-/// degrades gracefully and skips text runs. Each glyph's
-/// [`glyph_id`](obscur_scene::text::PositionedGlyph::glyph_id) is already a
-/// **font glyph index** (the domain shaped against the run's resolved font), so it
-/// is used **directly** — no Unicode charmap remap — and drawn at the
-/// domain-supplied position; Vello's glyph pipeline rasterizes it (spec §5.2).
-///
-/// ## Multi-font runs
-///
-/// A [`GlyphRun`] carries a [`font`](GlyphRun::font) handle (`0` = primary): the
-/// runtime emits one `DrawText` per font-segment, each tagged with its resolved
-/// face's id. The converter keeps a registry keyed by that `u32` handle
-/// ([`Self::register_font`]) and draws each run against the matching font, so a
-/// mixed-script line (e.g. Latin + Cyrillic resolved to two different faces)
-/// rasterizes each segment from its covering font. An unknown handle falls back
-/// to id `0`; with neither present the run is skipped (no panic).
+#[doc = include_str!("scene_converter.doc/SceneConverter.md")]
 #[derive(Debug, Default, Clone)]
 pub struct SceneConverter {
     path: PathConverter,
     brush: BrushConverter,
     clip: ClipConverter,
-    /// Host-provided fonts keyed by the scene [`GlyphRun`] font handle (`0` =
-    /// primary). Empty until [`Self::register_font`] / [`Self::set_font`] is
-    /// called; text is skipped while a run's font (and the id-`0` fallback) are
-    /// both absent.
+    #[doc = include_str!("scene_converter.doc/fonts.md")]
     fonts: HashMap<u32, FontData>,
 }
 
 impl SceneConverter {
-    /// Creates a scene converter with freshly constructed leaf converters.
-    ///
-    /// No fonts are registered; call [`Self::register_font`] (or the
-    /// back-compat [`Self::set_font`]) before text runs will render.
+    #[doc = include_str!("scene_converter.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         let color = ColorConverter::new();
@@ -179,50 +50,27 @@ impl SceneConverter {
         }
     }
 
-    /// Registers (or replaces) the host-provided [`FontData`] for the run font
-    /// handle `id` (`0` = primary; higher ids are fallback faces).
-    ///
-    /// Fonts are a host resource; the adapter never fabricates one. The `id` must
-    /// match the face id the runtime's font resolver assigned (so scene run
-    /// handles line up with these fonts). Until a covering font is registered,
-    /// the run's [`PaintCommand::DrawText`] is skipped.
+    #[doc = include_str!("scene_converter.doc/register_font.md")]
     pub fn register_font(&mut self, id: u32, font: FontData) {
         self.fonts.insert(id, font);
     }
 
-    /// Attaches (or replaces) the primary host font (font handle `0`).
-    ///
-    /// Back-compat shim over [`Self::register_font`]: single-font callers keep
-    /// working, and every untagged run (`font == 0`) renders against this face.
+    #[doc = include_str!("scene_converter.doc/set_font.md")]
     pub fn set_font(&mut self, font: FontData) {
         self.register_font(0, font);
     }
 
-    /// Selects the [`FontData`] a run tagged with handle `id` draws against:
-    /// the exact match if present, otherwise the primary (id `0`) as a fallback,
-    /// otherwise `None` (the run is skipped rather than panicking).
+    #[doc = include_str!("scene_converter.doc/font_for.md")]
     fn font_for(&self, id: u32) -> Option<&FontData> {
         self.fonts.get(&id).or_else(|| self.fonts.get(&0))
     }
 
-    /// Whether a run tagged with handle `id` will draw at all here, or be skipped
-    /// for want of a font (spec §5.2).
-    ///
-    /// [`font_for`](Self::font_for)'s own rule, exposed so the renderer can tell a
-    /// host *which* runs its scene will lose. It has to be that same rule: a scan
-    /// that disagrees with the draw path reports a skip that did not happen, or
-    /// stays quiet about one that did.
+    #[doc = include_str!("scene_converter.doc/can_draw_text.md")]
     pub(crate) fn can_draw_text(&self, id: u32) -> bool {
         self.font_for(id).is_some()
     }
 
-    /// Converts an obscur-scene [`DisplayList`] into a single [`vello::Scene`],
-    /// drawing any `filter: blur` subtree **inline and un-blurred**.
-    ///
-    /// This is the back-compat entry point (used by callers and tests that do not
-    /// run the owned gaussian pass). For the real blur, the renderer uses
-    /// [`Self::convert_with_blurs`], which extracts blur subtrees into separate
-    /// sub-scenes. With no blur layer the two produce the identical scene.
+    #[doc = include_str!("scene_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, list: &DisplayList) -> Scene {
         let mut scene = Scene::new();
@@ -230,24 +78,7 @@ impl SceneConverter {
         scene
     }
 
-    /// Converts an obscur-scene [`DisplayList`] into a main [`vello::Scene`] plus a
-    /// list of [`BlurLayer`]s to blur and composite separately (spec §5.2).
-    ///
-    /// A `filter: blur(r)` element's subtree is bracketed by a `PushLayer(Blur)` …
-    /// `PopLayer` (by the scene coordinator) and is therefore **contiguous** in
-    /// paint order. This walk detects that bracket, collects the bracketed commands
-    /// into their own sub-scene (recorded as a [`BlurLayer`] with the layer's clip
-    /// bounds and radius), and **omits** them from the main scene so they are not
-    /// also drawn un-blurred. Everything else is emitted exactly as [`Self::convert`]
-    /// would, so a list with no blur layer returns `(convert(list), vec![])`,
-    /// byte-for-byte identical to the previous single render.
-    ///
-    /// # Nesting
-    ///
-    /// Only the top level extracts blurs. A blur layer nested inside another is
-    /// drawn as an ordinary layer in the outer sub-scene (its content is blurred
-    /// once, by the outer pass, rather than separately) — a documented minimal
-    /// nesting limitation, not a panic.
+    #[doc = include_str!("scene_converter.doc/convert_with_blurs.md")]
     #[must_use]
     pub fn convert_with_blurs(&self, list: &DisplayList) -> (Scene, Vec<BlurLayer>) {
         let mut scene = Scene::new();
@@ -261,29 +92,7 @@ impl SceneConverter {
         (scene, blurs)
     }
 
-    /// Splits the display list at each
-    /// [`BackdropFilter`](PaintCommand::BackdropFilter) into an ordered list of
-    /// [`SceneSegment`]s the renderer composites in sequence (spec §5.2, CSS
-    /// `backdrop-filter`).
-    ///
-    /// `backdrop-filter` frosts the frame **as accumulated so far**, so it is
-    /// order-dependent and cannot live inside one Vello scene. This walk breaks the
-    /// command stream at every backdrop boundary: the commands between boundaries
-    /// become a [`SceneSegment::Content`] (converted exactly as
-    /// [`Self::convert_with_blurs`], so each still extracts its own `filter: blur`
-    /// layers), and each boundary becomes a [`SceneSegment::Backdrop`] carrying the
-    /// frost region + radii + radius. The renderer renders and composites each
-    /// content segment onto an accumulating frame, then frosts that frame in place
-    /// at each backdrop boundary.
-    ///
-    /// # Limitation
-    ///
-    /// Each content run is converted as an **independent** scene, so a `PushClip` /
-    /// `PushTransform` left open across a backdrop boundary is closed at the run's
-    /// end and does not carry into the next run (its pops there are ignored). A
-    /// backdrop-filter nested under such an ancestor is therefore approximate; the
-    /// common top-level acrylic panel is exact. A list with no backdrop-filter
-    /// returns a single `Content` segment equal to `convert_with_blurs`.
+    #[doc = include_str!("scene_converter.doc/convert_segments.md")]
     #[must_use]
     pub fn convert_segments(&self, list: &DisplayList) -> Vec<SceneSegment> {
         let commands = list.commands();
@@ -309,9 +118,7 @@ impl SceneConverter {
         segments
     }
 
-    /// Converts one content run (the commands between two backdrop boundaries) into
-    /// a [`SceneSegment::Content`], extracting its `filter: blur` layers just like
-    /// [`Self::convert_with_blurs`].
+    #[doc = include_str!("scene_converter.doc/content_segment.md")]
     fn content_segment(&self, commands: &[PaintCommand]) -> SceneSegment {
         let mut scene = Scene::new();
         let mut blurs: Vec<BlurLayer> = Vec::new();
@@ -319,16 +126,7 @@ impl SceneConverter {
         SceneSegment::Content { scene, blurs }
     }
 
-    /// Replays `commands` onto `scene` under a `base` transform, in paint order.
-    ///
-    /// When `extract` is `Some`, a `PushLayer` carrying a
-    /// [`Blur`](obscur_scene::layer::LayerEffect::Blur) effect (and a clip whose
-    /// bounds give the blur region) is peeled off: its bracketed commands become a
-    /// separate sub-scene pushed into `extract`, and are **not** drawn here. When
-    /// `extract` is `None` (a sub-scene render), such a layer is drawn as an
-    /// ordinary layer (its content painted un-blurred). Pops are balanced against a
-    /// depth counter, so a malformed list never panics: a stray pop is ignored and
-    /// open layers are closed at the end.
+    #[doc = include_str!("scene_converter.doc/emit.md")]
     fn emit(
         &self,
         scene: &mut Scene,
@@ -450,17 +248,7 @@ impl SceneConverter {
         }
     }
 
-    /// Rasterizes a single **pre-shaped** text run at `origin`.
-    ///
-    /// The run was shaped once in the `obscur-text` domain against this same host
-    /// font, so this method neither re-shapes nor remaps: each glyph's
-    /// [`glyph_id`](obscur_scene::text::PositionedGlyph::glyph_id) is already a
-    /// **font glyph index** and is used **directly**, placed at its domain-supplied
-    /// run-relative position offset by `origin`. The assembled glyphs are drawn with
-    /// Vello's glyph pipeline, brushed with the command's own [`Brush`].
-    ///
-    /// Degrades gracefully: with no host font set the run is skipped rather than
-    /// erroring.
+    #[doc = include_str!("scene_converter.doc/draw_text.md")]
     fn draw_text(
         &self,
         scene: &mut Scene,
@@ -516,7 +304,7 @@ impl SceneConverter {
         draw.draw(peniko::Fill::NonZero, glyphs.into_iter());
     }
 
-    /// Fills or strokes a single path under the active `transform`.
+    #[doc = include_str!("scene_converter.doc/draw_path.md")]
     fn draw_path(
         &self,
         scene: &mut Scene,
@@ -541,8 +329,7 @@ impl SceneConverter {
         }
     }
 
-    /// Pushes a clip as a neutral-blend layer bounded by the clip's shape, mapped
-    /// by the active `transform`.
+    #[doc = include_str!("scene_converter.doc/push_clip.md")]
     fn push_clip(&self, scene: &mut Scene, clip: &Clip, transform: Affine) {
         let shape = self.clip.shape(clip);
         scene.push_layer(
@@ -554,8 +341,7 @@ impl SceneConverter {
         );
     }
 
-    /// Pushes a compositing layer with its opacity, blend, and clip shape, the
-    /// shape mapped by the active `transform`.
+    #[doc = include_str!("scene_converter.doc/push_layer.md")]
     fn push_layer(&self, scene: &mut Scene, layer: &SceneLayer, transform: Affine) {
         let blend = peniko::BlendMode::new(mix(layer.blend_mode()), compose(layer.composition()));
         let alpha = layer.opacity();
@@ -569,9 +355,7 @@ impl SceneConverter {
     }
 }
 
-/// The first [`Blur`](LayerEffect::Blur) radius on a layer, if any. A layer may
-/// carry several effects; the coordinator emits exactly one blur, so the first is
-/// used.
+#[doc = include_str!("scene_converter.doc/layer_blur_radius.md")]
 fn layer_blur_radius(layer: &SceneLayer) -> Option<f32> {
     layer.effects().iter().find_map(|effect| match effect {
         LayerEffect::Blur { radius } => Some(*radius),
@@ -579,8 +363,7 @@ fn layer_blur_radius(layer: &SceneLayer) -> Option<f32> {
     })
 }
 
-/// The first [`ColorMatrix`](LayerEffect::ColorMatrix) folded matrix on a layer, if
-/// any — the color-op `filter` chain the coordinator composed into one 4×5 matrix.
+#[doc = include_str!("scene_converter.doc/layer_color_matrix.md")]
 fn layer_color_matrix(layer: &SceneLayer) -> Option<[f32; 20]> {
     layer
         .effects()
@@ -588,9 +371,7 @@ fn layer_color_matrix(layer: &SceneLayer) -> Option<[f32; 20]> {
         .find_map(|effect| effect.as_color_matrix())
 }
 
-/// The index of the `PopLayer`/`PopClip` matching the `PushLayer` at `start`,
-/// counting nested `Push*`/`Pop*` of both clip and layer kinds. Returns
-/// `commands.len()` for an unbalanced list (the rest is treated as the subtree).
+#[doc = include_str!("scene_converter.doc/matching_layer_pop.md")]
 fn matching_layer_pop(commands: &[PaintCommand], start: usize) -> usize {
     let mut depth: i32 = 0;
     for (offset, command) in commands[start..].iter().enumerate() {
@@ -608,13 +389,7 @@ fn matching_layer_pop(commands: &[PaintCommand], start: usize) -> usize {
     commands.len()
 }
 
-/// Maps an axis-aligned `rect` (a filter layer's local clip bounds) through the
-/// accumulated transform `a` and returns the bounding box of the result, in `a`'s
-/// target (device) space. For the usual scale + translate `a` (root device-scale,
-/// scroll offset, ancestor transforms) the box is exact; for a rotation it is the
-/// enclosing AABB, which still contains the whole filtered subtree. At
-/// `a == identity` it returns `rect` unchanged, keeping the scale-1 path
-/// byte-identical.
+#[doc = include_str!("scene_converter.doc/transform_rect.md")]
 #[allow(clippy::cast_possible_truncation)]
 fn transform_rect(a: Affine, rect: obscur_geometry::Rect) -> obscur_geometry::Rect {
     let m = a.as_coeffs();
@@ -638,18 +413,14 @@ fn transform_rect(a: Affine, rect: obscur_geometry::Rect) -> obscur_geometry::Re
     )
 }
 
-/// The linear (uniform) scale factor of `a`, `sqrt(|det|)` — used to scale a
-/// gaussian blur radius from logical to device pixels so the blur strength tracks
-/// the element's on-screen size. `1.0` for an identity/translate-only transform.
+#[doc = include_str!("scene_converter.doc/affine_scale.md")]
 #[allow(clippy::cast_possible_truncation)]
 fn affine_scale(a: Affine) -> f32 {
     let m = a.as_coeffs();
     (m[0] * m[3] - m[1] * m[2]).abs().sqrt() as f32
 }
 
-/// Converts an obscur-geometry [`AffineTransform`](obscur_geometry::AffineTransform)
-/// into a kurbo [`Affine`]. Both store the six coefficients `[a, b, c, d, e, f]`
-/// in the identical layout, so the conversion is a straight widening to `f64`.
+#[doc = include_str!("scene_converter.doc/to_kurbo_affine.md")]
 fn to_kurbo_affine(t: &obscur_geometry::AffineTransform) -> Affine {
     let m = t.coeffs;
     Affine::new([
@@ -662,351 +433,7 @@ fn to_kurbo_affine(t: &obscur_geometry::AffineTransform) -> Affine {
     ])
 }
 
-/// Rasterizes a CSS `box-shadow` as a gaussian-blurred rounded rectangle
-/// (spec §5.2).
-///
-/// The box's border box is translated by `offset` and inflated (a drop shadow) or
-/// deflated (an inset shadow) by `spread`; Vello's
-/// [`Scene::draw_blurred_rounded_rect`] then blurs it, mapping the CSS blur
-/// *radius* to a gaussian standard deviation of `blur / 2`. Vello takes a single
-/// corner radius, so the four `radii` collapse to their maximum (a documented
-/// approximation for non-uniform corners). An **inset** shadow is approximated by
-/// the same blurred rounded rect at the deflated geometry — Vello does not clip it
-/// to the box interior here, so inset fidelity is approximate (documented). A
-/// degenerate (non-positive) rect is skipped.
-#[allow(clippy::too_many_arguments)]
-fn draw_shadow(
-    scene: &mut Scene,
-    rect: &obscur_geometry::Rect,
-    radii: &obscur_geometry::CornerRadii,
-    color: obscur_scene::color::Color,
-    blur: f32,
-    spread: f32,
-    offset: (f32, f32),
-    inset: bool,
-    transform: Affine,
-) {
-    // An inset shadow is an *inner* shadow confined to the box, not an offset
-    // rounded rect — it takes its own path so it is clipped to the box interior
-    // and painted as a soft frame rather than a filled blob.
-    if inset {
-        draw_inset_shadow(scene, rect, radii, color, blur, spread, offset, transform);
-        return;
-    }
-    // Drop shadows inflate by `spread`.
-    let inflate = f64::from(spread);
-    let (ox, oy) = (f64::from(offset.0), f64::from(offset.1));
-    let x0 = f64::from(rect.origin.x) + ox - inflate;
-    let y0 = f64::from(rect.origin.y) + oy - inflate;
-    let x1 = f64::from(rect.origin.x + rect.size.width) + ox + inflate;
-    let y1 = f64::from(rect.origin.y + rect.size.height) + oy + inflate;
-    if x1 <= x0 || y1 <= y0 {
-        return;
-    }
-    let kurbo_rect = KurboRect::new(x0, y0, x1, y1);
-    // Spec §6.1.1: an outset shadow's corner radii are the box radii grown by
-    // `+spread` (a sharp corner stays sharp) so the rounded corners stay
-    // concentric with the box, eased where a radius is smaller than the spread.
-    let radius = blurred_shadow_radius(radii.spread_offset(spread));
-    // Map the CSS blur radius to a gaussian standard deviation.
-    let std_dev = f64::from(blur.max(0.0)) / 2.0;
-    let peniko_color = ColorConverter::new().convert(color);
-    scene.draw_blurred_rounded_rect(transform, kurbo_rect, peniko_color, radius, std_dev);
-}
-
-/// Collapses a shadow's eight radii into the one scalar Vello's blur can take.
-///
-/// **This is a Vello backend limitation, and it is lossy.** `vello 0.9`'s
-/// `Scene::draw_blurred_rounded_rect(.., radius: f64, std_dev: f64)` — and its
-/// `_in` variant — accept a *single* `f64` radius for the whole rect. There is no
-/// per-corner form and no elliptical form (kurbo's `RoundedRectRadii`, which the
-/// inset path's `to_rounded_rect` could take, is four **scalars** — per-corner but
-/// still circular, so it does not rescue the elliptical case either). So a shadow
-/// whose box has elliptical corners (`border-radius: 50%` on a non-square box) or
-/// unequal corners cannot be reproduced exactly on Vello, and this function picks
-/// the closest circle rather than a silent axis.
-///
-/// Two losses, in order:
-///
-/// 1. **Per corner**, [`CornerRadius::circular_approximation`] takes the mean of the
-///    two axes — exact when the corner is already circular, unbiased when not.
-/// 2. **Across corners**, the max wins, which over-rounds a box whose corners
-///    differ. This is the pre-existing convention and is exact for the overwhelmingly
-///    common case of four equal corners.
-///
-/// Both losses vanish for a uniform circular `border-radius`, which is why the
-/// normal path is exact. This divergence is confined to the **blurred shadow**
-/// effect and does not touch clip or scene geometry, which spec §5.2 requires to
-/// match across backends: those go through [`obscur_scene::path::Path`], which draws
-/// true quarter ellipses on both backends. The CPU backend builds its shadow from
-/// that same `Path` and so keeps the ellipse; Vello's blurred shadow rounds it. See
-/// `docs/conformance-audit.md` finding 4-A.
-fn blurred_shadow_radius(radii: obscur_geometry::CornerRadii) -> f64 {
-    f64::from(
-        radii
-            .corners()
-            .iter()
-            .map(|c| c.circular_approximation())
-            .fold(0.0_f32, f32::max)
-            .max(0.0),
-    )
-}
-
-/// Rasterizes an **inset** `box-shadow` as an inner shadow confined to the box.
-///
-/// Unlike a drop shadow (a blurred rounded rect behind the box), an inset shadow
-/// darkens the *inside* edges of the box. It is built in three steps, all clipped
-/// to the box's rounded border box so nothing can bleed outside it:
-///
-/// 1. Push a clip layer to the box's rounded rect (the confinement + isolation).
-/// 2. Fill that whole shape with the shadow color.
-/// 3. Punch a hole in the fill with a blurred rounded rect — the box deflated by
-///    `spread` and shifted by `offset` — composited with [`Compose::DestOut`], so
-///    only the soft frame between the box edge and the hole survives. The blur
-///    feathers the hole's edge, giving the standard inner-shadow gradient; with
-///    `blur == 0` and a positive `spread` the frame is a crisp inner ring.
-///
-/// The hole is punched with an opaque color because `DestOut` uses only the source
-/// alpha; the visible shadow keeps the authored color's own alpha from step 2.
-#[allow(clippy::too_many_arguments)]
-fn draw_inset_shadow(
-    scene: &mut Scene,
-    rect: &obscur_geometry::Rect,
-    radii: &obscur_geometry::CornerRadii,
-    color: obscur_scene::color::Color,
-    blur: f32,
-    spread: f32,
-    offset: (f32, f32),
-    transform: Affine,
-) {
-    let bx0 = f64::from(rect.origin.x);
-    let by0 = f64::from(rect.origin.y);
-    let bx1 = f64::from(rect.origin.x + rect.size.width);
-    let by1 = f64::from(rect.origin.y + rect.size.height);
-    if bx1 <= bx0 || by1 <= by0 {
-        return;
-    }
-    // A single corner radius, matching the drop-shadow path — see
-    // [`blurred_shadow_radius`] for why a shadow may collapse the four corners.
-    let radius = blurred_shadow_radius(*radii);
-    let box_shape = KurboRect::new(bx0, by0, bx1, by1).to_rounded_rect(radius);
-    let peniko_color = ColorConverter::new().convert(color);
-
-    // (1) Clip + isolate to the box: the inner shadow can never escape it.
-    scene.push_layer(
-        peniko::Fill::NonZero,
-        peniko::BlendMode::default(),
-        1.0,
-        transform,
-        &box_shape,
-    );
-    // (2) Paint the shadow color across the whole box interior.
-    scene.fill(
-        peniko::Fill::NonZero,
-        transform,
-        peniko_color,
-        None,
-        &box_shape,
-    );
-
-    // (3) Punch out the lit interior (box deflated by `spread`, shifted by
-    // `offset`), blurred, leaving only the inner frame.
-    let sp = f64::from(spread);
-    let ox = f64::from(offset.0);
-    let oy = f64::from(offset.1);
-    let ix0 = bx0 + ox + sp;
-    let iy0 = by0 + oy + sp;
-    let ix1 = bx1 + ox - sp;
-    let iy1 = by1 + oy - sp;
-    if ix1 > ix0 && iy1 > iy0 {
-        let inner = KurboRect::new(ix0, iy0, ix1, iy1);
-        // Spec §6.1.1, as on the drop path: the hole's radii are the box radii
-        // contracted by `spread`, so they take `−spread`. Offsetting the eight
-        // radii *before* collapsing to Vello's single scalar (rather than
-        // subtracting from the already-collapsed `radius`) is what lets §6.1.1's
-        // per-axis easing apply at all, and matches the drop path's ordering.
-        let inner_radius = blurred_shadow_radius(radii.spread_offset(-spread));
-        let std_dev = f64::from(blur.max(0.0)) / 2.0;
-        // Opaque punch: `DestOut` clears the destination by the source alpha.
-        let punch = peniko::Color::new([
-            peniko_color.components[0],
-            peniko_color.components[1],
-            peniko_color.components[2],
-            1.0,
-        ]);
-        let dest_out = peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestOut);
-        scene.push_layer(peniko::Fill::NonZero, dest_out, 1.0, transform, &box_shape);
-        scene.draw_blurred_rounded_rect(transform, inner, punch, inner_radius, std_dev);
-        scene.pop_layer();
-    }
-    // Close the box clip layer. A collapsed inner rect (huge `spread`) leaves the
-    // whole box filled with the shadow color — the correct limit.
-    scene.pop_layer();
-}
-
-/// A `Sized` wrapper over a shared `Arc<[u8]>` pixel buffer so it can back a
-/// peniko [`Blob`] without copying: `Arc<[u8]>` is an unsized fat pointer that
-/// cannot coerce to `Arc<dyn AsRef<[u8]>>`, but `Arc<SharedPixels>` can.
-struct SharedPixels(std::sync::Arc<[u8]>);
-
-impl AsRef<[u8]> for SharedPixels {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-/// The largest number of image copies drawn per axis for a tiled
-/// (`background-repeat`) background — a bounded-loop guard matching the CPU
-/// backend, so both agree. The `region` clip trims any overdraw regardless.
-const MAX_TILES_PER_AXIS: i32 = 8192;
-
-/// The smallest tile extent (logical px) that still tiles on an axis; at or below
-/// it the axis is treated as non-repeating so a degenerate size cannot spin the
-/// tile loop.
-const MIN_TILE_EXTENT: f32 = 0.5;
-
-/// Draws a decoded [`SceneImage`] as one copy scaled to `tile`, clipped to
-/// `region`, and optionally tiled along the `repeat_x` / `repeat_y` axes to fill
-/// `region` (spec §5.16, CSS Backgrounds §3).
-///
-/// The RGBA8 pixels are wrapped into a [`peniko::ImageData`] — zero-copy, since
-/// the [`SceneImage`]'s `Arc<[u8]>` becomes the image [`Blob`] directly — tagged
-/// with the image's own alpha encoding ([`AlphaMode::Straight`] →
-/// [`ImageAlphaType::Alpha`], [`AlphaMode::Premultiplied`] →
-/// [`ImageAlphaType::AlphaPremultiplied`]), so Vello premultiplies honestly rather
-/// than this adapter double-premultiplying. [`Scene::draw_image`] draws the image
-/// at its intrinsic `width × height`; a per-copy transform scales that to `tile`'s
-/// size and translates it to each copy's origin, composed under the active
-/// `transform`.
-///
-/// peniko 0.6's `ImageData` exposes `x_extend` / `y_extend`, but Vello 0.9's
-/// `Scene::draw_image` draws a single image instance (extend only pads sampling at
-/// the image's own edges, it does not tile across a larger area), so tiling is done
-/// with the SAME bounded per-copy loop as the CPU backend, and both are confined to
-/// `region` by a pushed clip layer. A single tile fully inside `region` with no
-/// tiling takes neither the loop nor the clip — visually identical to the previous
-/// stretch draw. A zero-sized image, tile, or region is skipped.
-#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
-fn draw_image(
-    scene: &mut Scene,
-    image: &SceneImage,
-    tile: &obscur_geometry::Rect,
-    region: &obscur_geometry::Rect,
-    repeat_x: bool,
-    repeat_y: bool,
-    transform: Affine,
-) {
-    let (iw, ih) = (image.width(), image.height());
-    if iw == 0
-        || ih == 0
-        || tile.size.width <= 0.0
-        || tile.size.height <= 0.0
-        || region.size.width <= 0.0
-        || region.size.height <= 0.0
-    {
-        return;
-    }
-    // A tile too small to tile safely repeats as a single copy on that axis.
-    let repeat_x = repeat_x && tile.size.width > MIN_TILE_EXTENT;
-    let repeat_y = repeat_y && tile.size.height > MIN_TILE_EXTENT;
-
-    let alpha_type = match image.alpha_mode() {
-        AlphaMode::Straight => ImageAlphaType::Alpha,
-        AlphaMode::Premultiplied => ImageAlphaType::AlphaPremultiplied,
-    };
-    let data = ImageData {
-        // Zero-copy: wrap the image's shared `Arc<[u8]>` in a `Sized` newtype so it
-        // coerces to the `Arc<dyn AsRef<[u8]>>` a `Blob` holds — only a refcount
-        // bump, never a pixel copy.
-        data: Blob::new(std::sync::Arc::new(SharedPixels(image.pixels_arc()))),
-        format: ImageFormat::Rgba8,
-        alpha_type,
-        width: iw,
-        height: ih,
-    };
-
-    // Confine drawing to `region` unless a single tile already sits inside it.
-    let contained = !repeat_x
-        && !repeat_y
-        && tile.origin.x >= region.origin.x - 1e-3
-        && tile.origin.y >= region.origin.y - 1e-3
-        && tile.origin.x + tile.size.width <= region.origin.x + region.size.width + 1e-3
-        && tile.origin.y + tile.size.height <= region.origin.y + region.size.height + 1e-3;
-    let clipped = !contained;
-    if clipped {
-        let clip = KurboRect::new(
-            f64::from(region.origin.x),
-            f64::from(region.origin.y),
-            f64::from(region.origin.x + region.size.width),
-            f64::from(region.origin.y + region.size.height),
-        );
-        scene.push_layer(
-            peniko::Fill::NonZero,
-            peniko::BlendMode::default(),
-            1.0,
-            transform,
-            &clip,
-        );
-    }
-
-    let (i0, i1) = tile_index_range(
-        repeat_x,
-        region.origin.x,
-        region.origin.x + region.size.width,
-        tile.origin.x,
-        tile.size.width,
-    );
-    let (j0, j1) = tile_index_range(
-        repeat_y,
-        region.origin.y,
-        region.origin.y + region.size.height,
-        tile.origin.y,
-        tile.size.height,
-    );
-    // Intrinsic → tile: scale the natural `iw × ih` to the tile size (constant
-    // across copies), then translate to each copy's origin.
-    let scale = Affine::scale_non_uniform(
-        f64::from(tile.size.width) / f64::from(iw),
-        f64::from(tile.size.height) / f64::from(ih),
-    );
-    for j in j0..=j1 {
-        for i in i0..=i1 {
-            let ox = f64::from(tile.origin.x) + f64::from(i) * f64::from(tile.size.width);
-            let oy = f64::from(tile.origin.y) + f64::from(j) * f64::from(tile.size.height);
-            let place = Affine::translate((ox, oy));
-            scene.draw_image(&data, transform * place * scale);
-        }
-    }
-
-    if clipped {
-        scene.pop_layer();
-    }
-}
-
-/// Computes the inclusive tile index range `[start, end]` covering the span
-/// `[r0, r1]` with copies at `t0 + k * ts` (`ts > 0`), matching the CPU backend. A
-/// non-repeating axis is the single index `0`; the range is padded by one on each
-/// side and clamped to [`MAX_TILES_PER_AXIS`] copies (the `region` clip trims any
-/// overdraw).
-#[allow(clippy::cast_possible_truncation)]
-fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i32) {
-    if !repeat || ts <= 0.0 {
-        return (0, 0);
-    }
-    let start_f = ((r0 - t0) / ts).floor();
-    let end_f = ((r1 - t0) / ts).ceil();
-    if !start_f.is_finite() || !end_f.is_finite() {
-        return (0, 0);
-    }
-    let start = start_f as i32 - 1;
-    let mut end = end_f as i32 + 1;
-    if end - start + 1 > MAX_TILES_PER_AXIS {
-        end = start + MAX_TILES_PER_AXIS - 1;
-    }
-    (start, end)
-}
-
-/// Maps an obscur-scene [`BlendMode`] to a peniko [`Mix`](peniko::Mix) blend.
+#[doc = include_str!("scene_converter.doc/mix.md")]
 fn mix(mode: BlendMode) -> peniko::Mix {
     match mode {
         BlendMode::Normal => peniko::Mix::Normal,
@@ -1024,8 +451,7 @@ fn mix(mode: BlendMode) -> peniko::Mix {
     }
 }
 
-/// Maps an obscur-scene [`CompositionMode`] to a peniko
-/// [`Compose`](peniko::Compose) operator.
+#[doc = include_str!("scene_converter.doc/compose.md")]
 fn compose(mode: CompositionMode) -> peniko::Compose {
     match mode {
         CompositionMode::SrcOver => peniko::Compose::SrcOver,
@@ -1042,6 +468,9 @@ mod tests {
     use obscur_scene::color::Color;
     use obscur_scene::paint::{Brush, Stroke};
     use obscur_scene::path::Path;
+    // The font-registry tests build a `FontData` from raw bytes; production code
+    // here takes fonts already wrapped, so the `Blob` constructor is a test import.
+    use vello::peniko::Blob;
 
     fn rect_path() -> Path {
         Path::rect(Rect::new(Point::new(0.0, 0.0), Size::new(10.0, 10.0)))

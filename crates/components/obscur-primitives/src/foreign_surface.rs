@@ -1,35 +1,22 @@
-//! `ForeignSurface`: an embedded external-surface primitive (spec §2.6, §5.5).
+#![doc = include_str!("foreign_surface.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{View, ViewNode, ViewProperty, ViewValue};
 
-/// An embedded, externally-owned surface placed into the view tree.
-///
-/// `ForeignSurface` is one of the minimal built-in primitives (spec §2.6). It
-/// reserves a region for a surface the framework does not paint — a native
-/// widget, video output, or an external GPU-rendered surface (spec §5.5) —
-/// referenced by an opaque handle key the host resolves to the real surface. It
-/// is a leaf element primitive with no children: it lowers to a
-/// [`ViewNode::Element`] carrying the surface handle as a property.
+#[doc = include_str!("foreign_surface.doc/ForeignSurface.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeignSurface {
     surface: Box<str>,
 }
 
 impl ForeignSurface {
-    /// Stable component id for the foreign-surface primitive (see
-    /// [`Container::COMPONENT_ID`] for the shared id scheme).
-    ///
-    /// [`Container::COMPONENT_ID`]: crate::Container::COMPONENT_ID
+    #[doc = include_str!("foreign_surface.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0008);
 
-    /// Property name for the opaque surface handle key (see [`Image::PROP_SRC`]
-    /// for the shared prop-symbol scheme).
-    ///
-    /// [`Image::PROP_SRC`]: crate::Image::PROP_SRC
+    #[doc = include_str!("foreign_surface.doc/PROP_SURFACE.md")]
     pub const PROP_SURFACE: InternedSymbol = InternedSymbol::from_raw(0x00C1_0801);
 
-    /// Creates a foreign surface referencing the opaque handle `surface`.
+    #[doc = include_str!("foreign_surface.doc/new.md")]
     #[must_use]
     pub fn new(surface: impl Into<Box<str>>) -> Self {
         Self {
@@ -37,14 +24,13 @@ impl ForeignSurface {
         }
     }
 
-    /// Returns the opaque surface handle key.
+    #[doc = include_str!("foreign_surface.doc/surface.md")]
     #[must_use]
     pub fn surface(&self) -> &str {
         &self.surface
     }
 
-    /// Lowers this surface into its [`ViewNode::Element`], emitting the surface
-    /// handle as a property.
+    #[doc = include_str!("foreign_surface.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::element(Self::COMPONENT_ID).with_prop(ViewProperty::new(
@@ -53,7 +39,7 @@ impl ForeignSurface {
         ))
     }
 
-    /// Lowers this surface into a single-node [`View`].
+    #[doc = include_str!("foreign_surface.doc/view.md")]
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

@@ -1,50 +1,22 @@
-//! A single positioned glyph carried in a [`GlyphRun`](super::GlyphRun).
+#![doc = include_str!("positioned_glyph.doc/_module.md")]
 
-/// One shaped, positioned glyph in a [`GlyphRun`](super::GlyphRun): a glyph
-/// identifier paired with the pen position it occupies (spec §5.10, §5.2).
-///
-/// This is the backend-independent unit a [`DrawText`] command carries. Shaping
-/// has already run (in the `obscur-text` domain), so a renderer never re-shapes:
-/// it maps [`glyph_id`](Self::glyph_id) to an outline and draws it at
-/// [`x`](Self::x)/[`y`](Self::y). Because both the GPU and the software backend
-/// consume the very same positioned glyphs, they cannot diverge on text layout —
-/// only on rasterization (spec §5.2 determinism boundary).
-///
-/// - [`x`](Self::x)/[`y`](Self::y) are the glyph's pen position **relative to the
-///   run's origin**, in logical pixels; `y` is measured at the text baseline.
-/// - [`advance`](Self::advance) is the glyph's horizontal advance, letting a
-///   software backend that lacks real glyph outlines approximate the glyph with a
-///   coverage cell of this width.
-/// - [`glyph_id`](Self::glyph_id) is a **font glyph index** — the same contract as
-///   the domain
-///   [`ShapedGlyph`](../../../obscur_text/shaping/struct.ShapedGlyph.html). A real
-///   shaper (the HarfRust adapter) emits real, font-specific glyph indices, so a
-///   renderer draws them directly with no remap; the reference
-///   [`MockTextShaper`](../../../obscur_text/shaping/struct.MockTextShaper.html)
-///   emits the Unicode scalar value as a placeholder index for headless
-///   determinism.
-/// - [`cluster`](Self::cluster) is the byte offset into the run's source text the
-///   glyph maps back to (for caret hit-testing / accessibility).
-///
-/// Storing `f32` fields means the type derives `PartialEq` but not `Eq`.
+#[doc = include_str!("positioned_glyph.doc/PositionedGlyph.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PositionedGlyph {
-    /// The font glyph index (the mock shaper emits the Unicode scalar as a
-    /// placeholder index).
+    #[doc = include_str!("positioned_glyph.doc/glyph_id.md")]
     glyph_id: u32,
-    /// The byte offset into the run's source text this glyph maps back to.
+    #[doc = include_str!("positioned_glyph.doc/cluster.md")]
     cluster: usize,
-    /// The pen x position relative to the run origin, in logical pixels.
+    #[doc = include_str!("positioned_glyph.doc/x.md")]
     x: f32,
-    /// The baseline y position relative to the run origin, in logical pixels.
+    #[doc = include_str!("positioned_glyph.doc/y.md")]
     y: f32,
-    /// The glyph's horizontal advance, in logical pixels.
+    #[doc = include_str!("positioned_glyph.doc/advance.md")]
     advance: f32,
 }
 
 impl PositionedGlyph {
-    /// Creates a positioned glyph with the given identity, source `cluster`, pen
-    /// position `(x, y)` relative to the run origin, and horizontal `advance`.
+    #[doc = include_str!("positioned_glyph.doc/new.md")]
     #[must_use]
     pub const fn new(glyph_id: u32, cluster: usize, x: f32, y: f32, advance: f32) -> Self {
         Self {
@@ -56,33 +28,31 @@ impl PositionedGlyph {
         }
     }
 
-    /// Returns the font glyph index (the mock shaper emits the Unicode scalar as
-    /// a placeholder).
+    #[doc = include_str!("positioned_glyph.doc/glyph_id_2.md")]
     #[must_use]
     pub const fn glyph_id(&self) -> u32 {
         self.glyph_id
     }
 
-    /// Returns the byte offset into the run's source text this glyph maps back to.
+    #[doc = include_str!("positioned_glyph.doc/cluster_2.md")]
     #[must_use]
     pub const fn cluster(&self) -> usize {
         self.cluster
     }
 
-    /// Returns the pen x position relative to the run origin, in logical pixels.
+    #[doc = include_str!("positioned_glyph.doc/x_2.md")]
     #[must_use]
     pub const fn x(&self) -> f32 {
         self.x
     }
 
-    /// Returns the baseline y position relative to the run origin, in logical
-    /// pixels.
+    #[doc = include_str!("positioned_glyph.doc/y_2.md")]
     #[must_use]
     pub const fn y(&self) -> f32 {
         self.y
     }
 
-    /// Returns the glyph's horizontal advance, in logical pixels.
+    #[doc = include_str!("positioned_glyph.doc/advance_2.md")]
     #[must_use]
     pub const fn advance(&self) -> f32 {
         self.advance

@@ -1,22 +1,4 @@
-//! **Proof: a multi-line `<textarea>` edits, wraps, and paints a LINE-AWARE caret**
-//! (spec §5.10/§5.11; CSS Text 3 §4.1.1 segment breaks).
-//!
-//! Drives a focused **multi-line** field (`type=textarea`, `white-space: pre-wrap`)
-//! through the real runtime editing path: it types `"line one\nline two\nline
-//! three"` — the two `\n`s entered as real **Enter** key presses, which the editing
-//! keymap inserts as segment breaks (a single-line `input` would submit instead) —
-//! renders a CPU `target/textarea_proof.png`, and asserts:
-//!
-//! - the value laid out onto **three** lines (one `DrawText` run per wrapped line),
-//!   each exactly `line-height` (22px) tall;
-//! - the caret (at the end of the text) sits on the **third** line — its painted
-//!   `y ≈ 2 × line-height` — at an `x` measured **within line 3** (the width of
-//!   `"line three"` alone), NOT the summed width of all three lines (the single-line
-//!   caret bug this replaces).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example textarea_proof \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("textarea_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -47,27 +29,23 @@ use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 
-/// The logical extent the frame is laid out and rasterized under.
+#[doc = include_str!("textarea_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 200.0);
 
-/// The `on-input` command the field binds (registered, never mirrored here).
+#[doc = include_str!("textarea_proof.doc/CMD.md")]
 const CMD: InternedSymbol = InternedSymbol::from_raw(0x0001);
 
-/// The exact authored `line-height`, in logical pixels — so each wrapped line is a
-/// deterministic 22px tall and line 3 sits at `y = 2 × 22`.
+#[doc = include_str!("textarea_proof.doc/LINE_HEIGHT.md")]
 const LINE_HEIGHT: f32 = 22.0;
 
-/// A multi-line field: 240px wide (each short line fits, so wrapping is driven only
-/// by the typed `\n`s), `white-space: pre-wrap` (preserves segment breaks AND wraps),
-/// with an exact 22px line-height. The `.stage` frames it.
+#[doc = include_str!("textarea_proof.doc/CSS.md")]
 const CSS: &str = "\
 .stage { padding: 24px 20px; background: #12141c; }\
 .field { width: 240px; height: 88px; background: #ffffff; color: #101216; \
 white-space: pre-wrap; line-height: 22px; overflow: hidden; \
 border: 1px solid #5b6472; padding: 6px; }";
 
-/// The value typed into the textarea — three lines separated by real newlines,
-/// each entered through the runtime editing path (`\n` = an Enter key press).
+#[doc = include_str!("textarea_proof.doc/VALUE.md")]
 const VALUE: &str = "line one\nline two\nline three";
 
 fn main() {
@@ -189,8 +167,7 @@ fn main() {
     println!("\n== all textarea assertions held; exiting 0 ==");
 }
 
-/// A `.stage` holding one editable MULTI-LINE `.field` (`type=textarea`) carrying
-/// `text` and binding on-input.
+#[doc = include_str!("textarea_proof.doc/field_view.md")]
 fn field_view(text: &str) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(1))
@@ -207,7 +184,7 @@ fn field_view(text: &str) -> View {
     ]))
 }
 
-/// The `field`'s text-leaf node id (root → stage → field → text).
+#[doc = include_str!("textarea_proof.doc/text_leaf.md")]
 fn text_leaf(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("root after a frame");
     let stage = runtime.tree().get(root).unwrap().child_nodes()[0];
@@ -215,8 +192,7 @@ fn text_leaf(runtime: &UiRuntime) -> NodeId {
     runtime.tree().get(field).unwrap().child_nodes()[0]
 }
 
-/// The `(origin, advance-width)` of every painted `DrawText` run — one per wrapped
-/// line — in paint order.
+#[doc = include_str!("textarea_proof.doc/text_runs.md")]
 fn text_runs(snapshot: &SceneSnapshot) -> Vec<(Point, f32)> {
     snapshot
         .display_list()
@@ -232,9 +208,7 @@ fn text_runs(snapshot: &SceneSnapshot) -> Vec<(Point, f32)> {
         .collect()
 }
 
-/// The painted caret rect: the thin (width-1) fill whose height is one line box
-/// (`line-height`), so it is distinguished from the field's 1px-wide, full-height
-/// border edges (which are also width-1 fills).
+#[doc = include_str!("textarea_proof.doc/caret_rect_of.md")]
 fn caret_rect_of(snapshot: &SceneSnapshot) -> Option<obscur_kit::geometry::Rect> {
     snapshot
         .display_list()
@@ -248,7 +222,7 @@ fn caret_rect_of(snapshot: &SceneSnapshot) -> Option<obscur_kit::geometry::Rect>
         })
 }
 
-/// Boots a runtime + CPU renderer with the text stack wired (best-effort font).
+#[doc = include_str!("textarea_proof.doc/boot.md")]
 fn boot() -> (UiRuntime, CpuRenderer) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
     runtime.on_text_input(CMD, |_| {});
@@ -259,7 +233,7 @@ fn boot() -> (UiRuntime, CpuRenderer) {
     (runtime, renderer)
 }
 
-/// Rasterizes a snapshot through the CPU renderer and clones the pixmap.
+#[doc = include_str!("textarea_proof.doc/rasterize.md")]
 fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia::Pixmap {
     let frame = RenderFrame::new(snapshot.clone(), VIEWPORT);
     let submission = FrameSubmission::new(frame);
@@ -270,7 +244,7 @@ fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia:
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] at `origin`.
+#[doc = include_str!("textarea_proof.doc/compile.md")]
 fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
@@ -280,12 +254,12 @@ fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
         .matchable
 }
 
-/// A plain (no-modifier) character key press.
+#[doc = include_str!("textarea_proof.doc/char_press.md")]
 fn char_press(c: char) -> KeyEvent {
     KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character(c)))
 }
 
-/// A named (non-character) key press.
+#[doc = include_str!("textarea_proof.doc/named_press.md")]
 fn named_press(named: NamedKey) -> KeyEvent {
     KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::named(named)))
 }
@@ -299,7 +273,7 @@ fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     )
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("textarea_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -307,8 +281,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("textarea_proof.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -326,12 +299,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("textarea_proof.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("textarea_proof.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

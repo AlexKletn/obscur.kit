@@ -1,4 +1,4 @@
-//! `ComponentRegistration`: one entry in the [`ComponentRegistry`](crate::component::ComponentRegistry).
+#![doc = include_str!("component_registration.doc/_module.md")]
 
 use obscur_identity::ComponentId;
 
@@ -7,20 +7,7 @@ use crate::component::{
     InstanceId,
 };
 
-/// One entry in the component registry (spec §2.14).
-///
-/// It aggregates exactly what §2.14 lists a registry stores, without
-/// duplication: the stable [`ComponentId`], the [`ComponentContract`] — which
-/// already carries the contract schema, the component's capability requirements,
-/// and its diagnostics metadata (spec §2.13) — the [`ComponentVersion`] of that
-/// schema, and the boxed [`ComponentFactory`] used to instantiate the kind.
-///
-/// # `Debug` and the boxed factory
-///
-/// This type owns a trait object (`Box<dyn ComponentFactory>`), so it cannot
-/// derive `Clone`, `PartialEq`, or `Eq`. It *does* derive [`Debug`]: that is why
-/// [`ComponentFactory`] carries a [`core::fmt::Debug`] supertrait — the boxed
-/// factory is `Debug`, so no hand-written impl is needed.
+#[doc = include_str!("component_registration.doc/ComponentRegistration.md")]
 #[derive(Debug)]
 pub struct ComponentRegistration {
     id: ComponentId,
@@ -30,12 +17,7 @@ pub struct ComponentRegistration {
 }
 
 impl ComponentRegistration {
-    /// Builds a registration for `factory` at `version`.
-    ///
-    /// The [`ComponentId`] and [`ComponentContract`] are taken from the factory
-    /// itself (via [`ComponentFactory::component_id`] and
-    /// [`ComponentFactory::contract`]), keeping the entry internally consistent
-    /// by construction.
+    #[doc = include_str!("component_registration.doc/new.md")]
     #[must_use]
     pub fn new(factory: Box<dyn ComponentFactory>, version: ComponentVersion) -> Self {
         Self {
@@ -46,43 +28,37 @@ impl ComponentRegistration {
         }
     }
 
-    /// The stable identity of the registered component kind.
+    #[doc = include_str!("component_registration.doc/id.md")]
     #[must_use]
     pub fn id(&self) -> ComponentId {
         self.id
     }
 
-    /// The registered component's contract (schema, capability requirements, and
-    /// diagnostics metadata all live here — spec §2.13).
+    #[doc = include_str!("component_registration.doc/contract.md")]
     #[must_use]
     pub fn contract(&self) -> &ComponentContract {
         &self.contract
     }
 
-    /// The version of this component's contract schema.
+    #[doc = include_str!("component_registration.doc/version.md")]
     #[must_use]
     pub fn version(&self) -> ComponentVersion {
         self.version
     }
 
-    /// The factory used to instantiate this component kind.
+    #[doc = include_str!("component_registration.doc/factory.md")]
     #[must_use]
     pub fn factory(&self) -> &dyn ComponentFactory {
         self.factory.as_ref()
     }
 
-    /// Mints a fresh runtime instance of this kind via the stored factory.
-    ///
-    /// The returned instance is in
-    /// [`LifecycleState::Created`](crate::lifecycle::LifecycleState::Created).
+    #[doc = include_str!("component_registration.doc/create_instance.md")]
     #[must_use]
     pub fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         self.factory.create_instance(instance)
     }
 
-    /// Mints a fresh renderable component value of this kind via the stored
-    /// factory — the [`create_instance`](Self::create_instance) counterpart that
-    /// carries the component's local state (spec §2.1).
+    #[doc = include_str!("component_registration.doc/create_component.md")]
     #[must_use]
     pub fn create_component(&self) -> Box<dyn ErasedComponent> {
         self.factory.create_component()

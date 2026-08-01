@@ -1,14 +1,14 @@
-//! The scope at which a capability is issued.
+#![doc = include_str!("capability_scope.doc/_module.md")]
 
-/// The lifetime/binding scope of an issued capability (spec §8.64).
+#[doc = include_str!("capability_scope.doc/CapabilityScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityScope {
-    /// Bound to the whole process.
+    #[doc = include_str!("capability_scope.doc/Process.md")]
     Process,
-    /// Bound to one host application.
+    #[doc = include_str!("capability_scope.doc/Application.md")]
     Application,
-    /// Bound to one UI runtime.
+    #[doc = include_str!("capability_scope.doc/Runtime.md")]
     Runtime,
-    /// Bound to one contribution instance.
+    #[doc = include_str!("capability_scope.doc/Instance.md")]
     Instance,
 }

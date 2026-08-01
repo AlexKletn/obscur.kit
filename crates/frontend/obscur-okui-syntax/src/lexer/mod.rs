@@ -1,4 +1,4 @@
-//! Lexer: tokenizes `.okui` source into a lossless [`Token`] stream.
+#![doc = include_str!("mod.doc/_module.md")]
 mod lexer;
 pub use lexer::Lexer;
 mod token;

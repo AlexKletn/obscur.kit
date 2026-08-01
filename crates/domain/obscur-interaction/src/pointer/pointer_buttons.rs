@@ -1,27 +1,22 @@
-//! The [`PointerButtons`] pressed-button bitset and its [`PointerButton`]
-//! members (spec §4.7).
+#![doc = include_str!("pointer_buttons.doc/_module.md")]
 
-/// A single addressable pointer button (spec §4.7).
-///
-/// Each variant maps to one bit in a [`PointerButtons`] bitset via
-/// [`PointerButton::mask`].
+#[doc = include_str!("pointer_buttons.doc/PointerButton.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerButton {
-    /// The primary button (typically left mouse / main contact).
+    #[doc = include_str!("pointer_buttons.doc/Primary.md")]
     Primary,
-    /// The secondary button (typically right mouse / context).
+    #[doc = include_str!("pointer_buttons.doc/Secondary.md")]
     Secondary,
-    /// The middle button (typically the mouse wheel press).
+    #[doc = include_str!("pointer_buttons.doc/Middle.md")]
     Middle,
-    /// The back navigation button.
+    #[doc = include_str!("pointer_buttons.doc/Back.md")]
     Back,
-    /// The forward navigation button.
+    #[doc = include_str!("pointer_buttons.doc/Forward.md")]
     Forward,
 }
 
 impl PointerButton {
-    /// Returns the single-bit mask this button occupies within a
-    /// [`PointerButtons`] bitset.
+    #[doc = include_str!("pointer_buttons.doc/mask.md")]
     #[must_use]
     pub const fn mask(self) -> u8 {
         match self {
@@ -34,60 +29,57 @@ impl PointerButton {
     }
 }
 
-/// The set of pointer buttons currently held down (spec §4.7).
-///
-/// Backed by a `u8` bitset; each [`PointerButton`] contributes one bit. An empty
-/// set means no buttons are pressed (a hover or contact-less move).
+#[doc = include_str!("pointer_buttons.doc/PointerButtons.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct PointerButtons(u8);
 
 impl PointerButtons {
-    /// Bit for [`PointerButton::Primary`].
+    #[doc = include_str!("pointer_buttons.doc/PRIMARY.md")]
     pub const PRIMARY: u8 = 1;
-    /// Bit for [`PointerButton::Secondary`].
+    #[doc = include_str!("pointer_buttons.doc/SECONDARY.md")]
     pub const SECONDARY: u8 = 2;
-    /// Bit for [`PointerButton::Middle`].
+    #[doc = include_str!("pointer_buttons.doc/MIDDLE.md")]
     pub const MIDDLE: u8 = 4;
-    /// Bit for [`PointerButton::Back`].
+    #[doc = include_str!("pointer_buttons.doc/BACK.md")]
     pub const BACK: u8 = 8;
-    /// Bit for [`PointerButton::Forward`].
+    #[doc = include_str!("pointer_buttons.doc/FORWARD.md")]
     pub const FORWARD: u8 = 16;
 
-    /// Creates an empty button set (no buttons pressed).
+    #[doc = include_str!("pointer_buttons.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self(0)
     }
 
-    /// Creates a button set from a raw `u8` bitmask.
+    #[doc = include_str!("pointer_buttons.doc/from_bits.md")]
     #[must_use]
     pub const fn from_bits(bits: u8) -> Self {
         Self(bits)
     }
 
-    /// Marks `button` as pressed.
+    #[doc = include_str!("pointer_buttons.doc/press.md")]
     pub const fn press(&mut self, button: PointerButton) {
         self.0 |= button.mask();
     }
 
-    /// Marks `button` as released.
+    #[doc = include_str!("pointer_buttons.doc/release.md")]
     pub const fn release(&mut self, button: PointerButton) {
         self.0 &= !button.mask();
     }
 
-    /// Returns whether `button` is currently pressed.
+    #[doc = include_str!("pointer_buttons.doc/contains.md")]
     #[must_use]
     pub const fn contains(&self, button: PointerButton) -> bool {
         self.0 & button.mask() != 0
     }
 
-    /// Returns whether no buttons are pressed.
+    #[doc = include_str!("pointer_buttons.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.0 == 0
     }
 
-    /// Returns the raw `u8` bitmask backing this set.
+    #[doc = include_str!("pointer_buttons.doc/bits.md")]
     #[must_use]
     pub const fn bits(&self) -> u8 {
         self.0

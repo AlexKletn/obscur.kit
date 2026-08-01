@@ -1,0 +1,1 @@
+Captures `pointer` to `node`.

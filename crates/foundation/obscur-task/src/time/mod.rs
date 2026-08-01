@@ -1,4 +1,4 @@
-//! Time module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod clock;
 mod deadline;
 mod instant;

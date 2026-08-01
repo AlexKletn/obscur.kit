@@ -1,43 +1,4 @@
-//! **Windowed capabilities demo → Vello (GPU, animated).**
-//!
-//! The live sibling of `capabilities_png.rs` / `capabilities_vello_png.rs`: it
-//! renders the *very same* shared [`capabilities`] scene through winit 0.30 +
-//! Vello/wgpu 29 into a genuine on-screen window, so the GPU-class effects (the
-//! Oklab gradient, the linearRGB blur, the spread shadow) render at **full
-//! fidelity** live — and it additionally **animates** the transform-interpolation
-//! card (§13).
-//!
-//! # The animated transform
-//!
-//! The CSS→motion plumbing is scalar-only today, so the interpolation is driven
-//! at the DRIVER level (a clean demo-driver animation, no engine change): each
-//! frame the driver blends `rotate(0°) → rotate(90°)` through the motion engine's
-//! [`MotionValue::Transform`] decompose→lerp→recompose at an oscillating
-//! `t ∈ [0, 1]`, and applies the resulting `[a, b, c, d, e, f]` affine to the
-//! `.xform-box` element by layering a per-frame `.xform-box { transform:
-//! matrix(...) }` override stylesheet on top of the base sheet (the runtime's
-//! real CSS cascade path — a later same-specificity rule wins). The decomposition
-//! keeps the square at FULL size through the whole sweep (a naive component-wise
-//! matrix lerp would shrink it ~30% at the midpoint); the box rotates 0°→90°→0°.
-//!
-//! # Device scale & HiDPI
-//!
-//! The window is **device-scale aware**: the render scale is the display's HiDPI
-//! `scale_factor` — **not tied to the window size**. It points the runtime's
-//! viewport at `physical_extent / scale` and sets the runtime device scale so the
-//! scene is bracketed in a root `scale()` and rasterizes crisply at its authored
-//! CSS size. Because the scale is fixed to the display density, **resizing the
-//! window reflows the layout** — the UI is *not* zoomed up and down with the
-//! window — exactly like a real application.
-//!
-//! Run it (a display + a GPU adapter are required):
-//! `cargo run -p obscur-kit --example capabilities_window --features full`
-//!
-//! # Environment note
-//!
-//! Like the other windowed examples, this needs a display and a usable GPU
-//! adapter; in a headless environment it compiles but exits cleanly on `resumed`
-//! when no adapter/surface can be acquired (it never panics on that path).
+#![doc = include_str!("capabilities_window.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::sync::Arc;
@@ -67,32 +28,28 @@ use winit::window::{Window, WindowAttributes, WindowId};
 #[path = "capabilities/scene.rs"]
 mod capabilities;
 
-/// The animation period in seconds: one full `0° → 90° → 0°` sweep.
+#[doc = include_str!("capabilities_window.doc/CYCLE_SECS.md")]
 const CYCLE_SECS: f32 = 3.2;
 
-/// The initial window size in logical pixels.
+#[doc = include_str!("capabilities_window.doc/INITIAL_SIZE.md")]
 const INITIAL_SIZE: Size = Size::new(1180.0, 820.0);
 
-/// The winit application: owns the window, the Vello renderer, the swapchain
-/// surface, the runtime, and the animation clock.
+#[doc = include_str!("capabilities_window.doc/CapabilitiesWindow.md")]
 struct CapabilitiesWindow {
     window: Option<Arc<Window>>,
     surface: Option<VelloSurface>,
     device: Option<wgpu::Device>,
     renderer: Option<VelloRenderer>,
     runtime: UiRuntime,
-    /// The compiled base stylesheet (recomposed each frame with the animated
-    /// `.xform-box` override layered on top).
+    #[doc = include_str!("capabilities_window.doc/base_sheet.md")]
     base_sheet: Stylesheet,
-    /// The animation start instant, so `elapsed()` drives the transform sweep.
+    #[doc = include_str!("capabilities_window.doc/start.md")]
     start: Instant,
     scale_factor: f64,
 }
 
 impl CapabilitiesWindow {
-    /// Builds the application with a fresh [`UiRuntime`] wired to the shared scene:
-    /// the reactive view builder and the compiled base stylesheet. No window,
-    /// surface, or GPU device yet (created on `resumed`).
+    #[doc = include_str!("capabilities_window.doc/new.md")]
     fn new() -> Self {
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), INITIAL_SIZE);
         // The static view (no per-frame view rebuild needed — the animation is
@@ -113,25 +70,13 @@ impl CapabilitiesWindow {
         }
     }
 
-    /// The base device-pixel scale the UI renders at: the display's HiDPI
-    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
-    ///
-    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
-    /// renders at its natural CSS size for the display density, so widening or
-    /// narrowing the window changes the logical viewport and the layout reflows,
-    /// exactly like a real application — rather than scaling the whole UI up and
-    /// down with the window.
+    #[doc = include_str!("capabilities_window.doc/base_scale.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn base_scale(&self) -> f32 {
         (self.scale_factor as f32).max(0.05)
     }
 
-    /// Re-syncs the runtime's viewport + device scale to the current swapchain
-    /// extent and display density (called after surface creation and on resize).
-    ///
-    /// The viewport is the swapchain's **physical** extent divided by the device
-    /// scale, so layout runs in **logical** CSS pixels that follow the real window
-    /// size and reflow on resize.
+    #[doc = include_str!("capabilities_window.doc/sync_viewport.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -145,8 +90,7 @@ impl CapabilitiesWindow {
         }
     }
 
-    /// The oscillating blend parameter `t ∈ [0, 1]`: a triangle wave over
-    /// [`CYCLE_SECS`] so the rotation sweeps `0° → 90° → 0°` and repeats.
+    #[doc = include_str!("capabilities_window.doc/blend_t.md")]
     fn blend_t(&self) -> f32 {
         let phase = (self.start.elapsed().as_secs_f32() / CYCLE_SECS).fract();
         if phase < 0.5 {
@@ -156,9 +100,7 @@ impl CapabilitiesWindow {
         }
     }
 
-    /// Blends `rotate(0°) → rotate(90°)` through the motion engine at the current
-    /// `t` (decompose→lerp→recompose, CSS Transforms §14) and returns the
-    /// resulting affine `[a, b, c, d, e, f]` — full-size at every `t`.
+    #[doc = include_str!("capabilities_window.doc/animated_matrix.md")]
     fn animated_matrix(&self) -> [f32; 6] {
         let from = MotionValue::transform([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]); // rotate(0°)
         let to = MotionValue::transform([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]); // rotate(90°)
@@ -167,9 +109,7 @@ impl CapabilitiesWindow {
             .unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
     }
 
-    /// Compiles the per-frame `.xform-box` override sheet carrying the animated
-    /// affine as a `matrix(...)` (transform-origin defaults to the box centre, so
-    /// the square rotates in place).
+    #[doc = include_str!("capabilities_window.doc/override_sheet.md")]
     fn override_sheet(&self) -> Stylesheet {
         let m = self.animated_matrix();
         let css = format!(
@@ -179,9 +119,7 @@ impl CapabilitiesWindow {
         compile(&css)
     }
 
-    /// Renders one animated frame: push the base + fresh override stylesheets,
-    /// run a due reactive frame, and present it on-screen via Vello. Requests the
-    /// next redraw so the animation runs continuously.
+    #[doc = include_str!("capabilities_window.doc/render_frame.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn render_frame(&mut self) {
         // Layer the animated override on top of the base sheet (later, same
@@ -308,20 +246,14 @@ impl ApplicationHandler for CapabilitiesWindow {
     }
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("capabilities_window.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Initialises a wgpu swapchain surface + device/queue for on-screen rendering.
-///
-/// # Errors
-///
-/// Returns an error if the surface cannot be created, no compatible GPU adapter
-/// is available, the device cannot be created, or the surface exposes no default
-/// configuration.
+#[doc = include_str!("capabilities_window.doc/init_gpu.md")]
 fn init_gpu(
     window: &Arc<Window>,
 ) -> Result<
@@ -348,8 +280,7 @@ fn init_gpu(
     Ok((surface, config, device, queue))
 }
 
-/// Wires the full text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the Vello renderer (identical id↔bytes mapping).
+#[doc = include_str!("capabilities_window.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -367,12 +298,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes:
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("capabilities_window.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("capabilities_window.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
@@ -389,11 +320,7 @@ fn load_system_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Builds the winit event loop and runs the application to completion.
-///
-/// # Errors
-///
-/// Propagates any event-loop construction or run error.
+#[doc = include_str!("capabilities_window.doc/main.md")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== obscur-kit capabilities demo → Vello (windowed, animated transform) ==\n");
     let event_loop = EventLoop::new()?;

@@ -1,63 +1,46 @@
-//! The [`OverscanPolicy`] — how many extra items to materialize beyond the
-//! visible viewport on each side (spec §4.9 *overscan*).
-//!
-//! Overscan reduces blank flashes while scrolling: by materializing a handful of
-//! items just past each edge of the viewport, freshly revealed items are already
-//! laid out when they scroll into view. The policy is pure sizing data — it maps
-//! a visible index range to an expanded, saturating one.
+#![doc = include_str!("overscan_policy.doc/_module.md")]
 
-/// How many extra items to materialize beyond the visible viewport, on each side
-/// (spec §4.9 *overscan* — reduces blank flashes when scrolling).
-///
-/// A larger overscan trades more materialized work for fewer blank regions at the
-/// leading/trailing edges during fast scrolls. Applied to a visible `[start, end)`
-/// range via [`expand`](OverscanPolicy::expand), which saturates at `0` and the
-/// item count so the result never leaves the collection's bounds.
+#[doc = include_str!("overscan_policy.doc/OverscanPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverscanPolicy {
-    /// Extra items to materialize before the first visible item.
+    #[doc = include_str!("overscan_policy.doc/leading.md")]
     leading: usize,
-    /// Extra items to materialize after the last visible item.
+    #[doc = include_str!("overscan_policy.doc/trailing.md")]
     trailing: usize,
 }
 
 impl OverscanPolicy {
-    /// Creates a policy with `leading` extra items before and `trailing` extra
-    /// items after the visible range (spec §4.9).
+    #[doc = include_str!("overscan_policy.doc/new.md")]
     #[must_use]
     pub const fn new(leading: usize, trailing: usize) -> Self {
         Self { leading, trailing }
     }
 
-    /// Creates a policy with the same `count` of extra items on both sides.
+    #[doc = include_str!("overscan_policy.doc/symmetric.md")]
     #[must_use]
     pub const fn symmetric(count: usize) -> Self {
         Self::new(count, count)
     }
 
-    /// A policy with no overscan on either side (`0`, `0`).
+    #[doc = include_str!("overscan_policy.doc/none.md")]
     #[must_use]
     pub const fn none() -> Self {
         Self::new(0, 0)
     }
 
-    /// Extra items materialized before the first visible item.
+    #[doc = include_str!("overscan_policy.doc/leading_2.md")]
     #[must_use]
     pub const fn leading(self) -> usize {
         self.leading
     }
 
-    /// Extra items materialized after the last visible item.
+    #[doc = include_str!("overscan_policy.doc/trailing_2.md")]
     #[must_use]
     pub const fn trailing(self) -> usize {
         self.trailing
     }
 
-    /// Applies this overscan to a visible half-open `[start, end)` range,
-    /// returning the expanded `(start, end)` (spec §4.9).
-    ///
-    /// The start saturates at `0` and the end is clamped to `item_count`, so the
-    /// expanded range always stays within `[0, item_count]`.
+    #[doc = include_str!("overscan_policy.doc/expand.md")]
     #[must_use]
     pub const fn expand(&self, start: usize, end: usize, item_count: usize) -> (usize, usize) {
         let expanded_start = start.saturating_sub(self.leading);
@@ -72,7 +55,7 @@ impl OverscanPolicy {
 }
 
 impl Default for OverscanPolicy {
-    /// The default policy has no overscan (spec §4.9): [`OverscanPolicy::none`].
+    #[doc = include_str!("overscan_policy.doc/default.md")]
     fn default() -> Self {
         Self::none()
     }

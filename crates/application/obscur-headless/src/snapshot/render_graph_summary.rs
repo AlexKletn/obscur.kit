@@ -1,50 +1,27 @@
-//! A backend-neutral render-graph description of a frame: [`RenderGraphSummary`].
+#![doc = include_str!("render_graph_summary.doc/_module.md")]
 
 use obscur_geometry::Size;
 use obscur_scene::scene::SceneSnapshot;
 
 use super::RenderPass;
 
-/// A backend-neutral, GPU-free description of a frame's render graph (spec §7.4).
-///
-/// §7.4 lists the *render graph* as one of the eight headless outputs. A full
-/// render graph — pass scheduling, transient targets, GPU resource aliasing — is
-/// only meaningful with a concrete backend, so this type captures the
-/// **backend-neutral structural description** that a headless frame determines:
-/// the ordered [`passes`](Self::passes) and the [`target`](Self::target) they
-/// render into. It invents no GPU data; every field is derived from the composed
-/// scene and the viewport, so the same frame always yields the same summary.
-///
-/// For an ordinary headless frame the graph is a single `"scene"` pass (the
-/// composited display list) into the viewport-sized target. Extension/custom
-/// passes (spec §5.3) and GPU-specific passes are backend-gated and are not
-/// modeled here; this is the deterministic skeleton every backend shares.
+#[doc = include_str!("render_graph_summary.doc/RenderGraphSummary.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderGraphSummary {
-    /// The ordered render passes the frame comprises.
+    #[doc = include_str!("render_graph_summary.doc/passes.md")]
     passes: Vec<RenderPass>,
-    /// The target area the passes render into, in logical pixels.
+    #[doc = include_str!("render_graph_summary.doc/target.md")]
     target: Size,
 }
 
 impl RenderGraphSummary {
-    /// Builds a summary from already-computed parts.
-    ///
-    /// Prefer [`from_scene`](Self::from_scene), which derives the single scene
-    /// pass from a composed scene; this constructor exists for callers that hold
-    /// the passes directly.
+    #[doc = include_str!("render_graph_summary.doc/new.md")]
     #[must_use]
     pub fn new(passes: Vec<RenderPass>, target: Size) -> Self {
         Self { passes, target }
     }
 
-    /// Derives the backend-neutral render graph for an ordinary headless frame:
-    /// a single `"scene"` pass covering `scene`'s display list, rendering into a
-    /// `target`-sized area.
-    ///
-    /// The pass counts come straight from the scene's
-    /// [`SceneStatistics`](obscur_scene::scene::SceneStatistics), so capturing
-    /// the same scene twice yields an equal summary (spec §7.14).
+    #[doc = include_str!("render_graph_summary.doc/from_scene.md")]
     #[must_use]
     pub fn from_scene(scene: &SceneSnapshot, target: Size) -> Self {
         let stats = scene.statistics();
@@ -56,19 +33,19 @@ impl RenderGraphSummary {
         Self { passes, target }
     }
 
-    /// The ordered render passes.
+    #[doc = include_str!("render_graph_summary.doc/passes_2.md")]
     #[must_use]
     pub fn passes(&self) -> &[RenderPass] {
         &self.passes
     }
 
-    /// The number of render passes in the graph.
+    #[doc = include_str!("render_graph_summary.doc/pass_count.md")]
     #[must_use]
     pub fn pass_count(&self) -> usize {
         self.passes.len()
     }
 
-    /// The target area the passes render into, in logical pixels.
+    #[doc = include_str!("render_graph_summary.doc/target_2.md")]
     #[must_use]
     pub fn target(&self) -> Size {
         self.target

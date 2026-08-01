@@ -1,25 +1,14 @@
-//! `Document`: the typed AST view of the lossless tree root (spec §2.2).
+#![doc = include_str!("document.doc/_module.md")]
 
 use crate::ast::Element;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-/// Typed AST wrapper over a [`Document`](SyntaxKind::Document) syntax node
-/// (spec §2.2).
-///
-/// A `Document` is the root of a parsed `.okui` source. It wraps the underlying
-/// [`SyntaxNode`] by value (a cheap clone) so the typed view is owned and can be
-/// passed around freely while the lossless tree stays intact underneath.
-///
-/// Its top-level children are elements (including the element-shaped
-/// [`Conditional`](SyntaxKind::Conditional) / [`ForLoop`](SyntaxKind::ForLoop)
-/// control-flow constructs), interpolated expressions and raw text. Only the
-/// element-shaped children are surfaced by [`elements`](Self::elements).
+#[doc = include_str!("document.doc/Document.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document(SyntaxNode);
 
 impl Document {
-    /// Casts a syntax node to a `Document`, returning `Some` iff its kind is
-    /// [`Document`](SyntaxKind::Document).
+    #[doc = include_str!("document.doc/cast.md")]
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if node.kind() == SyntaxKind::Document {
@@ -29,23 +18,18 @@ impl Document {
         }
     }
 
-    /// Returns the wrapped syntax node.
+    #[doc = include_str!("document.doc/syntax.md")]
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    /// Iterates the document's top-level elements.
-    ///
-    /// Every element-shaped child node — a plain [`Element`](SyntaxKind::Element)
-    /// as well as the element-shaped [`Conditional`](SyntaxKind::Conditional) and
-    /// [`ForLoop`](SyntaxKind::ForLoop) constructs — is cast to [`Element`];
-    /// non-element children (expressions, text) are skipped.
+    #[doc = include_str!("document.doc/elements.md")]
     pub fn elements(&self) -> impl Iterator<Item = Element> + '_ {
         self.0.child_nodes().cloned().filter_map(Element::cast)
     }
 
-    /// Returns the number of direct child nodes of the document.
+    #[doc = include_str!("document.doc/child_count.md")]
     #[must_use]
     pub fn child_count(&self) -> usize {
         self.0.child_nodes().count()

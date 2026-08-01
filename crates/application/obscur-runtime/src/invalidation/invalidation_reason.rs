@@ -1,56 +1,30 @@
-//! The runtime-level cause of a change (Obscur Kit 2 specs §4.3).
+#![doc = include_str!("invalidation_reason.doc/_module.md")]
 
 use crate::invalidation::InvalidationKind;
 
-/// Why a change happened — the runtime-level cause — which maps to an
-/// [`InvalidationKind`] and, via the router, to the domain invalidation reasons.
-///
-/// Each variant records the semantic cause of an invalidation as reported to the
-/// runtime; [`kind`](InvalidationReason::kind) classifies it into the shared
-/// [`InvalidationKind`] depth used to flag dirty pipeline phases.
+#[doc = include_str!("invalidation_reason.doc/InvalidationReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InvalidationReason {
-    /// A node's style / declarations changed (e.g. a stylesheet rule now matches
-    /// differently). Maps to [`InvalidationKind::Style`].
+    #[doc = include_str!("invalidation_reason.doc/StyleChanged.md")]
     StyleChanged,
-    /// A node's inline style attribute changed. Maps to [`InvalidationKind::Style`].
+    #[doc = include_str!("invalidation_reason.doc/InlineStyleChanged.md")]
     InlineStyleChanged,
-    /// A node's pseudo-state changed (hover/focus/etc.). Maps to
-    /// [`InvalidationKind::Style`].
+    #[doc = include_str!("invalidation_reason.doc/PseudoStateChanged.md")]
     PseudoStateChanged,
-    /// A custom property (CSS variable) affecting a node changed. Maps to
-    /// [`InvalidationKind::Style`].
+    #[doc = include_str!("invalidation_reason.doc/CustomPropertyChanged.md")]
     CustomPropertyChanged,
-    /// A node's box geometry must be recomputed without its style having changed.
-    /// Maps to [`InvalidationKind::Layout`].
-    ///
-    /// The cause a caller states when it knows the *result* of a style rather than
-    /// the style itself — it asks for a relayout and nothing more, so the style
-    /// phase is not dirtied. [`UiOperation::InvalidateLayout`] is exactly that
-    /// statement, and this is what it means.
-    ///
-    /// [`UiOperation::InvalidateLayout`]: crate::transaction::UiOperation::InvalidateLayout
+    #[doc = include_str!("invalidation_reason.doc/LayoutChanged.md")]
     LayoutChanged,
-    /// The node tree changed (children added/removed). Maps to
-    /// [`InvalidationKind::Tree`].
+    #[doc = include_str!("invalidation_reason.doc/TreeChanged.md")]
     TreeChanged,
-    /// A node's text / intrinsic content changed. Maps to
-    /// [`InvalidationKind::Text`].
+    #[doc = include_str!("invalidation_reason.doc/ContentChanged.md")]
     ContentChanged,
-    /// The window/environment changed (viewport, DPI). Maps to
-    /// [`InvalidationKind::Environment`].
+    #[doc = include_str!("invalidation_reason.doc/EnvironmentChanged.md")]
     EnvironmentChanged,
 }
 
 impl InvalidationReason {
-    /// Classifies this cause into its [`InvalidationKind`] depth.
-    ///
-    /// The style-affecting causes ([`StyleChanged`](InvalidationReason::StyleChanged),
-    /// [`InlineStyleChanged`](InvalidationReason::InlineStyleChanged),
-    /// [`PseudoStateChanged`](InvalidationReason::PseudoStateChanged),
-    /// [`CustomPropertyChanged`](InvalidationReason::CustomPropertyChanged)) all map
-    /// to [`InvalidationKind::Style`]; the remaining causes map to their matching
-    /// depths.
+    #[doc = include_str!("invalidation_reason.doc/kind.md")]
     #[must_use]
     pub fn kind(self) -> InvalidationKind {
         match self {

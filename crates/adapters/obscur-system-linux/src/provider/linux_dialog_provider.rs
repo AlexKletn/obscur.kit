@@ -1,19 +1,4 @@
-//! A Linux [`DialogProvider`] that presents dialogs via `zenity` (spec §6.9).
-//!
-//! [`LinuxDialogProvider`] implements the pure
-//! [`DialogProvider`](obscur_system::dialog::DialogProvider) port by shelling out
-//! to `zenity` with [`std::process::Command`] and no external crates. Each
-//! [`DialogRequest`](obscur_system::dialog::DialogRequest) maps to a `zenity`
-//! argv (see [`build_args`]); the provider runs the tool synchronously, captures
-//! its output, and maps the exit status onto a
-//! [`DialogResult`](obscur_system::dialog::DialogResult).
-//!
-//! There is no `Failed` variant in the result vocabulary, so a spawn/IO error is
-//! reported best-effort as [`DialogResult::Dismissed`] (as if the user closed the
-//! dialog), a missing tool as [`DialogResult::Unsupported`], and a user cancel as
-//! [`DialogResult::Dismissed`]. A portal-based implementation
-//! (`xdg-desktop-portal` via `ashpd`) is a future refinement (spec §2.7
-//! target-specific providers); the shell-out path here is dependency-free.
+#![doc = include_str!("linux_dialog_provider.doc/_module.md")]
 
 use std::process::{Command, Output};
 
@@ -23,19 +8,15 @@ use obscur_system::document::{
     DirectoryHandle, DocumentHandle, DocumentMetadata, DocumentPermission,
 };
 
-/// A Linux [`DialogProvider`] backed by `zenity` (spec §6.9).
-///
-/// The provider holds the tool command name (defaulting to `"zenity"`).
-/// [`Self::supports`] scans `PATH` for the tool without executing it — so it never
-/// pops a GUI — and [`Self::present`] runs the tool with a request-specific argv.
+#[doc = include_str!("linux_dialog_provider.doc/LinuxDialogProvider.md")]
 #[derive(Debug, Clone)]
 pub struct LinuxDialogProvider {
-    /// The dialog tool to invoke, e.g. `"zenity"`.
+    #[doc = include_str!("linux_dialog_provider.doc/tool.md")]
     tool: Box<str>,
 }
 
 impl LinuxDialogProvider {
-    /// Creates a provider that presents dialogs with `zenity` (spec §6.9).
+    #[doc = include_str!("linux_dialog_provider.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -43,27 +24,26 @@ impl LinuxDialogProvider {
         }
     }
 
-    /// Creates a provider that presents dialogs with a custom `tool` command
-    /// (spec §6.9).
+    #[doc = include_str!("linux_dialog_provider.doc/with_tool.md")]
     #[must_use]
     pub fn with_tool(tool: impl Into<Box<str>>) -> Self {
         Self { tool: tool.into() }
     }
 
-    /// Returns the dialog tool this provider invokes (spec §6.9).
+    #[doc = include_str!("linux_dialog_provider.doc/tool_2.md")]
     #[must_use]
     pub fn tool(&self) -> &str {
         &self.tool
     }
 
-    /// Runs the configured tool with `args`, capturing its output (spec §6.9).
+    #[doc = include_str!("linux_dialog_provider.doc/run_zenity.md")]
     fn run_zenity(&self, args: &[&str]) -> std::io::Result<Output> {
         Command::new(&*self.tool).args(args).output()
     }
 }
 
 impl Default for LinuxDialogProvider {
-    /// The default provider presents dialogs with `zenity`.
+    #[doc = include_str!("linux_dialog_provider.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }
@@ -138,18 +118,7 @@ impl DialogProvider for LinuxDialogProvider {
     }
 }
 
-/// Builds the `zenity` argv for `request`, excluding the tool name (spec §6.9).
-///
-/// This is the pure request→argv mapping, factored out so the flag choices can be
-/// unit-tested without spawning `zenity`:
-/// - [`OpenFile`](DialogRequest::OpenFile) → `--file-selection` (+ `--multiple`).
-/// - [`SaveFile`](DialogRequest::SaveFile) → `--file-selection --save
-///   --confirm-overwrite --filename <suggested_name>`.
-/// - [`PickFolder`](DialogRequest::PickFolder) → `--file-selection --directory`.
-/// - [`Message`](DialogRequest::Message) → `--info`/`--warning`/`--error --title
-///   <title> --text <body>`.
-/// - [`Confirm`](DialogRequest::Confirm) → `--question --title <title> --text
-///   <body>`.
+#[doc = include_str!("linux_dialog_provider.doc/build_args.md")]
 #[must_use]
 fn build_args(request: &DialogRequest) -> Vec<String> {
     match request {
@@ -187,7 +156,7 @@ fn build_args(request: &DialogRequest) -> Vec<String> {
     }
 }
 
-/// Maps a [`MessageLevel`] to the corresponding `zenity` flag (spec §6.9).
+#[doc = include_str!("linux_dialog_provider.doc/message_flag.md")]
 fn message_flag(level: MessageLevel) -> &'static str {
     match level {
         MessageLevel::Info => "--info",
@@ -196,10 +165,7 @@ fn message_flag(level: MessageLevel) -> &'static str {
     }
 }
 
-/// Parses `zenity` file-selection stdout into individual path strings (spec §6.9).
-///
-/// `zenity --multiple` separates selections with `|`, and single selections carry
-/// a trailing newline; this splits on both, trims, and drops empty fragments.
+#[doc = include_str!("linux_dialog_provider.doc/parse_paths.md")]
 fn parse_paths(stdout: &str) -> Vec<String> {
     stdout
         .split(['\n', '|'])
@@ -209,18 +175,13 @@ fn parse_paths(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-/// Builds a read/permission-tagged [`DocumentHandle`] from a picked `path`
-/// (spec §6.10).
-///
-/// The path becomes both the opaque token and the advisory path hint, and its
-/// last component is the display name.
+#[doc = include_str!("linux_dialog_provider.doc/handle_from_path.md")]
 fn handle_from_path(path: &str, permission: DocumentPermission) -> DocumentHandle {
     DocumentHandle::new(path, DocumentMetadata::new(basename(path)), permission)
         .with_path_hint(path)
 }
 
-/// Builds a read-only [`DirectoryHandle`] from a picked directory `path`
-/// (spec §6.10).
+#[doc = include_str!("linux_dialog_provider.doc/directory_from_path.md")]
 fn directory_from_path(path: &str) -> DirectoryHandle {
     DirectoryHandle::new(
         path,
@@ -230,17 +191,12 @@ fn directory_from_path(path: &str) -> DirectoryHandle {
     .with_path_hint(path)
 }
 
-/// Returns the last path component of `path` for display, or the whole string
-/// when there is no separator.
+#[doc = include_str!("linux_dialog_provider.doc/basename.md")]
 fn basename(path: &str) -> &str {
     path.rsplit('/').find(|s| !s.is_empty()).unwrap_or(path)
 }
 
-/// Returns whether an executable named `cmd` exists on `PATH` (spec §2.7).
-///
-/// The probe scans the `PATH` environment variable, splitting on `:`, and tests
-/// each `dir/cmd` with [`std::fs::metadata`]. It deliberately does **not** execute
-/// the tool, so capability queries are deterministic and never pop a GUI.
+#[doc = include_str!("linux_dialog_provider.doc/tool_available.md")]
 fn tool_available(cmd: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;

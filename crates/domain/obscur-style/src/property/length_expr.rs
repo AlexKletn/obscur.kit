@@ -1,66 +1,36 @@
-//! A symbolic length expression: [`LengthExpr`].
-//!
-//! `calc()`, `min()`, `max()` and `clamp()` combine several length terms with
-//! arithmetic and folding rules (spec §4.13, "Supported"). Rather than evaluate
-//! them at parse time — when the font size and viewport are still unknown — the
-//! compiler lowers them into this symbolic tree.
-//!
-//! The tree is then reduced in two steps against a
-//! [`LengthContext`](crate::property::LengthContext):
-//! [`LengthExpr::absolutize`] folds the font- and viewport-relative *leaves* at
-//! the computed-value step (`calc(50% - 2em)` computes to `calc(50% - 32px)`),
-//! and [`LengthExpr::resolve`] collapses the whole tree to a number once layout
-//! knows the percentage basis.
-//!
-//! The leaves are [`Length`] terms (`px` / `%` / `em` / `rem` / `vw` / `vh` /
-//! …), so an expression can freely mix absolute, font-relative and
-//! viewport-relative units. Multiplication and division follow the CSS rule that
-//! one operand is a plain number: the coefficient is carried on the
-//! [`LengthExpr::Product`] / [`LengthExpr::Quotient`] node.
+#![doc = include_str!("length_expr.doc/_module.md")]
 
 use crate::property::{Length, LengthContext};
 
-/// A `calc()` / `min()` / `max()` / `clamp()` expression over length terms.
-///
-/// Every node resolves to logical pixels via [`LengthExpr::resolve`]; a term
-/// that cannot fold against the context (for example a `%` with no known basis,
-/// or `auto`) makes the whole expression resolve to [`None`].
-///
-/// Because the leaves carry `f32` data, this derives [`PartialEq`] but not
-/// [`Eq`]/[`Hash`].
+#[doc = include_str!("length_expr.doc/LengthExpr.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum LengthExpr {
-    /// A single length term (`10px`, `50%`, `2em`, `5vw`, …).
+    #[doc = include_str!("length_expr.doc/Leaf.md")]
     Leaf(Length),
-    /// The sum of two sub-expressions (`a + b`).
+    #[doc = include_str!("length_expr.doc/Sum.md")]
     Sum(Box<LengthExpr>, Box<LengthExpr>),
-    /// The difference of two sub-expressions (`a - b`).
+    #[doc = include_str!("length_expr.doc/Diff.md")]
     Diff(Box<LengthExpr>, Box<LengthExpr>),
-    /// A sub-expression scaled by a plain number (`a * n`).
+    #[doc = include_str!("length_expr.doc/Product.md")]
     Product(Box<LengthExpr>, f32),
-    /// A sub-expression divided by a plain number (`a / n`).
+    #[doc = include_str!("length_expr.doc/Quotient.md")]
     Quotient(Box<LengthExpr>, f32),
-    /// `min(a, b, …)`: the smallest of its arguments.
+    #[doc = include_str!("length_expr.doc/Min.md")]
     Min(Vec<LengthExpr>),
-    /// `max(a, b, …)`: the largest of its arguments.
+    #[doc = include_str!("length_expr.doc/Max.md")]
     Max(Vec<LengthExpr>),
-    /// `clamp(min, val, max)`: `val` bounded to the `[min, max]` range,
-    /// evaluated as `max(min, min(val, max))`.
+    #[doc = include_str!("length_expr.doc/Clamp.md")]
     Clamp(Box<LengthExpr>, Box<LengthExpr>, Box<LengthExpr>),
 }
 
 impl LengthExpr {
-    /// Wraps a single length term as a leaf expression.
+    #[doc = include_str!("length_expr.doc/leaf.md")]
     #[must_use]
     pub const fn leaf(length: Length) -> Self {
         Self::Leaf(length)
     }
 
-    /// Returns `true` when any leaf anywhere in this expression is a `ch` term.
-    ///
-    /// Exhaustive over the tree, because `ch` is not required to be at the top:
-    /// `clamp(10px, 20ch, 50%)` needs the `0` glyph measured just as much as a
-    /// bare `20ch` does. See [`Length::is_ch`].
+    #[doc = include_str!("length_expr.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
@@ -72,13 +42,7 @@ impl LengthExpr {
         }
     }
 
-    /// Absolutizes every leaf against `ctx`, keeping the expression's shape.
-    ///
-    /// This is [`Length::absolutize`] lifted over the tree: the font- and
-    /// viewport-relative leaves become `px` while `%`, `auto` and an unmeasured
-    /// `ch` stay symbolic, so `calc(50% - 2em)` computes to `calc(50% - 32px)`
-    /// exactly as CSS specifies. The tree is *not* folded to a single number —
-    /// that needs the percentage basis, which only layout has.
+    #[doc = include_str!("length_expr.doc/absolutize.md")]
     #[must_use]
     pub fn absolutize(&self, ctx: &LengthContext) -> Self {
         match self {
@@ -99,11 +63,7 @@ impl LengthExpr {
         }
     }
 
-    /// Resolves this expression to concrete logical pixels against `ctx`.
-    ///
-    /// Returns [`None`] when any term cannot be folded (an `auto` term, a `%`
-    /// with no known [`percent_basis`](crate::property::LengthContext), a
-    /// division by zero, or an empty `min()` / `max()` list).
+    #[doc = include_str!("length_expr.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, ctx: &LengthContext) -> Option<f32> {
         match self {
@@ -130,8 +90,7 @@ impl LengthExpr {
     }
 }
 
-/// Resolves every argument and folds them with `combine`, returning [`None`] if
-/// the list is empty or any argument fails to resolve.
+#[doc = include_str!("length_expr.doc/fold.md")]
 fn fold(args: &[LengthExpr], ctx: &LengthContext, combine: fn(f32, f32) -> f32) -> Option<f32> {
     let mut iter = args.iter();
     let mut acc = iter.next()?.resolve(ctx)?;

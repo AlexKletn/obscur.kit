@@ -1,43 +1,4 @@
-//! **Windowed interactive control gallery → Vello (GPU, live).**
-//!
-//! A live windowed gallery of the base HTML controls where hovering, clicking,
-//! focusing, typing, toggling, and opening the dropdown drive **real** state and
-//! live CSS pseudo-classes recomputed by the runtime from the genuine input path.
-//! It renders the shared [`controls`] scene through winit 0.30 + Vello/wgpu into
-//! an on-screen window, and — unlike the two existing windowed demos
-//! (`showcase_window.rs` wires only three controls; `uikit_window.rs` only swaps
-//! themes) — it wires **every** genuinely-interactive control:
-//!
-//! - **Button** — clicking fires `EVENT_CLICK` → `CMD_BTN`, bumping a click count
-//!   shown in the status line; `:hover` / `:active` / `:focus` are recomputed live.
-//! - **Checkbox** — a plain box and a **tri-state** one; a click runs
-//!   [`Checkbox::toggle`], and the reserved `CHECKED` attribute drives `:checked`.
-//! - **Radio group** — composed clickable rows sharing one selected index; the
-//!   chosen row carries `CHECKED` so `:checked` fills it.
-//! - **Select** — the header toggles the real [`Select`] popup; while open, the
-//!   option rows show, and clicking one selects + closes it.
-//! - **Input** — clicking seats the caret + `:focus` ring; typing / IME flows
-//!   winit → converters → the runtime editing session → live text.
-//! - A **disabled** variant of each shows `:disabled` and ignores input (its
-//!   command has no handler, so activation resolves to nothing).
-//!
-//! The status line ("last event: … · clicks: N") updates every interaction so the
-//! events are visible. The window is **device-scale aware**: the render scale is
-//! the display's HiDPI `scale_factor` — **not tied to the window size** — so
-//! resizing the window reflows the layout rather than zooming the whole UI up and
-//! down, exactly like a real application. Any content taller than the window is
-//! reached by the mouse wheel, and `Ctrl+=`/`Ctrl+-`/`Ctrl+0` apply a user zoom on
-//! top (this is the exact driver shape reused from `showcase_window.rs`).
-//!
-//! Run it (a display + a GPU adapter are required):
-//! `cargo run -p obscur-kit --example controls_window --features full`
-//!
-//! # Environment note
-//!
-//! Like `showcase_window.rs`, this needs a display and a usable GPU adapter; in a
-//! headless environment it compiles but exits cleanly on `resumed` when no
-//! adapter/surface can be acquired (it never panics on that path). The headless
-//! CPU proof (`controls_headless.rs`) is the display-free verification.
+#![doc = include_str!("controls_window.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -77,13 +38,12 @@ use controls::{
     SELECT_COUNT, SELECT_LABELS, radio_command, select_option_command,
 };
 
-/// One wheel *line* of scroll, in logical content px.
+#[doc = include_str!("controls_window.doc/WHEEL_LINE_STEP.md")]
 const WHEEL_LINE_STEP: f32 = 64.0;
-/// The initial (and layout) window size in logical pixels.
+#[doc = include_str!("controls_window.doc/INITIAL_SIZE.md")]
 const INITIAL_SIZE: Size = Size::new(760.0, 720.0);
 
-/// The winit application: owns the window, the GPU Vello renderer, the swapchain,
-/// the embeddable [`UiRuntime`], and drives the shared [`GalleryState`].
+#[doc = include_str!("controls_window.doc/ControlsWindow.md")]
 struct ControlsWindow {
     window: Option<Arc<Window>>,
     surface: Option<VelloSurface>,
@@ -98,10 +58,7 @@ struct ControlsWindow {
 }
 
 impl ControlsWindow {
-    /// Builds the app with a fresh [`UiRuntime`] wired to the shared scene: the
-    /// compiled stylesheet, the reactive view builder, and a handler per
-    /// interactive command. All command handlers mutate the shared
-    /// [`GalleryState`] and refresh its status line so the events are visible.
+    #[doc = include_str!("controls_window.doc/new.md")]
     fn new() -> Self {
         let state = Rc::new(RefCell::new(GalleryState::default()));
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), INITIAL_SIZE);
@@ -197,14 +154,7 @@ impl ControlsWindow {
         }
     }
 
-    /// The base device-pixel scale the UI renders at: the display's HiDPI
-    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
-    ///
-    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
-    /// renders at its natural CSS size for the display density, so widening or
-    /// narrowing the window changes the logical viewport and the layout reflows,
-    /// exactly like a real application — rather than scaling the whole UI up and
-    /// down. The user `zoom` composes on top for an explicit magnify.
+    #[doc = include_str!("controls_window.doc/base_scale.md")]
     fn base_scale(&self) -> f32 {
         (self.scale_factor as f32).max(0.05)
     }
@@ -213,11 +163,7 @@ impl ControlsWindow {
         self.base_scale() * self.zoom
     }
 
-    /// The tallest content extent actually laid out this frame, in **logical**
-    /// px — the largest bottom edge across the tree, read from the runtime's live
-    /// [`inspect_snapshot`](UiRuntime::inspect_snapshot). Used for the scroll
-    /// range, so scrolling reflects the real content rather than a fixed design
-    /// height.
+    #[doc = include_str!("controls_window.doc/content_height_logical.md")]
     fn content_height_logical(&self) -> f32 {
         self.runtime
             .inspect_snapshot()
@@ -244,7 +190,7 @@ impl ControlsWindow {
         self.runtime.set_content_offset(0.0, offset);
     }
 
-    /// Assembles a domain button [`PointerEvent`] at the tracked cursor.
+    #[doc = include_str!("controls_window.doc/pointer_button_event.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
         PointerEvent::new(
@@ -255,8 +201,7 @@ impl ControlsWindow {
         )
     }
 
-    /// Re-syncs the runtime's layout viewport and device scale to the current
-    /// swapchain extent, HiDPI factor, and user zoom.
+    #[doc = include_str!("controls_window.doc/sync_viewport.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -271,7 +216,7 @@ impl ControlsWindow {
         self.apply_scroll();
     }
 
-    /// Handles a Ctrl+zoom shortcut, returning `true` when `key` was a zoom chord.
+    #[doc = include_str!("controls_window.doc/handle_zoom_shortcut.md")]
     fn handle_zoom_shortcut(&mut self, key: &Key) -> bool {
         let Key::Character(text) = key else {
             return false;
@@ -297,9 +242,7 @@ impl ControlsWindow {
         true
     }
 
-    /// Renders one frame: run a scheduler-gated reactive frame (rebuilding the view
-    /// from the current state when one is due), read the committed scene, and
-    /// present it on-screen via Vello.
+    #[doc = include_str!("controls_window.doc/render_frame.md")]
     fn render_frame(&mut self) {
         self.runtime.run_due_frame_reactive();
         let snapshot = self.runtime.snapshot();
@@ -497,7 +440,7 @@ impl ApplicationHandler for ControlsWindow {
     }
 }
 
-/// A short word for a tri-state checkbox's current value.
+#[doc = include_str!("controls_window.doc/tri_word.md")]
 fn tri_word(tri: &obscur_kit::widgets::checkbox::Checkbox) -> &'static str {
     if tri.is_indeterminate() {
         "mixed"
@@ -508,20 +451,14 @@ fn tri_word(tri: &obscur_kit::widgets::checkbox::Checkbox) -> &'static str {
     }
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("controls_window.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Initialises a wgpu swapchain surface + device/queue for on-screen rendering.
-///
-/// # Errors
-///
-/// Returns an error if the surface cannot be created, no compatible GPU adapter is
-/// available (as in a headless environment), the device cannot be created, or the
-/// surface exposes no supported default configuration.
+#[doc = include_str!("controls_window.doc/init_gpu.md")]
 fn init_gpu(
     window: &Arc<Window>,
 ) -> Result<
@@ -548,7 +485,7 @@ fn init_gpu(
     Ok((surface, config, device, queue))
 }
 
-/// Wires the multi-font fallback stack onto the runtime and the Vello renderer.
+#[doc = include_str!("controls_window.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primary_bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let primary_id = registry.register(
@@ -576,12 +513,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primar
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (a `u32`) for a resolved [`FontId`].
+#[doc = include_str!("controls_window.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes for the text path (best effort).
+#[doc = include_str!("controls_window.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
@@ -598,7 +535,7 @@ fn load_system_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Loads a second, CJK-covering fallback font's bytes (best effort).
+#[doc = include_str!("controls_window.doc/load_fallback_font.md")]
 fn load_fallback_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -614,11 +551,7 @@ fn load_fallback_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
-/// Builds the winit event loop and runs the application to completion.
-///
-/// # Errors
-///
-/// Propagates any event-loop construction or run error.
+#[doc = include_str!("controls_window.doc/main.md")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== obscur-kit interactive control gallery → Vello (windowed) ==");
     println!("(full backend: winit window + wgpu/Vello GPU renderer, live pseudo-classes)\n");

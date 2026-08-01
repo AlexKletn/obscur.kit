@@ -1,4 +1,4 @@
-//! The raw handles a GPU surface is built from.
+#![doc = include_str!("layer_window_target.doc/_module.md")]
 
 use core::ptr::NonNull;
 
@@ -7,25 +7,7 @@ use raw_window_handle::{
     RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle, WindowHandle,
 };
 
-/// An owned, `'static` pair of Wayland handles, so a host can build a
-/// `wgpu::Surface<'static>` from a layer surface exactly as it does from a
-/// window.
-///
-/// # Why this type exists at all
-///
-/// wgpu takes anything implementing [`HasWindowHandle`] + [`HasDisplayHandle`],
-/// and winit's window implements both — which is why the ordinary windowed path
-/// needs no unsafe anywhere. A raw `wl_surface` implements neither, so something
-/// has to assert the handles are valid. That assertion is the *only* unsafe in
-/// this crate, and it is here rather than in the host because the host forbids
-/// unsafe outright.
-///
-/// # Safety contract
-///
-/// The pointers are borrowed from the connection and the `wl_surface` owned by
-/// [`LayerWindow`](super::LayerWindow). This type must not outlive it. It is
-/// constructed only by `LayerWindow::target`, which hands out a fresh one from
-/// live objects, and it is inert data — dropping it releases nothing.
+#[doc = include_str!("layer_window_target.doc/LayerWindowTarget.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct LayerWindowTarget {
     display: NonNull<core::ffi::c_void>,
@@ -40,12 +22,7 @@ unsafe impl Send for LayerWindowTarget {}
 unsafe impl Sync for LayerWindowTarget {}
 
 impl LayerWindowTarget {
-    /// Builds a target from a live display and surface pointer.
-    ///
-    /// # Safety
-    ///
-    /// Both pointers must name live Wayland objects that outlive every
-    /// `wgpu::Surface` built from this target.
+    #[doc = include_str!("layer_window_target.doc/new.md")]
     #[must_use]
     pub const unsafe fn new(
         display: NonNull<core::ffi::c_void>,

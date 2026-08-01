@@ -1,65 +1,23 @@
-//! The event-driven frame scheduler (spec §3.5 event-driven scheduling, §3.6
-//! priorities): [`FrameScheduler`].
+#![doc = include_str!("frame_scheduler.doc/_module.md")]
 
 use super::{BackpressureDecision, BackpressurePolicy, SchedulerQueue, StarvationGuard};
 use crate::frame::{FrameReason, FrameRequest};
 
-/// The event-driven frame scheduler that composes the scheduler primitives into
-/// a single scheduling policy (spec §3.5, §3.6).
-///
-/// The scheduler is **event-driven** and has **no busy loop** (§3.5): callers
-/// push frame requests through [`request`](FrameScheduler::request) as events
-/// arrive, and pull the most-urgent pending frame through
-/// [`next_frame`](FrameScheduler::next_frame) when they are ready to run one.
-/// When nothing is pending, `next_frame` simply returns [`None`] — the scheduler
-/// never spins waiting for work.
-///
-/// It is **pure and deterministic**: it observes no wall-clock, `Instant`,
-/// `SystemTime`, timers, threads or randomness. Time and vsync belong to the
-/// task-port adapter that drives this state machine; the scheduler only reacts
-/// to explicit calls.
-///
-/// The policy is assembled from four primitives:
-///
-/// - a [`SchedulerQueue`] holding the pending, reason-coalesced frame requests,
-///   drained most-urgent-first by [`SchedulerPriority`](super::SchedulerPriority)
-///   (§3.6);
-/// - a [`BackpressurePolicy`] deciding how requests are admitted under load
-///   (§3.5 coalescing and stale-frame skipping);
-/// - a [`StarvationGuard`] providing fairness so background work is not starved
-///   by a stream of higher-priority frames (§3.6 "starvation prevention for
-///   background work");
-/// - a `background_pending` flag tracking whether background task work is
-///   waiting.
-///
-/// ## Background work is a separate signal, not a frame
-///
-/// Background shaping / decode / cache work
-/// ([`SchedulerPriority::Background`](super::SchedulerPriority::Background),
-/// §3.6 band 5) is **not** a [`FrameReason`] and is **not** in the frame queue:
-/// it is separate task work. Its starvation is therefore modeled as a signal on
-/// the scheduler rather than a queued frame. The runtime tells the scheduler
-/// when background work is waiting
-/// ([`note_background_pending`](FrameScheduler::note_background_pending) /
-/// [`note_background_idle`](FrameScheduler::note_background_idle)) and when it
-/// has been serviced ([`service_background`](FrameScheduler::service_background)),
-/// and the scheduler reports when that work has been preempted past the fairness
-/// threshold ([`background_starved`](FrameScheduler::background_starved)).
+#[doc = include_str!("frame_scheduler.doc/FrameScheduler.md")]
 #[derive(Debug, Clone)]
 pub struct FrameScheduler {
-    /// The pending, reason-coalesced frame requests (§3.5, §3.6).
+    #[doc = include_str!("frame_scheduler.doc/queue.md")]
     queue: SchedulerQueue,
-    /// The admission-control policy applied to incoming requests (§3.5).
+    #[doc = include_str!("frame_scheduler.doc/backpressure.md")]
     backpressure: BackpressurePolicy,
-    /// The fairness guard preventing background-work starvation (§3.6).
+    #[doc = include_str!("frame_scheduler.doc/starvation.md")]
     starvation: StarvationGuard,
-    /// Whether background task work is currently waiting to be serviced.
+    #[doc = include_str!("frame_scheduler.doc/background_pending.md")]
     background_pending: bool,
 }
 
 impl FrameScheduler {
-    /// Creates a scheduler with an unbounded backpressure policy and the default
-    /// starvation guard.
+    #[doc = include_str!("frame_scheduler.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -70,50 +28,21 @@ impl FrameScheduler {
         }
     }
 
-    /// Returns this scheduler using `backpressure` as its admission-control
-    /// policy.
-    ///
-    /// Fluent constructor: consumes and returns `self` so it can be chained after
-    /// [`new`](FrameScheduler::new).
+    #[doc = include_str!("frame_scheduler.doc/with_backpressure.md")]
     #[must_use]
     pub const fn with_backpressure(mut self, backpressure: BackpressurePolicy) -> Self {
         self.backpressure = backpressure;
         self
     }
 
-    /// Returns this scheduler using `starvation` as its fairness guard.
-    ///
-    /// Fluent constructor: consumes and returns `self` so it can be chained after
-    /// [`new`](FrameScheduler::new).
+    #[doc = include_str!("frame_scheduler.doc/with_starvation_guard.md")]
     #[must_use]
     pub const fn with_starvation_guard(mut self, starvation: StarvationGuard) -> Self {
         self.starvation = starvation;
         self
     }
 
-    /// Admits an incoming frame request through the backpressure policy (§3.5).
-    ///
-    /// This is the event ingress: a request is a fact ("a frame is wanted for
-    /// this reason"), and this method decides whether it joins the pending set.
-    /// The [`BackpressurePolicy`] is consulted with whether the reason is already
-    /// queued and the current queue length, and the resulting
-    /// [`BackpressureDecision`] drives what happens:
-    ///
-    /// - [`Admit`](BackpressureDecision::Admit) or
-    ///   [`DropStale`](BackpressureDecision::DropStale) → the request is pushed.
-    ///   Under [`DropStale`](BackpressureDecision::DropStale) a stale queued
-    ///   frame is allowed to be skipped later (§3.5 "stale intermediate frames
-    ///   may be skipped"); because the queue coalesces by reason, a fresher
-    ///   request for a reason already supersedes the stale one, so pushing is the
-    ///   correct realization of dropping the stale frame.
-    /// - [`Coalesce`](BackpressureDecision::Coalesce) → no-op; the reason is
-    ///   already pending and the incoming request folds into it (§3.5 "updates
-    ///   are coalesced").
-    /// - [`Reject`](BackpressureDecision::Reject) → the request is dropped; the
-    ///   pending set is full and stale-skipping is disabled.
-    ///
-    /// Returns the [`BackpressureDecision`] so callers and diagnostics can
-    /// observe how the request was handled.
+    #[doc = include_str!("frame_scheduler.doc/request.md")]
     pub fn request(&mut self, request: FrameRequest) -> BackpressureDecision {
         let already = self.queue.contains(request.reason());
         let decision = self.backpressure.decide(already, self.queue.len());
@@ -126,25 +55,12 @@ impl FrameScheduler {
         decision
     }
 
-    /// Admits a frame request for `reason`, wrapping it in a [`FrameRequest`].
-    ///
-    /// Convenience over [`request`](FrameScheduler::request) for callers that
-    /// only have a [`FrameReason`] in hand.
+    #[doc = include_str!("frame_scheduler.doc/request_reason.md")]
     pub fn request_reason(&mut self, reason: FrameReason) -> BackpressureDecision {
         self.request(FrameRequest::new(reason))
     }
 
-    /// Pops the most-urgent pending frame to run, or [`None`] if idle (§3.6).
-    ///
-    /// The frame is drawn from the queue in priority order. If a frame is
-    /// returned while background work is pending, that frame has preempted the
-    /// waiting background work, so the starvation guard records a preemption
-    /// ([`StarvationGuard::record_preempted`]) — moving the background work one
-    /// step closer to being reported as starved
-    /// ([`background_starved`](FrameScheduler::background_starved)).
-    ///
-    /// When the queue is empty this returns [`None`] without side effects: the
-    /// scheduler is event-driven and does not busy-loop (§3.5).
+    #[doc = include_str!("frame_scheduler.doc/next_frame.md")]
     pub fn next_frame(&mut self) -> Option<FrameRequest> {
         let frame = self.queue.pop()?;
         if self.background_pending {
@@ -153,96 +69,63 @@ impl FrameScheduler {
         Some(frame)
     }
 
-    /// Coalesces every still-pending frame request into the frame just pulled by
-    /// [`next_frame`](FrameScheduler::next_frame), clearing them from the queue
-    /// (§3.4 step 2 "choose frame reasons" — plural; §3.5 "updates are
-    /// coalesced").
-    ///
-    /// A single frame serves the whole scheduling window: input by its dispatch
-    /// phase, a commit by its staged plan, a landed resource by the completion
-    /// drain. Those reasons are therefore discarded rather than left to schedule
-    /// further frames of their own — and without counting as further preemptions
-    /// of background work, because only one frame ran and
-    /// [`next_frame`](FrameScheduler::next_frame) already recorded its single
-    /// preemption.
+    #[doc = include_str!("frame_scheduler.doc/coalesce_pending.md")]
     pub fn coalesce_pending(&mut self) {
         self.queue.clear();
     }
 
-    /// Records that background task work is now waiting to be serviced.
-    ///
-    /// The runtime calls this when subsystem shaping / decode / cache work
-    /// (§3.6 band 5) has become pending; while set, frames served by
-    /// [`next_frame`](FrameScheduler::next_frame) count as preemptions of that
-    /// work.
+    #[doc = include_str!("frame_scheduler.doc/note_background_pending.md")]
     pub fn note_background_pending(&mut self) {
         self.background_pending = true;
     }
 
-    /// Records that no background task work is waiting.
-    ///
-    /// Clears the pending flag set by
-    /// [`note_background_pending`](FrameScheduler::note_background_pending);
-    /// subsequent frames no longer count as preemptions.
+    #[doc = include_str!("frame_scheduler.doc/note_background_idle.md")]
     pub fn note_background_idle(&mut self) {
         self.background_pending = false;
     }
 
-    /// Records that the pending background work was run, resetting fairness.
-    ///
-    /// Calling this resets the starvation guard
-    /// ([`StarvationGuard::record_served`]) so the fairness count starts over.
-    /// The runtime **should** call this when
-    /// [`background_starved`](FrameScheduler::background_starved) returns `true`,
-    /// servicing the background work next to honor §3.6 starvation prevention.
+    #[doc = include_str!("frame_scheduler.doc/service_background.md")]
     pub fn service_background(&mut self) {
         self.starvation.record_served();
     }
 
-    /// Returns whether pending background work has been starved and must be
-    /// serviced next (§3.6).
-    ///
-    /// This is `true` only when background work is pending **and** the starvation
-    /// guard reports it as starved — that is, higher-priority frames have
-    /// preempted it past the fairness threshold. When this returns `true` the
-    /// runtime should run the background work and call
-    /// [`service_background`](FrameScheduler::service_background).
+    #[doc = include_str!("frame_scheduler.doc/background_starved.md")]
     #[must_use]
     pub const fn background_starved(&self) -> bool {
         self.background_pending && self.starvation.is_starved()
     }
 
-    /// Returns the number of pending (coalesced) frame requests.
+    #[doc = include_str!("frame_scheduler.doc/pending_count.md")]
     #[must_use]
     pub fn pending_count(&self) -> usize {
         self.queue.len()
     }
 
-    /// Returns whether any frame request is pending.
+    #[doc = include_str!("frame_scheduler.doc/has_pending.md")]
     #[must_use]
     pub fn has_pending(&self) -> bool {
         !self.queue.is_empty()
     }
 
-    /// Returns the most-urgent pending frame without removing it, if any.
+    #[doc = include_str!("frame_scheduler.doc/peek.md")]
     #[must_use]
     pub fn peek(&self) -> Option<FrameRequest> {
         self.queue.peek()
     }
 
-    /// Returns whether background task work is currently marked pending.
+    #[doc = include_str!("frame_scheduler.doc/is_background_pending.md")]
     #[must_use]
     pub const fn is_background_pending(&self) -> bool {
         self.background_pending
     }
 
-    /// Returns the backpressure policy this scheduler admits requests with.
+    #[doc = include_str!("frame_scheduler.doc/backpressure_2.md")]
     #[must_use]
     pub const fn backpressure(&self) -> &BackpressurePolicy {
         &self.backpressure
     }
 
-    /// Returns the starvation guard tracking background-work fairness.
+    #[doc = include_str!("frame_scheduler.doc/starvation_2.md")]
     #[must_use]
     pub const fn starvation(&self) -> &StarvationGuard {
         &self.starvation
@@ -250,7 +133,7 @@ impl FrameScheduler {
 }
 
 impl Default for FrameScheduler {
-    /// The default scheduler is [`FrameScheduler::new`].
+    #[doc = include_str!("frame_scheduler.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }

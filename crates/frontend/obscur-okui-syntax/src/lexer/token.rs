@@ -1,13 +1,8 @@
-//! A single lexed token: its kind, exact source slice and byte offset.
+#![doc = include_str!("token.doc/_module.md")]
 
 use crate::lexer::TokenKind;
 
-/// A single token produced by the [`Lexer`](crate::lexer::Lexer).
-///
-/// A token stores the exact source slice it was lexed from ([`Token::text`]),
-/// so the whole stream is *lossless*: concatenating the `text` of every token
-/// (excluding the empty [`TokenKind::Eof`] marker) reproduces the source
-/// byte-for-byte.
+#[doc = include_str!("token.doc/Token.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     kind: TokenKind,
@@ -16,7 +11,7 @@ pub struct Token {
 }
 
 impl Token {
-    /// Creates a token of `kind` covering `text`, starting at byte `offset`.
+    #[doc = include_str!("token.doc/new.md")]
     #[must_use]
     pub fn new(kind: TokenKind, text: impl Into<Box<str>>, offset: u32) -> Self {
         Self {
@@ -26,38 +21,37 @@ impl Token {
         }
     }
 
-    /// Returns the token's kind.
+    #[doc = include_str!("token.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> TokenKind {
         self.kind
     }
 
-    /// Returns the exact source slice this token was lexed from.
+    #[doc = include_str!("token.doc/text.md")]
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Returns the byte offset of the token's start in the source.
+    #[doc = include_str!("token.doc/offset.md")]
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset
     }
 
-    /// Returns the token's length in bytes.
+    #[doc = include_str!("token.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> u32 {
         u32::try_from(self.text.len()).unwrap_or(u32::MAX)
     }
 
-    /// Returns `true` if the token covers no bytes (only the [`TokenKind::Eof`]
-    /// marker is empty).
+    #[doc = include_str!("token.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    /// Returns the byte offset just past the end of this token.
+    #[doc = include_str!("token.doc/end.md")]
     #[must_use]
     pub fn end(&self) -> u32 {
         self.offset.saturating_add(self.len())

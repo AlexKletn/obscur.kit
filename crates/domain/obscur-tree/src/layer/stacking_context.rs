@@ -1,50 +1,38 @@
-//! The stacking context a `LAYER_ROOT` node establishes.
+#![doc = include_str!("stacking_context.doc/_module.md")]
 
 use std::cmp::Ordering;
 
 use obscur_identity::NodeId;
 
-/// Describes the stacking context a `LAYER_ROOT` node establishes (spec §5.1).
-///
-/// A stacking context groups a node and the subtree it composites, and fixes
-/// that group's paint order relative to sibling contexts via a `z_index`:
-/// higher values paint on top. This is the **descriptive** retained-tree model
-/// only — no actual painting or compositing happens here; that lives in
-/// `obscur-scene` / `obscur-render` later.
+#[doc = include_str!("stacking_context.doc/StackingContext.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StackingContext {
-    /// The node that establishes this stacking context.
+    #[doc = include_str!("stacking_context.doc/root.md")]
     root: NodeId,
-    /// Paint order among siblings; higher paints on top.
+    #[doc = include_str!("stacking_context.doc/z_index.md")]
     z_index: i32,
 }
 
 impl StackingContext {
-    /// Creates a stacking context established by `root` at paint order
-    /// `z_index`.
+    #[doc = include_str!("stacking_context.doc/new.md")]
     #[must_use]
     pub const fn new(root: NodeId, z_index: i32) -> Self {
         Self { root, z_index }
     }
 
-    /// Returns the node that establishes this stacking context.
+    #[doc = include_str!("stacking_context.doc/root_2.md")]
     #[must_use]
     pub const fn root(self) -> NodeId {
         self.root
     }
 
-    /// Returns the paint order (`z_index`); higher paints on top.
+    #[doc = include_str!("stacking_context.doc/z_index_2.md")]
     #[must_use]
     pub const fn z_index(self) -> i32 {
         self.z_index
     }
 
-    /// Compares two contexts for **paint order**, from bottom-most to top-most.
-    ///
-    /// The primary key is `z_index` ascending (a higher `z_index` paints later,
-    /// i.e. on top). Ties are broken deterministically by the establishing
-    /// node's raw [`NodeId`] so the ordering is a total order and paint order is
-    /// always well-defined for a given set of contexts.
+    #[doc = include_str!("stacking_context.doc/paint_order.md")]
     #[must_use]
     pub fn paint_order(self, other: Self) -> Ordering {
         self.z_index

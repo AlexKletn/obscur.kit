@@ -1,21 +1,9 @@
-//! One authored declaration inside a rule block, before cascade context:
-//! [`BlockDeclaration`].
+#![doc = include_str!("block_declaration.doc/_module.md")]
 
 use crate::cascade::ImportantFlag;
 use crate::property::{PropertyId, PropertyValue};
 
-/// A single authored declaration as written inside a style rule's block, e.g.
-/// `color: red` or `width: 10px !important`.
-///
-/// This is the declaration *before* it acquires any cascade context: it carries
-/// only the target [`PropertyId`], the [`PropertyValue`] to assign, and whether
-/// it was written `!important`. Its [`CascadeOrigin`](crate::cascade::CascadeOrigin),
-/// [`SelectorSpecificity`](crate::selector::SelectorSpecificity) and
-/// `source_order` are not known here — they are supplied at match time by the
-/// [`StyleMatcher`](crate::matching::StyleMatcher), which pairs the origin of
-/// the containing stylesheet, the specificity of the matched selector, and the
-/// declaration's document position to build a full
-/// [`Declaration`](crate::cascade::Declaration).
+#[doc = include_str!("block_declaration.doc/BlockDeclaration.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockDeclaration {
     property: PropertyId,
@@ -24,8 +12,7 @@ pub struct BlockDeclaration {
 }
 
 impl BlockDeclaration {
-    /// Creates an authored declaration from its property, value and
-    /// `!important` flag.
+    #[doc = include_str!("block_declaration.doc/new.md")]
     #[must_use]
     pub const fn new(property: PropertyId, value: PropertyValue, important: ImportantFlag) -> Self {
         Self {
@@ -35,31 +22,31 @@ impl BlockDeclaration {
         }
     }
 
-    /// Creates a normal (non-`!important`) authored declaration.
+    #[doc = include_str!("block_declaration.doc/normal.md")]
     #[must_use]
     pub const fn normal(property: PropertyId, value: PropertyValue) -> Self {
         Self::new(property, value, ImportantFlag::Normal)
     }
 
-    /// Creates an `!important` authored declaration.
+    #[doc = include_str!("block_declaration.doc/important.md")]
     #[must_use]
     pub const fn important(property: PropertyId, value: PropertyValue) -> Self {
         Self::new(property, value, ImportantFlag::Important)
     }
 
-    /// Returns the property this declaration assigns.
+    #[doc = include_str!("block_declaration.doc/property.md")]
     #[must_use]
     pub const fn property(&self) -> PropertyId {
         self.property
     }
 
-    /// Returns the value this declaration assigns.
+    #[doc = include_str!("block_declaration.doc/value.md")]
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.value
     }
 
-    /// Returns whether this declaration was written `!important`.
+    #[doc = include_str!("block_declaration.doc/important_flag.md")]
     #[must_use]
     pub const fn important_flag(&self) -> ImportantFlag {
         self.important

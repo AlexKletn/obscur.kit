@@ -1,35 +1,28 @@
-//! The measure-phase input for a node.
+#![doc = include_str!("measure_pass.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 
-/// The **measure** phase input for a node (spec §4.2): the [`BoxConstraints`]
-/// under which the node is asked for its desired size.
-///
-/// Measure returns a desired size (a
-/// [`LayoutResult`](crate::model::LayoutResult)) without positioning anything;
-/// positioning is the job of the separate arrange phase
-/// ([`ArrangePass`](super::ArrangePass)).
+#[doc = include_str!("measure_pass.doc/MeasurePass.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MeasurePass {
-    /// The constraints the node is measured against.
+    #[doc = include_str!("measure_pass.doc/constraints.md")]
     constraints: BoxConstraints,
 }
 
 impl MeasurePass {
-    /// Creates a measure input carrying the given `constraints`.
+    #[doc = include_str!("measure_pass.doc/new.md")]
     #[must_use]
     pub const fn new(constraints: BoxConstraints) -> Self {
         Self { constraints }
     }
 
-    /// The constraints the node is measured against.
+    #[doc = include_str!("measure_pass.doc/constraints_2.md")]
     #[must_use]
     pub const fn constraints(self) -> BoxConstraints {
         self.constraints
     }
 
-    /// Clamps a `desired` size into these constraints (delegates to
-    /// [`BoxConstraints::constrain`]).
+    #[doc = include_str!("measure_pass.doc/constrain.md")]
     #[must_use]
     pub fn constrain(self, desired: Size) -> Size {
         self.constraints.constrain(desired)

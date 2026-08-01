@@ -1,21 +1,4 @@
-//! **SPECIFICATION-DERIVED** component-contract, template and slot cases for
-//! obscur.kit §2.8 (*Rust DSL*), §2.12 (*Templates and slots*) and §2.13
-//! (*Component contracts*).
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expectation below was produced by an agent reading obscur.kit §2 with
-//! **no access to this repository's source**. The cases are a statement of what
-//! the implementation owes the spec, not a record of what it currently does. A
-//! failure here is a defect report about the engine (or, occasionally, about the
-//! spec) and must not be "corrected" by editing the expected value.
-//!
-//! Rejection cases drive the `.okui` string path rather than the `okui!` macro,
-//! for the reason spelled out in `spec_ch2_expressions.rs`: a rejection the
-//! macro reaches is a compile error in this file, and a test binary that does
-//! not build reports nothing.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch2_contracts.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch2_support/mod.rs"]
@@ -37,44 +20,44 @@ use support::{
 
 // ---------------------------------------------------------- the contracts
 
-/// A button declaring two props and exactly one event.
+#[doc = include_str!("spec_ch2_contracts.doc/MyButtonProps.md")]
 #[allow(dead_code)]
 #[derive(Contract)]
 #[contract(name = "MyButton")]
 struct MyButtonProps {
-    /// Declared prop.
+    #[doc = include_str!("spec_ch2_contracts.doc/label.md")]
     label: String,
-    /// Declared prop with a contract-declared default of `"primary"`.
+    #[doc = include_str!("spec_ch2_contracts.doc/variant.md")]
     #[contract(default)]
     variant: Option<String>,
-    /// The one event `MyButton` exports.
+    #[doc = include_str!("spec_ch2_contracts.doc/pressed.md")]
     #[contract(event)]
     pressed: Option<String>,
 }
 
-/// A dialog declaring `title` (exactly one) and `actions` (zero or more).
+#[doc = include_str!("spec_ch2_contracts.doc/DialogProps.md")]
 #[derive(Contract)]
 #[contract(name = "Dialog")]
 #[contract(slot(name = "title", cardinality = one))]
 #[contract(slot(name = "actions", cardinality = many))]
 struct DialogProps {
-    /// A prop, so the surface is not slots-only.
+    #[doc = include_str!("spec_ch2_contracts.doc/id.md")]
     #[allow(dead_code)]
     id: String,
 }
 
-/// A menu whose default slot admits only `MenuItem` and `MenuSeparator`.
+#[doc = include_str!("spec_ch2_contracts.doc/MenuProps.md")]
 #[derive(Contract)]
 #[contract(name = "Menu")]
 #[contract(slot(name = "items", cardinality = many, child = "MenuItem"))]
 #[contract(slot(name = "items", cardinality = many, child = "MenuSeparator"))]
 struct MenuProps {
-    /// A prop, so the surface is not slots-only.
+    #[doc = include_str!("spec_ch2_contracts.doc/id_2.md")]
     #[allow(dead_code)]
     id: String,
 }
 
-/// Compiles `source` against `surfaces`, returning every diagnostic's message.
+#[doc = include_str!("spec_ch2_contracts.doc/diagnostics_for.md")]
 fn diagnostics_for(
     source: &str,
     surfaces: &[obscur_kit::view::contract::ComponentSurface],
@@ -99,15 +82,14 @@ fn diagnostics_for(
         .collect()
 }
 
-/// Diagnostics for a document that uses `MyButton`.
+#[doc = include_str!("spec_ch2_contracts.doc/button_diagnostics.md")]
 fn button_diagnostics(source: &str) -> Vec<String> {
     diagnostics_for(source, &[MyButtonProps::contract_surface()])
 }
 
 // ------------------------------------------------------------------- §2.13
 
-/// §2.13: "Unknown attributes, events and string method names are compile
-/// errors."
+#[doc = include_str!("spec_ch2_contracts.doc/an_unknown_attribute_is_a_compile_error.md")]
 #[test]
 fn an_unknown_attribute_is_a_compile_error() {
     let source = r#"<MyButton label="Go" varaint="primary"/>"#;
@@ -120,8 +102,7 @@ fn an_unknown_attribute_is_a_compile_error() {
     );
 }
 
-/// §2.13: "Unknown attributes, events and string method names are compile
-/// errors."
+#[doc = include_str!("spec_ch2_contracts.doc/an_unknown_event_is_a_compile_error.md")]
 #[test]
 fn an_unknown_event_is_a_compile_error() {
     for (source, event) in [
@@ -145,12 +126,7 @@ fn an_unknown_event_is_a_compile_error() {
     }
 }
 
-/// §2.13: "Unknown attributes, events and string method names are compile
-/// errors." / §2.3: "Events are typed. String-based method dispatch is not
-/// used."
-///
-/// The "exists" half is what discriminates: the *form* is refused, not just an
-/// unresolved name.
+#[doc = include_str!("spec_ch2_contracts.doc/a_string_named_handler_is_refused_even_when_the_method_exists.md")]
 #[test]
 fn a_string_named_handler_is_refused_even_when_the_method_exists() {
     // `handle_submit` is defined in the compilation scope above — it exists.
@@ -168,19 +144,7 @@ fn a_string_named_handler_is_refused_even_when_the_method_exists() {
     }
 }
 
-/// §2.13: "- defaults;"
-///
-/// WEAKENED 2026-07-19: this originally asserted that an omitted prop arrives
-/// carrying an AUTHOR-SPECIFIED default value — `"variant=primary count=5"`.
-/// §2.13's entire text is the bullet "- defaults;", and no such surface exists:
-/// `#[contract(default)]` takes no value and `PropContract::with_default()`
-/// carries none, so "primary"/5 appeared nowhere but this file's doc comments
-/// and the case was unsatisfiable by any implementation. What the spec's bullet
-/// does support, and what is kept, is that a defaulted prop is declared
-/// *optional* rather than required and that omitting it is not an error.
-/// Candidate spec amendment: state whether "- defaults;" means author-specified
-/// default VALUES in the contract, or only optionality with the type's `Default`
-/// — and if the former, name the declaration syntax.
+#[doc = include_str!("spec_ch2_contracts.doc/a_contract_declared_default_is_applied_rather_than_the_type_s_zero_value.md")]
 #[test]
 fn a_contract_declared_default_is_applied_rather_than_the_type_s_zero_value() {
     // The component reports back what it observed.
@@ -223,15 +187,14 @@ fn a_contract_declared_default_is_applied_rather_than_the_type_s_zero_value() {
     );
 }
 
-/// A component whose props carry contract-declared defaults, and which renders
-/// what it actually observed.
+#[doc = include_str!("spec_ch2_contracts.doc/ObserverProps.md")]
 #[derive(Contract)]
 #[contract(name = "Observer")]
 struct ObserverProps {
-    /// Declared default `"primary"`.
+    #[doc = include_str!("spec_ch2_contracts.doc/variant_2.md")]
     #[contract(default)]
     variant: Option<String>,
-    /// Declared default `5`.
+    #[doc = include_str!("spec_ch2_contracts.doc/count.md")]
     #[contract(default)]
     count: Option<i64>,
 }
@@ -270,7 +233,7 @@ impl ComponentFactory for ObserverFactory {
 
 // ------------------------------------------------------------------- §2.12
 
-/// §2.12: "- slot cardinality;"
+#[doc = include_str!("spec_ch2_contracts.doc/slot_cardinality_is_enforced_in_both_directions.md")]
 #[test]
 fn slot_cardinality_is_enforced_in_both_directions() {
     let surfaces = [DialogProps::contract_surface()];
@@ -303,7 +266,7 @@ fn slot_cardinality_is_enforced_in_both_directions() {
     );
 }
 
-/// §2.12: "- allowed child contracts;"
+#[doc = include_str!("spec_ch2_contracts.doc/a_slot_s_allowed_children_are_enforced.md")]
 #[test]
 fn a_slot_s_allowed_children_are_enforced() {
     let surfaces = [MenuProps::contract_surface()];
@@ -326,7 +289,7 @@ fn a_slot_s_allowed_children_are_enforced() {
     );
 }
 
-/// §2.12: "- named slots;"
+#[doc = include_str!("spec_ch2_contracts.doc/slot_content_projects_to_its_template_position_not_its_usage_order.md")]
 #[test]
 fn slot_content_projects_to_its_template_position_not_its_usage_order() {
     let mut rt = small_runtime();
@@ -376,17 +339,7 @@ fn slot_content_projects_to_its_template_position_not_its_usage_order() {
     );
 }
 
-/// §2.12: "- named slots;" (the partitioning half)
-///
-/// WEAKENED 2026-07-19: this originally also asserted that the two children
-/// carrying no `slot=` assignment land in an unnamed DEFAULT slot, in written
-/// order (`children(default).len() == 2`, classes `["d1", "d2"]`). §2.12's list
-/// is "- named slots; - allowed child contracts; - slot cardinality; - exported
-/// style parts; - exported visual states." — a default/unnamed slot is nowhere
-/// in it, and the case's own `ViewNode::slot("")` outlet is an invention of the
-/// test. The named-slot half, which the spec does state, is kept. Candidate spec
-/// amendment: state whether a component may declare a default (unnamed) slot,
-/// how it is spelled, and where unassigned children go when it is absent.
+#[doc = include_str!("spec_ch2_contracts.doc/a_default_slot_and_a_named_slot_partition_the_children.md")]
 #[test]
 fn a_default_slot_and_a_named_slot_partition_the_children() {
     let mut rt = small_runtime();
@@ -451,8 +404,7 @@ fn a_default_slot_and_a_named_slot_partition_the_children() {
 // construct, say so, name the syntax, and state that a state or lifecycle
 // declaration inside one is a compile error — then this case can be restored.
 
-/// §2.12: "- exported style parts;" (with §4.15 "- component stylesheets are
-/// scoped by default;")
+#[doc = include_str!("spec_ch2_contracts.doc/an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_not.md")]
 #[test]
 fn an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_not() {
     let mut rt = small_runtime();
@@ -492,7 +444,7 @@ fn an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_
 
 // --------------------------------------------------------------------- §2.8
 
-/// §2.8: "- typed props and events;" and "- compile-time validation;"
+#[doc = include_str!("spec_ch2_contracts.doc/a_prop_type_mismatch_is_reported_per_attribute_at_its_own_span.md")]
 #[test]
 fn a_prop_type_mismatch_is_reported_per_attribute_at_its_own_span() {
     // `label` is a string prop given an integer; `count` is an integer prop
@@ -516,29 +468,18 @@ fn a_prop_type_mismatch_is_reported_per_attribute_at_its_own_span() {
     );
 }
 
-/// A component with one string prop and one integer prop.
+#[doc = include_str!("spec_ch2_contracts.doc/TypedProps.md")]
 #[allow(dead_code)]
 #[derive(Contract)]
 #[contract(name = "Typed")]
 struct TypedProps {
-    /// A string-typed prop.
+    #[doc = include_str!("spec_ch2_contracts.doc/label_2.md")]
     label: String,
-    /// An integer-typed prop.
+    #[doc = include_str!("spec_ch2_contracts.doc/count_2.md")]
     count: i64,
 }
 
-/// §2.15: "- source-mapped;" (with §2.8 "- stable source mapping;")
-///
-/// WEAKENED 2026-07-19: this originally demanded the diagnostic report LINE 12,
-/// COLUMN 5. The two clauses cited are the bullets "- stable source mapping;"
-/// (a goal of the Rust DSL) and "- source-mapped;" (a property of UI IR);
-/// neither says line-and-column, and the front end reports a byte offset that
-/// resolves to exactly the right place in the authored text. The assertion is
-/// now that the location is the author's offending construct rather than a
-/// macro-expansion site or the start of the file — the same defect the case was
-/// written to catch, stated in the units the implementation reports. Candidate
-/// spec amendment: fix the presentation of a source location (offset vs
-/// line/column) so tooling can depend on it.
+#[doc = include_str!("spec_ch2_contracts.doc/a_contract_diagnostic_carries_the_author_s_line_and_column.md")]
 #[test]
 fn a_contract_diagnostic_carries_the_author_s_line_and_column() {
     // The violation sits on line 12, column 5 of the authored file.
@@ -563,7 +504,7 @@ fn a_contract_diagnostic_carries_the_author_s_line_and_column() {
 
 // -------------------------------------------------------------- components
 
-/// A `Card` whose template renders Body first, then Footer.
+#[doc = include_str!("spec_ch2_contracts.doc/CardProps.md")]
 #[derive(Contract)]
 #[contract(name = "SpecCard")]
 #[contract(slot(name = "body", cardinality = many))]
@@ -582,7 +523,7 @@ impl Component for Card {
     }
 }
 
-/// A `Panel` with a default slot and a named `header` slot.
+#[doc = include_str!("spec_ch2_contracts.doc/PanelProps.md")]
 #[derive(Contract)]
 #[contract(name = "SpecPanel")]
 #[contract(slot(name = "header", cardinality = one))]
@@ -601,8 +542,7 @@ impl Component for Panel {
     }
 }
 
-/// A `PartCard` exporting a style part `label` on one inner element and leaving
-/// another, classed `inner`, unexported.
+#[doc = include_str!("spec_ch2_contracts.doc/PartCardProps.md")]
 #[derive(Contract)]
 #[contract(name = "PartCard")]
 struct PartCardProps {}
@@ -619,20 +559,19 @@ impl Component for PartCard {
     }
 }
 
-/// A box classed `region-<slot>` wrapping the outlet for `slot`.
+#[doc = include_str!("spec_ch2_contracts.doc/region.md")]
 fn region(slot: &str) -> ViewNode {
     classed_with(&format!("region-{slot}"), vec![ViewNode::slot(slot)])
 }
 
-/// A container carrying `class` and the given children.
+#[doc = include_str!("spec_ch2_contracts.doc/classed_with.md")]
 fn classed_with(class: &str, kids: Vec<ViewNode>) -> ViewNode {
     ViewNode::element(obscur_kit::ui_ir::name_binding::CONTAINER)
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
         .with_children(ViewFragment::from_nodes(kids))
 }
 
-/// A container carrying `class` and, when `slot` is non-empty, a `slot="…"`
-/// assignment.
+#[doc = include_str!("spec_ch2_contracts.doc/classed.md")]
 fn classed(class: &str, slot: &str) -> ViewNode {
     let node = classed_with(class, vec![]);
     if slot.is_empty() {
@@ -645,7 +584,7 @@ fn classed(class: &str, slot: &str) -> ViewNode {
     }
 }
 
-/// Whether `node` is `ancestor` or a logical descendant of it.
+#[doc = include_str!("spec_ch2_contracts.doc/descends_from.md")]
 fn descends_from(
     rt: &obscur_kit::runtime::UiRuntime,
     node: obscur_kit::identity::NodeId,
@@ -687,12 +626,12 @@ factory!(CardFactory, CardProps, Card);
 factory!(PanelFactory, PanelProps, Panel);
 factory!(PartCardFactory, PartCardProps, PartCard);
 
-/// Silences the unused-import lint for helpers a subset of the cases use.
+#[doc = include_str!("spec_ch2_contracts.doc/_uses.md")]
 #[allow(dead_code)]
 fn _uses(rt: &obscur_kit::runtime::UiRuntime) -> (usize, Vec<obscur_kit::identity::NodeId>) {
     (root_children(rt).len(), by_class(rt, "x"))
 }
 
-/// The reserved event symbol, referenced so the import is live.
+#[doc = include_str!("spec_ch2_contracts.doc/_EVENT.md")]
 #[allow(dead_code)]
 const _EVENT: InternedSymbol = obscur_kit::view::view::EVENT_CLICK;

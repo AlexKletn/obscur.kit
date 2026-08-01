@@ -1,27 +1,8 @@
-//! The [`LongPressRecognizer`] — a contact held still past a threshold (spec
-//! §6.16 `LongPress`).
+#![doc = include_str!("long_press_recognizer.doc/_module.md")]
 
 use super::{GestureKind, GestureRecognizer, RecognizerId, RecognizerState};
 
-/// Recognizes a [`LongPress`](GestureKind::LongPress): a contact that stays put
-/// long enough to mean something other than a tap (spec §6.16).
-///
-/// A touchscreen has one button and no modifiers, so everything a second button
-/// or a modifier would reach on a desktop has to be reached by holding still.
-/// That makes this the only route to context actions on a tablet, and it is the
-/// one gesture that fires **while nothing is happening** — no event arrives from
-/// a finger that rests, so recognition cannot be driven by input alone. The
-/// consumer advances it with elapsed time instead, which is why
-/// [`advance`](Self::advance) exists and why this type reads no clock: it is
-/// told how much time passed, like everything else in this crate.
-///
-/// # Lifecycle
-///
-/// `Possible` → `Recognized` (held past the threshold, still within the slop) or
-/// `Failed` (the contact moved too far, or lifted first). Recognition happens
-/// **once**: [`advance`](Self::advance) reports `true` on the step that crosses
-/// the threshold and never again, so a consumer that keeps ticking does not open
-/// a context menu on every frame the finger stays down.
+#[doc = include_str!("long_press_recognizer.doc/LongPressRecognizer.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LongPressRecognizer {
     recognizer: GestureRecognizer,
@@ -30,8 +11,7 @@ pub struct LongPressRecognizer {
 }
 
 impl LongPressRecognizer {
-    /// Arms a long press that recognizes after `threshold` seconds of a contact
-    /// held still.
+    #[doc = include_str!("long_press_recognizer.doc/new.md")]
     #[must_use]
     pub fn new(id: RecognizerId, threshold: f32) -> Self {
         Self {
@@ -41,11 +21,7 @@ impl LongPressRecognizer {
         }
     }
 
-    /// Adds `seconds` to the time the contact has been held, returning `true` on
-    /// the single step that crosses the threshold.
-    ///
-    /// Returns `false` once terminal, so the caller may keep ticking every armed
-    /// recognizer without filtering.
+    #[doc = include_str!("long_press_recognizer.doc/advance.md")]
     pub fn advance(&mut self, seconds: f32) -> bool {
         if self.recognizer.state().is_terminal() || seconds <= 0.0 {
             return false;
@@ -58,43 +34,36 @@ impl LongPressRecognizer {
         true
     }
 
-    /// Reports that the contact has moved `distance` from where it went down,
-    /// failing the long press if that is more than `slop`.
-    ///
-    /// A finger that wandered is doing something else — scrolling, most likely —
-    /// and a long press that survived the wander would fire a context action in
-    /// the middle of someone's scroll.
+    #[doc = include_str!("long_press_recognizer.doc/moved.md")]
     pub fn moved(&mut self, distance: f32, slop: f32) {
         if distance > slop {
             self.recognizer.fail();
         }
     }
 
-    /// Fails the long press: the contact lifted before the threshold, so it was a
-    /// tap.
+    #[doc = include_str!("long_press_recognizer.doc/end.md")]
     pub fn end(&mut self) {
         self.recognizer.fail();
     }
 
-    /// Cancels the long press — the system took the sequence, or another
-    /// recognizer won it.
+    #[doc = include_str!("long_press_recognizer.doc/cancel.md")]
     pub fn cancel(&mut self) {
         self.recognizer.cancel();
     }
 
-    /// Whether the hold has been recognized.
+    #[doc = include_str!("long_press_recognizer.doc/is_recognized.md")]
     #[must_use]
     pub fn is_recognized(&self) -> bool {
         self.recognizer.state() == RecognizerState::Recognized
     }
 
-    /// Whether the hold is still a candidate — neither recognized nor ruled out.
+    #[doc = include_str!("long_press_recognizer.doc/is_pending.md")]
     #[must_use]
     pub fn is_pending(&self) -> bool {
         self.recognizer.state() == RecognizerState::Possible
     }
 
-    /// The recognizer's lifecycle state.
+    #[doc = include_str!("long_press_recognizer.doc/state.md")]
     #[must_use]
     pub fn state(&self) -> RecognizerState {
         self.recognizer.state()

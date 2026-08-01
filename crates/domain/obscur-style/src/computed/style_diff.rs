@@ -1,25 +1,10 @@
-//! The difference between two computed styles: [`StyleDiff`].
-//!
-//! [`StyleDiff::between`] compares an `old` and a `new` [`ComputedStyle`] and
-//! records which computed properties changed and whether any custom property
-//! changed. Downstream invalidation (sub-step 6) consumes this to decide what to
-//! re-layout or re-paint. The changed-property list is sorted for stable,
-//! deterministic output.
+#![doc = include_str!("style_diff.doc/_module.md")]
 
 use crate::computed::ComputedStyle;
 use crate::property::PropertyId;
 use std::collections::HashSet;
 
-/// The set of computed properties whose value differs between two
-/// [`ComputedStyle`]s, plus whether any custom property changed.
-///
-/// A property counts as changed when it was added, removed, or has a differing
-/// computed value. The list returned by [`StyleDiff::changed_properties`] is
-/// sorted (by canonical property name) so equal diffs compare equal and output is
-/// reproducible.
-///
-/// Because the comparison is over `f32`-bearing values, this derives
-/// [`PartialEq`] but not [`Eq`]/[`Hash`].
+#[doc = include_str!("style_diff.doc/StyleDiff.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleDiff {
     changed: Vec<PropertyId>,
@@ -27,12 +12,7 @@ pub struct StyleDiff {
 }
 
 impl StyleDiff {
-    /// Computes the difference from `old` to `new`.
-    ///
-    /// Every property present in either style is compared; one that was added,
-    /// removed, or whose computed value differs is recorded. Custom properties are
-    /// compared as a whole: the flag is set when any name was added, removed, or
-    /// its value changed.
+    #[doc = include_str!("style_diff.doc/between.md")]
     #[must_use]
     pub fn between(old: &ComputedStyle, new: &ComputedStyle) -> Self {
         // Union of property keys present in either style.
@@ -57,31 +37,31 @@ impl StyleDiff {
         }
     }
 
-    /// Returns the changed properties in sorted order.
+    #[doc = include_str!("style_diff.doc/changed_properties.md")]
     #[must_use]
     pub fn changed_properties(&self) -> &[PropertyId] {
         &self.changed
     }
 
-    /// Returns `true` when any custom property was added, removed, or changed.
+    #[doc = include_str!("style_diff.doc/custom_properties_changed.md")]
     #[must_use]
     pub fn custom_properties_changed(&self) -> bool {
         self.custom_properties_changed
     }
 
-    /// Returns `true` when nothing changed — no property and no custom property.
+    #[doc = include_str!("style_diff.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.changed.is_empty() && !self.custom_properties_changed
     }
 
-    /// Returns `true` when `property` is among the changed properties.
+    #[doc = include_str!("style_diff.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, property: PropertyId) -> bool {
         self.changed.contains(&property)
     }
 
-    /// Compares the two styles' effective custom properties.
+    #[doc = include_str!("style_diff.doc/custom_changed.md")]
     fn custom_changed(old: &ComputedStyle, new: &ComputedStyle) -> bool {
         // Union of custom-property names present in either style.
         let mut names: HashSet<_> = HashSet::new();

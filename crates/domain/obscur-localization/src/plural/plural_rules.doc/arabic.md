@@ -1,0 +1,19 @@
+CLDR `<pluralRules locales="ar ars">`:
+
+```text
+zero:   n = 0        @integer 0        @decimal 0.0, 0.00, …
+one:    n = 1        @integer 1        @decimal 1.0, 1.00, …
+two:    n = 2        @integer 2        @decimal 2.0, 2.00, …
+few:    n % 100 = 3..10    @integer 3~10, 103~110, 1003, …
+many:   n % 100 = 11..99   @integer 11~26, 111, 1011, …
+other:                     @integer 100~102, 200~202, …
+```
+
+All six categories, and the only rule set here written against `n` rather than
+`i` — so unlike Russian, Arabic's `1.0` **is** `one`.
+
+`n % 100 = 3..10` is a range relation, and TR35 defines `a..b` as *"listing
+all the **integers** between a and b, inclusive"*: for `n = 3.5` the modulus
+is 3.5, which is not one of those integers, so the relation is false. That is
+why the modulus is compared as an integer only when `n` has no fractional
+part.

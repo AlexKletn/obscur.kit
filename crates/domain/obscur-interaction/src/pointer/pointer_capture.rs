@@ -1,37 +1,32 @@
-//! The [`PointerCapture`] binding that routes a pointer to a node (spec §4.7).
+#![doc = include_str!("pointer_capture.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use super::PointerId;
 
-/// A binding that captures one pointer to a node (spec §4.7 pointer capture).
-///
-/// While a capture is in force, every subsequent event for
-/// [`pointer`](Self::pointer) routes to [`node`](Self::node) regardless of
-/// hit-testing — letting a node that began an interaction (a drag, a slider
-/// grab) keep receiving the pointer even after it leaves the node's bounds.
+#[doc = include_str!("pointer_capture.doc/PointerCapture.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PointerCapture {
-    /// The captured pointer.
+    #[doc = include_str!("pointer_capture.doc/pointer.md")]
     pub pointer: PointerId,
-    /// The node the pointer is captured to.
+    #[doc = include_str!("pointer_capture.doc/node.md")]
     pub node: NodeId,
 }
 
 impl PointerCapture {
-    /// Creates a capture binding `pointer` to `node`.
+    #[doc = include_str!("pointer_capture.doc/new.md")]
     #[must_use]
     pub const fn new(pointer: PointerId, node: NodeId) -> Self {
         Self { pointer, node }
     }
 
-    /// Returns the captured pointer.
+    #[doc = include_str!("pointer_capture.doc/pointer_2.md")]
     #[must_use]
     pub const fn pointer(&self) -> PointerId {
         self.pointer
     }
 
-    /// Returns the node the pointer is captured to.
+    #[doc = include_str!("pointer_capture.doc/node_2.md")]
     #[must_use]
     pub const fn node(&self) -> NodeId {
         self.node

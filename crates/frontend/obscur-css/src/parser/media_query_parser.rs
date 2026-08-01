@@ -1,89 +1,75 @@
-//! The [`MediaQueryParser`] and its parsed media-query AST (spec §4.13).
-//!
-//! Parses an `@media` prelude: qualifiers (`not`/`only`), media types
-//! (`screen`, `all`, `print`), `and`/`or` connectors, colon feature queries
-//! (`(min-width: 600px)`, `(prefers-color-scheme: dark)`), boolean features
-//! (`(hover)`), and range features (`(width >= 600px)`). Feature values reuse
-//! the crate's [`ParsedValue`] model.
+#![doc = include_str!("media_query_parser.doc/_module.md")]
 
 use crate::error::{CssParseError, CssParseErrorKind};
 use crate::source::CssSource;
 
-use super::stylesheet_parser::{CssToken, CssTokenKind, Tokenizer};
+use super::css_tokenizer::{CssToken, CssTokenKind, Tokenizer};
 use super::value_parser::{ParsedValue, ValueParser};
 
-/// A comma-separated list of media queries.
+#[doc = include_str!("media_query_parser.doc/ParsedMediaQueryList.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedMediaQueryList(pub Vec<ParsedMediaQuery>);
 
-/// A single media query: an optional qualifier and media type followed by zero
-/// or more feature conditions.
+#[doc = include_str!("media_query_parser.doc/ParsedMediaQuery.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedMediaQuery {
-    /// The `not`/`only` qualifier, if present.
+    #[doc = include_str!("media_query_parser.doc/qualifier.md")]
     pub qualifier: Option<MediaQualifier>,
-    /// The media type (`screen`, `all`, `print`, …), if present.
+    #[doc = include_str!("media_query_parser.doc/media_type.md")]
     pub media_type: Option<Box<str>>,
-    /// The feature conditions, in source order.
+    #[doc = include_str!("media_query_parser.doc/conditions.md")]
     pub conditions: Vec<MediaCondition>,
 }
 
-/// A media query qualifier.
+#[doc = include_str!("media_query_parser.doc/MediaQualifier.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaQualifier {
-    /// The `not` qualifier.
+    #[doc = include_str!("media_query_parser.doc/Not.md")]
     Not,
-    /// The `only` qualifier.
+    #[doc = include_str!("media_query_parser.doc/Only.md")]
     Only,
 }
 
-/// A single media feature condition (`(min-width: 600px)` or `(width >= 600px)`).
+#[doc = include_str!("media_query_parser.doc/MediaCondition.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct MediaCondition {
-    /// The feature name (for example `min-width`, `prefers-color-scheme`).
+    #[doc = include_str!("media_query_parser.doc/feature.md")]
     pub feature: Box<str>,
-    /// The range comparator, or [`None`] for a colon or boolean feature.
+    #[doc = include_str!("media_query_parser.doc/comparator.md")]
     pub comparator: Option<MediaComparator>,
-    /// The feature value, or [`None`] for a boolean feature such as `(hover)`.
+    #[doc = include_str!("media_query_parser.doc/value.md")]
     pub value: Option<Vec<ParsedValue>>,
 }
 
-/// A comparator used in range media/container features.
+#[doc = include_str!("media_query_parser.doc/MediaComparator.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaComparator {
-    /// `=` equality.
+    #[doc = include_str!("media_query_parser.doc/Eq.md")]
     Eq,
-    /// `<` strictly less than.
+    #[doc = include_str!("media_query_parser.doc/Lt.md")]
     Lt,
-    /// `<=` less than or equal.
+    #[doc = include_str!("media_query_parser.doc/Le.md")]
     Le,
-    /// `>` strictly greater than.
+    #[doc = include_str!("media_query_parser.doc/Gt.md")]
     Gt,
-    /// `>=` greater than or equal.
+    #[doc = include_str!("media_query_parser.doc/Ge.md")]
     Ge,
 }
 
-/// Parses an `@media` prelude into a [`ParsedMediaQueryList`].
-///
-/// The parser is stateless; a single instance may parse any number of preludes.
+#[doc = include_str!("media_query_parser.doc/MediaQueryParser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct MediaQueryParser {
     _private: (),
 }
 
 impl MediaQueryParser {
-    /// Creates a media-query parser.
+    #[doc = include_str!("media_query_parser.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { _private: () }
     }
 
-    /// Parses `source` as a media-query prelude (without the `@media` keyword).
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] with kind
-    /// [`InvalidAtRule`](CssParseErrorKind::InvalidAtRule) on malformed syntax.
+    #[doc = include_str!("media_query_parser.doc/parse.md")]
     pub fn parse(&self, source: &CssSource) -> Result<ParsedMediaQueryList, CssParseError> {
         let text = source.text();
         let eof = u32::try_from(text.len()).unwrap_or(u32::MAX);
@@ -94,11 +80,7 @@ impl MediaQueryParser {
         Self::parse_tokens(&tokens, eof)
     }
 
-    /// Parses a media-query prelude from an already-tokenized slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] on malformed syntax.
+    #[doc = include_str!("media_query_parser.doc/parse_tokens.md")]
     pub(crate) fn parse_tokens(
         tokens: &[CssToken],
         eof: u32,
@@ -112,7 +94,7 @@ impl MediaQueryParser {
     }
 }
 
-/// Index-based feature/query parser shared in shape with the container parser.
+#[doc = include_str!("media_query_parser.doc/Inner.md")]
 pub(crate) struct Inner<'t> {
     tokens: &'t [CssToken],
     pos: usize,
@@ -195,8 +177,7 @@ impl<'t> Inner<'t> {
         self.take_leading_ident()
     }
 
-    /// Consumes a leading non-connector identifier (a media type or container
-    /// name), returning it if present. Shared with the container-query parser.
+    #[doc = include_str!("media_query_parser.doc/take_container_name.md")]
     pub(crate) fn take_container_name(&mut self) -> Option<Box<str>> {
         self.skip_ws();
         self.take_leading_ident()
@@ -213,7 +194,7 @@ impl<'t> Inner<'t> {
         None
     }
 
-    /// Parses zero or more `(feature …)` conditions joined by `and`/`or`.
+    #[doc = include_str!("media_query_parser.doc/parse_conditions.md")]
     pub(crate) fn parse_conditions(&mut self) -> Result<Vec<MediaCondition>, CssParseError> {
         let mut conditions = Vec::new();
         loop {
@@ -292,7 +273,7 @@ impl<'t> Inner<'t> {
         Some(cmp)
     }
 
-    /// Collects tokens up to the matching `)` and parses them as a value.
+    #[doc = include_str!("media_query_parser.doc/parse_value_until_rparen.md")]
     fn parse_value_until_rparen(&mut self) -> Result<Vec<ParsedValue>, CssParseError> {
         let start = self.pos;
         let mut depth = 1i32;
@@ -315,7 +296,7 @@ impl<'t> Inner<'t> {
     }
 }
 
-/// Returns whether an identifier is a media-condition connector keyword.
+#[doc = include_str!("media_query_parser.doc/is_connector.md")]
 fn is_connector(id: &str) -> bool {
     id.eq_ignore_ascii_case("and")
         || id.eq_ignore_ascii_case("or")

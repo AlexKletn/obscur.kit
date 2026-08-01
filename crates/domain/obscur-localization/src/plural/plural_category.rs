@@ -1,36 +1,26 @@
-//! `PluralCategory`: the six CLDR plural categories (spec §7.2).
+#![doc = include_str!("plural_category.doc/_module.md")]
 
 use std::fmt;
 
-/// One of CLDR's six plural categories.
-///
-/// The set is fixed and universal; which of them a *language* actually uses is
-/// not. English uses two (`one`, `other`), Russian four (`one`, `few`, `many`,
-/// `other`), Arabic all six, Japanese one. The names are grammatical labels, not
-/// counts: Russian's `one` is the category of 1, 21, 31 **and** 101, and its
-/// `many` is the category of 0, 5, 11 **and** 111.
-///
-/// Ordering follows CLDR's canonical order, which is also the order arms are
-/// conventionally written in.
+#[doc = include_str!("plural_category.doc/PluralCategory.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PluralCategory {
-    /// `zero` — e.g. Arabic ٠.
+    #[doc = include_str!("plural_category.doc/Zero.md")]
     Zero,
-    /// `one` — the singular *category*, which in Russian includes 21 and 101.
+    #[doc = include_str!("plural_category.doc/One.md")]
     One,
-    /// `two` — the dual, e.g. Arabic.
+    #[doc = include_str!("plural_category.doc/Two.md")]
     Two,
-    /// `few` — the paucal, e.g. Russian 2–4, 22–24.
+    #[doc = include_str!("plural_category.doc/Few.md")]
     Few,
-    /// `many` — e.g. Russian 0, 5–20, 111.
+    #[doc = include_str!("plural_category.doc/Many.md")]
     Many,
-    /// `other` — the catch-all every language has; the only category of a
-    /// language with no plural distinctions at all.
+    #[doc = include_str!("plural_category.doc/Other.md")]
     Other,
 }
 
 impl PluralCategory {
-    /// Every category, in CLDR's canonical order.
+    #[doc = include_str!("plural_category.doc/ALL.md")]
     pub const ALL: [Self; 6] = [
         Self::Zero,
         Self::One,
@@ -40,10 +30,7 @@ impl PluralCategory {
         Self::Other,
     ];
 
-    /// Returns the CLDR keyword for this category (`"one"`, `"few"`, …).
-    ///
-    /// These are the exact spellings used as `count=` in CLDR's `plurals.xml` and
-    /// as arm names in a [`MessagePattern`](crate::message::MessagePattern).
+    #[doc = include_str!("plural_category.doc/as_str.md")]
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -56,7 +43,7 @@ impl PluralCategory {
         }
     }
 
-    /// Parses a CLDR category keyword; `None` for anything else.
+    #[doc = include_str!("plural_category.doc/from_keyword.md")]
     #[must_use]
     pub fn from_keyword(keyword: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|c| c.as_str() == keyword)

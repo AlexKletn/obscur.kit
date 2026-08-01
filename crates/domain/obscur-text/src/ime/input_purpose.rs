@@ -1,45 +1,29 @@
-//! The semantic purpose of a text field, guiding IME and keyboard behaviour
-//! (spec §5.12 IME).
+#![doc = include_str!("input_purpose.doc/_module.md")]
 
-/// The semantic purpose of a text field (spec §5.12).
-///
-/// The purpose is a hint that platform IMEs, on-screen keyboards, and autofill
-/// use to tailor input: a [`Password`](Self::Password) field suppresses
-/// learning and suggestions, a [`Number`](Self::Number) field offers a numeric
-/// keypad, an [`Email`](Self::Email) field surfaces `@`, and so on. It carries
-/// no validation semantics of its own — it only describes intent.
-///
-/// [`is_sensitive`](Self::is_sensitive) reports whether the purpose implies
-/// sensitive-mode handling (per §5.12 "sensitive/password modes are
-/// respected").
+#[doc = include_str!("input_purpose.doc/InputPurpose.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum InputPurpose {
-    /// Ordinary free-form text with no special semantics. The default.
+    #[doc = include_str!("input_purpose.doc/FreeForm.md")]
     #[default]
     FreeForm,
-    /// A secret password; sensitive-mode handling applies.
+    #[doc = include_str!("input_purpose.doc/Password.md")]
     Password,
-    /// A numeric PIN; sensitive-mode handling applies.
+    #[doc = include_str!("input_purpose.doc/Pin.md")]
     Pin,
-    /// An email address.
+    #[doc = include_str!("input_purpose.doc/Email.md")]
     Email,
-    /// A URL.
+    #[doc = include_str!("input_purpose.doc/Url.md")]
     Url,
-    /// A numeric value.
+    #[doc = include_str!("input_purpose.doc/Number.md")]
     Number,
-    /// A telephone number.
+    #[doc = include_str!("input_purpose.doc/Phone.md")]
     Phone,
-    /// A search query.
+    #[doc = include_str!("input_purpose.doc/Search.md")]
     Search,
 }
 
 impl InputPurpose {
-    /// Returns whether this purpose implies sensitive-mode handling: true for
-    /// [`Password`](Self::Password) and [`Pin`](Self::Pin) (spec §5.12).
-    ///
-    /// This is a hint that the field holds a secret, so IME learning,
-    /// suggestions, and clipboard exposure should be suppressed even when the
-    /// caller did not set an explicit sensitive flag.
+    #[doc = include_str!("input_purpose.doc/is_sensitive.md")]
     #[must_use]
     pub const fn is_sensitive(&self) -> bool {
         matches!(self, Self::Password | Self::Pin)

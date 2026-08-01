@@ -1,24 +1,4 @@
-//! **Proof: CSS `repeating-linear-gradient()` tiled as REAL stripes via Vello.**
-//!
-//! Drives the *whole* slice end-to-end: authors one CSS rule
-//! `background-image: repeating-linear-gradient(45deg, #2b2a27 0 6px, #faf9f6 6px
-//! 12px)` on a single box, compiles it through the real `obscur-css` frontend,
-//! runs one frame through [`UiRuntime`] (so the scene coordinator resolves the
-//! one-period gradient axis + `ExtendMode::Repeat`), and renders it through
-//! headless Vello/wgpu into `target/repeating_gradient_proof.png`.
-//!
-//! The 12px period tiles across the box at 45°, so the read-back PNG shows a field
-//! of alternating dark/light diagonal stripes — NOT a single ramp. On the CPU
-//! backend the same gradient would flatten to its first (dark) stop per the
-//! GPU-class-effect policy; the faithful stripes are the Vello proof.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. With none it prints a diagnostic and exits cleanly
-//! (no panic); it never fabricates a device.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example repeating_gradient_proof --features render-vello`
+#![doc = include_str!("repeating_gradient_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -36,11 +16,10 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewProperty, ViewValue};
 
-/// The output image extent (and the box fills it).
+#[doc = include_str!("repeating_gradient_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 360.0);
 
-/// The authored stylesheet: a full-viewport box painted with a repeating linear
-/// gradient — a 12px period of a dark 6px band then a light 6px band, at 45°.
+#[doc = include_str!("repeating_gradient_proof.doc/CSS.md")]
 const CSS: &str = r"
 .app {
     display: block;
@@ -112,7 +91,7 @@ fn main() {
     );
 }
 
-/// Builds the single `#app` box view carrying the striped `background-image`.
+#[doc = include_str!("repeating_gradient_proof.doc/build_view.md")]
 fn build_view() -> View {
     let app = Container::new()
         .into_view_node()
@@ -120,15 +99,14 @@ fn build_view() -> View {
     View::single(app)
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("repeating_gradient_proof.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Acquires a headless wgpu device + queue (no surface), or [`None`] when no
-/// adapter/device is available so the caller exits cleanly instead of panicking.
+#[doc = include_str!("repeating_gradient_proof.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -140,7 +118,7 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("repeating_gradient_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

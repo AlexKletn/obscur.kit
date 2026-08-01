@@ -1,49 +1,39 @@
-//! The typed outcome of testing a selector against a node: [`SelectorMatch`].
+#![doc = include_str!("selector_match.doc/_module.md")]
 
 use super::selector_specificity::SelectorSpecificity;
 
-/// The result of testing one selector against one node.
-///
-/// It records whether the selector matched and, when it did, the
-/// [`SelectorSpecificity`] the matched selector contributes to the cascade.
-///
-/// The actual matching — walking combinators against the tree, evaluating
-/// `:nth-*`, attribute tests, and the required [`PseudoState`]s — is performed
-/// by `obscur-css` / the matcher. This type is only the typed outcome the
-/// cascade consumes.
-///
-/// [`PseudoState`]: super::pseudo_state::PseudoState
+#[doc = include_str!("selector_match.doc/SelectorMatch.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectorMatch {
-    /// The selector matched the node, contributing the given specificity.
+    #[doc = include_str!("selector_match.doc/Matched.md")]
     Matched {
-        /// The specificity the matched selector contributes to the cascade.
+        #[doc = include_str!("selector_match.doc/specificity.md")]
         specificity: SelectorSpecificity,
     },
-    /// The selector did not match the node.
+    #[doc = include_str!("selector_match.doc/NoMatch.md")]
     NoMatch,
 }
 
 impl SelectorMatch {
-    /// Constructs a matched outcome carrying the given specificity.
+    #[doc = include_str!("selector_match.doc/matched.md")]
     #[must_use]
     pub const fn matched(specificity: SelectorSpecificity) -> Self {
         Self::Matched { specificity }
     }
 
-    /// Constructs a non-matching outcome.
+    #[doc = include_str!("selector_match.doc/no_match.md")]
     #[must_use]
     pub const fn no_match() -> Self {
         Self::NoMatch
     }
 
-    /// Returns `true` if the selector matched the node.
+    #[doc = include_str!("selector_match.doc/is_match.md")]
     #[must_use]
     pub const fn is_match(self) -> bool {
         matches!(self, Self::Matched { .. })
     }
 
-    /// Returns the contributed specificity when matched, otherwise `None`.
+    #[doc = include_str!("selector_match.doc/specificity_2.md")]
     #[must_use]
     pub const fn specificity(self) -> Option<SelectorSpecificity> {
         match self {

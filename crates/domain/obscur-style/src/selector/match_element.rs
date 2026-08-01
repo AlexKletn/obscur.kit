@@ -1,87 +1,57 @@
-//! The abstract element the matcher walks: [`MatchElement`].
+#![doc = include_str!("match_element.doc/_module.md")]
 
 use super::pseudo_state::PseudoState;
 
-/// An element the selector matcher can navigate and inspect.
-///
-/// This is the seam that keeps `obscur-style` a pure domain crate: the matcher
-/// operates only through this trait, so a retained-tree node (or any other
-/// element graph) can implement it in a later sub-step without this crate
-/// depending on the tree. Names and attributes are exchanged as `&str` — not
-/// interned symbols — because CSS and the tree intern into different tables;
-/// see the crate's interner-coherence note.
-///
-/// Navigation methods ([`parent`](Self::parent),
-/// [`previous_sibling_element`](Self::previous_sibling_element)) return owned
-/// `Self` values: implementors are expected to be cheap `Copy`/handle/cursor
-/// types over a shared arena rather than owning the node data.
-///
-/// Only element siblings are considered "siblings" here; text and other
-/// non-element children are excluded from indices and counts.
+#[doc = include_str!("match_element.doc/MatchElement.md")]
 pub trait MatchElement {
-    /// Returns the element's local/type name (e.g. `"div"`), or [`None`] if it
-    /// has none. Type-selector comparison is ASCII case-insensitive.
+    #[doc = include_str!("match_element.doc/local_name.md")]
     fn local_name(&self) -> Option<&str>;
 
-    /// Returns the element's id, or [`None`] if unset.
+    #[doc = include_str!("match_element.doc/id.md")]
     fn id(&self) -> Option<&str>;
 
-    /// Returns `true` if the element carries the given class.
+    #[doc = include_str!("match_element.doc/has_class.md")]
     fn has_class(&self, class: &str) -> bool;
 
-    /// Returns the value of the named attribute, or [`None`] if absent.
+    #[doc = include_str!("match_element.doc/attribute.md")]
     fn attribute(&self, name: &str) -> Option<&str>;
 
-    /// Returns the element's active interaction state bitset.
+    #[doc = include_str!("match_element.doc/pseudo_state.md")]
     fn pseudo_state(&self) -> PseudoState;
 
-    /// Returns the element's parent, or [`None`] if it is the root or detached.
+    #[doc = include_str!("match_element.doc/parent.md")]
     fn parent(&self) -> Option<Self>
     where
         Self: Sized;
 
-    /// Returns the immediately preceding element sibling, or [`None`].
+    #[doc = include_str!("match_element.doc/previous_sibling_element.md")]
     fn previous_sibling_element(&self) -> Option<Self>
     where
         Self: Sized;
 
-    /// Returns the element's 0-based index among its element siblings.
+    #[doc = include_str!("match_element.doc/index_among_siblings.md")]
     fn index_among_siblings(&self) -> usize;
 
-    /// Returns the total number of element siblings including this element
-    /// (always at least `1`).
+    #[doc = include_str!("match_element.doc/sibling_count.md")]
     fn sibling_count(&self) -> usize;
 
-    /// Returns `true` if the element is the root of its tree (`:root`).
+    #[doc = include_str!("match_element.doc/is_root.md")]
     fn is_root(&self) -> bool;
 
-    /// Returns `true` if the element has any element children; `false` means the
-    /// element is `:empty`.
+    #[doc = include_str!("match_element.doc/has_children.md")]
     fn has_children(&self) -> bool;
 
-    /// Returns `true` if this element is the only element among its siblings
-    /// (`:only-child`).
-    ///
-    /// Defaults to `sibling_count() == 1`.
+    #[doc = include_str!("match_element.doc/is_only_child.md")]
     fn is_only_child(&self) -> bool {
         self.sibling_count() == 1
     }
 
-    /// Returns the element's 1-based index among same-type siblings, counting
-    /// from the front (`:nth-of-type`).
-    ///
-    /// The default does not distinguish types and returns the overall 1-based
-    /// index; implementors that track element types should override it.
+    #[doc = include_str!("match_element.doc/nth_of_type_index.md")]
     fn nth_of_type_index(&self) -> usize {
         self.index_among_siblings() + 1
     }
 
-    /// Returns the element's 1-based index among same-type siblings, counting
-    /// from the back (`:nth-last-of-type`).
-    ///
-    /// The default does not distinguish types and returns the overall 1-based
-    /// index from the back; implementors that track element types should
-    /// override it.
+    #[doc = include_str!("match_element.doc/nth_last_of_type_index.md")]
     fn nth_last_of_type_index(&self) -> usize {
         self.sibling_count() - self.index_among_siblings()
     }

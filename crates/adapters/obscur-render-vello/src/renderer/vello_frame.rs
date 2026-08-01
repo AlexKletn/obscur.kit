@@ -1,15 +1,6 @@
-//! A per-frame offscreen texture Vello rasterizes into (spec §5.2, §5.6).
+#![doc = include_str!("vello_frame.doc/_module.md")]
 
-/// An offscreen [`wgpu::Texture`] and its view, sized for one frame
-/// (spec §5.6 offscreen output).
-///
-/// Vello's [`render_to_texture`](vello::Renderer::render_to_texture) draws into a
-/// texture that must have the [`wgpu::TextureFormat::Rgba8Unorm`] format and the
-/// [`wgpu::TextureUsages::STORAGE_BINDING`] flag (Vello's fine-rasterization
-/// stage writes it with a compute pipeline). This type allocates exactly such a
-/// texture plus the matching [`wgpu::TextureView`] Vello binds. Additional
-/// usages — render-attachment, texture-binding, and copy-source — let a host
-/// blit the result to a surface or read it back for an offscreen/bitmap target.
+#[doc = include_str!("vello_frame.doc/VelloFrame.md")]
 #[derive(Clone)]
 pub struct VelloFrame {
     texture: wgpu::Texture,
@@ -19,12 +10,7 @@ pub struct VelloFrame {
 }
 
 impl VelloFrame {
-    /// Allocates an offscreen render target of `width` × `height` on `device`.
-    ///
-    /// The extent is clamped to a minimum of `1` per axis (wgpu rejects a
-    /// zero-sized texture). The texture is created with the format and usages
-    /// Vello requires plus the copy/binding usages a host needs to consume the
-    /// result.
+    #[doc = include_str!("vello_frame.doc/new_offscreen.md")]
     #[must_use]
     pub fn new_offscreen(device: &wgpu::Device, width: u32, height: u32) -> Self {
         let width = width.max(1);
@@ -55,31 +41,31 @@ impl VelloFrame {
         }
     }
 
-    /// The backing texture.
+    #[doc = include_str!("vello_frame.doc/texture.md")]
     #[must_use]
     pub const fn texture(&self) -> &wgpu::Texture {
         &self.texture
     }
 
-    /// The texture view Vello renders into.
+    #[doc = include_str!("vello_frame.doc/view.md")]
     #[must_use]
     pub const fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
 
-    /// The target width, in physical pixels.
+    #[doc = include_str!("vello_frame.doc/width.md")]
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
-    /// The target height, in physical pixels.
+    #[doc = include_str!("vello_frame.doc/height.md")]
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
-    /// The target extent as a `(width, height)` pair, in physical pixels.
+    #[doc = include_str!("vello_frame.doc/size.md")]
     #[must_use]
     pub const fn size(&self) -> (u32, u32) {
         (self.width, self.height)

@@ -1,49 +1,35 @@
-//! The `InterpolationResult` outcome of an interpolation attempt (spec §4.17).
+#![doc = include_str!("interpolation_result.doc/_module.md")]
 
 use super::MotionValue;
 
-/// The typed outcome of blending two [`MotionValue`] endpoints (spec §4.17).
-///
-/// Interpolation only succeeds when both endpoints hold the same
-/// [`MotionValue`] variant. This enum makes that outcome explicit: a successful
-/// blend is [`Interpolated`](Self::Interpolated); a variant mismatch — two
-/// endpoints that cannot be blended — is reported as
-/// [`Incompatible`](Self::Incompatible), which preserves both endpoints so a
-/// caller can fall back (for example to a discrete swap) without losing
-/// information.
+#[doc = include_str!("interpolation_result.doc/InterpolationResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InterpolationResult {
-    /// The endpoints blended successfully to this value.
+    #[doc = include_str!("interpolation_result.doc/Interpolated.md")]
     Interpolated(MotionValue),
-    /// The endpoints held different variants and could not be blended.
+    #[doc = include_str!("interpolation_result.doc/Incompatible.md")]
     Incompatible {
-        /// The `self`/start endpoint of the attempted blend.
+        #[doc = include_str!("interpolation_result.doc/from.md")]
         from: MotionValue,
-        /// The `other`/end endpoint of the attempted blend.
+        #[doc = include_str!("interpolation_result.doc/to.md")]
         to: MotionValue,
     },
 }
 
 impl InterpolationResult {
-    /// Wraps a successfully interpolated value.
+    #[doc = include_str!("interpolation_result.doc/interpolated.md")]
     #[must_use]
     pub const fn interpolated(value: MotionValue) -> Self {
         Self::Interpolated(value)
     }
 
-    /// Records a failed blend between two type-incompatible endpoints.
+    #[doc = include_str!("interpolation_result.doc/incompatible.md")]
     #[must_use]
     pub const fn incompatible(from: MotionValue, to: MotionValue) -> Self {
         Self::Incompatible { from, to }
     }
 
-    /// Blends `from` toward `to` by `t`, classifying the outcome (spec §4.17).
-    ///
-    /// Delegates to [`MotionValue::interpolate_checked`]: a `Some` result
-    /// becomes [`Interpolated`](Self::Interpolated), and a `None` (variant
-    /// mismatch) becomes [`Incompatible`](Self::Incompatible) carrying both
-    /// endpoints. `t` follows the interpolation contract: normalized progress
-    /// in `[0, 1]`, not clamped.
+    #[doc = include_str!("interpolation_result.doc/between.md")]
     #[must_use]
     pub fn between(from: MotionValue, to: MotionValue, t: f32) -> InterpolationResult {
         match from.interpolate_checked(&to, t) {
@@ -52,8 +38,7 @@ impl InterpolationResult {
         }
     }
 
-    /// Returns the interpolated value, or `None` when the endpoints were
-    /// incompatible.
+    #[doc = include_str!("interpolation_result.doc/value.md")]
     #[must_use]
     pub const fn value(&self) -> Option<MotionValue> {
         match self {
@@ -62,20 +47,19 @@ impl InterpolationResult {
         }
     }
 
-    /// Returns whether the blend succeeded.
+    #[doc = include_str!("interpolation_result.doc/is_interpolated.md")]
     #[must_use]
     pub const fn is_interpolated(&self) -> bool {
         matches!(self, Self::Interpolated(_))
     }
 
-    /// Returns whether the endpoints were incompatible.
+    #[doc = include_str!("interpolation_result.doc/is_incompatible.md")]
     #[must_use]
     pub const fn is_incompatible(&self) -> bool {
         matches!(self, Self::Incompatible { .. })
     }
 
-    /// Returns the interpolated value, or `fallback` when the endpoints were
-    /// incompatible.
+    #[doc = include_str!("interpolation_result.doc/unwrap_or.md")]
     #[must_use]
     pub const fn unwrap_or(&self, fallback: MotionValue) -> MotionValue {
         match self {

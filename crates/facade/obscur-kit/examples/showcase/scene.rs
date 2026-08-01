@@ -1,34 +1,4 @@
-//! The **shared capability-showcase** scene, authored once and rendered by both
-//! the headless CPU→PNG example (`showcase_png.rs`) and the windowed Vello
-//! example. It is deliberately **backend-pure**: it names only the toolkit's
-//! view / widget / primitive / CSS authoring surfaces (`obscur_kit::*`) and never
-//! a renderer, window, or GPU type, so the exact same view + stylesheet feed a
-//! software rasterizer and a GPU surface unchanged.
-//!
-//! # What it exercises
-//!
-//! A titled "gallery" laid out with a **grid** of cards over a **flex** toolbar
-//! row, each card demonstrating one shipped capability:
-//!
-//! - layout: a `display: grid` gallery (multiple tracks) + a `display: flex` row;
-//! - backgrounds: `background-color`, `linear-gradient`, `radial-gradient`,
-//!   `conic-gradient`;
-//! - borders: `border` + `border-radius`, and a thick colored border;
-//! - effects: `box-shadow`, `filter: drop-shadow(...)`, group `opacity: 0.5`,
-//!   `transform: rotate()/scale()`;
-//! - images: a `background-image: url(...)` card and an `<img>` [`Image`]
-//!   primitive with `object-fit: contain`;
-//! - text: headings + paragraphs at several sizes / weights (a mixed-script
-//!   sample too);
-//! - widgets: a [`Button`], a [`Checkbox`], and an [`Input`] carrying a value;
-//! - a state-driven counter value rendered as text.
-//!
-//! The gradient / shadow / blur effects are GPU-class: on the CPU backend they
-//! degrade to a documented approximation (a gradient paints its first stop; a
-//! shadow paints a flat offset rect) per the project's CPU/GPU effect-split
-//! policy — the layout, text, images, borders, radius, opacity, and transform
-//! geometry all render faithfully. The windowed Vello example shows the effects
-//! at full fidelity from the very same module.
+#![doc = include_str!("scene.doc/_module.md")]
 // Both examples share this module via `#[path]`; each uses a subset (so some
 // items look dead/unreachable-pub inside a single example binary, but are part of
 // the shared surface the sibling example also consumes).
@@ -41,37 +11,28 @@ use obscur_kit::widgets::button::Button;
 use obscur_kit::widgets::checkbox::Checkbox;
 use obscur_kit::widgets::input::Input;
 
-/// The file name the image cards reference. Both `background-image: url(...)` and
-/// the `<img>` [`Image`] primitive resolve this against the resource loader's
-/// sandbox root, so an example writes [`image_asset_bytes`] to
-/// `<sandbox>/gallery.png` before rendering.
+#[doc = include_str!("scene.doc/IMAGE_ASSET_NAME.md")]
 pub const IMAGE_ASSET_NAME: &str = "gallery.png";
 
-/// The bytes of the small colorful RGBA PNG the image cards display, embedded so
-/// the demo needs no external asset. An example writes these to
-/// `<sandbox>/gallery.png` and points the resource loader at that directory.
+#[doc = include_str!("scene.doc/image_asset_bytes.md")]
 #[must_use]
 pub fn image_asset_bytes() -> &'static [u8] {
     include_bytes!("gallery.png")
 }
 
-/// Commands the interactive widgets fire (interned handles); the windowed example
-/// binds real command handlers to these, the headless PNG example just renders
-/// them.
+#[doc = include_str!("scene.doc/CMD_BUTTON.md")]
 const CMD_BUTTON: InternedSymbol = InternedSymbol::from_raw(0x5001);
 const CMD_CHECKBOX: InternedSymbol = InternedSymbol::from_raw(0x5002);
 const CMD_INPUT: InternedSymbol = InternedSymbol::from_raw(0x5003);
 
-/// The small, serializable state the showcase view is parameterized by, so
-/// sub-step 2 can drive it interactively. Sub-step 1 renders [`Default`].
+#[doc = include_str!("scene.doc/ShowcaseState.md")]
 #[derive(Debug, Clone)]
 pub struct ShowcaseState {
-    /// The counter value rendered as text (bumped by the button in the windowed
-    /// example).
+    #[doc = include_str!("scene.doc/counter.md")]
     pub counter: i32,
-    /// The text seeded into the [`Input`] widget.
+    #[doc = include_str!("scene.doc/input_text.md")]
     pub input_text: String,
-    /// The [`Checkbox`] checked state.
+    #[doc = include_str!("scene.doc/checked.md")]
     pub checked: bool,
 }
 
@@ -85,10 +46,7 @@ impl Default for ShowcaseState {
     }
 }
 
-/// The authored stylesheet exercising the selector engine + cascade: id, class,
-/// and descendant selectors driving every capability the scene shows. Returned as
-/// a `&'static str` so both examples compile it through the real `obscur-css`
-/// frontend.
+#[doc = include_str!("scene.doc/stylesheet.md")]
 #[must_use]
 pub fn stylesheet() -> &'static str {
     "\
@@ -144,8 +102,7 @@ pub fn stylesheet() -> &'static str {
 "
 }
 
-/// Builds the full showcase view tree from `state`. Pure view/widget/primitive
-/// construction — no backend types — so both examples call it identically.
+#[doc = include_str!("scene.doc/view.md")]
 #[must_use]
 pub fn view(state: &ShowcaseState) -> View {
     let header = el(
@@ -195,13 +152,12 @@ pub fn view(state: &ShowcaseState) -> View {
     View::single(app)
 }
 
-/// A toolbar chip: a colored rounded container with a dark centered label — a
-/// flex-row item whose `background-color` paints (unlike a bare text node).
+#[doc = include_str!("scene.doc/chip.md")]
 fn chip(color: &str, label: &str) -> ViewNode {
     el(&format!("chip {color}"), vec![text("chip-text", label)])
 }
 
-/// A gallery card: a classed container with a bold label and a small note.
+#[doc = include_str!("scene.doc/card.md")]
 fn card(class: &str, label: &str, note: &str) -> ViewNode {
     el(
         &format!("card {class}"),
@@ -209,12 +165,12 @@ fn card(class: &str, label: &str, note: &str) -> ViewNode {
     )
 }
 
-/// The `background-image: url(...)` card (no extra children — the CSS paints it).
+#[doc = include_str!("scene.doc/bg_image_card.md")]
 fn bg_image_card() -> ViewNode {
     el("card bgimage", vec![text("card-label", "background-image")])
 }
 
-/// The `<img>` primitive card: a real [`Image`] element sized by `object-fit`.
+#[doc = include_str!("scene.doc/img_card.md")]
 fn img_card() -> ViewNode {
     let thumb = Image::new(IMAGE_ASSET_NAME)
         .into_view_node()
@@ -225,8 +181,7 @@ fn img_card() -> ViewNode {
     )
 }
 
-/// The widgets card: a real [`Button`], [`Checkbox`], and [`Input`] laid out in
-/// a column, each pulled to its element node so it participates in the tree.
+#[doc = include_str!("scene.doc/widgets_card.md")]
 fn widgets_card(state: &ShowcaseState) -> ViewNode {
     let button = first_node(Button::new("Click me", CMD_BUTTON).view())
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("btn".into())));
@@ -248,7 +203,7 @@ fn widgets_card(state: &ShowcaseState) -> ViewNode {
     )
 }
 
-/// Wraps `children` in a classed [`Container`] element node.
+#[doc = include_str!("scene.doc/el.md")]
 fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
@@ -256,16 +211,14 @@ fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A classed [`Text`] node (the class carries color / size / weight so the run's
-/// brush + font style are authored).
+#[doc = include_str!("scene.doc/text.md")]
 fn text(class: &str, content: &str) -> ViewNode {
     Text::new(content.to_owned())
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// Pulls a widget's first rendered [`ViewNode`] out of the [`View`] it produces,
-/// so it can be nested as a child of another element.
+#[doc = include_str!("scene.doc/first_node.md")]
 fn first_node(view: View) -> ViewNode {
     view.into_fragment().nodes().to_vec().remove(0)
 }

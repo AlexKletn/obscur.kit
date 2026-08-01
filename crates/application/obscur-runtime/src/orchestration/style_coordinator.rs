@@ -1,4 +1,4 @@
-//! Resolves computed styles across the retained tree: [`StyleCoordinator`].
+#![doc = include_str!("style_coordinator.doc/_module.md")]
 
 use std::collections::{HashMap, HashSet};
 
@@ -11,61 +11,29 @@ use obscur_tree::tree::RetainedTree;
 
 use super::StyleInputs;
 
-/// The computed style for every node the coordinator resolved, keyed by
-/// [`NodeId`].
+#[doc = include_str!("style_coordinator.doc/ComputedStyles.md")]
 pub type ComputedStyles = HashMap<NodeId, ComputedStyle>;
 
-/// What [`StyleCoordinator::resolve_incremental`] did, so the frame pipeline can
-/// classify the phases downstream of it (spec §3.4 phase 5, §4.3).
+#[doc = include_str!("style_coordinator.doc/IncrementalRestyle.md")]
 #[derive(Debug, Clone, Default)]
 pub struct IncrementalRestyle {
-    /// How many nodes were re-resolved — the frame's real style cost, and the
-    /// number the `style.resolved` counter reports. Not the size of the resulting
-    /// map, and not `previous.len()` either.
+    #[doc = include_str!("style_coordinator.doc/resolved.md")]
     pub resolved: usize,
-    /// The style each re-resolved node had **before**, for those that had one.
-    ///
-    /// Together with [`introduced`](Self::introduced) this is the complete answer to
-    /// "where can the map have changed?": a node absent from both was not
-    /// re-resolved, so it provably still holds the style it did last frame.
+    #[doc = include_str!("style_coordinator.doc/previous.md")]
     pub previous: ComputedStyles,
-    /// Whether any re-resolved node had **no** retained style, i.e. the walk added
-    /// an entry rather than replacing one.
-    ///
-    /// Such a node has no "before" to compare against, so it is not in `previous`
-    /// and a consumer must not conclude anything from its absence there. Always
-    /// `false` when the caller's precondition holds (the retained map covers the
-    /// tree); it exists so that a caller which is wrong about that degrades to
-    /// conservative rather than to silently skipping work.
+    #[doc = include_str!("style_coordinator.doc/introduced.md")]
     pub introduced: bool,
 }
 
-/// Orchestrates computed-style resolution over a [`RetainedTree`].
-///
-/// The coordinator is **orchestration only** (spec §3.10): the computed-value
-/// algorithm and inheritance live entirely in `obscur-style`'s [`StyleResolver`].
-/// The coordinator's own responsibility is to walk the tree **parent-first**
-/// (pre-order) and thread each node's already-computed parent style into the
-/// resolver, so that when a node is resolved its parent's [`ComputedStyle`] is
-/// already available for inheritance (spec §4.14).
-///
-/// The walk is cycle-safe and panic-free: a malformed or cyclic child link never
-/// causes a loop, and a node that is unreachable from the root is simply not
-/// resolved.
-///
-/// The same parent-first order is what makes `rem` resolvable at computed-value
-/// time: the root **element** is resolved first (against the initial `font-size`,
-/// which is what `rem` means *on* the root), and its absolute `font-size` becomes
-/// the `rem` base every descendant is resolved against — see
-/// [`ResolutionContext`].
+#[doc = include_str!("style_coordinator.doc/StyleCoordinator.md")]
 #[derive(Debug, Clone, Default)]
 pub struct StyleCoordinator {
-    /// The stateless resolver that computes each node's style.
+    #[doc = include_str!("style_coordinator.doc/resolver.md")]
     resolver: StyleResolver,
 }
 
 impl StyleCoordinator {
-    /// Creates a coordinator with a fresh resolver.
+    #[doc = include_str!("style_coordinator.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -73,13 +41,7 @@ impl StyleCoordinator {
         }
     }
 
-    /// Attaches `metrics` to `ctx` when the caller supplied any.
-    ///
-    /// Both walks rebuild their context on reaching the root element (to swap in
-    /// the real `rem` base), and a rebuild that forgot the port would silently
-    /// un-resolve `ch` for the whole document *below the root* while the root
-    /// itself stayed correct — a bug that hides in exactly the tree shape tests
-    /// use. Funnelling every construction through here is what stops that.
+    #[doc = include_str!("style_coordinator.doc/attach.md")]
     const fn attach<'a>(
         ctx: ResolutionContext<'a>,
         metrics: Option<&'a dyn ChMetrics>,
@@ -92,20 +54,7 @@ impl StyleCoordinator {
         }
     }
 
-    /// Resolves the [`ComputedStyle`] of every node reachable from the tree root,
-    /// inheriting down from each node's parent (spec §4.14).
-    ///
-    /// Returns an empty map when the tree has no root. Otherwise the tree is
-    /// walked parent-first and each node is resolved against its cascaded
-    /// [`StyleInputs`] and its parent's already-computed style.
-    ///
-    /// `viewport` supplies the `vw` / `vh` bases every computed `<length>` is
-    /// absolutized against (spec §4.5).
-    ///
-    /// `metrics` supplies the `ch` base by measuring the `0` glyph. It is optional
-    /// only because a caller may not own a shaper; one that does should pass it, or
-    /// every `ch` on the tree stays symbolic and reaches paint as `0` — see
-    /// [`ResolutionContext::with_metrics`].
+    #[doc = include_str!("style_coordinator.doc/resolve.md")]
     #[must_use]
     pub fn resolve(
         &self,
@@ -129,25 +78,7 @@ impl StyleCoordinator {
         self.resolve_in_order(&order, inputs, viewport, environment, root_element, metrics)
     }
 
-    /// Re-resolves **only** the nodes `dirty` records, updating `styles` in place
-    /// (spec §3.4 phase 5, §4.3).
-    ///
-    /// This is the same walk as [`resolve`](Self::resolve) — the same parent-first
-    /// order, the same threaded parent style, the same `rem` base read off the root
-    /// element — with the resolve step gated on the dirty set: a node the set does
-    /// not record keeps the style it already had instead of recomputing an identical
-    /// one. Sharing the walk is what makes the two paths agree by construction rather
-    /// than by coincidence.
-    ///
-    /// # What the caller owes
-    ///
-    /// `styles` must be what this same walk produced over this same tree, and
-    /// `dirty` must record **every** node whose resolved style can differ — see
-    /// [`RestyleScope`](crate::invalidation::RestyleScope), which derives that set
-    /// from the selector engine's navigation surface. A node missing from `dirty`
-    /// is not checked; it is *assumed* unchanged. Since the marked set is
-    /// downward-closed, inheritance needs no separate pass: a node whose parent
-    /// changed is in the set with it.
+    #[doc = include_str!("style_coordinator.doc/resolve_incremental.md")]
     #[must_use]
     pub fn resolve_incremental(
         &self,
@@ -219,13 +150,7 @@ impl StyleCoordinator {
         out
     }
 
-    /// Computes a parent-first (pre-order) traversal from `root`, pairing each
-    /// visited node with its parent id (the root's parent is [`None`]).
-    ///
-    /// `children_of` yields the child ids of a node. The traversal is cycle-safe:
-    /// a visited set guarantees each node is emitted at most once, so cyclic or
-    /// diamond child links terminate rather than loop. Children are emitted in
-    /// their natural left-to-right order.
+    #[doc = include_str!("style_coordinator.doc/preorder.md")]
     fn preorder<F>(root: NodeId, children_of: F) -> Vec<(NodeId, Option<NodeId>)>
     where
         F: Fn(NodeId) -> Vec<NodeId>,
@@ -252,26 +177,7 @@ impl StyleCoordinator {
         order
     }
 
-    /// Resolves every node in a parent-first `order`, threading each node's
-    /// already-computed parent style into the resolver.
-    ///
-    /// Because `order` is parent-first, a node's parent is always present in the
-    /// accumulating map by the time the node is resolved, so inheritance flows
-    /// down correctly. A node with no cascaded inputs still gets a computed style
-    /// from the resolver's defaults and inheritance.
-    ///
-    /// `root_element` is the node `rem` resolves against: the topmost **element**
-    /// of the walk, which is what `:root` matches. It is not necessarily
-    /// `order[0]` — [`RetainedTree::root`] is a synthetic non-element host node
-    /// whose first element child is the document's actual root element.
-    ///
-    /// Because the walk is parent-first, that element is reached before anything
-    /// that could refer to it, so its computed `font-size` is in hand in time to
-    /// become the `rem` base. It is read back off the resolved style rather than
-    /// recomputed, so `rem` cannot drift from the `font-size` the root actually
-    /// painted at. Until it is reached (i.e. for the synthetic host above it),
-    /// `rem` means the initial `font-size` — the same answer `rem` gets *on* the
-    /// root element itself.
+    #[doc = include_str!("style_coordinator.doc/resolve_in_order.md")]
     fn resolve_in_order(
         &self,
         order: &[(NodeId, Option<NodeId>)],

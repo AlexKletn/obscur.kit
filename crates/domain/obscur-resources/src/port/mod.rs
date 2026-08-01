@@ -1,4 +1,4 @@
-//! Port module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod cache_store;
 pub use cache_store::{CacheStore, InMemoryCacheStore};
 mod resource_compiler;

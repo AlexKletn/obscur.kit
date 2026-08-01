@@ -1,27 +1,22 @@
-//! Display hotplug and configuration events (spec §6.6).
+#![doc = include_str!("display_event.doc/_module.md")]
 
 use crate::display::DisplayId;
 
-/// A hotplug or configuration change reported for a display (spec §6.6).
-///
-/// These notifications track the monitor list and its configuration over time:
-/// displays being connected or disconnected, a display's mode/scale/bounds
-/// changing, and the primary display changing. Every variant carries the
-/// [`DisplayId`] it concerns.
+#[doc = include_str!("display_event.doc/DisplayEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DisplayEvent {
-    /// A display was connected and is now available.
+    #[doc = include_str!("display_event.doc/Connected.md")]
     Connected(DisplayId),
-    /// A display was disconnected and is no longer available.
+    #[doc = include_str!("display_event.doc/Disconnected.md")]
     Disconnected(DisplayId),
-    /// A display's configuration changed (mode, scale, or bounds).
+    #[doc = include_str!("display_event.doc/ConfigurationChanged.md")]
     ConfigurationChanged(DisplayId),
-    /// A display became the primary display.
+    #[doc = include_str!("display_event.doc/PrimaryChanged.md")]
     PrimaryChanged(DisplayId),
 }
 
 impl DisplayEvent {
-    /// Returns the identifier of the display this event concerns.
+    #[doc = include_str!("display_event.doc/display_id.md")]
     #[must_use]
     pub const fn display_id(&self) -> DisplayId {
         match self {
@@ -32,13 +27,13 @@ impl DisplayEvent {
         }
     }
 
-    /// Returns whether this event reports a display being connected.
+    #[doc = include_str!("display_event.doc/is_connected.md")]
     #[must_use]
     pub const fn is_connected(&self) -> bool {
         matches!(self, Self::Connected(_))
     }
 
-    /// Returns whether this event reports a display being disconnected.
+    #[doc = include_str!("display_event.doc/is_disconnected.md")]
     #[must_use]
     pub const fn is_disconnected(&self) -> bool {
         matches!(self, Self::Disconnected(_))

@@ -1,21 +1,4 @@
-//! Squeezing a window and restoring it must not hang the application.
-//!
-//! The bug this pins was the worst class the kit has had: shrinking a window to
-//! its minimum and restoring it stopped the app dead — no drawing, and the
-//! window could not even be closed. That last part is the tell. It was not a
-//! slow frame or a wrong layout; the frame **never returned**, so the event loop
-//! never got to handle anything again, including the close request.
-//!
-//! The cause was a flex container whose padding exceeded the space it was given:
-//! with no room left, the block axis is offered *unbounded*, and §9.7's
-//! resolve-flexible-lengths loop grew an item toward infinity, clamped it
-//! against an infinite maximum, and computed the violation as `inf − inf` — NaN.
-//! NaN is false against every sign test, so the pass that decides what to freeze
-//! froze nothing and the next pass recomputed the identical state, forever.
-//!
-//! The whole sequence runs here, down to a zero viewport and back. A regression
-//! does not fail this test — it hangs it, which the suite reports as a test that
-//! never finishes. That is the honest signal for this class of defect.
+#![doc = include_str!("squeezed_window.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -76,8 +59,7 @@ fn cls(node: ViewNode, class: &str) -> ViewNode {
     node.class(class.to_owned())
 }
 
-/// The calculator's own shape: the sheet above with a tape, a display and a key
-/// row, which is what the owner was resizing when it hung.
+#[doc = include_str!("squeezed_window.doc/view.md")]
 fn view() -> View {
     let key = |label: &str| {
         cls(
@@ -154,9 +136,7 @@ fn squeezing_a_window_to_nothing_and_restoring_it_completes() {
     }
 }
 
-/// The minimal recipe, kept separate so a failure says *what* rather than only
-/// *that*: a flex container whose padding exceeds the space it is given, holding
-/// a child that wants to grow.
+#[doc = include_str!("squeezed_window.doc/a_container_padded_beyond_its_space_lays_out_its_growing_child.md")]
 #[test]
 fn a_container_padded_beyond_its_space_lays_out_its_growing_child() {
     let css = ".outer { width: 100%; height: 100%; display: flex; flex-direction: column } \

@@ -1,21 +1,13 @@
-//! `Expression`: the typed AST view of an `{expr}` interpolation (spec §2.10).
+#![doc = include_str!("expression.doc/_module.md")]
 
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-/// Typed AST wrapper over an [`Expression`](SyntaxKind::Expression) syntax node
-/// (spec §2.10).
-///
-/// An expression node covers a `{ … }` interpolation. Full expression parsing
-/// is the compiler's job; this wrapper only exposes the raw inner source. Note
-/// that the wrapped node keeps its surrounding braces — [`text`](Self::text)
-/// strips the leading [`LBrace`](SyntaxKind::LBrace) and trailing
-/// [`RBrace`](SyntaxKind::RBrace) tokens and concatenates the rest.
+#[doc = include_str!("expression.doc/Expression.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expression(SyntaxNode);
 
 impl Expression {
-    /// Casts a syntax node to an `Expression`, returning `Some` iff its kind is
-    /// [`Expression`](SyntaxKind::Expression).
+    #[doc = include_str!("expression.doc/cast.md")]
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if node.kind() == SyntaxKind::Expression {
@@ -25,17 +17,13 @@ impl Expression {
         }
     }
 
-    /// Returns the wrapped syntax node.
+    #[doc = include_str!("expression.doc/syntax.md")]
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    /// Returns the inner expression source, without the surrounding braces.
-    ///
-    /// The child tokens are concatenated in order, skipping a leading
-    /// [`LBrace`](SyntaxKind::LBrace) and a trailing [`RBrace`](SyntaxKind::RBrace)
-    /// if present. Braces nested inside the expression are preserved.
+    #[doc = include_str!("expression.doc/text.md")]
     #[must_use]
     pub fn text(&self) -> String {
         let tokens: Vec<_> = self.0.tokens().collect();
@@ -50,8 +38,7 @@ impl Expression {
         tokens[start..end].iter().map(|t| t.text()).collect()
     }
 
-    /// Returns `true` if the expression has no content between its braces (no
-    /// non-brace tokens).
+    #[doc = include_str!("expression.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         !self

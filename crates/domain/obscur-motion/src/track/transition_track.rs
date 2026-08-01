@@ -1,28 +1,21 @@
-//! The [`TransitionTrack`] single from→to eased track (spec §4.17).
+#![doc = include_str!("transition_track.doc/_module.md")]
 
 use crate::track::{Easing, MotionTrack};
 use crate::value::MotionValue;
 
-/// A single `from` → `to` interpolation shaped by an easing curve (spec §4.17).
-///
-/// This is the native compile target of a CSS `transition`: one start value, one
-/// end value, and a timing function. Sampling blends `from` toward `to` by the
-/// eased progress. Because the two endpoints must share a [`MotionValue`]
-/// variant to blend, a *type mismatch* (e.g. a scalar transitioning to a point)
-/// cannot interpolate; sampling then falls back to the `to` endpoint rather than
-/// panicking or fabricating a blend.
+#[doc = include_str!("transition_track.doc/TransitionTrack.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransitionTrack {
-    /// The value at `t == 0`.
+    #[doc = include_str!("transition_track.doc/from.md")]
     from: MotionValue,
-    /// The value at `t == 1`.
+    #[doc = include_str!("transition_track.doc/to.md")]
     to: MotionValue,
-    /// The easing curve applied to progress before interpolating.
+    #[doc = include_str!("transition_track.doc/easing.md")]
     easing: Easing,
 }
 
 impl TransitionTrack {
-    /// Creates a transition from `from` to `to` with [`Easing::Linear`].
+    #[doc = include_str!("transition_track.doc/new.md")]
     #[must_use]
     pub const fn new(from: MotionValue, to: MotionValue) -> Self {
         Self {
@@ -32,26 +25,26 @@ impl TransitionTrack {
         }
     }
 
-    /// Returns this transition with `easing` applied (fluent setter).
+    #[doc = include_str!("transition_track.doc/with_easing.md")]
     #[must_use]
     pub const fn with_easing(mut self, easing: Easing) -> Self {
         self.easing = easing;
         self
     }
 
-    /// Returns the start (`t == 0`) value.
+    #[doc = include_str!("transition_track.doc/from_2.md")]
     #[must_use]
     pub const fn from(&self) -> MotionValue {
         self.from
     }
 
-    /// Returns the end (`t == 1`) value.
+    #[doc = include_str!("transition_track.doc/to_2.md")]
     #[must_use]
     pub const fn to(&self) -> MotionValue {
         self.to
     }
 
-    /// Returns the easing curve applied before interpolation.
+    #[doc = include_str!("transition_track.doc/easing_2.md")]
     #[must_use]
     pub const fn easing(&self) -> Easing {
         self.easing
@@ -59,11 +52,7 @@ impl TransitionTrack {
 }
 
 impl MotionTrack for TransitionTrack {
-    /// Samples the eased blend from `from` toward `to` at progress `t`.
-    ///
-    /// The easing curve clamps `t` to `[0, 1]`, so `t <= 0` yields `from` and
-    /// `t >= 1` yields `to`. On a variant mismatch between the endpoints the
-    /// blend is undefined and this falls back to `to`.
+    #[doc = include_str!("transition_track.doc/sample.md")]
     fn sample(&self, t: f32) -> MotionValue {
         self.from
             .interpolate_checked(&self.to, self.easing.apply(t))

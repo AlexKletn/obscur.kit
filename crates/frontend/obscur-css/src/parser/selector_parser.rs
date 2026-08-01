@@ -1,127 +1,108 @@
-//! The [`SelectorParser`] and its parsed selector AST (spec §4.13).
-//!
-//! Supports the toolkit's selector surface: type/universal, class, id,
-//! attribute (`[a]`, `[a=b]`, `[a^=b]`, `[a$=b]`, `[a*=b]`, `[a~=b]`, `[a|=b]`),
-//! pseudo-class (including functional forms whose argument is captured as raw
-//! text), pseudo-element (`::before`/`::after`), and the four combinators. No
-//! specificity is computed here — that is the compiler's responsibility.
+#![doc = include_str!("selector_parser.doc/_module.md")]
 
 use crate::error::{CssParseError, CssParseErrorKind};
 use crate::source::{CssSource, SourceSpan};
 
-use super::stylesheet_parser::{CssToken, CssTokenKind, TokenCursor, Tokenizer, slice_span};
+use super::css_tokenizer::{CssToken, CssTokenKind, Tokenizer};
+use super::token_cursor::{TokenCursor, slice_span};
 
-/// A comma-separated list of complex selectors (`a, b > c`).
+#[doc = include_str!("selector_parser.doc/ParsedSelectorList.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedSelectorList(pub Vec<ParsedComplexSelector>);
 
-/// A complex selector: a lead compound selector followed by combinator-linked
-/// compounds (`div > .a + span`).
-///
-/// The `head` is the first compound; each entry in `tail` pairs the combinator
-/// that *precedes* a compound with that compound.
+#[doc = include_str!("selector_parser.doc/ParsedComplexSelector.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedComplexSelector {
-    /// The first compound selector.
+    #[doc = include_str!("selector_parser.doc/head.md")]
     pub head: ParsedCompoundSelector,
-    /// The remaining compounds, each with its preceding combinator.
+    #[doc = include_str!("selector_parser.doc/tail.md")]
     pub tail: Vec<(Combinator, ParsedCompoundSelector)>,
 }
 
-/// A combinator linking two compound selectors.
+#[doc = include_str!("selector_parser.doc/Combinator.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Combinator {
-    /// Descendant combinator (whitespace).
+    #[doc = include_str!("selector_parser.doc/Descendant.md")]
     Descendant,
-    /// Child combinator (`>`).
+    #[doc = include_str!("selector_parser.doc/Child.md")]
     Child,
-    /// Next-sibling combinator (`+`).
+    #[doc = include_str!("selector_parser.doc/NextSibling.md")]
     NextSibling,
-    /// Subsequent-sibling combinator (`~`).
+    #[doc = include_str!("selector_parser.doc/SubsequentSibling.md")]
     SubsequentSibling,
 }
 
-/// A compound selector: contiguous simple selectors with no combinator between
-/// them (`div.a#b:hover`).
+#[doc = include_str!("selector_parser.doc/ParsedCompoundSelector.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedCompoundSelector {
-    /// The simple selectors making up the compound, in source order.
+    #[doc = include_str!("selector_parser.doc/parts.md")]
     pub parts: Vec<SimpleSelector>,
 }
 
-/// A single simple selector.
+#[doc = include_str!("selector_parser.doc/SimpleSelector.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleSelector {
-    /// A type/element selector such as `div`.
+    #[doc = include_str!("selector_parser.doc/Type.md")]
     Type(Box<str>),
-    /// The universal selector `*`.
+    #[doc = include_str!("selector_parser.doc/Universal.md")]
     Universal,
-    /// A class selector such as `.button`.
+    #[doc = include_str!("selector_parser.doc/Class.md")]
     Class(Box<str>),
-    /// An id selector such as `#main`.
+    #[doc = include_str!("selector_parser.doc/Id.md")]
     Id(Box<str>),
-    /// An attribute selector such as `[data-x]` or `[type="text"]`.
+    #[doc = include_str!("selector_parser.doc/Attribute.md")]
     Attribute {
-        /// The attribute name.
+        #[doc = include_str!("selector_parser.doc/name.md")]
         name: Box<str>,
-        /// The match operator, or [`None`] for a bare presence test.
+        #[doc = include_str!("selector_parser.doc/op.md")]
         op: Option<AttrOp>,
-        /// The compared value, or [`None`] for a bare presence test.
+        #[doc = include_str!("selector_parser.doc/value.md")]
         value: Option<Box<str>>,
     },
-    /// A pseudo-class such as `:hover` or `:nth-child(2n+1)`.
+    #[doc = include_str!("selector_parser.doc/PseudoClass.md")]
     PseudoClass {
-        /// The pseudo-class name (without the leading `:`).
+        #[doc = include_str!("selector_parser.doc/name_2.md")]
         name: Box<str>,
-        /// The raw argument text for a functional pseudo-class, if any.
+        #[doc = include_str!("selector_parser.doc/arg.md")]
         arg: Option<Box<str>>,
     },
-    /// A pseudo-element such as `::before` (without the leading `::`).
+    #[doc = include_str!("selector_parser.doc/PseudoElement.md")]
     PseudoElement(Box<str>),
-    /// The `::part(name)` exported-part pseudo-element; stores the part name
-    /// (§2.12 / §4.15).
+    #[doc = include_str!("selector_parser.doc/Part.md")]
     Part(Box<str>),
 }
 
-/// An attribute selector match operator.
+#[doc = include_str!("selector_parser.doc/AttrOp.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttrOp {
-    /// `=` exact match.
+    #[doc = include_str!("selector_parser.doc/Exact.md")]
     Exact,
-    /// `~=` whitespace-separated list contains.
+    #[doc = include_str!("selector_parser.doc/Includes.md")]
     Includes,
-    /// `|=` exact or prefix followed by `-`.
+    #[doc = include_str!("selector_parser.doc/DashMatch.md")]
     DashMatch,
-    /// `^=` prefix match.
+    #[doc = include_str!("selector_parser.doc/Prefix.md")]
     Prefix,
-    /// `$=` suffix match.
+    #[doc = include_str!("selector_parser.doc/Suffix.md")]
     Suffix,
-    /// `*=` substring match.
+    #[doc = include_str!("selector_parser.doc/Substring.md")]
     Substring,
 }
 
-/// Parses selector tokens into a [`ParsedSelectorList`].
-///
-/// The parser is stateless; a single instance may parse any number of selectors.
+#[doc = include_str!("selector_parser.doc/SelectorParser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct SelectorParser {
     _private: (),
 }
 
 impl SelectorParser {
-    /// Creates a selector parser.
+    #[doc = include_str!("selector_parser.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { _private: () }
     }
 
-    /// Parses `source` as a selector list.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] with kind
-    /// [`InvalidSelector`](CssParseErrorKind::InvalidSelector) on malformed
-    /// input (an empty compound, an unterminated `[ … ]`, and so on).
+    #[doc = include_str!("selector_parser.doc/parse.md")]
     pub fn parse(&self, source: &CssSource) -> Result<ParsedSelectorList, CssParseError> {
         let text = source.text();
         let eof = u32::try_from(text.len()).unwrap_or(u32::MAX);
@@ -132,12 +113,7 @@ impl SelectorParser {
         Self::parse_tokens(&tokens, text, eof)
     }
 
-    /// Parses a selector list from an already-tokenized slice. `source` is the
-    /// full source text, used to slice raw functional-pseudo arguments.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] on malformed selector syntax.
+    #[doc = include_str!("selector_parser.doc/parse_tokens.md")]
     pub(crate) fn parse_tokens(
         tokens: &[CssToken],
         source: &str,
@@ -152,7 +128,7 @@ impl SelectorParser {
     }
 }
 
-/// The inner selector parser state.
+#[doc = include_str!("selector_parser.doc/Inner.md")]
 struct Inner<'a, 't> {
     cursor: TokenCursor<'t>,
     source: &'a str,
@@ -214,7 +190,7 @@ impl Inner<'_, '_> {
         Ok(ParsedComplexSelector { head, tail })
     }
 
-    /// Skips whitespace, returning whether any was skipped.
+    #[doc = include_str!("selector_parser.doc/skip_ws_reporting.md")]
     fn skip_ws_reporting(&mut self) -> bool {
         let mut had = false;
         while matches!(self.cursor.peek(), Some(t) if t.is_whitespace()) {
@@ -302,7 +278,7 @@ impl Inner<'_, '_> {
         })
     }
 
-    /// Parses an attribute operator: `=`, or one of `~ | ^ $ *` followed by `=`.
+    #[doc = include_str!("selector_parser.doc/parse_attr_op.md")]
     fn parse_attr_op(&mut self) -> Result<AttrOp, CssParseError> {
         match self.cursor.peek_kind() {
             Some(CssTokenKind::Delim('=')) => {
@@ -358,8 +334,7 @@ impl Inner<'_, '_> {
         Ok(SimpleSelector::PseudoClass { name, arg: None })
     }
 
-    /// Captures the raw text between a `(` and its matching `)` as an owned
-    /// string, consuming both parentheses.
+    #[doc = include_str!("selector_parser.doc/capture_paren_arg.md")]
     fn capture_paren_arg(&mut self) -> Result<Box<str>, CssParseError> {
         self.cursor.advance(); // consume '('
         let mut depth = 1i32;

@@ -1,34 +1,20 @@
-//! `GridAreaRect`: the line-number rectangle a named grid area occupies.
+#![doc = include_str!("grid_area_rect.doc/_module.md")]
 
-/// The rectangle one named `grid-template-areas` area spans, in **1-based grid
-/// line numbers** (spec §4.2, the named-areas subset).
-///
-/// A named area is a filled rectangle of cells; this records the four grid lines
-/// that bound it. Line numbers are 1-based and the *end* edges are the line
-/// *after* the last occupied track, exactly as CSS `grid-row` / `grid-column`
-/// line placement reads: an area filling row 1, columns 1-2 (the `"h h"` first
-/// row of a two-column grid) is `row_start = 1`, `row_end = 2`,
-/// `column_start = 1`, `column_end = 3` — i.e. it can be assigned straight onto a
-/// child's `grid-row: 1 / 2` and `grid-column: 1 / 3`.
-///
-/// # Determinism
-///
-/// `GridAreaRect` is a plain `Copy` value with no interior mutability, so an
-/// area's placement resolves deterministically from the template alone.
+#[doc = include_str!("grid_area_rect.doc/GridAreaRect.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridAreaRect {
-    /// The 1-based grid line the area's first row starts on.
+    #[doc = include_str!("grid_area_rect.doc/row_start.md")]
     pub row_start: u32,
-    /// The 1-based grid line the area's last row ends on (last row + 1).
+    #[doc = include_str!("grid_area_rect.doc/row_end.md")]
     pub row_end: u32,
-    /// The 1-based grid line the area's first column starts on.
+    #[doc = include_str!("grid_area_rect.doc/column_start.md")]
     pub column_start: u32,
-    /// The 1-based grid line the area's last column ends on (last column + 1).
+    #[doc = include_str!("grid_area_rect.doc/column_end.md")]
     pub column_end: u32,
 }
 
 impl GridAreaRect {
-    /// Builds a rectangle from its four bounding grid lines (1-based).
+    #[doc = include_str!("grid_area_rect.doc/new.md")]
     #[must_use]
     pub const fn new(row_start: u32, row_end: u32, column_start: u32, column_end: u32) -> Self {
         Self {

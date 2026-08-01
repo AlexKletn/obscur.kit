@@ -1,4 +1,4 @@
-//! Key module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod interned_symbol;
 mod stable_key;
 

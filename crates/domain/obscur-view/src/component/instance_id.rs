@@ -1,22 +1,17 @@
-//! `InstanceId`: identity of a single mounted component instance.
+#![doc = include_str!("instance_id.doc/_module.md")]
 
-/// Stable, opaque identifier for one mounted component instance.
-///
-/// Distinct from [`ComponentId`](obscur_identity::ComponentId): a `ComponentId`
-/// names a *kind* of component, while an `InstanceId` names a single live
-/// instance of that kind. Backed by an integer handle whose value carries no
-/// meaning outside the runtime that mints it.
+#[doc = include_str!("instance_id.doc/InstanceId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InstanceId(u64);
 
 impl InstanceId {
-    /// Wraps a raw handle value into an `InstanceId`.
+    #[doc = include_str!("instance_id.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw handle value backing this identifier.
+    #[doc = include_str!("instance_id.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

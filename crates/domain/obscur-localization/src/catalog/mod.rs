@@ -1,4 +1,4 @@
-//! Catalog module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod message_provider;
 pub use message_provider::{EmptyMessageProvider, MessageProvider};
 mod message_catalog;

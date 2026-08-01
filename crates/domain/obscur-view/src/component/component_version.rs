@@ -1,27 +1,19 @@
-//! `ComponentVersion`: the schema version of a registered component (spec §2.14).
+#![doc = include_str!("component_version.doc/_module.md")]
 
-/// A small, ordered version stamp for a registered component's contract schema.
-///
-/// Spec §2.14 lists a "version" among the facts a registry entry records. This
-/// versions the *component/contract schema itself* — independently of the kit
-/// version — so tooling and the plugin system can reason about compatibility of
-/// a component kind as its contract evolves.
-///
-/// It is `Copy` and totally ordered: the derived ordering is major-then-minor,
-/// so `1.0 < 1.5 < 2.0`.
+#[doc = include_str!("component_version.doc/ComponentVersion.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentVersion {
-    /// Major version. Bumped for incompatible contract changes.
+    #[doc = include_str!("component_version.doc/major.md")]
     pub major: u16,
-    /// Minor version. Bumped for backward-compatible contract additions.
+    #[doc = include_str!("component_version.doc/minor.md")]
     pub minor: u16,
 }
 
 impl ComponentVersion {
-    /// The initial `0.1` version, a sensible default for a first registration.
+    #[doc = include_str!("component_version.doc/INITIAL.md")]
     pub const INITIAL: Self = Self { major: 0, minor: 1 };
 
-    /// Creates a version from its `major` and `minor` parts.
+    #[doc = include_str!("component_version.doc/new.md")]
     #[must_use]
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }

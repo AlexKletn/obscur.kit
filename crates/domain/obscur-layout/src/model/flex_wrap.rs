@@ -1,34 +1,25 @@
-//! Whether a flex container is single-line or multi-line (`flex-wrap`).
+#![doc = include_str!("flex_wrap.doc/_module.md")]
 
-/// Whether flex items are confined to a single line or wrapped onto multiple
-/// lines along the cross axis (spec §4.3).
-///
-/// [`NoWrap`](FlexWrap::NoWrap) (the default) keeps every item on one main-axis
-/// line, shrinking/overflowing as needed. [`Wrap`](FlexWrap::Wrap) breaks items
-/// onto successive lines that stack down the cross axis;
-/// [`WrapReverse`](FlexWrap::WrapReverse) stacks those lines in the opposite
-/// cross-axis order.
+#[doc = include_str!("flex_wrap.doc/FlexWrap.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FlexWrap {
-    /// Single-line: all items share one main-axis line (the default).
+    #[doc = include_str!("flex_wrap.doc/NoWrap.md")]
     #[default]
     NoWrap,
-    /// Multi-line: items wrap onto successive lines stacked along the cross axis.
+    #[doc = include_str!("flex_wrap.doc/Wrap.md")]
     Wrap,
-    /// Multi-line, with the lines stacked in reverse cross-axis order.
+    #[doc = include_str!("flex_wrap.doc/WrapReverse.md")]
     WrapReverse,
 }
 
 impl FlexWrap {
-    /// Returns `true` when the container wraps onto multiple lines (either
-    /// [`Wrap`](FlexWrap::Wrap) or [`WrapReverse`](FlexWrap::WrapReverse)).
+    #[doc = include_str!("flex_wrap.doc/is_multi_line.md")]
     #[must_use]
     pub const fn is_multi_line(self) -> bool {
         matches!(self, Self::Wrap | Self::WrapReverse)
     }
 
-    /// Returns `true` when wrapped lines are stacked in reverse cross-axis order
-    /// ([`WrapReverse`](FlexWrap::WrapReverse)).
+    #[doc = include_str!("flex_wrap.doc/is_reverse.md")]
     #[must_use]
     pub const fn is_reverse(self) -> bool {
         matches!(self, Self::WrapReverse)

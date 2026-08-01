@@ -1,22 +1,4 @@
-//! A `.okui` screen that reflects changed state — the case that could not exist.
-//!
-//! §2.9 defines `.okui` as a front end "compiled into the same UI IR as the Rust
-//! DSL", a peer of it. The run-time route was not a peer: `App::screen` compiled the
-//! source in `run` and handed the runtime `move || view.clone()`, one pre-built
-//! `View` for the application's whole life ("static v1 materialization"), so **no**
-//! state change could reach the screen. A standalone `.okui` file and reactivity were
-//! mutually exclusive.
-//!
-//! What changed is what is kept: the compiled **IR**, not the lowered `View`. Each
-//! frame lowers it again — nothing re-parses, nothing re-compiles — and the lowering
-//! resolves `{bindings}` against a [`ScreenData`] table the application writes. The
-//! last case measures what that costs.
-//!
-//! Structure is still fixed: `<If>`/`<For>` are statically materialised on this
-//! route, and a `{binding}` inside a `<VirtualFor>` keeps its placeholder. Shape that
-//! depends on state belongs in the build-time route (a `build.rs` emitting through
-//! `CodegenRoot::facade`, or the inline `okui!` macro), where the markup becomes
-//! ordinary Rust — and where §2.9's compile-time contract validation happens.
+#![doc = include_str!("okui_screen_state.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::time::Instant;
@@ -32,12 +14,10 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::runtime::frame::FrameReason;
 use obscur_kit::screen::{OkuiScreen, ScreenData};
 
-/// The handler name the markup binds its click to, hashed the same way the front end
-/// hashes it.
+#[doc = include_str!("okui_screen_state.doc/INCREMENT.md")]
 const INCREMENT: InternedSymbol = InternedSymbol::named("increment");
 
-/// A counter, in markup: the value is a body binding, and the button is an ordinary
-/// element with a click binding.
+#[doc = include_str!("okui_screen_state.doc/COUNTER.md")]
 const COUNTER: &str = r#"<div class="counter">
     <span class="value" test-id="value">{count}</span>
     <div class="button" test-id="plus" on:click=increment/>
@@ -47,7 +27,7 @@ const CSS: &str = ".counter { width: 200px; height: 100px } \
                    .value { width: 200px; height: 50px } \
                    .button { width: 200px; height: 50px }";
 
-/// A runtime whose root is `screen`, with the CSS installed and one frame committed.
+#[doc = include_str!("okui_screen_state.doc/host.md")]
 fn host(screen: OkuiScreen) -> (UiRuntime, ScreenData, AppControl, CssPipeline) {
     let data = screen.data().clone();
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
@@ -59,7 +39,7 @@ fn host(screen: OkuiScreen) -> (UiRuntime, ScreenData, AppControl, CssPipeline) 
     (runtime, data, control, css)
 }
 
-/// Runs one reactive frame — the builder is invoked, so the screen is lowered again.
+#[doc = include_str!("okui_screen_state.doc/frame.md")]
 fn frame(runtime: &mut UiRuntime) {
     runtime.request_frame(FrameReason::UiCommit);
     runtime
@@ -67,16 +47,14 @@ fn frame(runtime: &mut UiRuntime) {
         .expect("a requested frame is due");
 }
 
-/// The node carrying `test-id`, resolved the way §7.5 says to.
+#[doc = include_str!("okui_screen_state.doc/node.md")]
 fn node(runtime: &UiRuntime, test_id: &str) -> NodeId {
     SelectorResolver::new()
         .resolve(runtime, &SelectorTarget::test_id(test_id))
         .unwrap_or_else(|| panic!("no node carries test-id=\"{test_id}\""))
 }
 
-/// The text content **rendered under** the element carrying `test-id`, read from the
-/// retained tree rather than from the desired view — so what is asserted is what the
-/// runtime committed.
+#[doc = include_str!("okui_screen_state.doc/rendered_text.md")]
 fn rendered_text(runtime: &UiRuntime, test_id: &str) -> String {
     let element = node(runtime, test_id);
     let children = runtime
@@ -96,7 +74,7 @@ fn rendered_text(runtime: &UiRuntime, test_id: &str) -> String {
         .expect("a text child")
 }
 
-/// A trusted click at `(x, y)`.
+#[doc = include_str!("okui_screen_state.doc/click.md")]
 fn click(runtime: &mut UiRuntime, x: f32, y: f32) {
     for kind in [PointerEventKind::Down, PointerEventKind::Up] {
         runtime.handle_pointer(
@@ -111,7 +89,7 @@ fn click(runtime: &mut UiRuntime, x: f32, y: f32) {
     }
 }
 
-/// **The case that could not exist.** One compiled screen, two frames, two values.
+#[doc = include_str!("okui_screen_state.doc/a_screen_reflects_changed_state_across_frames.md")]
 #[test]
 fn a_screen_reflects_changed_state_across_frames() {
     let screen = OkuiScreen::compile(COUNTER).expect("the screen compiles");
@@ -130,10 +108,7 @@ fn a_screen_reflects_changed_state_across_frames() {
     );
 }
 
-/// The whole loop, from markup to pixels: the screen's own `on:click=increment`
-/// dispatches the command, the handler writes the table, and the next frame's
-/// lowering shows it. A counter in a standalone `.okui` file, which is exactly what
-/// was impossible.
+#[doc = include_str!("okui_screen_state.doc/a_click_authored_in_the_markup_changes_what_the_screen_shows.md")]
 #[test]
 fn a_click_authored_in_the_markup_changes_what_the_screen_shows() {
     let screen = OkuiScreen::compile(COUNTER).expect("the screen compiles");
@@ -159,9 +134,7 @@ fn a_click_authored_in_the_markup_changes_what_the_screen_shows() {
     assert_eq!(rendered_text(&runtime, "value"), "2");
 }
 
-/// A bound **attribute** reaches the cascade, not just the tree: `class={theme}` is
-/// substituted before reconcile, so the matcher sees the class the data holds and the
-/// element is styled by it.
+#[doc = include_str!("okui_screen_state.doc/a_bound_class_reaches_the_cascade.md")]
 #[test]
 fn a_bound_class_reaches_the_cascade() {
     // The name is declared to the compiler by being bound before the compile, which is
@@ -192,8 +165,7 @@ fn a_bound_class_reaches_the_cascade() {
     );
 }
 
-/// An unbound binding keeps its path visible rather than blanking, so a misspelling is
-/// a wrong word on screen instead of a missing line.
+#[doc = include_str!("okui_screen_state.doc/an_unbound_binding_shows_its_path.md")]
 #[test]
 fn an_unbound_binding_shows_its_path() {
     let screen = OkuiScreen::compile(r#"<div class="counter" test-id="v">{cuont}</div>"#)
@@ -203,14 +175,7 @@ fn an_unbound_binding_shows_its_path() {
     assert_eq!(rendered_text(&runtime, "v"), "cuont");
 }
 
-/// What the per-frame lowering costs, and the claim it backs: keeping the **IR** and
-/// lowering it again is cheap, where re-parsing the source per frame — the obvious
-/// wrong answer — is not.
-///
-/// The numbers are printed (`cargo test -- --nocapture`) because a wall-clock
-/// threshold is not a property worth asserting on someone else's machine. What *is*
-/// asserted is the ratio the design rests on: a lowering costs a fraction of a
-/// parse+compile, so a screen can be rebuilt every frame and a source cannot.
+#[doc = include_str!("okui_screen_state.doc/the_per_frame_lowering_is_far_cheaper_than_a_parse.md")]
 #[test]
 fn the_per_frame_lowering_is_far_cheaper_than_a_parse() {
     const ROUNDS: u32 = 200;
@@ -295,8 +260,7 @@ fn the_per_frame_lowering_is_far_cheaper_than_a_parse() {
     );
 }
 
-/// The cost model in one assertion: a screen with nothing bound is walked by the
-/// bridge alone, and only the path from the root to a binding is re-lowered.
+#[doc = include_str!("okui_screen_state.doc/a_static_screen_pays_nothing_for_the_data_aware_path.md")]
 #[test]
 fn a_static_screen_pays_nothing_for_the_data_aware_path() {
     let static_screen =

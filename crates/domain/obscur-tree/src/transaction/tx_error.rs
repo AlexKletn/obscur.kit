@@ -1,36 +1,24 @@
-//! `TxError`: typed validation errors returned by a transaction commit.
+#![doc = include_str!("tx_error.doc/_module.md")]
 
 use core::fmt;
 
 use obscur_identity::NodeId;
 
-/// A validation error produced when a [`TreeTransaction`](super::TreeTransaction)
-/// is validated or committed.
-///
-/// Validation runs over the *entire* staged batch before any change is applied,
-/// so returning one of these guarantees the live tree was left completely
-/// untouched (atomicity). Validation itself never panics; every failure mode is
-/// reported as one of these variants.
-///
-/// Marked `#[non_exhaustive]`: more validation cases may be added without a
-/// breaking change, so callers must include a wildcard arm.
+#[doc = include_str!("tx_error.doc/TxError.md")]
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TxError {
-    /// A referenced existing node is not (or no longer) live in the tree.
+    #[doc = include_str!("tx_error.doc/StaleNode.md")]
     StaleNode(NodeId),
-    /// A [`StagedRef::New`](super::StagedRef::New) index refers to a creation
-    /// that has not been staged before its use in this transaction.
+    #[doc = include_str!("tx_error.doc/UndefinedNewRef.md")]
     UndefinedNewRef(u32),
-    /// A [`SetText`](super::TreeChange::SetText) targeted a node that is not a
-    /// text node.
+    #[doc = include_str!("tx_error.doc/NotTextNode.md")]
     NotTextNode(NodeId),
-    /// A child insertion or move used an index outside the valid range for the
-    /// parent's (projected) child count.
+    #[doc = include_str!("tx_error.doc/IndexOutOfRange.md")]
     IndexOutOfRange {
-        /// The offending index that was requested.
+        #[doc = include_str!("tx_error.doc/index.md")]
         index: usize,
-        /// The parent's child count against which the index was validated.
+        #[doc = include_str!("tx_error.doc/child_count.md")]
         child_count: usize,
     },
 }

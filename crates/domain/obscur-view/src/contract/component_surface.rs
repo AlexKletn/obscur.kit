@@ -1,104 +1,36 @@
-//! `ComponentSurface`: the string-keyed *tooling* view of a component's usage
-//! contract (spec §2.13).
+#![doc = include_str!("component_surface.doc/_module.md")]
 
 use crate::contract::SlotSurface;
 
-/// Which children a [`ComponentSurface`] permits, named by string tag.
-///
-/// This mirrors [`ChildContract`](crate::contract::ChildContract) in the string
-/// (tooling) world: `ChildContract` decides membership by
-/// [`ComponentId`](obscur_identity::ComponentId) identity, whereas the tooling
-/// surface must decide it by the tag *name* a `.okui` source writes, since the
-/// `.okui` compiler has only strings to work with.
-///
-/// The three cases mirror `ChildContract::{Any, None, Only}`:
-///
-/// - [`Any`](ChildrenSurface::Any) — any child element is allowed (no
-///   restriction);
-/// - [`None`](ChildrenSurface::None) — a leaf: no children. This used to be
-///   *unenforceable*: the string contract the `.okui` compiler consumed held
-///   children in a list whose empty state already meant "any child", so the bridge
-///   into it had to flatten `None` into `Any` and a declared leaf accepted children
-///   anyway. The compiler's contract now names the three states, and the
-///   declaration crosses intact;
-/// - [`Only`](ChildrenSurface::Only) — only the listed child tags are allowed.
+#[doc = include_str!("component_surface.doc/ChildrenSurface.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ChildrenSurface {
-    /// Any child element is allowed (no restriction).
+    #[doc = include_str!("component_surface.doc/Any.md")]
     #[default]
     Any,
-    /// No children are allowed (a leaf position).
+    #[doc = include_str!("component_surface.doc/None.md")]
     None,
-    /// Only components whose tag appears in this list are allowed.
+    #[doc = include_str!("component_surface.doc/Only.md")]
     Only(Vec<&'static str>),
 }
 
-/// The broad category of a prop's declared Rust type, kept on the tooling
-/// surface so a string-keyed checker can reject a literal of the wrong kind at
-/// compile time (spec §2.8, "typed props … compile-time validation").
-///
-/// `#[derive(Contract)]` classifies each prop field's type into one of these
-/// from its normalized type string; the `.okui` compiler then compares it
-/// against the literal an attribute was given (`label={5}` → an integer for a
-/// `String` prop). [`Other`](PropTypeSurface::Other) is the escape hatch for a
-/// type the classifier does not recognise (an enum, a struct, a newtype), and a
-/// prop of that kind is never type-checked — the surface cannot know what
-/// literal, if any, would be valid.
+#[doc = include_str!("component_surface.doc/PropTypeSurface.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PropTypeSurface {
-    /// A string prop (`String`, `&str`, `Box<str>`, `Cow<str>`, …).
+    #[doc = include_str!("component_surface.doc/String.md")]
     String,
-    /// An integer prop (`i8`…`i128`, `u8`…`u128`, `isize`, `usize`).
+    #[doc = include_str!("component_surface.doc/Int.md")]
     Int,
-    /// A floating-point prop (`f32`, `f64`).
+    #[doc = include_str!("component_surface.doc/Float.md")]
     Float,
-    /// A boolean prop (`bool`).
+    #[doc = include_str!("component_surface.doc/Bool.md")]
     Bool,
-    /// A type the classifier does not recognise; never type-checked.
+    #[doc = include_str!("component_surface.doc/Other.md")]
     #[default]
     Other,
 }
 
-/// The string-keyed *tooling* view of a component's usage contract (spec §2.13).
-///
-/// The typed [`ComponentContract`](crate::component::ComponentContract) is the
-/// **runtime** view: it names every prop/event/child by an interned
-/// [`InternedSymbol`](obscur_identity::InternedSymbol) (a hash of the string)
-/// with no reverse string resolution, so it cannot drive a string-keyed tool
-/// such as the `.okui` compiler's contract checker. `ComponentSurface` is the
-/// parallel **tooling** view: it keeps the very same names as plain strings, so
-/// the compiler can match them against the attribute/event/child names written
-/// in a `.okui` source and enforce §2.13 for user-defined components.
-///
-/// `#[derive(Contract)]` emits both — the typed `contract()` and this
-/// `contract_surface()` — from the same string literals, before the typed one
-/// hashes its names away.
-///
-/// Its fields mirror the compiler's string contract surface exactly:
-///
-/// - `required_props` — attribute names every instance must set;
-/// - `allowed_props` — additional attribute names an instance *may* set (the
-///   prop surface is closed once any prop, required or allowed, is declared);
-/// - `allowed_events` — the `on:<event>` names an instance may bind (an empty
-///   list leaves the event surface open);
-/// - `children` — which child tags are permitted (see [`ChildrenSurface`]);
-/// - `slots` — the named slots the component declares (see [`SlotSurface`]).
-///   Declaring none closes the slot surface: a child of an instance may then
-///   carry no `slot="…"` at all.
-///
-/// It is built fluently, for example:
-///
-/// ```
-/// use obscur_view::contract::{ChildrenSurface, ComponentSurface};
-/// let surface = ComponentSurface::new("Tabs")
-///     .requiring_prop("selected")
-///     .allowing_prop("orientation")
-///     .allowing_event("change")
-///     .allowing_child("Tab");
-/// assert_eq!(surface.component(), "Tabs");
-/// assert_eq!(surface.required_props(), &["selected"]);
-/// assert_eq!(surface.children(), &ChildrenSurface::Only(vec!["Tab"]));
-/// ```
+#[doc = include_str!("component_surface.doc/ComponentSurface.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ComponentSurface {
     component: &'static str,
@@ -111,8 +43,7 @@ pub struct ComponentSurface {
 }
 
 impl ComponentSurface {
-    /// Creates a surface for `component` with no required props and no prop,
-    /// event or child restriction (children default to [`ChildrenSurface::Any`]).
+    #[doc = include_str!("component_surface.doc/new.md")]
     #[must_use]
     pub fn new(component: &'static str) -> Self {
         Self {
@@ -126,18 +57,14 @@ impl ComponentSurface {
         }
     }
 
-    /// Records the declared type category of prop `name` (fluent; spec §2.8).
-    ///
-    /// `#[derive(Contract)]` emits one call per prop, so the `.okui` compiler can
-    /// reject a literal of the wrong kind. A prop with no recorded type — or one
-    /// recorded as [`PropTypeSurface::Other`] — is not type-checked.
+    #[doc = include_str!("component_surface.doc/with_prop_type.md")]
     #[must_use]
     pub fn with_prop_type(mut self, name: &'static str, ty: PropTypeSurface) -> Self {
         self.prop_types.push((name, ty));
         self
     }
 
-    /// Returns the declared type category of prop `name`, if one was recorded.
+    #[doc = include_str!("component_surface.doc/prop_type.md")]
     #[must_use]
     pub fn prop_type(&self, name: &str) -> Option<PropTypeSurface> {
         self.prop_types
@@ -146,35 +73,34 @@ impl ComponentSurface {
             .map(|(_, ty)| *ty)
     }
 
-    /// Returns every recorded `(prop name, type)` pair, in declaration order.
+    #[doc = include_str!("component_surface.doc/prop_types.md")]
     #[must_use]
     pub fn prop_types(&self) -> &[(&'static str, PropTypeSurface)] {
         &self.prop_types
     }
 
-    /// Adds `name` to the surface's required props (fluent).
+    #[doc = include_str!("component_surface.doc/requiring_prop.md")]
     #[must_use]
     pub fn requiring_prop(mut self, name: &'static str) -> Self {
         self.required_props.push(name);
         self
     }
 
-    /// Adds `name` to the surface's allowed (optional) props (fluent).
+    #[doc = include_str!("component_surface.doc/allowing_prop.md")]
     #[must_use]
     pub fn allowing_prop(mut self, name: &'static str) -> Self {
         self.allowed_props.push(name);
         self
     }
 
-    /// Adds `name` to the surface's allowed `on:<event>` names (fluent).
+    #[doc = include_str!("component_surface.doc/allowing_event.md")]
     #[must_use]
     pub fn allowing_event(mut self, name: &'static str) -> Self {
         self.allowed_events.push(name);
         self
     }
 
-    /// Adds `tag` to the surface's allowed child tags (fluent), switching the
-    /// children rule to [`ChildrenSurface::Only`].
+    #[doc = include_str!("component_surface.doc/allowing_child.md")]
     #[must_use]
     pub fn allowing_child(mut self, tag: &'static str) -> Self {
         match &mut self.children {
@@ -184,61 +110,58 @@ impl ComponentSurface {
         self
     }
 
-    /// Sets the children rule to [`ChildrenSurface::Any`] (fluent).
+    #[doc = include_str!("component_surface.doc/any_children.md")]
     #[must_use]
     pub fn any_children(mut self) -> Self {
         self.children = ChildrenSurface::Any;
         self
     }
 
-    /// Sets the children rule to [`ChildrenSurface::None`] (a leaf; fluent).
+    #[doc = include_str!("component_surface.doc/no_children.md")]
     #[must_use]
     pub fn no_children(mut self) -> Self {
         self.children = ChildrenSurface::None;
         self
     }
 
-    /// Declares a named slot on the surface (fluent; spec §2.12).
+    #[doc = include_str!("component_surface.doc/with_slot.md")]
     #[must_use]
     pub fn with_slot(mut self, slot: SlotSurface) -> Self {
         self.slots.push(slot);
         self
     }
 
-    /// Returns the described component's name.
+    #[doc = include_str!("component_surface.doc/component.md")]
     #[must_use]
     pub fn component(&self) -> &str {
         self.component
     }
 
-    /// Returns the required prop names.
+    #[doc = include_str!("component_surface.doc/required_props.md")]
     #[must_use]
     pub fn required_props(&self) -> &[&'static str] {
         &self.required_props
     }
 
-    /// Returns the allowed (optional) prop names.
+    #[doc = include_str!("component_surface.doc/allowed_props.md")]
     #[must_use]
     pub fn allowed_props(&self) -> &[&'static str] {
         &self.allowed_props
     }
 
-    /// Returns the allowed `on:<event>` names.
+    #[doc = include_str!("component_surface.doc/allowed_events.md")]
     #[must_use]
     pub fn allowed_events(&self) -> &[&'static str] {
         &self.allowed_events
     }
 
-    /// Returns the children rule.
+    #[doc = include_str!("component_surface.doc/children.md")]
     #[must_use]
     pub fn children(&self) -> &ChildrenSurface {
         &self.children
     }
 
-    /// Returns the declared named slots (spec §2.12); an empty slice means the
-    /// component declares none, which *closes* the slot surface rather than
-    /// leaving it open — the asymmetry with props/children is deliberate, since
-    /// a `slot="…"` naming nothing has no meaning to fall back to.
+    #[doc = include_str!("component_surface.doc/slots.md")]
     #[must_use]
     pub fn slots(&self) -> &[SlotSurface] {
         &self.slots

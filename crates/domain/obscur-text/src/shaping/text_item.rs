@@ -1,33 +1,23 @@
-//! One itemized text segment: a uniform script + direction run (spec §5.10).
+#![doc = include_str!("text_item.doc/_module.md")]
 
 use crate::shaping::{ScriptTag, TextDirection};
 use crate::span::TextRange;
 
-/// One itemized segment of text: a byte range that is uniform in script and
-/// bidirectional direction (spec §5.10).
-///
-/// Itemization walks the source text in *logical* order and cuts it wherever the
-/// script or the resolved bidi direction changes, so every `TextItem` can be
-/// shaped as a single run. Alongside the [`range`](Self::range),
-/// [`script`](Self::script), and [`direction`](Self::direction) it carries the
-/// resolved Unicode Bidirectional Algorithm embedding [`level`](Self::level):
-/// even (`0`, `2`, …) levels are left-to-right, odd levels right-to-left, which
-/// later stages use to reorder runs for display.
+#[doc = include_str!("text_item.doc/TextItem.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextItem {
-    /// The byte range of the source text this item covers.
+    #[doc = include_str!("text_item.doc/range.md")]
     range: TextRange,
-    /// The script the run is written in.
+    #[doc = include_str!("text_item.doc/script.md")]
     script: ScriptTag,
-    /// The resolved base direction of the run.
+    #[doc = include_str!("text_item.doc/direction.md")]
     direction: TextDirection,
-    /// The resolved bidi embedding level (even = LTR, odd = RTL).
+    #[doc = include_str!("text_item.doc/level.md")]
     level: u8,
 }
 
 impl TextItem {
-    /// Creates an item covering `range`, written in `script`, laid out in
-    /// `direction` at bidi embedding `level`.
+    #[doc = include_str!("text_item.doc/new.md")]
     #[must_use]
     pub const fn new(
         range: TextRange,
@@ -43,25 +33,25 @@ impl TextItem {
         }
     }
 
-    /// Returns the byte range of the source text this item covers.
+    #[doc = include_str!("text_item.doc/range_2.md")]
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    /// Returns the script the run is written in.
+    #[doc = include_str!("text_item.doc/script_2.md")]
     #[must_use]
     pub const fn script(&self) -> ScriptTag {
         self.script
     }
 
-    /// Returns the resolved base direction of the run.
+    #[doc = include_str!("text_item.doc/direction_2.md")]
     #[must_use]
     pub const fn direction(&self) -> TextDirection {
         self.direction
     }
 
-    /// Returns the resolved bidi embedding level (even = LTR, odd = RTL).
+    #[doc = include_str!("text_item.doc/level_2.md")]
     #[must_use]
     pub const fn level(&self) -> u8 {
         self.level

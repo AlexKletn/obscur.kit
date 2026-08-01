@@ -1,12 +1,4 @@
-//! End-to-end coverage for audit 3-A (§3.4 phase 5, §4.3): a hover restyles the
-//! nodes it can affect, and **not** the rest of the tree.
-//!
-//! The assertions here count work rather than observe output. "The frame rendered"
-//! and "the hovered node turned red" both pass against a full restyle, so they
-//! prove nothing about invalidation; the number of nodes the style phase resolved
-//! separates the two designs. That count is read off the runtime's own §7.9
-//! telemetry — the `style.resolved` counter the style phase records — through a
-//! sink installed via the public facade.
+#![doc = include_str!("incremental_restyle.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -24,15 +16,13 @@ use obscur_kit::style::property::PropertyId;
 use obscur_kit::style::selector::PseudoState;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// Records every `style.resolved` counter the runtime emits, so a test can read
-/// back how many nodes each frame's style phase actually resolved.
+#[doc = include_str!("incremental_restyle.doc/StyleCounts.md")]
 #[derive(Debug, Default)]
 struct StyleCounts {
     resolved: Vec<u64>,
 }
 
-/// A [`TelemetrySink`] that keeps the style counts in a cell the test still owns
-/// after handing the sink to the runtime.
+#[doc = include_str!("incremental_restyle.doc/CountingSink.md")]
 struct CountingSink(Rc<RefCell<StyleCounts>>);
 
 impl TelemetrySink for CountingSink {
@@ -47,19 +37,13 @@ impl TelemetrySink for CountingSink {
     fn record_violation(&mut self, _violation: &BudgetViolation) {}
 }
 
-/// `.btn:hover` repaints itself only — no combinator, so nothing outside the
-/// hovered node can be affected by the hover. `.row` gives every node a box.
+#[doc = include_str!("incremental_restyle.doc/STYLESHEET.md")]
 const STYLESHEET: &str = "\
 .row { width: 40px; height: 10px; background-color: rgb(0, 0, 255); }\n\
 .btn:hover { background-color: rgb(255, 0, 0); }\n\
 ";
 
-/// A flat list of `count` sibling elements, the last one a `.btn`.
-///
-/// Flat and last on purpose: the reach of a hover is the hovered node's subtree
-/// plus its *following* siblings' subtrees, so hovering the last sibling of a flat
-/// list has a reach of exactly one node. Anything else the style phase resolves is
-/// work the invalidation set did not ask for.
+#[doc = include_str!("incremental_restyle.doc/view.md")]
 fn view(count: usize) -> View {
     let nodes = (0..count)
         .map(|i| {
@@ -88,7 +72,7 @@ const NODES: usize = 12;
 const RED: (f32, f32, f32) = (1.0, 0.0, 0.0);
 const BLUE: (f32, f32, f32) = (0.0, 0.0, 1.0);
 
-/// Sets up a runtime with `NODES` styled siblings and one settled frame rendered.
+#[doc = include_str!("incremental_restyle.doc/settled.md")]
 fn settled() -> (
     UiRuntime,
     Vec<NodeId>,
@@ -173,13 +157,7 @@ fn un_hovering_resolves_the_node_back() {
     );
 }
 
-/// A node whose ONLY matching rule is the `:hover` one must lose its whole
-/// cascade when the hover ends — not merely have it overwritten.
-///
-/// Distinct from [`un_hovering_resolves_the_node_back`], where the node also
-/// matches a plain `.row` rule that re-cascades over the stale entry and hides the
-/// bug. Here nothing matches once the hover ends, so an incremental re-match that
-/// only ever *writes* entries leaves the `:hover` background applied forever.
+#[doc = include_str!("incremental_restyle.doc/a_cascade_that_only_hover_produced_is_dropped_when_hover_ends.md")]
 #[test]
 fn a_cascade_that_only_hover_produced_is_dropped_when_hover_ends() {
     const SHEET: &str = ".solo:hover { background-color: rgb(255, 0, 0); }";
@@ -293,9 +271,7 @@ fn hovering_an_ancestor_resolves_its_subtree_and_nothing_before_it() {
     assert_eq!(background(&runtime, a_leaf), Some(BLUE));
 }
 
-/// A resize is not an interaction change: `@media` can re-match anything, so the
-/// frame must fall back to resolving the whole tree rather than trust a dirty set
-/// derived from pseudo-state alone.
+#[doc = include_str!("incremental_restyle.doc/a_viewport_change_still_restyles_everything.md")]
 #[test]
 fn a_viewport_change_still_restyles_everything() {
     let (mut runtime, _nodes, counts, sheets, view) = settled();
@@ -310,8 +286,7 @@ fn a_viewport_change_still_restyles_everything() {
     );
 }
 
-/// A new stylesheet can match anything, so it too must widen to a full restyle —
-/// the retained cascade inputs were matched against the old rules.
+#[doc = include_str!("incremental_restyle.doc/a_stylesheet_change_still_restyles_everything.md")]
 #[test]
 fn a_stylesheet_change_still_restyles_everything() {
     let (mut runtime, nodes, counts, sheets, view) = settled();

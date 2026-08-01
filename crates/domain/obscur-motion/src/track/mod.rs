@@ -1,4 +1,4 @@
-//! Track module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod keyframe_track;
 pub use keyframe_track::{Keyframe, KeyframeTrack};
 mod motion_track;

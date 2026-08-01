@@ -1,29 +1,21 @@
-//! A request to schedule a frame: [`FrameRequest`].
+#![doc = include_str!("frame_request.doc/_module.md")]
 
 use super::FrameReason;
 
-/// A request to schedule a frame for a given [`FrameReason`].
-///
-/// A request records only *why* a frame is wanted. Turning a stream of requests
-/// into actual frames — coalescing several requests into one frame, and ordering
-/// them by priority — is the scheduler's job in a later phase; a `FrameRequest`
-/// itself carries no timing or priority state.
-///
-/// The type is a plain value: `Copy`, equatable, and hashable, so pending
-/// requests can be deduplicated in a set.
+#[doc = include_str!("frame_request.doc/FrameRequest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FrameRequest {
     reason: FrameReason,
 }
 
 impl FrameRequest {
-    /// Creates a request to schedule a frame for `reason`.
+    #[doc = include_str!("frame_request.doc/new.md")]
     #[must_use]
     pub const fn new(reason: FrameReason) -> Self {
         Self { reason }
     }
 
-    /// Returns the reason this frame is being requested for.
+    #[doc = include_str!("frame_request.doc/reason.md")]
     #[must_use]
     pub const fn reason(self) -> FrameReason {
         self.reason

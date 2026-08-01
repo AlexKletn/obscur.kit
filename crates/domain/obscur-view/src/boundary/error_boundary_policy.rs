@@ -1,29 +1,19 @@
-//! `ErrorBoundaryPolicy`: how a component's error boundary behaves.
+#![doc = include_str!("error_boundary_policy.doc/_module.md")]
 
-/// The policy governing a component's error boundary (spec §1.7).
-///
-/// Every component is an error boundary by default, and a component may
-/// customize or explicitly disable that boundary. This small value captures
-/// both choices: whether the boundary is [`enabled`](Self::enabled) at all, and
-/// how many times a contained failure may be retried before the fallback UI is
-/// kept.
+#[doc = include_str!("error_boundary_policy.doc/ErrorBoundaryPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ErrorBoundaryPolicy {
-    /// Whether the boundary contains failures in this component's subtree.
-    ///
-    /// When `false` the component opts out and failures propagate to the
-    /// nearest enclosing boundary instead.
+    #[doc = include_str!("error_boundary_policy.doc/enabled.md")]
     pub enabled: bool,
-    /// How many times a contained failure may be retried before giving up and
-    /// keeping the fallback UI.
+    #[doc = include_str!("error_boundary_policy.doc/max_retries.md")]
     pub max_retries: u32,
 }
 
 impl ErrorBoundaryPolicy {
-    /// The default retry budget for an enabled boundary.
+    #[doc = include_str!("error_boundary_policy.doc/DEFAULT_MAX_RETRIES.md")]
     pub const DEFAULT_MAX_RETRIES: u32 = 1;
 
-    /// Creates an explicit policy from its parts.
+    #[doc = include_str!("error_boundary_policy.doc/new.md")]
     #[must_use]
     pub const fn new(enabled: bool, max_retries: u32) -> Self {
         Self {
@@ -32,21 +22,20 @@ impl ErrorBoundaryPolicy {
         }
     }
 
-    /// A disabled boundary: failures are not contained here and propagate
-    /// outward. Its retry budget is zero.
+    #[doc = include_str!("error_boundary_policy.doc/disabled.md")]
     #[must_use]
     pub const fn disabled() -> Self {
         Self::new(false, 0)
     }
 
-    /// Returns the policy with its retry budget set to `max_retries`.
+    #[doc = include_str!("error_boundary_policy.doc/with_max_retries.md")]
     #[must_use]
     pub const fn with_max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
         self
     }
 
-    /// Returns whether this boundary is enabled.
+    #[doc = include_str!("error_boundary_policy.doc/is_enabled.md")]
     #[must_use]
     pub const fn is_enabled(self) -> bool {
         self.enabled
@@ -54,8 +43,7 @@ impl ErrorBoundaryPolicy {
 }
 
 impl Default for ErrorBoundaryPolicy {
-    /// The default boundary is enabled with a small retry budget, matching the
-    /// spec's "every component is an error boundary by default".
+    #[doc = include_str!("error_boundary_policy.doc/default.md")]
     fn default() -> Self {
         Self::new(true, Self::DEFAULT_MAX_RETRIES)
     }

@@ -1,50 +1,24 @@
-//! Per-phase frame budgets: [`FrameBudget`].
-//!
-//! Spec §7.9 requires that exceeding a performance budget produce a diagnostic,
-//! not a crash. The runtime is deliberately **clock-free** (the scheduler and
-//! frame loop observe no wall-clock; determinism is a hard requirement), so a
-//! frame phase has no wall-clock duration to budget. Instead each phase reports
-//! a deterministic *cost count* — the number of nodes it processed, boxes it
-//! arranged, or paint commands it produced — and this budget bounds that count.
-//!
-//! To reuse the tested [`PerformanceBudget`]/[`BudgetViolation`] machinery
-//! (which is expressed in [`Duration`]), a cost count is encoded as a duration
-//! at the rate **one item = one nanosecond**. The encoding is purely a carrier:
-//! [`BudgetViolation::overage`](obscur_diagnostics::BudgetViolation::overage) and
-//! [`ratio`](obscur_diagnostics::BudgetViolation::ratio) then read back as item
-//! counts and count ratios, and the emitted
-//! [`Diagnostic`](obscur_diagnostics::Diagnostic) flows through the normal
-//! diagnostics channel unchanged.
+#![doc = include_str!("frame_budget.doc/_module.md")]
 
 use std::time::Duration;
 
 use obscur_diagnostics::{BudgetViolation, DiagnosticSubsystem, PerformanceBudget};
 
-/// A bound on each frame phase's deterministic cost count (spec §7.9).
-///
-/// A `None` limit means the phase is unbounded (the default): no violation is
-/// ever produced for it. A `Some(limit)` phase yields a [`BudgetViolation`] when
-/// the phase's reported count strictly exceeds `limit`.
-///
-/// Budgets are attributed to the same subsystems the frame phases record spans
-/// under: reconcile → [`Tree`](DiagnosticSubsystem::Tree), style →
-/// [`Style`](DiagnosticSubsystem::Style), layout →
-/// [`Layout`](DiagnosticSubsystem::Layout), compose →
-/// [`Render`](DiagnosticSubsystem::Render).
+#[doc = include_str!("frame_budget.doc/FrameBudget.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FrameBudget {
-    /// Maximum retained-tree node count after reconcile, if bounded.
+    #[doc = include_str!("frame_budget.doc/reconcile_nodes.md")]
     reconcile_nodes: Option<u64>,
-    /// Maximum resolved computed-style count, if bounded.
+    #[doc = include_str!("frame_budget.doc/style_nodes.md")]
     style_nodes: Option<u64>,
-    /// Maximum arranged layout-box count, if bounded.
+    #[doc = include_str!("frame_budget.doc/layout_boxes.md")]
     layout_boxes: Option<u64>,
-    /// Maximum composed paint-command count, if bounded.
+    #[doc = include_str!("frame_budget.doc/compose_commands.md")]
     compose_commands: Option<u64>,
 }
 
 impl FrameBudget {
-    /// A budget that bounds nothing: every phase is unbounded (the default).
+    #[doc = include_str!("frame_budget.doc/unbounded.md")]
     #[must_use]
     pub const fn unbounded() -> Self {
         Self {
@@ -55,62 +29,59 @@ impl FrameBudget {
         }
     }
 
-    /// Bounds the reconcile phase to at most `max` retained-tree nodes.
+    #[doc = include_str!("frame_budget.doc/with_reconcile_nodes.md")]
     #[must_use]
     pub const fn with_reconcile_nodes(mut self, max: u64) -> Self {
         self.reconcile_nodes = Some(max);
         self
     }
 
-    /// Bounds the style phase to at most `max` resolved computed styles.
+    #[doc = include_str!("frame_budget.doc/with_style_nodes.md")]
     #[must_use]
     pub const fn with_style_nodes(mut self, max: u64) -> Self {
         self.style_nodes = Some(max);
         self
     }
 
-    /// Bounds the layout phase to at most `max` arranged boxes.
+    #[doc = include_str!("frame_budget.doc/with_layout_boxes.md")]
     #[must_use]
     pub const fn with_layout_boxes(mut self, max: u64) -> Self {
         self.layout_boxes = Some(max);
         self
     }
 
-    /// Bounds the compose phase to at most `max` paint commands.
+    #[doc = include_str!("frame_budget.doc/with_compose_commands.md")]
     #[must_use]
     pub const fn with_compose_commands(mut self, max: u64) -> Self {
         self.compose_commands = Some(max);
         self
     }
 
-    /// Checks the reconcile phase's `nodes` count, yielding a violation when it
-    /// exceeds the configured bound.
+    #[doc = include_str!("frame_budget.doc/check_reconcile.md")]
     #[must_use]
     pub(crate) fn check_reconcile(self, nodes: u64) -> Option<BudgetViolation> {
         Self::check(self.reconcile_nodes, DiagnosticSubsystem::Tree, nodes)
     }
 
-    /// Checks the style phase's resolved-style `count`.
+    #[doc = include_str!("frame_budget.doc/check_style.md")]
     #[must_use]
     pub(crate) fn check_style(self, count: u64) -> Option<BudgetViolation> {
         Self::check(self.style_nodes, DiagnosticSubsystem::Style, count)
     }
 
-    /// Checks the layout phase's arranged-box `count`.
+    #[doc = include_str!("frame_budget.doc/check_layout.md")]
     #[must_use]
     pub(crate) fn check_layout(self, count: u64) -> Option<BudgetViolation> {
         Self::check(self.layout_boxes, DiagnosticSubsystem::Layout, count)
     }
 
-    /// Checks the compose phase's paint-command `count`.
+    #[doc = include_str!("frame_budget.doc/check_compose.md")]
     #[must_use]
     pub(crate) fn check_compose(self, count: u64) -> Option<BudgetViolation> {
         Self::check(self.compose_commands, DiagnosticSubsystem::Render, count)
     }
 
-    /// Checks `measured` (a cost count) against an optional `limit` for
-    /// `subsystem`, encoding both as nanosecond-durations so the tested
-    /// [`PerformanceBudget`] machinery applies.
+    #[doc = include_str!("frame_budget.doc/check.md")]
     #[must_use]
     fn check(
         limit: Option<u64>,

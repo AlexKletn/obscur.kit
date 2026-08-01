@@ -1,7 +1,4 @@
-//! Shared harness for the `spec_ch7b_*` specification-derived test files.
-//!
-//! Module declarations and re-exports only — every helper lives in
-//! [`harness`], never here.
+#![doc = include_str!("mod.doc/_module.md")]
 
 pub mod harness;
 

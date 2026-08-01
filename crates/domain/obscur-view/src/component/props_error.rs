@@ -1,40 +1,28 @@
-//! `PropsError`: why a node's properties could not become a component's typed props.
+#![doc = include_str!("props_error.doc/_module.md")]
 
 use core::fmt;
 
 use obscur_identity::InternedSymbol;
 
-/// Why decoding a node's [`ViewProperty`](crate::view::ViewProperty) slice into a
-/// component's typed [`Props`](crate::component::Component::Props) failed
-/// (spec §3.1).
-///
-/// Decoding is the boundary where untyped, authored data becomes typed inputs, so
-/// its failures are *data* errors, not bugs: a `.okui` author can write a missing
-/// or wrongly-typed attribute, and the runtime must report that rather than panic.
-/// Both variants name the property by its [`InternedSymbol`] — the same symbol the
-/// view tree carries — so a caller can map it back to a name for a diagnostic.
+#[doc = include_str!("props_error.doc/PropsError.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PropsError {
-    /// A required property was absent (or explicitly
-    /// [`Null`](crate::view::ViewValue::Null), which is *absence of a value*).
+    #[doc = include_str!("props_error.doc/Missing.md")]
     Missing {
-        /// The property that was required but not supplied.
+        #[doc = include_str!("props_error.doc/name.md")]
         name: InternedSymbol,
     },
-    /// A property was present but its value could not become the field's type —
-    /// e.g. a `Text` where a `bool` was wanted, or an integer outside the
-    /// field's range.
+    #[doc = include_str!("props_error.doc/Type.md")]
     Type {
-        /// The property whose value did not fit.
+        #[doc = include_str!("props_error.doc/name_2.md")]
         name: InternedSymbol,
-        /// The type that was wanted, as
-        /// [`FromViewValue::TYPE_NAME`](crate::component::FromViewValue::TYPE_NAME).
+        #[doc = include_str!("props_error.doc/expected.md")]
         expected: &'static str,
     },
 }
 
 impl PropsError {
-    /// The property this error is about.
+    #[doc = include_str!("props_error.doc/name_3.md")]
     #[must_use]
     pub const fn name(self) -> InternedSymbol {
         match self {

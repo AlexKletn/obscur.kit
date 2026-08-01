@@ -1,4 +1,4 @@
-//! The Wayland dispatch state behind a layer surface.
+#![doc = include_str!("layer_state.doc/_module.md")]
 
 use obscur_geometry::{Point, Size};
 use obscur_interaction::pointer::{
@@ -32,50 +32,40 @@ use wayland_protocols::wp::viewporter::client::{
 
 use crate::event::LayerEvent;
 
-/// The left mouse button's Linux input code, which `wl_pointer` reports verbatim.
+#[doc = include_str!("layer_state.doc/BTN_LEFT.md")]
 const BTN_LEFT: u32 = 0x110;
-/// The right button.
+#[doc = include_str!("layer_state.doc/BTN_RIGHT.md")]
 const BTN_RIGHT: u32 = 0x111;
-/// The middle button.
+#[doc = include_str!("layer_state.doc/BTN_MIDDLE.md")]
 const BTN_MIDDLE: u32 = 0x112;
 
-/// Everything the Wayland queue dispatches into, and the events it produces.
-///
-/// This is deliberately a plain data sink: the handlers translate Wayland into
-/// the kit's own vocabulary and push onto [`events`](Self::events), and nothing
-/// here draws, lays out or blocks. The host drains the queue after each
-/// dispatch, so a slow frame cannot stall the connection.
+#[doc = include_str!("layer_state.doc/LayerState.md")]
 pub struct LayerState {
     pub(super) registry_state: RegistryState,
     pub(super) seat_state: SeatState,
     pub(super) output_state: OutputState,
     pub(super) layer: Option<LayerSurface>,
-    /// Events produced since the host last drained.
+    #[doc = include_str!("layer_state.doc/events.md")]
     pub(super) events: Vec<LayerEvent>,
-    /// The size the compositor last configured, in logical pixels.
+    #[doc = include_str!("layer_state.doc/size.md")]
     pub(super) size: Size,
-    /// The output scale the surface is on.
+    #[doc = include_str!("layer_state.doc/scale.md")]
     pub(super) scale: f32,
-    /// Set once the compositor closes the surface.
+    #[doc = include_str!("layer_state.doc/closed.md")]
     pub(super) closed: bool,
-    /// Whether a configure has arrived, so the host knows when it may first draw.
+    #[doc = include_str!("layer_state.doc/configured.md")]
     pub(super) configured: bool,
     pointer: Option<wl_pointer::WlPointer>,
     touch: Option<wl_touch::WlTouch>,
-    /// The last position of each live touch contact, because `wl_touch.up`
-    /// carries an id and a time but **no coordinates** — and an `Up` at the
-    /// origin would read as a drag to the top-left corner.
+    #[doc = include_str!("layer_state.doc/touch_positions.md")]
     touch_positions: HashMap<i32, Point>,
-    /// Buttons currently held, so a `Move` carries the same held set a drag needs.
+    #[doc = include_str!("layer_state.doc/held.md")]
     held: PointerButtons,
-    /// The last pointer position, so a button press reports where it happened
-    /// (`wl_pointer.button` carries no coordinates either).
+    #[doc = include_str!("layer_state.doc/cursor.md")]
     cursor: Point,
-    /// The fractional-scale object for this surface, when the compositor offers
-    /// the protocol. Its presence is what decides whether [`scale`](Self::scale)
-    /// can be non-integral.
+    #[doc = include_str!("layer_state.doc/fractional.md")]
     pub(super) fractional: Option<WpFractionalScaleV1>,
-    /// The viewport that maps the fractional buffer onto the logical size.
+    #[doc = include_str!("layer_state.doc/viewport.md")]
     pub(super) viewport: Option<WpViewport>,
 }
 
@@ -106,18 +96,14 @@ impl LayerState {
         }
     }
 
-    /// The layer surface, once created.
-    ///
-    /// It is absent only between connecting and creating the surface — a window
-    /// that exists always has one, because outputs must be enumerated *before*
-    /// the surface can name the one it wants.
+    #[doc = include_str!("layer_state.doc/layer.md")]
     pub(super) fn layer(&self) -> &LayerSurface {
         self.layer
             .as_ref()
             .expect("a layer surface, created before the window was handed out")
     }
 
-    /// The connector names of every output the compositor has announced.
+    #[doc = include_str!("layer_state.doc/output_names.md")]
     pub(super) fn output_names(&self) -> Vec<String> {
         self.output_state
             .outputs()
@@ -126,7 +112,7 @@ impl LayerState {
             .collect()
     }
 
-    /// The `wl_output` whose connector is `name`, if it is connected.
+    #[doc = include_str!("layer_state.doc/output_named.md")]
     pub(super) fn output_named(&self, name: &str) -> Option<wl_output::WlOutput> {
         self.output_state.outputs().find(|output| {
             self.output_state
@@ -136,15 +122,13 @@ impl LayerState {
         })
     }
 
-    /// Pushes a converted pointer event, stamped with `time_ms` in microseconds.
+    #[doc = include_str!("layer_state.doc/push_pointer.md")]
     fn push_pointer(&mut self, event: PointerEvent) {
         self.events.push(LayerEvent::Pointer(event));
     }
 }
 
-/// The kit button for a Linux input code, or [`None`] for one the kit has no
-/// name for — an extra thumb button is dropped rather than mapped onto a button
-/// that means something else.
+#[doc = include_str!("layer_state.doc/button_of.md")]
 fn button_of(code: u32) -> Option<PointerButton> {
     match code {
         BTN_LEFT => Some(PointerButton::Primary),
@@ -367,11 +351,11 @@ impl PointerHandler for LayerState {
     }
 }
 
-/// Logical pixels a discrete wheel notch scrolls, matching the windowed runner.
+#[doc = include_str!("layer_state.doc/WHEEL_NOTCH.md")]
 const WHEEL_NOTCH: f32 = 48.0;
 
 impl LayerState {
-    /// Builds and pushes a mouse pointer event at `at`, stamped from `time_ms`.
+    #[doc = include_str!("layer_state.doc/push_event.md")]
     fn push_event(&mut self, kind: PointerEventKind, at: Point, time_ms: u32) {
         let event = PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, at)
             .with_buttons(self.held)
@@ -462,28 +446,14 @@ impl TouchHandler for LayerState {
     }
 }
 
-/// A surface-local Wayland position as a kit point, in **physical** pixels.
-///
-/// Wayland reports pointer and touch positions in *surface-local logical*
-/// coordinates — already divided by the buffer scale. The kit's runtime expects
-/// the opposite: `handle_pointer` divides what it is given by the device scale,
-/// because the windowed path feeds it winit's physical positions.
-///
-/// Handing over logical coordinates therefore halves every click on a 2× display
-/// — a press near the right edge lands in the middle of the surface, and the
-/// controls that live there are never hit. Multiplying here keeps both windowing
-/// paths in one coordinate space, which is the only way the runtime can stay
-/// unaware of which one it is on.
+#[doc = include_str!("layer_state.doc/point_of.md")]
 fn point_of(position: (f64, f64), scale: f32) -> Point {
     #[allow(clippy::cast_possible_truncation)]
     Point::new(position.0 as f32 * scale, position.1 as f32 * scale)
 }
 
 impl LayerState {
-    /// Builds and pushes a touch contact's event.
-    ///
-    /// A contact holds the primary button while it is down, which is what makes
-    /// the runtime treat a tap as a click without a touch-specific path.
+    #[doc = include_str!("layer_state.doc/push_touch.md")]
     fn push_touch(&mut self, id: i32, kind: PointerEventKind, at: Point, time_ms: u32, down: bool) {
         let mut held = PointerButtons::new();
         if down {
@@ -499,8 +469,7 @@ impl LayerState {
     }
 }
 
-/// The denominator `wp_fractional_scale_v1` reports its scale in: the event
-/// carries `scale × 120`, so 1.5 arrives as 180.
+#[doc = include_str!("layer_state.doc/FRACTIONAL_DENOMINATOR.md")]
 const FRACTIONAL_DENOMINATOR: f32 = 120.0;
 
 impl Dispatch<WpFractionalScaleV1, ()> for LayerState {

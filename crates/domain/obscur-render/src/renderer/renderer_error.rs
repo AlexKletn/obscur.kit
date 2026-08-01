@@ -1,62 +1,30 @@
-//! The typed failure of a render operation (spec §5.2 explicit diagnostics).
+#![doc = include_str!("renderer_error.doc/_module.md")]
 
 use crate::frame::DeviceLoss;
 
-/// The typed failure of a [`Renderer`](crate::renderer::Renderer) operation
-/// (spec §5.2).
-///
-/// Spec §5.2 requires that unsupported effects and fallbacks be **explicit
-/// diagnostics** rather than silent failures or panics. Each variant names a
-/// distinct, actionable cause: a lost device the backend must handle, an effect
-/// the backend cannot reproduce (the explicit fallback signal), an invalid
-/// target, an out-of-memory condition, or a generic backend failure carrying a
-/// human-readable reason.
+#[doc = include_str!("renderer_error.doc/RendererError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RendererError {
-    /// The GPU device was lost; see [`DeviceLoss`] for the reason and whether
-    /// the runtime may rebuild and retry.
+    #[doc = include_str!("renderer_error.doc/DeviceLost.md")]
     DeviceLost(DeviceLoss),
-    /// The backend cannot reproduce the named effect at all. This is the
-    /// *unsupported effect* half of spec §5.2's explicit diagnostics, in the form
-    /// [`SceneEffect::name`](crate::renderer::SceneEffect::name) gives it. The
-    /// *fallback* half — an effect that was drawn, but approximated — is
-    /// [`EffectFallback`](crate::renderer::EffectFallback), which is not an error:
-    /// nothing failed.
-    ///
-    /// Both in-tree backends **emit** it rather than **return** it: they own a
-    /// documented fallback for every effect they report
-    /// [`Unavailable`](obscur_capability::SupportLevel::Unavailable) (the CPU
-    /// rasterizer approximates by design), so they draw the frame and raise this
-    /// through their diagnostic sink — see
-    /// [`EffectFallbackReporter`](crate::renderer::EffectFallbackReporter). It is
-    /// returned from [`render`](crate::renderer::Renderer::render) only by a backend
-    /// with no fallback at all, and no such backend exists in this workspace today.
+    #[doc = include_str!("renderer_error.doc/UnsupportedEffect.md")]
     UnsupportedEffect(Box<str>),
-    /// The render target was invalid for this backend, with a human-readable
-    /// reason.
+    #[doc = include_str!("renderer_error.doc/InvalidTarget.md")]
     InvalidTarget(Box<str>),
-    /// The backend ran out of memory servicing the operation.
+    #[doc = include_str!("renderer_error.doc/OutOfMemory.md")]
     OutOfMemory,
-    /// A generic backend failure, carrying a human-readable reason.
+    #[doc = include_str!("renderer_error.doc/Backend.md")]
     Backend(Box<str>),
 }
 
 impl RendererError {
-    /// Whether this error is a device-loss event.
+    #[doc = include_str!("renderer_error.doc/is_device_lost.md")]
     #[must_use]
     pub const fn is_device_lost(&self) -> bool {
         matches!(self, Self::DeviceLost(_))
     }
 
-    /// Whether the caller can continue after this error.
-    ///
-    /// A [`RendererError::DeviceLost`] is recoverable exactly when its
-    /// [`DeviceLoss::is_recoverable`] flag is set (the runtime may rebuild the
-    /// device and retry). A [`RendererError::UnsupportedEffect`] is always
-    /// recoverable: it names one effect the backend will not reproduce, never a
-    /// failure of the operation, so a caller may drop that effect and re-render (and
-    /// where a backend raises it as a diagnostic, the frame was drawn regardless).
-    /// The remaining variants are terminal for the operation.
+    #[doc = include_str!("renderer_error.doc/is_recoverable.md")]
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         match self {

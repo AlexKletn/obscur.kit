@@ -1,22 +1,21 @@
-//! Immutable snapshot of available capabilities.
+#![doc = include_str!("capability_snapshot.doc/_module.md")]
 
 use super::Capability;
 
-/// An immutable snapshot of the capabilities available to a principal at
-/// activation time (spec §8.58).
+#[doc = include_str!("capability_snapshot.doc/CapabilitySnapshot.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CapabilitySnapshot {
     entries: Vec<Capability>,
 }
 
 impl CapabilitySnapshot {
-    /// Builds a snapshot from a set of capability entries.
+    #[doc = include_str!("capability_snapshot.doc/new.md")]
     #[must_use]
     pub fn new(entries: Vec<Capability>) -> Self {
         Self { entries }
     }
 
-    /// Returns the capabilities in this snapshot.
+    #[doc = include_str!("capability_snapshot.doc/entries.md")]
     #[must_use]
     pub fn entries(&self) -> &[Capability] {
         &self.entries

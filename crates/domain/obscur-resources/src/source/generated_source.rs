@@ -1,16 +1,6 @@
-//! A procedurally generated resource source (spec §5.16 generated content).
+#![doc = include_str!("generated_source.doc/_module.md")]
 
-/// A resource produced by a generator rather than loaded from stored bytes (spec
-/// §5.16 generated source).
-///
-/// A generated source names the `generator` (its stable kind, for example
-/// `"solid-color"` or `"noise"`) and carries an opaque `descriptor` — a spec
-/// string the generator interprets as its parameters. It is a pure description:
-/// the actual bytes are produced later when a loader runs the named generator.
-///
-/// Because equal `(generator, descriptor)` pairs compare and hash equal, identical
-/// generated requests deduplicate in the hub (spec §5.15); [`Self::dedup_key`]
-/// exposes that identity as a single string for keying.
+#[doc = include_str!("generated_source.doc/GeneratedSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GeneratedSource {
     generator: Box<str>,
@@ -18,7 +8,7 @@ pub struct GeneratedSource {
 }
 
 impl GeneratedSource {
-    /// Creates a generated source from a generator kind and its descriptor.
+    #[doc = include_str!("generated_source.doc/new.md")]
     #[must_use]
     pub fn new(generator: impl Into<Box<str>>, descriptor: impl Into<Box<str>>) -> Self {
         Self {
@@ -27,20 +17,19 @@ impl GeneratedSource {
         }
     }
 
-    /// Returns the generator's stable kind name (spec §5.16).
+    #[doc = include_str!("generated_source.doc/generator.md")]
     #[must_use]
     pub fn generator(&self) -> &str {
         &self.generator
     }
 
-    /// Returns the opaque descriptor the generator interprets (spec §5.16).
+    #[doc = include_str!("generated_source.doc/descriptor.md")]
     #[must_use]
     pub fn descriptor(&self) -> &str {
         &self.descriptor
     }
 
-    /// Returns a key combining generator and descriptor so identical generated
-    /// requests deduplicate (spec §5.15).
+    #[doc = include_str!("generated_source.doc/dedup_key.md")]
     #[must_use]
     pub fn dedup_key(&self) -> String {
         format!("{}\u{1f}{}", self.generator, self.descriptor)

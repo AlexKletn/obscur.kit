@@ -1,41 +1,24 @@
-//! A style-local `radial-gradient(...)` value (spec §5.2).
+#![doc = include_str!("radial_gradient.doc/_module.md")]
 
 use crate::property::{GradientStop, Length, RadialShape, RadialSize};
 
-/// A CSS `radial-gradient(...)` image, as authored in a stylesheet.
-///
-/// The gradient is described by an ending [`shape`](RadialShape) (circle or
-/// ellipse), an ending [`size`](RadialSize) (an extent keyword or explicit
-/// radius), a center position (`center_x` / `center_y`, box-relative
-/// [`Length`]s — the `at <position>`), and an ordered list of color
-/// [`GradientStop`]s. Every parameter is stored **box-relative** and resolved
-/// against the painted box at paint time, mirroring how [`LinearGradient`] stores
-/// only an angle: the scene coordinator turns the shape/size/center plus the
-/// box's bounds into the concrete center and radius the renderer's
-/// `obscur_scene::paint::RadialGradient` needs. This type is a pure style concept
-/// and deliberately has **no dependency on the scene**.
-///
-/// [`LinearGradient`]: crate::property::LinearGradient
-///
-/// Because [`GradientStop`] carries `f32` data, this type derives [`PartialEq`]
-/// but not [`Eq`]/[`Hash`].
+#[doc = include_str!("radial_gradient.doc/RadialGradient.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RadialGradient {
-    /// The ending shape (circle or ellipse).
+    #[doc = include_str!("radial_gradient.doc/shape.md")]
     pub shape: RadialShape,
-    /// The ending size (an extent keyword or an explicit radius).
+    #[doc = include_str!("radial_gradient.doc/size.md")]
     pub size: RadialSize,
-    /// The center's horizontal position, box-relative (default `50%`).
+    #[doc = include_str!("radial_gradient.doc/center_x.md")]
     pub center_x: Length,
-    /// The center's vertical position, box-relative (default `50%`).
+    #[doc = include_str!("radial_gradient.doc/center_y.md")]
     pub center_y: Length,
-    /// The gradient's color stops, in authored order outward from the center.
+    #[doc = include_str!("radial_gradient.doc/stops.md")]
     pub stops: Box<[GradientStop]>,
 }
 
 impl RadialGradient {
-    /// Creates a radial gradient with the given ending shape/size, center
-    /// position, and stops.
+    #[doc = include_str!("radial_gradient.doc/new.md")]
     #[must_use]
     pub fn new(
         shape: RadialShape,
@@ -53,34 +36,31 @@ impl RadialGradient {
         }
     }
 
-    /// Returns the ending shape.
+    #[doc = include_str!("radial_gradient.doc/shape_2.md")]
     #[must_use]
     pub const fn shape(&self) -> RadialShape {
         self.shape
     }
 
-    /// Returns the ending size.
+    #[doc = include_str!("radial_gradient.doc/size_2.md")]
     #[must_use]
     pub const fn size(&self) -> RadialSize {
         self.size
     }
 
-    /// Returns the center's horizontal position (box-relative).
+    #[doc = include_str!("radial_gradient.doc/center_x_2.md")]
     #[must_use]
     pub const fn center_x(&self) -> Length {
         self.center_x
     }
 
-    /// Returns the center's vertical position (box-relative).
+    #[doc = include_str!("radial_gradient.doc/center_y_2.md")]
     #[must_use]
     pub const fn center_y(&self) -> Length {
         self.center_y
     }
 
-    /// Whether the center or an explicit radius is a `ch` term.
-    ///
-    /// Covers exactly the lengths `absolutize_radial` folds; the stop offsets are
-    /// percentages, not lengths.
+    #[doc = include_str!("radial_gradient.doc/uses_ch.md")]
     #[must_use]
     pub const fn uses_ch(&self) -> bool {
         self.center_x().is_ch()
@@ -91,7 +71,7 @@ impl RadialGradient {
             }
     }
 
-    /// Returns the gradient's color stops.
+    #[doc = include_str!("radial_gradient.doc/stops_2.md")]
     #[must_use]
     pub const fn stops(&self) -> &[GradientStop] {
         &self.stops

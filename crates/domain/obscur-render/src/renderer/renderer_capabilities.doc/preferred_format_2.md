@@ -1,0 +1,1 @@
+The preferred pixel format.

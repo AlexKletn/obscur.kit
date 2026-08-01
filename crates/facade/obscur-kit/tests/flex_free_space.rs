@@ -1,15 +1,4 @@
-//! Free space on a flex line goes to the items that asked to grow (CSS Flexbox
-//! §9.7 *Resolving Flexible Lengths*), and an item that did not ask stays at its
-//! content size (§9.2.3 — an `auto` basis with no definite main size resolves to
-//! the item's max-content size).
-//!
-//! The defect these pin: a plain item with no flex properties absorbed the whole
-//! line and starved the sibling that declared `flex: 1`. On an 800px row a text
-//! item took 700px while a `flex: 1` sibling got **zero** — inverted, silently,
-//! with no error anywhere.
-//!
-//! It was invisible in the single-item case: `flex: 1` beside a fixed-width item
-//! is correct, which is why the control below matters as much as the case.
+#![doc = include_str!("flex_free_space.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -21,7 +10,7 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A wide, short viewport so the row has plenty of free space to misplace.
+#[doc = include_str!("flex_free_space.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size {
     width: 800.0,
     height: 100.0,
@@ -45,7 +34,7 @@ fn el(raw: u64, class: &str, kids: Vec<ViewNode>) -> ViewNode {
         .with_children(ViewFragment::from_nodes(kids))
 }
 
-/// Lays out `items` as a flex row and returns each one's used width.
+#[doc = include_str!("flex_free_space.doc/widths.md")]
 fn widths(items: Vec<ViewNode>) -> Vec<f32> {
     let sheet = compile(CSS);
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
@@ -68,8 +57,7 @@ fn widths(items: Vec<ViewNode>) -> Vec<f32> {
         .collect()
 }
 
-/// The control, and the reason the defect hid for so long: with nothing else
-/// competing, `flex: 1` correctly takes everything the fixed item leaves.
+#[doc = include_str!("flex_free_space.doc/a_growing_item_takes_the_space_a_fixed_sibling_leaves.md")]
 #[test]
 fn a_growing_item_takes_the_space_a_fixed_sibling_leaves() {
     let widths = widths(vec![
@@ -89,8 +77,7 @@ fn a_growing_item_takes_the_space_a_fixed_sibling_leaves() {
     );
 }
 
-/// The case. A plain item — no `flex` at all, so `flex-grow: 0` — must stay at
-/// its content size and leave the free space to the sibling that asked for it.
+#[doc = include_str!("flex_free_space.doc/a_plain_item_does_not_absorb_the_space_a_sibling_asked_to_grow_into.md")]
 #[test]
 fn a_plain_item_does_not_absorb_the_space_a_sibling_asked_to_grow_into() {
     let widths = widths(vec![
@@ -125,9 +112,7 @@ fn a_plain_item_does_not_absorb_the_space_a_sibling_asked_to_grow_into() {
     );
 }
 
-/// `flex: 0 0 auto` is the explicit spelling of the same thing, and must behave
-/// identically — it is what an author writes when they mean "size me to my
-/// content and leave me alone".
+#[doc = include_str!("flex_free_space.doc/an_explicit_auto_basis_sizes_to_content_too.md")]
 #[test]
 fn an_explicit_auto_basis_sizes_to_content_too() {
     let widths = widths(vec![
@@ -147,16 +132,7 @@ fn an_explicit_auto_basis_sizes_to_content_too() {
     );
 }
 
-/// The case a real panel hit: the item is itself a **flex container**, which is
-/// what every styled button in this kit is.
-///
-/// It needed a second fix. A flex container with `width: auto` reported the space
-/// it was *offered* along its main axis — the block answer, "as much as I was
-/// given" — so under the max-content probe it answered infinity, and the caller
-/// fell back to the whole line. The answer has to be summed from its items, and
-/// summed rather than read off their placed positions: `justify-content` has
-/// already spread them across the infinite line, so the rightmost edge is
-/// infinite too.
+#[doc = include_str!("flex_free_space.doc/a_nested_flex_container_sizes_to_its_own_content.md")]
 #[test]
 fn a_nested_flex_container_sizes_to_its_own_content() {
     let widths = widths(vec![

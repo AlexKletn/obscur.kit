@@ -1,4 +1,4 @@
-//! Capability module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod capability;
 mod capability_id;
 mod capability_scope;

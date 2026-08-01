@@ -1,52 +1,32 @@
-//! What a layer surface reports back to its host.
+#![doc = include_str!("layer_event.doc/_module.md")]
 
 use obscur_geometry::{Point, Size};
 use obscur_interaction::pointer::PointerEvent;
 
-/// One thing that happened to a layer surface, in the host's own vocabulary.
-///
-/// Pointer and touch arrive already converted into the kit's
-/// [`PointerEvent`], so a host feeds them to `UiRuntime::handle_pointer`
-/// unchanged and every device-agnostic behaviour — hover, focus, gestures,
-/// capture — works as it does in a window.
+#[doc = include_str!("layer_event.doc/LayerEvent.md")]
 #[derive(Debug, Clone)]
 pub enum LayerEvent {
-    /// The compositor decided the surface's size. **This, not the request, is
-    /// the real extent**: an anchored axis is decided by the compositor, so a bar
-    /// that asked for a width and got the output's is normal, not an error.
+    #[doc = include_str!("layer_event.doc/Configured.md")]
     Configured {
-        /// The size in logical pixels.
+        #[doc = include_str!("layer_event.doc/size.md")]
         size: Size,
     },
-    /// The output's scale changed; the host should re-derive its physical
-    /// surface extent.
+    #[doc = include_str!("layer_event.doc/ScaleChanged.md")]
     ScaleChanged {
-        /// The new device-pixel ratio.
+        #[doc = include_str!("layer_event.doc/scale.md")]
         scale: f32,
     },
-    /// Something outside the compositor asked the loop to turn — a worker
-    /// thread, a timer, another protocol's connection — through a
-    /// [`LayerWaker`](crate::surface::LayerWaker).
-    ///
-    /// It carries nothing, and cannot: the waker does not know why it was rung.
-    /// A host treats it as "reconsider the interface", which is what every
-    /// caller of a waker actually means.
+    #[doc = include_str!("layer_event.doc/Woken.md")]
     Woken,
-    /// The compositor closed the surface. Every handle to it is now dead and the
-    /// host should stop.
+    #[doc = include_str!("layer_event.doc/Closed.md")]
     Closed,
-    /// A pointer, touch or pen event, already in the kit's model.
+    #[doc = include_str!("layer_event.doc/Pointer.md")]
     Pointer(PointerEvent),
-    /// A scroll of `delta_y` pixels at the pointer's position.
-    ///
-    /// The position travels with the delta because scrolling is routed to the
-    /// container *under the pointer*, and a host that had to guess it — from the
-    /// hovered node's box, say — would send the notch to the wrong place the
-    /// moment the pointer sat over a child.
+    #[doc = include_str!("layer_event.doc/Scroll.md")]
     Scroll {
-        /// Pixels to scroll; positive reveals content further down.
+        #[doc = include_str!("layer_event.doc/delta_y.md")]
         delta_y: f32,
-        /// Where the pointer was, in physical pixels.
+        #[doc = include_str!("layer_event.doc/at.md")]
         at: Point,
     },
 }

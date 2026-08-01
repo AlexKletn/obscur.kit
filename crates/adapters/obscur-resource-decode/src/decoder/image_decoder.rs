@@ -1,11 +1,4 @@
-//! A raster-image [`ResourceDecoder`] backed by the `image` crate (spec §5.16).
-//!
-//! [`ImageDecoder`] decodes encoded raster bytes (PNG, JPEG) into a CPU
-//! representation of tightly-packed, non-premultiplied RGBA8 pixels in row-major
-//! order, and records the intrinsic pixel size and aspect ratio the runtime needs
-//! for object-fit layout (spec §5.16). It enforces a maximum per-side dimension as
-//! the spec §5.16 safety limit, rejecting oversized images with
-//! [`ResourceError::LimitExceeded`] before allocating their pixel buffer.
+#![doc = include_str!("image_decoder.doc/_module.md")]
 
 use std::sync::Arc;
 
@@ -14,29 +7,18 @@ use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-/// The default maximum per-side pixel dimension a decoded image may have (spec
-/// §5.16 safety limits). 16384 comfortably exceeds real UI assets while bounding
-/// the worst-case RGBA allocation to about one gigabyte.
+#[doc = include_str!("image_decoder.doc/DEFAULT_MAX_DIMENSION.md")]
 const DEFAULT_MAX_DIMENSION: u32 = 16_384;
 
-/// A [`ResourceDecoder`] that decodes raster images (PNG/JPEG) into RGBA8 pixels
-/// via the `image` crate (spec §5.16).
-///
-/// This decoder supports only [`ResourceKind::Image`]; every other kind is
-/// refused so the decoder composes honestly alongside the font and SVG decoders.
-/// The decoded [`DecodedResource`] carries the raw RGBA8 bytes (four bytes per
-/// pixel, `width * height * 4` in total) and metadata whose intrinsic size is the
-/// image's pixel dimensions.
+#[doc = include_str!("image_decoder.doc/ImageDecoder.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageDecoder {
-    /// The maximum allowed width or height, in pixels, before a decode is
-    /// rejected as [`ResourceError::LimitExceeded`] (spec §5.16).
+    #[doc = include_str!("image_decoder.doc/max_dimension.md")]
     max_dimension: u32,
 }
 
 impl ImageDecoder {
-    /// Creates an image decoder with the default per-side dimension limit
-    /// ([`DEFAULT_MAX_DIMENSION`]).
+    #[doc = include_str!("image_decoder.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -44,14 +26,13 @@ impl ImageDecoder {
         }
     }
 
-    /// Creates an image decoder that rejects any image wider or taller than
-    /// `max_dimension` pixels (spec §5.16 safety limits).
+    #[doc = include_str!("image_decoder.doc/with_max_dimension.md")]
     #[must_use]
     pub const fn with_max_dimension(max_dimension: u32) -> Self {
         Self { max_dimension }
     }
 
-    /// Returns the current per-side dimension limit in pixels.
+    #[doc = include_str!("image_decoder.doc/max_dimension_2.md")]
     #[must_use]
     pub const fn max_dimension(&self) -> u32 {
         self.max_dimension
@@ -59,7 +40,7 @@ impl ImageDecoder {
 }
 
 impl Default for ImageDecoder {
-    /// The default image decoder uses [`ImageDecoder::new`].
+    #[doc = include_str!("image_decoder.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }

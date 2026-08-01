@@ -1,34 +1,17 @@
-//! Which output a layer surface is placed on (spec §6.5).
+#![doc = include_str!("layer_output.doc/_module.md")]
 
-/// The output (monitor) a layer surface asks to live on.
-///
-/// # Why a name and not a handle
-///
-/// The domain has no Wayland objects in it and must not grow any, so a choice
-/// of output has to be expressible as data. A connector name — `eDP-1`, `DP-2`,
-/// `HDMI-A-1` — is what a user's configuration file says, what a compositor's
-/// rules match on, and what survives being written to disk and read back, which
-/// a protocol handle does not.
+#[doc = include_str!("layer_output.doc/LayerOutput.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum LayerOutput {
-    /// Let the compositor decide.
-    ///
-    /// In practice this is the output holding the pointer or the focus, which is
-    /// the right default for a launcher or a notification and the wrong one for a
-    /// panel that belongs to a particular screen.
+    #[doc = include_str!("layer_output.doc/Compositor.md")]
     #[default]
     Compositor,
-    /// A specific connector, by name.
-    ///
-    /// A name that matches no connected output is **not** an error: the surface
-    /// falls back to the compositor's choice, because a monitor being unplugged
-    /// must not stop the panel from appearing at all. A host that needs to know
-    /// which it got asks the surface afterwards.
+    #[doc = include_str!("layer_output.doc/Named.md")]
     Named(String),
 }
 
 impl LayerOutput {
-    /// The connector name this asks for, if it names one.
+    #[doc = include_str!("layer_output.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         match self {
@@ -37,7 +20,7 @@ impl LayerOutput {
         }
     }
 
-    /// Whether the choice is the compositor's.
+    #[doc = include_str!("layer_output.doc/is_compositor_choice.md")]
     #[must_use]
     pub const fn is_compositor_choice(&self) -> bool {
         matches!(self, Self::Compositor)

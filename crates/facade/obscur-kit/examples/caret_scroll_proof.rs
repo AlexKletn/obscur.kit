@@ -1,25 +1,4 @@
-//! **Proof: a single-line text field scrolls horizontally to keep the caret in
-//! view** (CSS Overflow 3 §3.1 scroll-into-view; the standard text-control
-//! behaviour a `<input type=text>` scrolls with).
-//!
-//! Drives a focused single-line `field` (100px wide, `white-space: nowrap`,
-//! `overflow: hidden`) through the real runtime editing path: it types a value
-//! far WIDER than the box, renders a CPU `target/caret_scroll_proof.png`, and
-//! asserts:
-//!
-//! - the painted caret sits INSIDE the field box (`caret.x ≤ box.right`) — you can
-//!   see what you type;
-//! - the text run's left edge is scrolled OUT past the box's left (head clipped),
-//!   so the TAIL (last-typed chars) is what shows;
-//! - pressing **Home** resets the scroll so the HEAD is visible again (run left
-//!   back at the box's left edge).
-//!
-//! Two frames are rendered side by side into one PNG: the scrolled "tail" state
-//! and the reset "head" state, each with the caret drawn.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example caret_scroll_proof \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("caret_scroll_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -48,20 +27,19 @@ use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 
-/// The logical extent the frame is laid out and rasterized under.
+#[doc = include_str!("caret_scroll_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 120.0);
 
-/// The `on-input` command the field binds (registered, never mirrored here).
+#[doc = include_str!("caret_scroll_proof.doc/CMD.md")]
 const CMD: InternedSymbol = InternedSymbol::from_raw(0x0001);
 
-/// A single-line field: 100px wide, `nowrap` (scrolls, not wraps), `overflow:
-/// hidden` (clips the scrolled-out glyphs). The `.stage` centers it vertically.
+#[doc = include_str!("caret_scroll_proof.doc/CSS.md")]
 const CSS: &str = "\
 .stage { padding: 40px 20px; background: #12141c; }\
 .field { width: 100px; height: 28px; background: #ffffff; color: #101216; \
 white-space: nowrap; overflow: hidden; border: 1px solid #5b6472; padding: 4px; }";
 
-/// The value typed into the field — far wider than the 100px box.
+#[doc = include_str!("caret_scroll_proof.doc/VALUE.md")]
 const VALUE: &str = "scrolling text field";
 
 fn main() {
@@ -188,7 +166,7 @@ fn main() {
     );
 }
 
-/// A `.stage` holding one editable `.field` carrying `text` and binding on-input.
+#[doc = include_str!("caret_scroll_proof.doc/field_view.md")]
 fn field_view(text: &str) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(1))
@@ -204,14 +182,14 @@ fn field_view(text: &str) -> View {
     ]))
 }
 
-/// The `field` node id (root → stage → field).
+#[doc = include_str!("caret_scroll_proof.doc/field_node.md")]
 fn field_node(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("root after a frame");
     let stage = runtime.tree().get(root).unwrap().child_nodes()[0];
     runtime.tree().get(stage).unwrap().child_nodes()[0]
 }
 
-/// The painted caret's x (the thin, width-1 fill), if present.
+#[doc = include_str!("caret_scroll_proof.doc/caret_x_of.md")]
 fn caret_x_of(snapshot: &SceneSnapshot) -> Option<f32> {
     snapshot
         .display_list()
@@ -226,7 +204,7 @@ fn caret_x_of(snapshot: &SceneSnapshot) -> Option<f32> {
         })
 }
 
-/// The first `DrawText` run's origin x (the run's left edge, `origin − scroll`).
+#[doc = include_str!("caret_scroll_proof.doc/run_left_of.md")]
 fn run_left_of(snapshot: &SceneSnapshot) -> Option<f32> {
     snapshot
         .display_list()
@@ -238,9 +216,7 @@ fn run_left_of(snapshot: &SceneSnapshot) -> Option<f32> {
         })
 }
 
-/// The first `DrawText` run's advance width and right edge (`origin.x + Σadvance`).
-/// The right edge is where the last glyph (and the caret trailing it) paints; the
-/// width proves the run is the FULL value, not a box-width truncated prefix.
+#[doc = include_str!("caret_scroll_proof.doc/run_extent_of.md")]
 fn run_extent_of(snapshot: &SceneSnapshot) -> Option<(f32, f32)> {
     snapshot
         .display_list()
@@ -255,7 +231,7 @@ fn run_extent_of(snapshot: &SceneSnapshot) -> Option<(f32, f32)> {
         })
 }
 
-/// Boots a runtime + CPU renderer with the text stack wired (best-effort font).
+#[doc = include_str!("caret_scroll_proof.doc/boot.md")]
 fn boot() -> (UiRuntime, CpuRenderer) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
     runtime.on_text_input(CMD, |_| {});
@@ -266,7 +242,7 @@ fn boot() -> (UiRuntime, CpuRenderer) {
     (runtime, renderer)
 }
 
-/// Rasterizes a snapshot through the CPU renderer and clones the pixmap.
+#[doc = include_str!("caret_scroll_proof.doc/rasterize.md")]
 fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia::Pixmap {
     let frame = RenderFrame::new(snapshot.clone(), VIEWPORT);
     let submission = FrameSubmission::new(frame);
@@ -277,7 +253,7 @@ fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia:
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Composites `left` and `right` pixmaps horizontally into one wider pixmap.
+#[doc = include_str!("caret_scroll_proof.doc/side_by_side.md")]
 fn side_by_side(left: &tiny_skia::Pixmap, right: &tiny_skia::Pixmap) -> tiny_skia::Pixmap {
     let w = left.width() + right.width();
     let h = left.height().max(right.height());
@@ -301,7 +277,7 @@ fn side_by_side(left: &tiny_skia::Pixmap, right: &tiny_skia::Pixmap) -> tiny_ski
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] at `origin`.
+#[doc = include_str!("caret_scroll_proof.doc/compile.md")]
 fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
@@ -311,12 +287,12 @@ fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
         .matchable
 }
 
-/// A plain (no-modifier) character key press.
+#[doc = include_str!("caret_scroll_proof.doc/char_press.md")]
 fn char_press(c: char) -> KeyEvent {
     KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character(c)))
 }
 
-/// A named (non-character) key press.
+#[doc = include_str!("caret_scroll_proof.doc/named_press.md")]
 fn named_press(named: NamedKey) -> KeyEvent {
     KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::named(named)))
 }
@@ -330,7 +306,7 @@ fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     )
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("caret_scroll_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -338,8 +314,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("caret_scroll_proof.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -357,12 +332,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("caret_scroll_proof.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("caret_scroll_proof.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

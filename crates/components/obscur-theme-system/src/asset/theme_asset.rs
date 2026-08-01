@@ -1,50 +1,42 @@
-//! A font/icon/image/stylesheet resource bundled by a theme (spec §2.6).
+#![doc = include_str!("theme_asset.doc/_module.md")]
 
 use std::sync::Arc;
 
-/// The kind of resource a [`ThemeAsset`] carries (spec §2.6).
+#[doc = include_str!("theme_asset.doc/AssetKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetKind {
-    /// A font file (e.g. TTF/OTF/WOFF).
+    #[doc = include_str!("theme_asset.doc/Font.md")]
     Font,
-    /// An icon resource.
+    #[doc = include_str!("theme_asset.doc/Icon.md")]
     Icon,
-    /// A raster or vector image.
+    #[doc = include_str!("theme_asset.doc/Image.md")]
     Image,
-    /// A stylesheet.
+    #[doc = include_str!("theme_asset.doc/Stylesheet.md")]
     Stylesheet,
 }
 
-/// Where a [`ThemeAsset`]'s bytes come from (spec §2.6).
-///
-/// An asset is either baked into the theme as bytes, or referenced by a path the
-/// host resolves at load time.
+#[doc = include_str!("theme_asset.doc/AssetSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetSource {
-    /// Bytes embedded directly in the theme, shared via [`Arc`].
+    #[doc = include_str!("theme_asset.doc/Embedded.md")]
     Embedded(Arc<[u8]>),
-    /// A path the host resolves to load the asset.
+    #[doc = include_str!("theme_asset.doc/Path.md")]
     Path(Box<str>),
 }
 
-/// A named font/icon/image/stylesheet resource a theme bundles (spec §2.6).
-///
-/// Each asset pairs a name and an [`AssetKind`] with an [`AssetSource`] that is
-/// either embedded bytes or a host-resolved path. Because the payloads
-/// ([`Arc<[u8]>`](Arc) and [`Box<str>`]) are `Eq`, this type derives `Debug`,
-/// `Clone`, `PartialEq`, and `Eq`.
+#[doc = include_str!("theme_asset.doc/ThemeAsset.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeAsset {
-    /// The asset's name (e.g. `"font.body"` or `"icon.close"`).
+    #[doc = include_str!("theme_asset.doc/name.md")]
     pub name: Box<str>,
-    /// The kind of resource.
+    #[doc = include_str!("theme_asset.doc/kind.md")]
     pub kind: AssetKind,
-    /// Where the asset's data comes from.
+    #[doc = include_str!("theme_asset.doc/source.md")]
     pub source: AssetSource,
 }
 
 impl ThemeAsset {
-    /// Creates an asset whose bytes are embedded directly in the theme.
+    #[doc = include_str!("theme_asset.doc/embedded.md")]
     #[must_use]
     pub fn embedded(
         name: impl Into<Box<str>>,
@@ -58,7 +50,7 @@ impl ThemeAsset {
         }
     }
 
-    /// Creates an asset referenced by a host-resolved path.
+    #[doc = include_str!("theme_asset.doc/path.md")]
     #[must_use]
     pub fn path(name: impl Into<Box<str>>, kind: AssetKind, path: impl Into<Box<str>>) -> Self {
         Self {
@@ -68,25 +60,25 @@ impl ThemeAsset {
         }
     }
 
-    /// Returns the asset's name.
+    #[doc = include_str!("theme_asset.doc/name_2.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the asset's kind.
+    #[doc = include_str!("theme_asset.doc/kind_2.md")]
     #[must_use]
     pub const fn kind(&self) -> AssetKind {
         self.kind
     }
 
-    /// Returns the asset's source.
+    #[doc = include_str!("theme_asset.doc/source_2.md")]
     #[must_use]
     pub const fn source(&self) -> &AssetSource {
         &self.source
     }
 
-    /// Returns the embedded bytes, or `None` for a path-backed asset.
+    #[doc = include_str!("theme_asset.doc/bytes.md")]
     #[must_use]
     pub fn bytes(&self) -> Option<&[u8]> {
         match &self.source {
@@ -95,7 +87,7 @@ impl ThemeAsset {
         }
     }
 
-    /// Returns whether the asset's bytes are embedded (rather than a path).
+    #[doc = include_str!("theme_asset.doc/is_embedded.md")]
     #[must_use]
     pub const fn is_embedded(&self) -> bool {
         matches!(self.source, AssetSource::Embedded(_))

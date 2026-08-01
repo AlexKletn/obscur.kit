@@ -1,32 +1,4 @@
-//! **Headless proof: the interactive control gallery WORKS without a display.**
-//!
-//! The deterministic, display-free sibling of `controls_window.rs`. It boots the
-//! very same shared [`controls`] scene on a real [`UiRuntime`], then drives every
-//! interaction **programmatically through the real input path** —
-//! [`handle_pointer`](UiRuntime::handle_pointer) for hover / press / release /
-//! click and [`handle_key`](UiRuntime::handle_key) for typing — and rasterizes the
-//! resulting states through the software [`CpuRenderer`] into three stitched
-//! panels written to `target/controls_gallery_proof.png`:
-//!
-//! - **Panel 1 — Idle.** The gallery at rest: nothing hovered, focused, or
-//!   toggled.
-//! - **Panel 2 — Hover · Active · Open.** The checkboxes toggled `:checked`, the
-//!   radio group with one option `:checked`, the **Select popup open** (its option
-//!   list rendered from the real [`Select::is_open`] state), and the primary
-//!   button held **pressed** so `:hover` + `:active` + `:focus` all bite from the
-//!   runtime's live pointer/press/focus targets.
-//! - **Panel 3 — Typed · Selected.** The button released (click count bumped), the
-//!   Select collapsed onto its chosen option, and the text field **focused with a
-//!   caret** showing text the run typed through the editing session.
-//!
-//! Each interaction is located by hit-testing the runtime's own layout boxes (so
-//! no pixel positions are hard-coded), driven through the pointer/keyboard API,
-//! and asserted, so a regression fails the run rather than producing a wrong
-//! image. The disabled button is clicked and shown to be a genuine no-op.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example controls_headless \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("controls_headless.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -58,8 +30,7 @@ use controls::{
     SELECT_COUNT, SELECT_LABELS, radio_command, select_option_command,
 };
 
-/// The logical extent each panel is laid out and rasterized under. Tall enough to
-/// show the whole gallery **with the Select popup expanded** without clipping.
+#[doc = include_str!("controls_headless.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(660.0, 860.0);
 
 fn main() {
@@ -190,9 +161,7 @@ fn main() {
 // Command handlers — identical semantics to the windowed driver.
 // ---------------------------------------------------------------------------
 
-/// Registers a handler per interactive command, all mutating the shared state and
-/// refreshing its status line (the disabled controls' commands are deliberately
-/// left unregistered so they are no-ops).
+#[doc = include_str!("controls_headless.doc/register_handlers.md")]
 fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>) {
     {
         let s = state.clone();
@@ -263,17 +232,13 @@ fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>)
 // Interaction + rendering helpers.
 // ---------------------------------------------------------------------------
 
-/// Rebuilds the view from the current state and runs one real frame through the
-/// runtime (reconcile → match → layout → compose), refreshing the retained tree,
-/// layout boxes, and spatial index so the next hit-test sees the current state.
+#[doc = include_str!("controls_headless.doc/refresh.md")]
 fn refresh(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>, sheets: &[Stylesheet]) {
     let view = controls::view(&state.borrow());
     runtime.render_now(&view, sheets);
 }
 
-/// Rebuilds + renders like [`refresh`] but is named for the pseudo-state panels:
-/// it re-applies the runtime's *current* interaction pseudo-states (hover / active
-/// / focus, already recomputed by the preceding pointer events) to the paint.
+#[doc = include_str!("controls_headless.doc/render_current.md")]
 fn render_current(
     runtime: &mut UiRuntime,
     state: &Rc<RefCell<GalleryState>>,
@@ -282,9 +247,7 @@ fn render_current(
     refresh(runtime, state, sheets);
 }
 
-/// Clicks the control identified by `id`: a full press + release on its box (in
-/// the padding region, left of the label, so the control element itself is the hit
-/// target — not its text child), then a refresh so the mutated state is laid out.
+#[doc = include_str!("controls_headless.doc/click.md")]
 fn click(
     runtime: &mut UiRuntime,
     state: &Rc<RefCell<GalleryState>>,
@@ -297,14 +260,12 @@ fn click(
     refresh(runtime, state, sheets);
 }
 
-/// Builds a mouse [`PointerEvent`] of `kind` at content-space point `p`.
+#[doc = include_str!("controls_headless.doc/pointer.md")]
 fn pointer(kind: PointerEventKind, p: Point) -> PointerEvent {
     PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, p)
 }
 
-/// Types `text` into the focused editable, one printable character at a time
-/// through the real keyboard path (press + release), so the runtime's editing
-/// session inserts each character and fires the field's `on-input` handler.
+#[doc = include_str!("controls_headless.doc/type_text.md")]
 fn type_text(runtime: &mut UiRuntime, text: &str) {
     for ch in text.chars() {
         let physical = physical_for(ch);
@@ -314,9 +275,7 @@ fn type_text(runtime: &mut UiRuntime, text: &str) {
     }
 }
 
-/// A plausible physical key position for a typed ASCII letter (only the scan
-/// position; the inserted character comes from the logical key). Falls back to
-/// `KeyA` for anything outside `a..=z`.
+#[doc = include_str!("controls_headless.doc/physical_for.md")]
 fn physical_for(ch: char) -> PhysicalKey {
     match ch.to_ascii_lowercase() {
         'a' => PhysicalKey::KeyA,
@@ -328,7 +287,7 @@ fn physical_for(ch: char) -> PhysicalKey {
     }
 }
 
-/// Finds the [`NodeId`] of the element carrying the reserved `id` attribute `id`.
+#[doc = include_str!("controls_headless.doc/node_by_id.md")]
 fn node_by_id(runtime: &UiRuntime, id: &str) -> Option<NodeId> {
     runtime
         .tree()
@@ -337,9 +296,7 @@ fn node_by_id(runtime: &UiRuntime, id: &str) -> Option<NodeId> {
         .map(|(node_id, _)| node_id)
 }
 
-/// The click point for the control `id`: a point just inside its left edge
-/// (in the padding, left of the label text) at the vertical centre, so the
-/// control element itself is the topmost hit rather than its text child.
+#[doc = include_str!("controls_headless.doc/center.md")]
 fn center(runtime: &UiRuntime, id: &str) -> Option<Point> {
     let node = node_by_id(runtime, id)?;
     let layout = runtime.layout_boxes().get(&node)?;
@@ -348,7 +305,7 @@ fn center(runtime: &UiRuntime, id: &str) -> Option<Point> {
     Some(Point::new(origin.x + 6.0, origin.y + size.height / 2.0))
 }
 
-/// Rasterizes the runtime's current committed scene into a fresh pixmap.
+#[doc = include_str!("controls_headless.doc/capture.md")]
 fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pixmap {
     let snapshot = runtime.snapshot();
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -360,7 +317,7 @@ fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pi
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Horizontally stitches `panels` left-to-right with thin dividers between them.
+#[doc = include_str!("controls_headless.doc/stitch.md")]
 fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 3u32;
     let height = panels.iter().map(|p| p.height()).max().unwrap_or(0);
@@ -384,14 +341,14 @@ fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("controls_headless.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("controls_headless.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -399,8 +356,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("controls_headless.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -418,12 +374,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("controls_headless.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("controls_headless.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

@@ -1,120 +1,4 @@
-//! `ViewCodegen`: emits ordinary Rust that builds a runtime [`View`] from a
-//! compiled [`UiIrDocument`] at *compile* time (spec §2.8, §2.15).
-//!
-//! This is the code-generation counterpart of the runtime
-//! [`UiIrViewBridge`](crate::bridge::UiIrViewBridge): where the bridge
-//! *interprets* the IR into a desired tree every time it runs, `ViewCodegen`
-//! lowers the same IR once, ahead of time, into Rust source that constructs the
-//! identical [`View`] with no `.okui` machinery present at runtime. A build step
-//! writes the emitted function into a generated `.rs` file the application
-//! `include!`s (or the same text is produced inline by the `okui!` macro).
-//!
-//! # What it emits
-//!
-//! [`document_to_view_fn`](ViewCodegen::document_to_view_fn) emits a free
-//! function
-//!
-//! ```ignore
-//! pub fn <name>() -> ::obscur_kit::view::view::View { <expr> }
-//! ```
-//!
-//! whose body is the fully-qualified [`View`] expression from
-//! [`document_to_view_expr`](ViewCodegen::document_to_view_expr). Every path is
-//! written with a leading `::` so the generated code needs no `use` items, and
-//! every one of them is written through the [`CodegenRoot`] the caller passes —
-//! by default the `obscur-kit` facade, the one crate an application depends on.
-//! See [`CodegenRoot`] for why that root is an argument rather than the fixed
-//! `::obscur_view` / `::obscur_identity` literals it used to be.
-//!
-//! # Name binding
-//!
-//! Tags, attributes and events resolve through the shared
-//! [`name_binding`] registry — the *same* policy the runtime bridge uses — so a
-//! `<Button>` emits its real `COMPONENT_ID`, an `<img src=…>` emits the reserved
-//! `SRC` symbol (reaching real decoded pixels), a `<div>` emits the generic
-//! `Container`, and `click`/`input`/`change` emit the reserved `EVENT_*`
-//! symbols. The emitted handles are raw values (`from_raw(0x…)`) resolved from
-//! the registry at generation time.
-//!
-//! An **element** tag is emitted twice over: as the component id above, and as the
-//! reserved `TYPE` property carrying the tag as the node's *local name*, so a
-//! `button { … }` type selector matches an authored `<button>` (spec §4.13). Both
-//! halves come from the registry — [`name_binding::local_name_for`] owns the
-//! policy, including the rule that an authored `type="…"` wins the same slot — and
-//! the runtime bridge emits the identical property from the identical call.
-//!
-//! A tag naming **no** built-in resolves by the node's kind: a `<div>` is the
-//! `Container` box, and a `<Card>` is
-//! [`user_component_id("Card")`](name_binding::user_component_id) — the id
-//! `#[derive(Contract)]` computes for the same name, so a host that registers
-//! `CardProps::contract().id` mounts the author's component under the authored
-//! tag. Codegen never asks the §2.14 registry what `Card` is and could not: that
-//! registry is a runtime value of `Box<dyn ComponentFactory>` trait objects,
-//! while this runs during the host crate's own compilation. The name is what the
-//! two sides share.
-//!
-//! What that does not buy is a diagnostic: a tag naming a component nobody
-//! registered emits an id nothing mounts, and — since no part of matching,
-//! layout or paint reads a `ComponentId` — still renders as the same box it
-//! silently rendered as before. See [`name_binding`]'s module docs for why that
-//! rule cannot be stated once for both front ends.
-//!
-//! # A binding is a Rust path
-//!
-//! `{open}` in a `.okui` document emits the Rust expression `open`, verbatim.
-//! There is no evaluator here and there does not need to be one: the emitted code
-//! lands in a scope and **Rust resolves it**. A path that names nothing is a Rust
-//! compile error, in the caller's build, pointing at the caller's code. A field
-//! whose type cannot become a [`ViewValue`](obscur_view::view::ViewValue) — or,
-//! for a body `{expr}`, cannot `Display` — is the same. That is the whole type
-//! system of the expression language, borrowed rather than rebuilt.
-//!
-//! This holds in `<div>{user.name}</div>` too, and that took a second commit: the
-//! body case kept emitting the path's *spelling* as literal text long after the
-//! attribute case stopped. See [`emit_text_content`].
-//!
-//! This is also what makes §2.10's restrictions meaningful rather than
-//! decorative: the allow-list polices what may appear in a path that is about to
-//! become real Rust.
-//!
-//! # Which scope, and the gap for a compiled file
-//!
-//! For the inline `okui!` macro the scope is the **caller's**, and a binding reads
-//! the caller's locals — that is the path the tests exercise end to end. For a
-//! compiled file, [`document_to_view_fn`](ViewCodegen::document_to_view_fn) emits
-//! a **nullary** `pub fn <name>() -> View`, so the only scope a binding can
-//! resolve in is whatever the generated module has around it (a `const`, a
-//! `static`, an import). A file whose bindings read per-call state does not
-//! compile — the function has no parameters to read it from — and giving it them
-//! needs a decision about the props signature that nothing here makes yet. The
-//! emitted expression is right on both front ends; only the file front end's
-//! function shape limits what a binding can name.
-//!
-//! # Conditionals are real conditionals
-//!
-//! `<If cond={open}>` emits `if open { … }`. `<ElseIf>` / `<Else>` following it
-//! join the same chain, so exactly one branch renders — the point of having them.
-//!
-//! Emitting a real `if` is why the children of a fragment are collected into a
-//! `Vec` with `push` rather than written as a `vec![…]` literal: a conditional is
-//! a *statement*, and there is no way to spell one as an element of a list
-//! literal. The shape of the generated code follows from the language, not from
-//! preference.
-//!
-//! # Loops are real loops
-//!
-//! `<For each={items} as={item} key={item.id}>` emits `for item in &items { … }`.
-//! `as` names the loop variable, and it is a Rust binding like any other — which
-//! is what lets the body's `{item.name}` be an ordinary path. The collection is
-//! borrowed, so a `<For>` never consumes the caller's data.
-//!
-//! `<Empty>` and `<Separator>` children are the §2.11 slots, not template nodes;
-//! `<Loading>` is deliberately absent — see [`loop_slot`].
-//!
-//! A `<VirtualFor>` is the exception: it emits **no** loop. It is a §4.9
-//! performance contract, so it lowers to a single virtual-collection marker
-//! carrying its row template, which the runtime realizes into a viewport-bounded
-//! window — see [`emit_virtual_collection`].
+#![doc = include_str!("view_codegen.doc/_module.md")]
 
 use std::fmt::Write as _;
 
@@ -125,20 +9,12 @@ use obscur_ui_ir::name_binding::{self, TagPosition};
 
 use crate::codegen::CodegenRoot;
 
-/// Emits ordinary Rust source building a [`View`](obscur_view::view::View) from
-/// a compiled [`UiIrDocument`].
+#[doc = include_str!("view_codegen.doc/ViewCodegen.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ViewCodegen;
 
 impl ViewCodegen {
-    /// Emits a `pub fn <fn_name>() -> View { … }` whose body constructs the
-    /// [`View`](obscur_view::view::View) equivalent to `document`, naming every
-    /// engine type through `root`.
-    ///
-    /// The function is self-contained (fully-qualified paths, no `use` items);
-    /// drop it into a generated module the consumer `include!`s. `root` must be
-    /// the one that resolves in *that* crate — [`CodegenRoot::facade`] for an
-    /// application.
+    #[doc = include_str!("view_codegen.doc/document_to_view_fn.md")]
     #[must_use]
     pub fn document_to_view_fn(
         document: &UiIrDocument,
@@ -150,12 +26,19 @@ impl ViewCodegen {
         format!(
             "/// Generated from a `.okui` document by `obscur-okui-compiler`.\n\
              /// Do not edit by hand.\n\
+             // The two lints below fire on the emitted body by construction, and the\n\
+             // consumer cannot silence them at the site because the site is generated.\n\
+             // `vec_init_then_push`: a conditional is a *statement*, so children are\n\
+             // collected into a sink rather than written as a `vec![…]` literal (see the\n\
+             // module docs). `unreadable_literal`: every id is a raw hash printed in hex,\n\
+             // where digit separators would be noise, not legibility.\n\
+             #[allow(clippy::vec_init_then_push, clippy::unreadable_literal)]\n\
+             #[must_use]\n\
              pub fn {fn_name}() -> {view}::View {{\n{expr}\n}}\n"
         )
     }
 
-    /// Emits just the [`View`](obscur_view::view::View) expression (no enclosing
-    /// function), indented for embedding.
+    #[doc = include_str!("view_codegen.doc/document_to_view_expr.md")]
     #[must_use]
     pub fn document_to_view_expr(document: &UiIrDocument, root: &CodegenRoot) -> String {
         let nodes = emit_nodes_block(std::slice::from_ref(&document.root()), 1, root);
@@ -168,13 +51,7 @@ impl ViewCodegen {
     }
 }
 
-/// Emits a block expression evaluating to the `Vec<ViewNode>` that `nodes`
-/// lower to, at `indent` levels.
-///
-/// A `Vec` built with `push` rather than a `vec![…]` literal, because a
-/// conditional emits a real `if` — a statement, which no list literal can hold.
-/// Each block declares its own sink, so a nested fragment's pushes cannot reach
-/// an outer one.
+#[doc = include_str!("view_codegen.doc/emit_nodes_block.md")]
 fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize, root: &CodegenRoot) -> String {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
@@ -191,30 +68,7 @@ fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize, root: &CodegenRoot) -> S
     out
 }
 
-/// Appends the statements that push `nodes` into the enclosing `__nodes` sink,
-/// at `indent` levels (4 spaces each).
-///
-/// # Conditionals are grouped, not emitted one by one
-///
-/// `<If>` / `<ElseIf>` / `<Else>` arrive as *siblings*, but they are one
-/// construct: emitting each on its own would produce `if a {…} if b {…} {…}` —
-/// three independent statements, the last of which always runs. So a run of them
-/// is collected and emitted as a single `if / else if / else` chain, which is the
-/// only shape where exactly one branch renders.
-///
-/// A run ends at the first non-conditional sibling, or after an `<Else>` (nothing
-/// may follow the fallback). An `<ElseIf>` / `<Else>` with no `<If>` before it
-/// starts no chain and is emitted as its own branch, which is what a stray
-/// `<Else>` deserves: it renders unconditionally rather than silently attaching
-/// to an unrelated `<If>` further up.
-///
-/// # The inherited key
-///
-/// `key` is the identity a `<For>` gives the node it renders for one item. It is
-/// threaded down rather than applied at the loop, because the item's root may sit
-/// under a conditional: `<For><If cond={x}><Row/></If></For>` must still key the
-/// `Row`. A node with a key of its own keeps it; `None` outside a loop leaves
-/// every node exactly as before.
+#[doc = include_str!("view_codegen.doc/emit_into.md")]
 fn emit_into(
     nodes: &[&UiIrNode],
     out: &mut String,
@@ -236,50 +90,12 @@ fn emit_into(
     }
 }
 
-/// The reserved child tags of a `<For>` that are slots rather than the item
-/// template (spec §2.11).
-///
-/// `<Loading>` is **not** here. `empty` and `separator` are decidable from the
-/// collection itself — it has a length, and iteration has a between — but nothing
-/// about a Rust collection says it is still loading: that needs a signal from
-/// outside, and the spec does not say what it is. Inventing one (`loading={…}`,
-/// say) would be putting words in the spec's mouth, so the slot stays unparsed
-/// and `<Loading>` is treated as an ordinary child until the signal is defined.
+#[doc = include_str!("view_codegen.doc/loop_slot.md")]
 fn loop_slot(tag: &str) -> bool {
     matches!(tag, "Empty" | "Separator")
 }
 
-/// Emits a `<For>` as a real Rust `for` loop, with its `empty` / `separator`
-/// slots (spec §2.11).
-///
-/// The shape:
-///
-/// ```ignore
-/// let mut __first = true;            // only when a slot needs it
-/// for item in &items {
-///     if !__first { /* separator */ }
-///     __first = false;
-///     __nodes.push(/* body, keyed */);
-/// }
-/// if __first { /* empty */ }
-/// ```
-///
-/// One flag serves both slots, and that is not a trick: "no separator before the
-/// first item" and "the collection was empty" are the same question — did an
-/// iteration happen yet.
-///
-/// `as={item}` names the loop variable, and it is a Rust binding like any other:
-/// the body's `{item.name}` is then an ordinary path (see the module docs).
-/// Without `as` the item is bound to `_`, which renders the body once per item
-/// with no way to read it — a repeat, which is what a `<For>` that names nothing
-/// asks for.
-///
-/// The collection is walked with `.iter()`, not `&{each}`. Both borrow, so a
-/// `<For>` never consumes the caller's data — but `&{each}` breaks the moment the
-/// binding is already a reference (`&[T]` becomes `&&[T]`, which is not an
-/// iterator), and a caller passing a slice is not doing anything unusual.
-/// `.iter()` reads the same on a `Vec`, a slice, an array and a borrow of any of
-/// them.
+#[doc = include_str!("view_codegen.doc/emit_loop.md")]
 fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoot) {
     // A `<VirtualFor>` is not a `<For>`: it does not walk the collection at all.
     // It emits a virtual-collection marker the runtime realizes into a
@@ -338,22 +154,7 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoo
     }
 }
 
-/// Emits a `<VirtualFor>` as a virtual-collection marker (spec §2.11, §4.9).
-///
-/// Where [`emit_loop`] emits a real `for` that materializes one node per item, a
-/// `<VirtualFor>` emits a single
-/// [`ViewNode::virtual_collection`](obscur_view::view::ViewNode::virtual_collection)
-/// carrying its row template. The runtime, which owns the viewport, realizes that
-/// marker into a viewport-bounded window — so the generated code never walks the
-/// collection and its size is independent of the collection's length, which is
-/// the promise a `<For>` cannot make.
-///
-/// The window template is emitted **once**, with no item binding: a windowed row
-/// is not yet a function of per-item data (the retained collection consumer the
-/// `collection_rule` docs describe is what would thread it in), so a
-/// `<VirtualFor>` body reads no `item`. Its `empty`/`separator` slots — a `<For>`
-/// affordance about iteration — are not part of a window template and are
-/// dropped.
+#[doc = include_str!("view_codegen.doc/emit_virtual_collection.md")]
 fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoot) {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
@@ -375,13 +176,12 @@ fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize, roo
     let _ = writeln!(out, "{pad}));");
 }
 
-/// Whether `node` opens a conditional chain (an `<If>`).
+#[doc = include_str!("view_codegen.doc/is_chain_head.md")]
 fn is_chain_head(node: &UiIrNode) -> bool {
     node.kind() == UiIrNodeKind::Conditional && node.tag() == "If"
 }
 
-/// The exclusive end of the conditional chain starting at `start`: every
-/// following `<ElseIf>`, up to and including the first `<Else>`.
+#[doc = include_str!("view_codegen.doc/chain_end.md")]
 fn chain_end(nodes: &[&UiIrNode], start: usize) -> usize {
     let mut end = start + 1;
     while end < nodes.len() && nodes[end].kind() == UiIrNodeKind::Conditional {
@@ -397,7 +197,7 @@ fn chain_end(nodes: &[&UiIrNode], start: usize) -> usize {
     end
 }
 
-/// Emits one `if / else if / else` chain, each branch pushing its own body.
+#[doc = include_str!("view_codegen.doc/emit_conditional_chain.md")]
 fn emit_conditional_chain(
     chain: &[&UiIrNode],
     out: &mut String,
@@ -424,24 +224,14 @@ fn emit_conditional_chain(
     out.push('\n');
 }
 
-/// The Rust condition expression for one branch.
-///
-/// A missing `cond` on an `<If>` / `<ElseIf>` emits `false`: a condition that was
-/// never stated is not true, so the branch does not render. The alternative —
-/// rendering a branch whose condition is absent — is the silent-wrong-output
-/// behaviour this whole path exists to remove.
+#[doc = include_str!("view_codegen.doc/branch_condition.md")]
 fn branch_condition(branch: &UiIrNode) -> String {
     branch
         .property("cond")
         .map_or_else(|| "false".to_owned(), emit_condition)
 }
 
-/// Emits an expression in boolean position.
-///
-/// A binding is its Rust path, verbatim — `cond={open}` is `if open`. A literal
-/// `true`/`false` is itself. Anything else (a number, a string, a call) is not a
-/// condition, and emits `false` rather than a type error inside generated code
-/// the author cannot see.
+#[doc = include_str!("view_codegen.doc/emit_condition.md")]
 fn emit_condition(expression: &UiIrExpression) -> String {
     match expression {
         UiIrExpression::Binding(path) => path.to_string(),
@@ -450,11 +240,7 @@ fn emit_condition(expression: &UiIrExpression) -> String {
     }
 }
 
-/// Appends the statement pushing the single `ViewNode` `node` lowers to.
-///
-/// A transparent fragment and a (still-spliced) loop push their children instead
-/// of a node of their own. An [interpolation](UiIrNode::interpolation) pushes a
-/// **text** node — it is a body `{expr}`, and its content is the expression.
+#[doc = include_str!("view_codegen.doc/emit_node.md")]
 fn emit_node(
     node: &UiIrNode,
     out: &mut String,
@@ -485,8 +271,7 @@ fn emit_node(
     }
 }
 
-/// Appends the statement pushing a `ViewNode::text` whose content is the
-/// already-emitted Rust expression `content`.
+#[doc = include_str!("view_codegen.doc/emit_text.md")]
 fn emit_text(
     node: &UiIrNode,
     out: &mut String,
@@ -502,31 +287,7 @@ fn emit_text(
     out.push_str(");\n");
 }
 
-/// Emits the Rust expression for a text node's content.
-///
-/// A binding is its **Rust path**, displayed: `<div>{user.name}</div>` becomes
-/// `ViewNode::text(ToString::to_string(&(user.name)))`. It used to emit the path
-/// as a string *literal*, so `{user.name}` rendered the nine characters
-/// `user.name` — the document showing its own source. That was fixed for
-/// attributes and left live here, on the more common case.
-///
-/// `Display` is the bound, where [`emit_value`] uses `Into<ViewValue>`, because
-/// text content is a string and a body `{count}` must render `7` rather than fail
-/// to compile. A type with no `Display` is **rustc's** error in the caller's
-/// build — the same borrowed type system every other binding leans on. (The
-/// emitted tokens are re-parsed from text, so that error lands on the whole
-/// `okui!` invocation, not on the offending expression; only the §2.10 check,
-/// which runs on the parsed input, is spanned that precisely.) Displaying by
-/// reference, so reading a field for text never moves the caller's data.
-///
-/// The path is parenthesised because a "path" is only mostly a path: both front
-/// ends fall back to a binding on the raw text for anything they do not classify
-/// as a literal, so `{a + b}` arrives here as the binding `a + b`, and
-/// `&a + b` is not what the author wrote.
-///
-/// A call emits the empty string for the reason [`emit_value`] emits `Null`:
-/// §2.10 allows only "explicitly exported pure functions", and nothing yet decides
-/// which those are.
+#[doc = include_str!("view_codegen.doc/emit_text_content.md")]
 fn emit_text_content(expression: &UiIrExpression) -> String {
     match expression {
         UiIrExpression::Binding(path) => format!("::std::string::ToString::to_string(&({path}))"),
@@ -540,14 +301,7 @@ fn emit_text_content(expression: &UiIrExpression) -> String {
     }
 }
 
-/// Appends the statement pushing a single `ViewNode::Element` for `node`.
-///
-/// `position` comes from the caller's [`UiIrNodeKind`], which is where the front
-/// ends already recorded their component-vs-element verdict; it decides what an
-/// unrecognised tag falls back to (a `Container` box, or the component's own
-/// name-derived id — see [`name_binding::component_id_for`]) **and** whether the
-/// tag is also emitted as the node's local name (see
-/// [`name_binding::local_name_for`]): an element is its tag, a component is not.
+#[doc = include_str!("view_codegen.doc/emit_element.md")]
 fn emit_element(
     node: &UiIrNode,
     out: &mut String,
@@ -626,8 +380,7 @@ fn emit_element(
     out.push_str(");\n");
 }
 
-/// Appends a `.with_key(…)` modifier for `node`'s key, if it has one; a no-op
-/// otherwise. Mirrors the runtime bridge's key lowering.
+#[doc = include_str!("view_codegen.doc/emit_key.md")]
 fn emit_key(
     node: &UiIrNode,
     out: &mut String,
@@ -673,26 +426,7 @@ fn emit_key(
     let _ = write!(out, ".with_key({key_expr})");
 }
 
-/// Emits the `ViewValue` expression for a property's value expression.
-///
-/// A binding emits its **Rust path**, converted through
-/// [`ViewValue::from`](obscur_view::view::ViewValue): `value={label}` becomes
-/// `ViewValue::from(label.clone())`. It used to emit the path as a string
-/// literal, so `value={user.name}` produced the literal text `"user.name"` — the
-/// placeholder that made every dynamic `.okui` document silently wrong.
-///
-/// The `.clone()` is uniform rather than clever: it works for an owned `String`
-/// and for a `Copy` number alike, and a binding read into a `ViewValue` cannot
-/// move out of the caller's data — a `<For>` body would read the same field on
-/// every iteration.
-///
-/// If the path names nothing, or names something no `ViewValue` can be built
-/// from, **rustc says so** in the caller's build. That is the type checking, and
-/// it is not reimplemented here.
-///
-/// A call still emits `Null`: §2.10 allows "explicitly exported pure functions",
-/// but nothing yet decides which functions those are, and emitting an arbitrary
-/// call would be exactly the unconstrained invocation §2.10 forbids.
+#[doc = include_str!("view_codegen.doc/emit_value.md")]
 fn emit_value(expression: &UiIrExpression, root: &CodegenRoot) -> String {
     let view = root.view();
     match expression {
@@ -704,7 +438,7 @@ fn emit_value(expression: &UiIrExpression, root: &CodegenRoot) -> String {
     }
 }
 
-/// Emits the `ViewValue` expression for a literal.
+#[doc = include_str!("view_codegen.doc/emit_literal.md")]
 fn emit_literal(value: &UiIrValue, root: &CodegenRoot) -> String {
     let view = root.view();
     match value {
@@ -718,13 +452,12 @@ fn emit_literal(value: &UiIrValue, root: &CodegenRoot) -> String {
     }
 }
 
-/// Renders `text` as a valid Rust string literal (Debug formatting escapes
-/// quotes, backslashes and control characters correctly).
+#[doc = include_str!("view_codegen.doc/string_literal.md")]
 fn string_literal(text: &str) -> String {
     format!("{text:?}")
 }
 
-/// Returns `indent` levels of four-space indentation.
+#[doc = include_str!("view_codegen.doc/indentation.md")]
 fn indentation(indent: usize) -> String {
     "    ".repeat(indent)
 }

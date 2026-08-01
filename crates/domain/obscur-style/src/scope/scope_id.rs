@@ -1,46 +1,26 @@
-//! Opaque identifier for a style scope.
-//!
-//! A [`ScopeId`] names a style scope (the boundary that scopes a component's or
-//! module's CSS, per §4.15) without carrying any behaviour. It is a lightweight
-//! newtype over an integer so it can key maps and be compared and ordered
-//! cheaply. The behaviour of a scope (isolation, boundary-crossing) lives on
-//! [`crate::scope::StyleScope`]; this type is only its identity.
+#![doc = include_str!("scope_id.doc/_module.md")]
 
-/// An opaque identifier for a style scope (§4.15).
-///
-/// This is a newtype over a `u32`: values are only meaningful relative to the
-/// allocator that hands them out. `Copy + Eq + Hash + Ord` so it can key maps
-/// and order deterministically.
-///
-/// [`ScopeId::GLOBAL`] is a reserved value denoting the root / global
-/// application scope; it is handed out by convention rather than being special
-/// to this type.
+#[doc = include_str!("scope_id.doc/ScopeId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ScopeId(u32);
 
 impl ScopeId {
-    /// The reserved identifier for the root / global application scope.
-    ///
-    /// The global scope performs no isolation, so it is convenient to give it a
-    /// well-known, stable value that allocators can reserve.
+    #[doc = include_str!("scope_id.doc/GLOBAL.md")]
     pub const GLOBAL: ScopeId = ScopeId(0);
 
-    /// Wraps a raw integer as a [`ScopeId`].
-    ///
-    /// The caller is responsible for the integer being a meaningful scope
-    /// identifier within its allocation domain.
+    #[doc = include_str!("scope_id.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw integer backing this identifier.
+    #[doc = include_str!("scope_id.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0
     }
 
-    /// Returns `true` when this is the reserved global scope identifier.
+    #[doc = include_str!("scope_id.doc/is_global.md")]
     #[must_use]
     pub const fn is_global(self) -> bool {
         self.0 == Self::GLOBAL.0

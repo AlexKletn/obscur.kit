@@ -1,4 +1,4 @@
-//! Presentation module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod fullscreen_mode;
 pub use fullscreen_mode::FullscreenMode;
 mod presentation_mode;

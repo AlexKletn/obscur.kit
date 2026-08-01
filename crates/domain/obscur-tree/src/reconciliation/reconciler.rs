@@ -1,4 +1,4 @@
-//! `Reconciler`: the engine that updates the retained tree from a desired tree.
+#![doc = include_str!("reconciler.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -13,44 +13,14 @@ use crate::tree::{RetainedTree, Subtree};
 
 use super::{ChildMatcher, IdentityMatch, ReconciliationOp, ReconciliationPlan};
 
-/// Transforms a desired declarative tree into the retained tree, preserving node
-/// identity across moves via keys.
-///
-/// Reconciliation is exactly the desired → retained transform (spec §2.2):
-/// updates are expressed as new desired state, and this engine is the sole
-/// writer that turns that state into retained-tree structure. It never invents a
-/// competing identity — it reuses an existing [`NodeId`] whenever a desired child
-/// is compatible with an existing one (matching by key across reorders, per spec
-/// §2.11), and mints a fresh id only when it must.
-///
-/// **Structure**, **identity**, **text content**, an element's **full authored
-/// property list** (plus the CSS-relevant [`StyleAttributes`] derived from it),
-/// and its **event bindings** (`event → command`) are all reconciled here.
-///
-/// Properties are retained rather than projected away because values flow *down*
-/// (spec §3.1) and the desired tree is gone by the time downstream phases run: a
-/// component's typed props are decoded from the retained list after reconcile,
-/// exactly as a fired event finds its command in the retained bindings. The
-/// change check compares the whole list, so a change to *any* authored prop — not
-/// just a CSS-relevant one — yields an `Update`.
-///
-/// **A §2.12 slot outlet is refused**, never materialized: `project_slots` has
-/// already substituted away every outlet in a component's output, so one reaching
-/// this engine belongs to a view no projection will run over and could only become
-/// an empty box nothing can fill. That refusal is what makes "an outlet never
-/// becomes a retained node" true of the tree rather than of one code path; it is
-/// silent here, because this engine has no diagnostics channel —
-/// `UiRuntime::report_stray_outlets` is what tells the author.
-///
-/// Every pass returns a [`ReconciliationPlan`] describing what it did. The engine
-/// is deterministic and panic-free, and is defensive about stale ids.
+#[doc = include_str!("reconciler.doc/Reconciler.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Reconciler {
     matcher: ChildMatcher,
 }
 
 impl Reconciler {
-    /// Creates a reconciler.
+    #[doc = include_str!("reconciler.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -58,13 +28,7 @@ impl Reconciler {
         }
     }
 
-    /// Ensures a root node exists and reconciles its children against `desired`.
-    ///
-    /// If the tree already has a live root it is reused; otherwise a
-    /// [`NodeKind::Root`] node is allocated and designated as the root (recorded
-    /// as an [`ReconciliationOp::Insert`] with the root as its own parent). The
-    /// desired [`View`]'s top-level fragment then reconciles into that root's
-    /// children.
+    #[doc = include_str!("reconciler.doc/reconcile_root.md")]
     #[must_use]
     pub fn reconcile_root(&self, tree: &mut RetainedTree, desired: &View) -> ReconciliationPlan {
         let mut plan = ReconciliationPlan::new();
@@ -85,11 +49,7 @@ impl Reconciler {
         plan
     }
 
-    /// Reconciles the children of an existing retained `parent` against a desired
-    /// fragment, updating the tree and returning the op log.
-    ///
-    /// If `parent` is not a live node the pass is a no-op and an empty plan is
-    /// returned.
+    #[doc = include_str!("reconciler.doc/reconcile.md")]
     #[must_use]
     pub fn reconcile(
         &self,
@@ -102,8 +62,7 @@ impl Reconciler {
         plan
     }
 
-    /// Reconciles `desired` into the children of `parent`, appending ops to
-    /// `plan`. Recurses into each element child. A no-op if `parent` is stale.
+    #[doc = include_str!("reconciler.doc/reconcile_into.md")]
     fn reconcile_into(
         self,
         tree: &mut RetainedTree,
@@ -288,14 +247,13 @@ impl Reconciler {
     }
 }
 
-/// Whether `id` is a live node flagged as hosting a mounted component, whose
-/// children are therefore owned by that component rather than by the desired tree.
+#[doc = include_str!("reconciler.doc/hosts_component.md")]
 fn hosts_component(tree: &RetainedTree, id: NodeId) -> bool {
     tree.get(id)
         .is_some_and(|node| node.flags().contains(NodeFlags::COMPONENT_HOST))
 }
 
-/// Maps a desired node to the retained [`NodeKind`] it materializes as.
+#[doc = include_str!("reconciler.doc/node_kind_of.md")]
 fn node_kind_of(node: &ViewNode) -> NodeKind {
     match node {
         ViewNode::Element { component, .. } => NodeKind::Element {
@@ -307,7 +265,7 @@ fn node_kind_of(node: &ViewNode) -> NodeKind {
     }
 }
 
-/// Records any key that more than one desired child claims (spec §2.4).
+#[doc = include_str!("reconciler.doc/report_duplicate_keys.md")]
 fn report_duplicate_keys(parent: NodeId, desired: &[ViewNode], plan: &mut ReconciliationPlan) {
     let mut counts: HashMap<StableKey, usize> = HashMap::new();
     for node in desired {
@@ -322,13 +280,12 @@ fn report_duplicate_keys(parent: NodeId, desired: &[ViewNode], plan: &mut Reconc
     }
 }
 
-/// Extracts the retained key (a [`StableKey`]) a desired node carries, if any.
+#[doc = include_str!("reconciler.doc/desired_key.md")]
 fn desired_key(node: &ViewNode) -> Option<StableKey> {
     node.key().map(|key| key.stable_key().clone())
 }
 
-/// Sets a node's logical and visual parent to `parent` and its reconciliation
-/// key. A no-op if `id` is stale.
+#[doc = include_str!("reconciler.doc/apply_identity.md")]
 fn apply_identity(tree: &mut RetainedTree, id: NodeId, parent: NodeId, key: Option<StableKey>) {
     if let Some(node) = tree.get_mut(id) {
         node.set_logical_parent(LogicalParent::of(parent));
@@ -337,9 +294,7 @@ fn apply_identity(tree: &mut RetainedTree, id: NodeId, parent: NodeId, key: Opti
     }
 }
 
-/// Updates a reused text node's content in place, returning `true` if the
-/// content actually changed. A no-op (returning `false`) if `id` is stale or is
-/// not a text node.
+#[doc = include_str!("reconciler.doc/apply_text_content.md")]
 fn apply_text_content(tree: &mut RetainedTree, id: NodeId, content: &str) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
@@ -358,9 +313,7 @@ fn apply_text_content(tree: &mut RetainedTree, id: NodeId, content: &str) -> boo
     changed
 }
 
-/// Refreshes a node's CSS-relevant style attributes from a desired element's
-/// props, returning `true` if they actually changed. A no-op (returning
-/// `false`) if `id` is stale or the extracted attributes equal the current ones.
+#[doc = include_str!("reconciler.doc/apply_props.md")]
 fn apply_props(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
@@ -380,21 +333,7 @@ fn apply_props(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> b
     true
 }
 
-/// Refreshes a node's §2.12 slot content — the authored children a mounted
-/// component projects into the outlets its own render declares — returning `true`
-/// if it actually changed. A no-op (returning `false`) if `id` is stale.
-///
-/// The children are kept **only** when one of them carries a `slot="…"`
-/// assignment. That gate is what makes retaining them affordable: an element's
-/// children include its whole subtree, so keeping every element's would clone the
-/// desired tree once per level of depth. A document that authors no slot stores
-/// nothing and pays one `assigns_slots` scan of each child list.
-///
-/// This is deliberately *not* gated on [`hosts_component`]. Whether a node hosts
-/// a component is only known after the plan this pass produces has been synced
-/// against a registry, and the reconciler — a domain-tier engine — can see no
-/// registry at all. Gating on the authored data instead keeps the decision where
-/// the data is, and keeps the content available on the very first frame.
+#[doc = include_str!("reconciler.doc/apply_slot_content.md")]
 fn apply_slot_content(tree: &mut RetainedTree, id: NodeId, children: &ViewFragment) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
@@ -418,9 +357,7 @@ fn apply_slot_content(tree: &mut RetainedTree, id: NodeId, children: &ViewFragme
     true
 }
 
-/// Refreshes a node's event bindings from a desired element's events, returning
-/// `true` if they actually changed. A no-op (returning `false`) if `id` is stale
-/// or the events equal the current bindings.
+#[doc = include_str!("reconciler.doc/apply_events.md")]
 fn apply_events(tree: &mut RetainedTree, id: NodeId, events: &[ViewEventBinding]) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;

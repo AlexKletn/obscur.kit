@@ -1,11 +1,4 @@
-//! **SPECIFICATION-DERIVED** unified-action cases for obscur.kit §6.7.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §6
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the toolkit, not about the test; expected values must not be
-//! edited to match current behaviour.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch6_actions.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch6_support/mod.rs"]
@@ -26,7 +19,7 @@ use support::{at, drive, el, pointer, view};
 
 const CSS: &str = ".panel{width:200px;height:200px} .item{width:200px;height:50px}";
 
-/// A rendered runtime with the `.item` node focused by a real pointer press.
+#[doc = include_str!("spec_ch6_actions.doc/focused_runtime.md")]
 fn focused_runtime() -> (UiRuntime, obscur_kit::identity::NodeId) {
     let v = view(vec![el(1, "panel", vec![el(2, "item", vec![])])]);
     let mut rt = drive(200.0, 200.0, CSS, &v);
@@ -41,7 +34,7 @@ fn focused_runtime() -> (UiRuntime, obscur_kit::identity::NodeId) {
     (rt, item)
 }
 
-/// Presses Ctrl+S through the real key path (Ctrl down, then S).
+#[doc = include_str!("spec_ch6_actions.doc/press_ctrl_s.md")]
 fn press_ctrl_s(rt: &mut UiRuntime) {
     rt.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
     rt.handle_key(KeyEvent::press(
@@ -54,14 +47,7 @@ fn press_ctrl_s(rt: &mut UiRuntime) {
 // P6-10
 // -------------------------------------------------------------------------
 
-/// §6.7 Menus and actions: "Unified Action model:" with "- stable ID;" …
-/// "- enabled;", and "The same action can drive:" / "- native menu;" /
-/// "- kit-rendered menu;" / "- toolbar;" / "- command palette;" / "- tray;" /
-/// "- accessibility;" / "- shortcuts."
-///
-/// One mutation by ID disables every surface at once: the shortcut must not fire
-/// the handler, and the action's own state is the single source of truth every
-/// surface reads.
+#[doc = include_str!("spec_ch6_actions.doc/disabling_an_action_by_id_also_disables_its_keyboard_shortcut.md")]
 #[test]
 fn disabling_an_action_by_id_also_disables_its_keyboard_shortcut() {
     let save = InternedSymbol::from_raw(0xA1);
@@ -126,11 +112,7 @@ fn disabling_an_action_by_id_also_disables_its_keyboard_shortcut() {
 // P6-11
 // -------------------------------------------------------------------------
 
-/// §6.7: "- checked;" and "- visible;" in the Action model.
-///
-/// `checked` is semantic state, not a title decoration; `visible = false` hides
-/// the action from rendered surfaces without unregistering it — the stable ID
-/// still resolves and the handler is still invocable.
+#[doc = include_str!("spec_ch6_actions.doc/checked_is_semantic_state_and_hiding_an_action_does_not_unregister_it.md")]
 #[test]
 fn checked_is_semantic_state_and_hiding_an_action_does_not_unregister_it() {
     let grid = InternedSymbol::from_raw(0xB2);

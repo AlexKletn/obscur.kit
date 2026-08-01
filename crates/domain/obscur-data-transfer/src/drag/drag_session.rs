@@ -1,67 +1,37 @@
-//! The active drag state machine and its lifecycle (spec §6.21 drag and drop —
-//! enter/leave/over/drop/cancel).
+#![doc = include_str!("drag_session.doc/_module.md")]
 
 use crate::drag::{DragEffect, DragSource, DropTarget};
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
 
-/// The lifecycle phase of a [`DragSession`] (spec §6.21 enter/leave/over/drop/
-/// cancel).
-///
-/// A session begins [`Started`](DragPhase::Started) — dragging but not yet over
-/// any drop target — and moves to [`Over`](DragPhase::Over) while the pointer is
-/// over an accepting target. It ends in one of two terminal phases:
-/// [`Dropped`](DragPhase::Dropped) when a valid drop committed, or
-/// [`Cancelled`](DragPhase::Cancelled) when the drag was abandoned or dropped
-/// with no valid target.
+#[doc = include_str!("drag_session.doc/DragPhase.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DragPhase {
-    /// The drag has begun but the pointer is not over a drop target (spec
-    /// §6.21).
+    #[doc = include_str!("drag_session.doc/Started.md")]
     Started,
-    /// The pointer is currently over an accepting drop target (spec §6.21).
+    #[doc = include_str!("drag_session.doc/Over.md")]
     Over,
-    /// A valid drop committed — terminal (spec §6.21).
+    #[doc = include_str!("drag_session.doc/Dropped.md")]
     Dropped,
-    /// The drag was cancelled — terminal (spec §6.21).
+    #[doc = include_str!("drag_session.doc/Cancelled.md")]
     Cancelled,
 }
 
 impl DragPhase {
-    /// Returns whether this is a terminal phase —
-    /// [`Dropped`](DragPhase::Dropped) or [`Cancelled`](DragPhase::Cancelled)
-    /// (spec §6.21).
+    #[doc = include_str!("drag_session.doc/is_terminal.md")]
     #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Dropped | Self::Cancelled)
     }
 
-    /// Returns whether this is an active phase —
-    /// [`Started`](DragPhase::Started) or [`Over`](DragPhase::Over) (spec
-    /// §6.21).
+    #[doc = include_str!("drag_session.doc/is_active.md")]
     #[must_use]
     pub const fn is_active(self) -> bool {
         matches!(self, Self::Started | Self::Over)
     }
 }
 
-/// The active drag state machine (spec §6.21 enter/leave/over/drop/cancel).
-///
-/// A session is created with [`start`](DragSession::start) from a
-/// [`DragSource`] and driven by pointer events: [`move_to`](DragSession::move_to)
-/// tracks the pointer, [`enter`](DragSession::enter) and
-/// [`leave`](DragSession::leave) mark crossing into and out of a
-/// [`DropTarget`], and [`drop`](DragSession::drop) or
-/// [`cancel`](DragSession::cancel) terminate it. Throughout, the session holds
-/// the current [`position`](DragSession::position), the target
-/// [`over`](DragSession::over) the pointer (if any), the negotiated
-/// [`effect`](DragSession::effect), and the [`phase`](DragSession::phase).
-///
-/// Once the session reaches a terminal phase (see
-/// [`DragPhase::is_terminal`]) every mutating method is a no-op, so a committed
-/// drop or cancel cannot be reopened. Any provisional layout transaction that
-/// materialises placeholders or insertion slots while a drag hovers is the
-/// runtime's concern and is not modeled here.
+#[doc = include_str!("drag_session.doc/DragSession.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragSession {
     source: DragSource,
@@ -72,8 +42,7 @@ pub struct DragSession {
 }
 
 impl DragSession {
-    /// Starts a session from `source` at the origin, over nothing, with no
-    /// effect and phase [`Started`](DragPhase::Started) (spec §6.21).
+    #[doc = include_str!("drag_session.doc/start.md")]
     #[must_use]
     pub fn start(source: DragSource) -> DragSession {
         Self {
@@ -85,9 +54,7 @@ impl DragSession {
         }
     }
 
-    /// Updates the current pointer position (spec §6.21).
-    ///
-    /// A no-op once the session is terminal.
+    #[doc = include_str!("drag_session.doc/move_to.md")]
     pub fn move_to(&mut self, position: Point) {
         if self.phase.is_terminal() {
             return;
@@ -95,16 +62,7 @@ impl DragSession {
         self.position = position;
     }
 
-    /// Marks the pointer entering `target` and negotiates the effect (spec
-    /// §6.21).
-    ///
-    /// If `target` accepts the dragged payload, the session records it as the
-    /// current target, sets the effect to the target's negotiated choice for
-    /// `preferred`, and enters phase [`Over`](DragPhase::Over). If the target
-    /// rejects the payload, the session clears the current target and effect and
-    /// returns to phase [`Started`](DragPhase::Started).
-    ///
-    /// A no-op once the session is terminal.
+    #[doc = include_str!("drag_session.doc/enter.md")]
     pub fn enter(&mut self, target: &DropTarget, preferred: DragEffect) {
         if self.phase.is_terminal() {
             return;
@@ -120,10 +78,7 @@ impl DragSession {
         }
     }
 
-    /// Marks the pointer leaving the current target, clearing it and the effect
-    /// and returning to phase [`Started`](DragPhase::Started) (spec §6.21).
-    ///
-    /// A no-op once the session is terminal.
+    #[doc = include_str!("drag_session.doc/leave.md")]
     pub fn leave(&mut self) {
         if self.phase.is_terminal() {
             return;
@@ -133,15 +88,7 @@ impl DragSession {
         self.phase = DragPhase::Started;
     }
 
-    /// Commits a drop, returning whether it succeeded (spec §6.21).
-    ///
-    /// Succeeds only when the session is in phase [`Over`](DragPhase::Over) with
-    /// a non-[`None`](DragEffect::None) effect: it enters phase
-    /// [`Dropped`](DragPhase::Dropped) and returns `true`. Otherwise — a drop
-    /// with no valid target — it enters phase [`Cancelled`](DragPhase::Cancelled)
-    /// and returns `false`.
-    ///
-    /// A no-op returning `false` once the session is already terminal.
+    #[doc = include_str!("drag_session.doc/drop.md")]
     pub fn drop(&mut self) -> bool {
         if self.phase.is_terminal() {
             return false;
@@ -155,10 +102,7 @@ impl DragSession {
         }
     }
 
-    /// Cancels the drag, clearing the target and effect and entering phase
-    /// [`Cancelled`](DragPhase::Cancelled) (spec §6.21).
-    ///
-    /// A no-op once the session is terminal.
+    #[doc = include_str!("drag_session.doc/cancel.md")]
     pub fn cancel(&mut self) {
         if self.phase.is_terminal() {
             return;
@@ -168,43 +112,43 @@ impl DragSession {
         self.effect = DragEffect::None;
     }
 
-    /// Returns the current lifecycle phase (spec §6.21).
+    #[doc = include_str!("drag_session.doc/phase.md")]
     #[must_use]
     pub const fn phase(&self) -> DragPhase {
         self.phase
     }
 
-    /// Returns the current pointer position (spec §6.21).
+    #[doc = include_str!("drag_session.doc/position.md")]
     #[must_use]
     pub const fn position(&self) -> Point {
         self.position
     }
 
-    /// Returns the drop target currently under the pointer, if any (spec §6.21).
+    #[doc = include_str!("drag_session.doc/over.md")]
     #[must_use]
     pub const fn over(&self) -> Option<NodeId> {
         self.over
     }
 
-    /// Returns the currently negotiated effect (spec §6.21).
+    #[doc = include_str!("drag_session.doc/effect.md")]
     #[must_use]
     pub const fn effect(&self) -> DragEffect {
         self.effect
     }
 
-    /// Returns the drag source this session was started from (spec §6.21).
+    #[doc = include_str!("drag_session.doc/source.md")]
     #[must_use]
     pub const fn source(&self) -> &DragSource {
         &self.source
     }
 
-    /// Returns whether the session is still active (spec §6.21).
+    #[doc = include_str!("drag_session.doc/is_active_2.md")]
     #[must_use]
     pub const fn is_active(&self) -> bool {
         self.phase.is_active()
     }
 
-    /// Returns whether the session has reached a terminal phase (spec §6.21).
+    #[doc = include_str!("drag_session.doc/is_terminal_2.md")]
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
         self.phase.is_terminal()

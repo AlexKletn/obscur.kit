@@ -1,29 +1,17 @@
-//! Maps IR node ids to their originating source spans [`SourceMap`] (spec §2.5
-//! source maps).
+#![doc = include_str!("source_map.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
 use crate::source::SourceReference;
 
-/// A map from IR node ids to the [`SourceReference`]s they originated from
-/// (spec §2.5).
-///
-/// Diagnostics raised against the IR carry a node id; the source map resolves
-/// that id back to a span in the original source (for example the `.okui` file)
-/// so errors can point at the code the author wrote.
-///
-/// Node ids are stored as raw `u64` keys. The document module is what assigns
-/// and interprets these ids; keeping them as plain integers here lets the source
-/// map stay independent of the document types (no dependency cycle) while still
-/// keying on the same value. A [`BTreeMap`] gives deterministic iteration order,
-/// which keeps serialized source maps and diagnostics stable across runs.
+#[doc = include_str!("source_map.doc/SourceMap.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SourceMap {
     entries: BTreeMap<u64, SourceReference>,
 }
 
 impl SourceMap {
-    /// Creates an empty source map.
+    #[doc = include_str!("source_map.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -31,48 +19,46 @@ impl SourceMap {
         }
     }
 
-    /// Inserts the source `reference` for `node_id`, returning any reference it
-    /// replaced.
+    #[doc = include_str!("source_map.doc/insert.md")]
     pub fn insert(&mut self, node_id: u64, reference: SourceReference) -> Option<SourceReference> {
         self.entries.insert(node_id, reference)
     }
 
-    /// Returns the source reference recorded for `node_id`, if any.
+    #[doc = include_str!("source_map.doc/get.md")]
     #[must_use]
     pub fn get(&self, node_id: u64) -> Option<&SourceReference> {
         self.entries.get(&node_id)
     }
 
-    /// Returns whether a reference is recorded for `node_id`.
+    #[doc = include_str!("source_map.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, node_id: u64) -> bool {
         self.entries.contains_key(&node_id)
     }
 
-    /// Removes the reference for `node_id`, returning whether one was present.
+    #[doc = include_str!("source_map.doc/remove.md")]
     pub fn remove(&mut self, node_id: u64) -> bool {
         self.entries.remove(&node_id).is_some()
     }
 
-    /// Returns the number of recorded references.
+    #[doc = include_str!("source_map.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns whether the map is empty.
+    #[doc = include_str!("source_map.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Iterates over the `(node_id, reference)` pairs in ascending node-id
-    /// order (deterministic [`BTreeMap`] order).
+    #[doc = include_str!("source_map.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (u64, &SourceReference)> {
         self.entries.iter().map(|(&id, reference)| (id, reference))
     }
 
-    /// Removes all recorded references.
+    #[doc = include_str!("source_map.doc/clear.md")]
     pub fn clear(&mut self) {
         self.entries.clear();
     }

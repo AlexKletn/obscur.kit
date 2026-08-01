@@ -1,33 +1,17 @@
-//! The [`MotionScheduler`] domain motion scheduler (spec §4.17 "motion engine",
-//! event-driven scheduling / frame demand).
+#![doc = include_str!("motion_scheduler.doc/_module.md")]
 
 use crate::scheduler::ActiveMotionSet;
 use crate::timeline::{Timeline, TimelineId};
 
-/// Advances active motions and reports frame demand (spec §4.17).
-///
-/// The `MotionScheduler` is the domain-level scheduler of the motion engine: it
-/// owns the [`ActiveMotionSet`], advances every active timeline by an explicit
-/// `delta` each frame, drops finished ones, and reports whether another frame is
-/// needed. It is **pure and deterministic** — it reads no wall-clock and reacts
-/// only to explicit calls — and stays smooth under event-driven scheduling and
-/// **skipped frames**, since a skipped frame is simply a larger `delta` absorbed
-/// by [`Timeline::advance`]'s multi-iteration carry.
-///
-/// While any timeline is still running, [`needs_frame`](Self::needs_frame)
-/// returns `true`; the runtime maps that signal to
-/// `FrameReason::Animation` so the frame scheduler keeps requesting animation
-/// frames until the last motion finishes (spec §4.17 "active animations keep
-/// requesting frames"). This is the domain scheduler; the runtime
-/// `FrameScheduler` merely consumes this demand signal.
+#[doc = include_str!("motion_scheduler.doc/MotionScheduler.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MotionScheduler {
-    /// The set of currently-tracked timelines.
+    #[doc = include_str!("motion_scheduler.doc/active.md")]
     active: ActiveMotionSet,
 }
 
 impl MotionScheduler {
-    /// Creates an empty scheduler with no active motions.
+    #[doc = include_str!("motion_scheduler.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -35,32 +19,12 @@ impl MotionScheduler {
         }
     }
 
-    /// Registers `timeline` into the active set, keyed by its
-    /// [`id`](Timeline::id).
-    ///
-    /// The timeline is inserted **as-is**: its own lifecycle state governs
-    /// advancement, so the caller is responsible for having
-    /// [`start`](Timeline::start)ed it. Registering a timeline whose id already
-    /// exists replaces the previous one.
+    #[doc = include_str!("motion_scheduler.doc/register.md")]
     pub fn register(&mut self, timeline: Timeline) {
         self.active.insert(timeline);
     }
 
-    /// Advances every active timeline by `delta` logical seconds, then drops the
-    /// finished ones and **returns** them.
-    ///
-    /// Each timeline is advanced via [`Timeline::advance`] in deterministic order
-    /// (ascending by [`TimelineId`], from the backing `BTreeMap`), after which any
-    /// that finished is pulled out of the active set. A large `delta` — e.g.
-    /// spanning several skipped frames — is handled by the timeline's own
-    /// multi-iteration overshoot, so scheduling stays smooth regardless of frame
-    /// cadence.
-    ///
-    /// The returned timelines are the ones that finished **on this call**, in
-    /// ascending id order. A caller that has to keep applying a finished
-    /// animation's last value needs the position it settled at, and pruning would
-    /// otherwise destroy it — a reversed final iteration settles at progress `0`,
-    /// not `1`, so "it finished, assume the end" is wrong.
+    #[doc = include_str!("motion_scheduler.doc/advance.md")]
     pub fn advance(&mut self, delta: f32) -> Vec<Timeline> {
         // Collect ids first (deterministic ascending order) so each timeline can
         // be advanced through the set's `get_mut`; the borrow of `iter` ends
@@ -80,39 +44,30 @@ impl MotionScheduler {
         finished
     }
 
-    /// Returns whether another frame is needed — `true` while any motion is still
-    /// active (spec §4.17).
-    ///
-    /// After [`advance`](Self::advance) has pruned finished timelines, a non-empty
-    /// active set means work remains, so an animation frame is still wanted. This
-    /// is the signal the runtime maps to `FrameReason::Animation`.
+    #[doc = include_str!("motion_scheduler.doc/needs_frame.md")]
     #[must_use]
     pub fn needs_frame(&self) -> bool {
         !self.active.is_empty()
     }
 
-    /// Returns the active motion set.
+    #[doc = include_str!("motion_scheduler.doc/active_2.md")]
     #[must_use]
     pub const fn active(&self) -> &ActiveMotionSet {
         &self.active
     }
 
-    /// Returns the number of active timelines.
+    #[doc = include_str!("motion_scheduler.doc/active_count.md")]
     #[must_use]
     pub fn active_count(&self) -> usize {
         self.active.len()
     }
 
-    /// Removes and returns the timeline with `id`, if present (spec §4.17
-    /// interruption).
-    ///
-    /// This pulls a motion out of the active set — for example when an animation
-    /// is interrupted or superseded before it finishes.
+    #[doc = include_str!("motion_scheduler.doc/remove.md")]
     pub fn remove(&mut self, id: TimelineId) -> Option<Timeline> {
         self.active.remove(id)
     }
 
-    /// Removes every tracked timeline, leaving the scheduler idle.
+    #[doc = include_str!("motion_scheduler.doc/clear.md")]
     pub fn clear(&mut self) {
         self.active = ActiveMotionSet::new();
     }

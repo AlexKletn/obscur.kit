@@ -1,20 +1,11 @@
-//! The immutable inputs for one frame: [`FrameContext`].
+#![doc = include_str!("frame_context.doc/_module.md")]
 
 use obscur_geometry::Size;
 use obscur_style::property::EnvironmentValues;
 
 use super::{FrameId, FrameReason};
 
-/// The immutable inputs that parameterise one frame's pipeline run.
-///
-/// A `FrameContext` bundles the identity ([`FrameId`]), the reason the frame is
-/// being produced ([`FrameReason`], spec §3.5), and the viewport the frame is
-/// laid out under. It is read-only for the duration of the frame: the pipeline
-/// consumes it but never mutates it, which keeps the synchronous frame phase
-/// deterministic (spec §3.4).
-///
-/// The type is a small plain value (`Copy`), so it can be threaded freely
-/// through the pipeline without borrowing concerns.
+#[doc = include_str!("frame_context.doc/FrameContext.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameContext {
     id: FrameId,
@@ -24,8 +15,7 @@ pub struct FrameContext {
 }
 
 impl FrameContext {
-    /// Creates a context for the frame `id`, produced for `reason`, laid out
-    /// under `viewport`.
+    #[doc = include_str!("frame_context.doc/new.md")]
     #[must_use]
     pub const fn new(id: FrameId, reason: FrameReason, viewport: Size) -> Self {
         Self {
@@ -36,42 +26,32 @@ impl FrameContext {
         }
     }
 
-    /// Returns this context with the host-reported environment values attached —
-    /// the safe-area and on-screen-keyboard insets `env()` resolves against
-    /// (spec §6.15).
-    ///
-    /// Defaulted rather than a [`new`](Self::new) parameter because a host that
-    /// reports nothing is the common case and its answer (all zeroes) is correct:
-    /// a screen with no cutout and no keyboard genuinely has no insets.
+    #[doc = include_str!("frame_context.doc/with_environment.md")]
     #[must_use]
     pub const fn with_environment(mut self, environment: EnvironmentValues) -> Self {
         self.environment = environment;
         self
     }
 
-    /// The host-reported environment values in force for this frame (spec §6.15).
+    #[doc = include_str!("frame_context.doc/environment.md")]
     #[must_use]
     pub const fn environment(self) -> EnvironmentValues {
         self.environment
     }
 
-    /// Returns the identity of this frame.
+    #[doc = include_str!("frame_context.doc/id.md")]
     #[must_use]
     pub const fn id(self) -> FrameId {
         self.id
     }
 
-    /// Returns the reason this frame is being produced.
+    #[doc = include_str!("frame_context.doc/reason.md")]
     #[must_use]
     pub const fn reason(self) -> FrameReason {
         self.reason
     }
 
-    /// Returns the viewport size.
-    ///
-    /// This is the size the root of the retained tree is laid out under: layout
-    /// arranges the root at the viewport origin under a tight constraint of this
-    /// size (spec §4.2).
+    #[doc = include_str!("frame_context.doc/viewport.md")]
     #[must_use]
     pub const fn viewport(self) -> Size {
         self.viewport

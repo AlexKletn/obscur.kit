@@ -1,26 +1,20 @@
-//! `ChildContract`: which children a slot or component accepts (spec §2.12).
+#![doc = include_str!("child_contract.doc/_module.md")]
 
 use obscur_identity::ComponentId;
 
-/// The rule describing which child components are allowed in a given position
-/// (a slot, or a component's direct children) per spec §2.12.
-///
-/// This is a small, typed allow-list rather than a string matcher: unknown
-/// children are rejected at contract-check time. The whitelist variant carries
-/// the concrete [`ComponentId`]s that are permitted, so membership is decided
-/// by identity, not by name.
+#[doc = include_str!("child_contract.doc/ChildContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChildContract {
-    /// Any child component is accepted.
+    #[doc = include_str!("child_contract.doc/Any.md")]
     Any,
-    /// No children are accepted (a leaf position).
+    #[doc = include_str!("child_contract.doc/None.md")]
     None,
-    /// Only components whose id appears in this list are accepted.
+    #[doc = include_str!("child_contract.doc/Only.md")]
     Only(Vec<ComponentId>),
 }
 
 impl ChildContract {
-    /// Returns whether a child with the given `id` is allowed by this contract.
+    #[doc = include_str!("child_contract.doc/allows.md")]
     #[must_use]
     pub fn allows(&self, id: ComponentId) -> bool {
         match self {

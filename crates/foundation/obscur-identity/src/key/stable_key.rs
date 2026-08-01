@@ -1,14 +1,13 @@
-//! Author-provided identity for keyed children.
+#![doc = include_str!("stable_key.doc/_module.md")]
 
-/// Explicit identity for a child within a keyed collection, used to preserve
-/// retained identity across reconciliation (spec §2.2, §2.11).
+#[doc = include_str!("stable_key.doc/StableKey.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StableKey {
-    /// A positional key derived from a stable index.
+    #[doc = include_str!("stable_key.doc/Index.md")]
     Index(u64),
-    /// A named key provided by the author.
+    #[doc = include_str!("stable_key.doc/Name.md")]
     Name(Box<str>),
-    /// An interned symbolic key.
+    #[doc = include_str!("stable_key.doc/Symbol.md")]
     Symbol(super::InternedSymbol),
 }
 

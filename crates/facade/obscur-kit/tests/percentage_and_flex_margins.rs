@@ -1,15 +1,4 @@
-//! End-to-end: **percentage margins** resolve against the containing block's
-//! width on every edge (CSS 2.1 §8.3), and a flex item's **`auto` margins** take
-//! the line's free space before `justify-content` sees it (CSS Flexbox §8.1).
-//!
-//! Both were silently inert: a `%` margin was folded to `0` by the CSS bridge, and
-//! a flex `auto` margin was read as `0` by the algorithm.
-//!
-//! The container here is deliberately **not square** (300×100). A square one
-//! cannot tell the §8.3 rule from the obvious-but-wrong reading — `margin-top:
-//! 10%` is 30 either way — so every block-axis assertion below would have passed
-//! against an implementation that resolved each edge against its own axis.
-
+#![doc = include_str!("percentage_and_flex_margins.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -27,7 +16,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The `.item`'s arranged `(x, y, width)` under `page` / `item` declarations.
+#[doc = include_str!("percentage_and_flex_margins.doc/item_box.md")]
 fn item_box(page_css: &str, item_css: &str) -> (f32, f32, f32) {
     let sheet = compile(&format!(".page {{ {page_css} }}\n.item {{ {item_css} }}"));
     let component = ComponentId::from_raw(0x00C0_0001);
@@ -47,7 +36,7 @@ fn item_box(page_css: &str, item_css: &str) -> (f32, f32, f32) {
     (layout.origin().x, layout.origin().y, layout.size().width)
 }
 
-/// A 300×100 block container.
+#[doc = include_str!("percentage_and_flex_margins.doc/BLOCK.md")]
 const BLOCK: &str = "width: 300px; height: 100px";
 
 #[test]
@@ -104,7 +93,7 @@ fn a_zero_percentage_and_a_pixel_margin_still_behave() {
     assert!((px - 40.0).abs() < 1e-3, "got {px}");
 }
 
-/// A 300-wide flex row.
+#[doc = include_str!("percentage_and_flex_margins.doc/FLEX.md")]
 const FLEX: &str = "display: flex; width: 300px; height: 50px";
 
 #[test]

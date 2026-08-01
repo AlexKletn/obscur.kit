@@ -1,38 +1,23 @@
-//! Access rights and the persistent permission token for a document (spec §6.10).
+#![doc = include_str!("document_permission.doc/_module.md")]
 
-/// The access rights granted for a document handle (spec §6.10).
-///
-/// A file picker or portal grants either read-only or read-write access to the
-/// document it returns; this enum records which. It carries no I/O and makes no
-/// filesystem assumption — it is a pure statement of what the host permits.
+#[doc = include_str!("document_permission.doc/AccessMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMode {
-    /// The host permits reading the document but not modifying it.
+    #[doc = include_str!("document_permission.doc/Read.md")]
     Read,
-    /// The host permits both reading and writing the document.
+    #[doc = include_str!("document_permission.doc/ReadWrite.md")]
     ReadWrite,
 }
 
 impl AccessMode {
-    /// Returns whether this mode permits writing (spec §6.10).
+    #[doc = include_str!("document_permission.doc/can_write.md")]
     #[must_use]
     pub const fn can_write(&self) -> bool {
         matches!(self, Self::ReadWrite)
     }
 }
 
-/// The access rights and optional persistent permission token for a document
-/// (spec §6.10 persistent permission token).
-///
-/// A document handle carries a permission describing what the host allows and,
-/// optionally, an opaque **persistent permission token** the host can re-use to
-/// re-acquire access to the same document in a later session (for example a
-/// security-scoped bookmark on macOS or a portal document identifier on Linux).
-/// A `None` token means access is ephemeral — valid only for the current session.
-///
-/// The token is opaque: this pure domain never interprets it, only stores and
-/// hands it back. There is no filesystem path here (spec §6.10 — handles are not
-/// paths).
+#[doc = include_str!("document_permission.doc/DocumentPermission.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentPermission {
     access: AccessMode,
@@ -40,7 +25,7 @@ pub struct DocumentPermission {
 }
 
 impl DocumentPermission {
-    /// Creates a read-only, ephemeral permission (spec §6.10).
+    #[doc = include_str!("document_permission.doc/read_only.md")]
     #[must_use]
     pub const fn read_only() -> Self {
         Self {
@@ -49,7 +34,7 @@ impl DocumentPermission {
         }
     }
 
-    /// Creates a read-write, ephemeral permission (spec §6.10).
+    #[doc = include_str!("document_permission.doc/read_write.md")]
     #[must_use]
     pub const fn read_write() -> Self {
         Self {
@@ -58,39 +43,32 @@ impl DocumentPermission {
         }
     }
 
-    /// Returns this permission with its persistent permission token set
-    /// (spec §6.10).
-    ///
-    /// The token is opaque host state that lets the host re-acquire access to the
-    /// same document later; setting it makes the permission persistent.
+    #[doc = include_str!("document_permission.doc/with_token.md")]
     #[must_use]
     pub fn with_token(mut self, token: impl Into<Box<str>>) -> Self {
         self.token = Some(token.into());
         self
     }
 
-    /// Returns the granted access mode (spec §6.10).
+    #[doc = include_str!("document_permission.doc/access.md")]
     #[must_use]
     pub const fn access(&self) -> AccessMode {
         self.access
     }
 
-    /// Returns whether this permission allows writing (spec §6.10).
+    #[doc = include_str!("document_permission.doc/can_write_2.md")]
     #[must_use]
     pub const fn can_write(&self) -> bool {
         self.access.can_write()
     }
 
-    /// Returns the opaque persistent permission token, if any (spec §6.10).
+    #[doc = include_str!("document_permission.doc/token.md")]
     #[must_use]
     pub fn token(&self) -> Option<&str> {
         self.token.as_deref()
     }
 
-    /// Returns whether this permission carries a persistent token (spec §6.10).
-    ///
-    /// A persistent permission can be re-used to re-acquire access in a later
-    /// session; an ephemeral one is valid only for the current session.
+    #[doc = include_str!("document_permission.doc/is_persistent.md")]
     #[must_use]
     pub const fn is_persistent(&self) -> bool {
         self.token.is_some()

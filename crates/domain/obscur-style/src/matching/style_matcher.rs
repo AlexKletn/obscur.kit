@@ -1,55 +1,21 @@
-//! Turns authored stylesheets plus one element into that element's cascaded
-//! [`ResolvedDeclarations`]: [`StyleMatcher`].
+#![doc = include_str!("style_matcher.doc/_module.md")]
 
 use crate::cascade::{Cascade, Declaration, ResolvedDeclarations};
 use crate::matching::{MediaEnvironment, Stylesheet};
 use crate::selector::{MatchElement, SelectorMatcher};
 
-/// The style-matching entry point: selects the rules that apply to an element
-/// and hands the resulting declarations to the [`Cascade`] (§4.14).
-///
-/// [`StyleMatcher`] is a zero-sized handle. Given an ordered slice of
-/// [`Stylesheet`]s and a single element, it matches every rule's selector list
-/// against the element, contextualises the matched rules' authored declarations
-/// with their origin, matched specificity and document position, and returns the
-/// cascaded value per property by reusing [`Cascade::resolve`]. It never
-/// reimplements the cascade ordering.
-///
-/// # Ordering and `source_order`
-///
-/// The caller supplies `sheets` ordered by **ascending cascade origin**
-/// (system-default → theme → global-app → component/module → inline). The
-/// matcher walks the sheets in that order and, for every
-/// [`BlockDeclaration`](crate::matching::BlockDeclaration) it *encounters* in
-/// document order — whether or not its rule matched — increments a single
-/// monotonic `source_order` counter. Later declarations therefore receive a
-/// higher `source_order`, so on an otherwise-exact tie the later declaration
-/// wins (§4.14 "order of appearance").
-///
-/// Because [`CascadePriority`](crate::cascade::CascadePriority) makes the origin
-/// band dominate specificity, the order of `sheets` only affects tie-breaks
-/// *within* a single origin band; it does not let a low-origin sheet outrank a
-/// high-origin one. Ordering the sheets correctly still matters so that
-/// `source_order` reflects true document position across origins.
+#[doc = include_str!("style_matcher.doc/StyleMatcher.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StyleMatcher;
 
 impl StyleMatcher {
-    /// Creates a style matcher.
+    #[doc = include_str!("style_matcher.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Matches `element` against all `sheets` and returns its cascaded values.
-    ///
-    /// `sheets` must be ordered by ascending cascade origin (system-default
-    /// first, inline last); see the type-level docs for how `source_order` is
-    /// assigned and why the ordering matters only for intra-band ties. For each
-    /// rule whose selector list matches, every authored declaration in its block
-    /// becomes a [`Declaration`] carrying the sheet's origin, the highest
-    /// matching selector specificity, and the declaration's document position;
-    /// the collected declarations are resolved by [`Cascade::resolve`].
+    #[doc = include_str!("style_matcher.doc/match_element.md")]
     #[must_use]
     pub fn match_element<E: MatchElement>(
         &self,
@@ -59,17 +25,7 @@ impl StyleMatcher {
         self.match_element_in(sheets, element, &MediaEnvironment::unbounded())
     }
 
-    /// Matches `element` against all `sheets` in `environment` and returns its
-    /// cascaded values.
-    ///
-    /// Identical to [`match_element`](Self::match_element) but each rule that was
-    /// authored inside an `@media`/`@container` group only contributes when its
-    /// [`RuleCondition`](crate::matching::RuleCondition)
-    /// [`holds`](crate::matching::RuleCondition::holds) against `environment`;
-    /// unconditional rules always contribute. A rule whose condition fails still
-    /// advances the shared `source_order` counter (exactly as a rule whose
-    /// selector list does not match does), so document-order tie-breaks are
-    /// unaffected by which rules the environment gated out.
+    #[doc = include_str!("style_matcher.doc/match_element_in.md")]
     #[must_use]
     pub fn match_element_in<E: MatchElement>(
         &self,
@@ -111,8 +67,7 @@ impl StyleMatcher {
         Cascade::new().resolve(&collected)
     }
 
-    /// Matches `element` against a single `sheet`, a convenience over
-    /// [`match_element`](Self::match_element) for the one-origin case.
+    #[doc = include_str!("style_matcher.doc/match_single.md")]
     #[must_use]
     pub fn match_single<E: MatchElement>(
         &self,

@@ -1,44 +1,31 @@
-//! CSS custom properties (`--name: value`).
-//!
-//! A custom property pairs its `--`-prefixed name (interned to an
-//! [`InternedSymbol`]) with a typed [`PropertyValue`]. Per the Obscur Kit 2
-//! draft (§4.14), custom properties **always inherit by default** and
-//! participate in cascade and inheritance before computed-value resolution.
-//! Because that inheritance behaviour is fixed, it is documented here rather
-//! than stored per instance.
+#![doc = include_str!("custom_property.doc/_module.md")]
 
 use crate::property::PropertyValue;
 use obscur_identity::InternedSymbol;
 
-/// A CSS custom property declaration (`--name: value`).
-///
-/// The `name` is the interned `--`-prefixed identifier; the `value` is the
-/// declared [`PropertyValue`], which may itself be an unresolved
-/// [`PropertyValue::CustomRef`] until custom-property substitution runs.
-///
-/// Custom properties always inherit by default (§4.14).
+#[doc = include_str!("custom_property.doc/CustomProperty.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomProperty {
-    /// The interned `--`-prefixed custom-property name.
+    #[doc = include_str!("custom_property.doc/name.md")]
     name: InternedSymbol,
-    /// The declared value.
+    #[doc = include_str!("custom_property.doc/value.md")]
     value: PropertyValue,
 }
 
 impl CustomProperty {
-    /// Creates a custom property from its interned name and declared value.
+    #[doc = include_str!("custom_property.doc/new.md")]
     #[must_use]
     pub const fn new(name: InternedSymbol, value: PropertyValue) -> Self {
         Self { name, value }
     }
 
-    /// Returns the interned `--`-prefixed name.
+    #[doc = include_str!("custom_property.doc/name_2.md")]
     #[must_use]
     pub const fn name(&self) -> InternedSymbol {
         self.name
     }
 
-    /// Returns a reference to the declared value.
+    #[doc = include_str!("custom_property.doc/value_2.md")]
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.value

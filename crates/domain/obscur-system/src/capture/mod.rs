@@ -1,4 +1,4 @@
-//! Capture module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod capture_provider;
 pub use capture_provider::{CaptureProvider, NullCaptureProvider, StubCaptureProvider};
 mod capture_request;

@@ -1,0 +1,1 @@
+Loaded resources (fonts, images, …).

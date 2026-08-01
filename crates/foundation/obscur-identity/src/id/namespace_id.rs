@@ -1,20 +1,17 @@
-//! Typed identifier: `NamespaceId`.
+#![doc = include_str!("namespace_id.doc/_module.md")]
 
-/// Stable, opaque identifier for a identifier namespace.
-///
-/// Backed by an integer handle; the numeric value carries no meaning outside
-/// the subsystem that mints it and must never be treated as a public schema.
+#[doc = include_str!("namespace_id.doc/NamespaceId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NamespaceId(u64);
 
 impl NamespaceId {
-    /// Wraps a raw handle value into a `NamespaceId`.
+    #[doc = include_str!("namespace_id.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw handle value backing this identifier.
+    #[doc = include_str!("namespace_id.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

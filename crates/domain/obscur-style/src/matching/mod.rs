@@ -1,4 +1,4 @@
-//! Matching module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod block_declaration;
 pub use block_declaration::BlockDeclaration;
 mod media_environment;

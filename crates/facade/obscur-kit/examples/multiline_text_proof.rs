@@ -1,26 +1,4 @@
-//! **Proof: multi-line auto-wrapping text + `line-height` in the coordinator.**
-//!
-//! Renders three text blocks through the REAL runtime + software [`CpuRenderer`]
-//! (no GPU), stitched top-to-bottom into `target/multiline_text_proof.png`:
-//!
-//! - **Block A — a long paragraph in a ~200px box.** The text auto-wraps into
-//!   several visual lines at the box's content width; the lines stack by the
-//!   font's natural (metric) line height so they do not overlap.
-//! - **Block B — an explicit `\n` two-line string** in a wide box: even though
-//!   nothing wraps, the mandatory newline forces two lines.
-//! - **Block C — the same long paragraph with `line-height: 2`** (inherited from
-//!   the container): it wraps to the same width but its lines are spaced twice as
-//!   far apart (2 · font-size), proving the CSS `line-height` property feeds the
-//!   line box height.
-//!
-//! Before writing the PNG it machine-checks the composed display list: Block A
-//! emits ≥ 2 `DrawText` runs at strictly increasing y (wrapped, non-overlapping);
-//! Block B emits exactly 2 runs (`\n` break); Block C's per-line spacing equals
-//! `2 · font-size` and is strictly wider than Block A's metric spacing.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example multiline_text_proof \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("multiline_text_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -43,14 +21,13 @@ use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The logical extent each block is laid out and rasterized under.
+#[doc = include_str!("multiline_text_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(340.0, 150.0);
 
-/// The font size the blocks author (px). `line-height: 2` therefore spaces C's
-/// lines by exactly `2 · FONT_SIZE`.
+#[doc = include_str!("multiline_text_proof.doc/FONT_SIZE.md")]
 const FONT_SIZE: f32 = 15.0;
 
-/// A long paragraph that overflows a ~200px box and must wrap.
+#[doc = include_str!("multiline_text_proof.doc/PARAGRAPH.md")]
 const PARAGRAPH: &str =
     "The quick brown fox jumps over the lazy dog while the sun sets behind the hills.";
 
@@ -106,9 +83,7 @@ fn main() {
     );
 }
 
-/// Renders one text `block` (a `.block` container holding a single text node)
-/// through the real runtime and returns its rasterized pixmap plus the DISTINCT,
-/// ascending y-origins of its `DrawText` runs (one per wrapped/visual line).
+#[doc = include_str!("multiline_text_proof.doc/render_block.md")]
 fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<f32>) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
     let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
@@ -152,7 +127,7 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<f32>) {
     (renderer.pixmap().expect("a rasterized frame").clone(), ys)
 }
 
-/// Machine-checks the three blocks' per-line y-origins.
+#[doc = include_str!("multiline_text_proof.doc/verify.md")]
 fn verify(a: &[f32], b: &[f32], c: &[f32]) {
     // Block A: the long paragraph WRAPPED into ≥ 2 visual lines, strictly stacked.
     assert!(
@@ -214,12 +189,12 @@ fn verify(a: &[f32], b: &[f32], c: &[f32]) {
     );
 }
 
-/// Whether `ys` is strictly increasing (each line strictly below the previous).
+#[doc = include_str!("multiline_text_proof.doc/strictly_increasing.md")]
 fn strictly_increasing(ys: &[f32]) -> bool {
     ys.windows(2).all(|w| w[1] > w[0])
 }
 
-/// The view: a single `.block` element wrapping one text node.
+#[doc = include_str!("multiline_text_proof.doc/block_view.md")]
 fn block_view(content: &str) -> View {
     let block = ViewNode::element(ComponentId::from_raw(1))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("block".into())))
@@ -230,7 +205,7 @@ fn block_view(content: &str) -> View {
     View::single(page)
 }
 
-/// Vertically stacks `pixmaps` into one image with thin gray dividers.
+#[doc = include_str!("multiline_text_proof.doc/stack.md")]
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
     let width = pixmaps
@@ -261,7 +236,7 @@ fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] at `origin`.
+#[doc = include_str!("multiline_text_proof.doc/compile.md")]
 fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
@@ -271,7 +246,7 @@ fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
         .matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("multiline_text_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -279,8 +254,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("multiline_text_proof.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -298,12 +272,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("multiline_text_proof.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("multiline_text_proof.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

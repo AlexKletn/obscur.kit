@@ -1,8 +1,4 @@
-//! Workspace architecture checks (spec §3.16, §5.8).
-//!
-//! Usage: `cargo run -p xtask -- check` (source rules, fast) or
-//! `cargo run -p xtask -- consumer` (builds the out-of-workspace facade
-//! consumer, so it costs a real compile and stays out of `check`).
+#![doc = include_str!("main.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -14,7 +10,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use rule::{
-    dependency_direction, dependency_graph, forbidden_file_name, module_layout, unsafe_boundary,
+    dependency_direction, dependency_graph, file_size, forbidden_file_name, main_entity,
+    module_layout, unsafe_boundary,
 };
 use violation::Violation;
 
@@ -40,6 +37,8 @@ fn main() -> ExitCode {
     }
     violations.extend(module_layout::check(&root));
     violations.extend(forbidden_file_name::check(&root));
+    violations.extend(file_size::check(&root));
+    violations.extend(main_entity::check(&root));
     violations.extend(unsafe_boundary::check(&root));
     violations.extend(dependency_direction::check(&root));
     violations.extend(dependency_graph::check(&root));
@@ -47,7 +46,7 @@ fn main() -> ExitCode {
     report(&violations)
 }
 
-/// Prints `violations` and turns them into the process's exit status.
+#[doc = include_str!("main.doc/report.md")]
 fn report(violations: &[Violation]) -> ExitCode {
     if violations.is_empty() {
         println!("architecture checks passed");

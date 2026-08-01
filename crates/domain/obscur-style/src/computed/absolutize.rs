@@ -1,26 +1,4 @@
-//! The one pass that makes a computed `<length>` absolute (§4.14).
-//!
-//! CSS specifies that the *computed* value of a `<length>` is already absolute:
-//! `em` / `rem` / `vw` / `vh` are folded once, at the computed-value step, and
-//! every downstream consumer reads plain pixels. This module is that fold —
-//! [`absolutize_value`] walks a [`PropertyValue`] and rewrites every [`Length`]
-//! it carries through [`Length::absolutize`], however deeply nested.
-//!
-//! Doing it here, once, is the whole point: before this pass existed layout
-//! folded relative units itself (via `Length::resolve_px`) while paint read the
-//! same property through `Length::as_px`, which honours absolute `px` only. The
-//! two phases therefore disagreed about the same box — `border-width: .1em`
-//! reserved space and painted nothing.
-//!
-//! # What stays symbolic, and why
-//!
-//! * **Percentages.** A `%` resolves against a containing block that layout has
-//!   not produced at computed-value time, so it survives the pass untouched
-//!   (the one exception is `font-size: 150%`, whose basis *is* known — the
-//!   parent's font-size — and which [`StyleResolver`](super::StyleResolver)
-//!   folds itself before building this pass's context).
-//! * **`auto`.** It has no length at all until layout picks the used value.
-//! * **`ch` with no measurement.** See [`Length::absolutize`].
+#![doc = include_str!("absolutize.doc/_module.md")]
 
 use crate::property::{
     BackgroundLayer, BackgroundPosition, BackgroundSize, BoxShadow, ConicGradient, FilterOp,
@@ -28,11 +6,7 @@ use crate::property::{
     RadialSize, TransformOrigin,
 };
 
-/// Returns `value` with every [`Length`] it carries absolutized against `ctx`.
-///
-/// The match is exhaustive rather than wildcarded so a new length-bearing
-/// [`PropertyValue`] variant cannot quietly opt out of the pass and reintroduce
-/// the layout/paint disagreement this exists to close.
+#[doc = include_str!("absolutize.doc/absolutize_value.md")]
 pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> PropertyValue {
     match value {
         PropertyValue::Length(length) => PropertyValue::Length(length.absolutize(ctx)),
@@ -94,27 +68,7 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
     }
 }
 
-/// Collapses an already-absolutized math function to the plain `px` length it is
-/// worth, when it has one.
-///
-/// CSS Values 4 §10.1: a math function is valid *wherever* its resolved type is,
-/// and one that no longer depends on anything unknown computes to the equivalent
-/// plain value. That is not a nicety here — it is the difference between a
-/// property working and being dropped. Downstream readers ask a computed value
-/// for its [`Length`]; a `Calc` is not one, so every reader that does not itself
-/// know how to fold an expression silently contributes zero. `border-radius:
-/// min(3vmin, 14px)` painted square corners for exactly that reason, and so would
-/// `border-width`, `outline-offset`, and every other property whose consumer
-/// reads a length rather than an expression.
-///
-/// Collapsing here fixes all of them at once, because it happens at the
-/// computed-value step every property already passes through.
-///
-/// An expression that still depends on something unknown stays an expression:
-/// [`LengthExpr::resolve`] returns [`None`] for a percentage with no basis (this
-/// context deliberately carries none — a `%` resolves against a containing block
-/// only layout knows), for `auto`, and for an unmeasured `ch`. Those keep the
-/// symbolic form the later passes need, so `calc(50% - 2em)` is untouched.
+#[doc = include_str!("absolutize.doc/collapse_calc.md")]
 fn collapse_calc(expr: LengthExpr, ctx: &LengthContext) -> PropertyValue {
     match expr.resolve(ctx) {
         Some(px) => PropertyValue::Length(Length::px(px)),
@@ -122,7 +76,7 @@ fn collapse_calc(expr: LengthExpr, ctx: &LengthContext) -> PropertyValue {
     }
 }
 
-/// Absolutizes a shadow's four lengths, leaving its color and `inset` flag alone.
+#[doc = include_str!("absolutize.doc/absolutize_shadow.md")]
 fn absolutize_shadow(shadow: &BoxShadow, ctx: &LengthContext) -> BoxShadow {
     BoxShadow::new(
         shadow.offset_x().absolutize(ctx),
@@ -134,12 +88,7 @@ fn absolutize_shadow(shadow: &BoxShadow, ctx: &LengthContext) -> BoxShadow {
     )
 }
 
-/// Absolutizes the one filter op that carries lengths (`drop-shadow(...)`).
-///
-/// `blur(<length>)`'s radius is an `f32` by the time it reaches a computed value:
-/// the CSS lowering resolved it with `Length::as_px`, so a `blur(1em)` is already
-/// `0` before this pass sees it. That is a lowering-side limitation and is not
-/// papered over here.
+#[doc = include_str!("absolutize.doc/absolutize_filter.md")]
 fn absolutize_filter(op: &FilterOp, ctx: &LengthContext) -> FilterOp {
     match op {
         FilterOp::DropShadow(shadow) => FilterOp::DropShadow(absolutize_shadow(shadow, ctx)),
@@ -155,8 +104,7 @@ fn absolutize_filter(op: &FilterOp, ctx: &LengthContext) -> FilterOp {
     }
 }
 
-/// Absolutizes the explicit per-axis form of `background-size`; the keyword forms
-/// carry no length.
+#[doc = include_str!("absolutize.doc/absolutize_background_size.md")]
 fn absolutize_background_size(size: BackgroundSize, ctx: &LengthContext) -> BackgroundSize {
     match size {
         BackgroundSize::Explicit { width, height } => BackgroundSize::Explicit {
@@ -167,7 +115,7 @@ fn absolutize_background_size(size: BackgroundSize, ctx: &LengthContext) -> Back
     }
 }
 
-/// Absolutizes a radial gradient's center and its explicit-radius size.
+#[doc = include_str!("absolutize.doc/absolutize_radial.md")]
 fn absolutize_radial(gradient: &RadialGradient, ctx: &LengthContext) -> RadialGradient {
     let size = match gradient.size() {
         RadialSize::Length(length) => RadialSize::Length(length.absolutize(ctx)),
@@ -182,7 +130,7 @@ fn absolutize_radial(gradient: &RadialGradient, ctx: &LengthContext) -> RadialGr
     )
 }
 
-/// Absolutizes a conic gradient's center; its start angle is not a length.
+#[doc = include_str!("absolutize.doc/absolutize_conic.md")]
 fn absolutize_conic(gradient: &ConicGradient, ctx: &LengthContext) -> ConicGradient {
     ConicGradient::new(
         gradient.from_angle_deg(),
@@ -192,7 +140,7 @@ fn absolutize_conic(gradient: &ConicGradient, ctx: &LengthContext) -> ConicGradi
     )
 }
 
-/// Absolutizes one `background-image` layer of a multi-layer list.
+#[doc = include_str!("absolutize.doc/absolutize_layer.md")]
 fn absolutize_layer(layer: &BackgroundLayer, ctx: &LengthContext) -> BackgroundLayer {
     match layer {
         BackgroundLayer::Radial(gradient) => {
@@ -203,8 +151,7 @@ fn absolutize_layer(layer: &BackgroundLayer, ctx: &LengthContext) -> BackgroundL
     }
 }
 
-/// Absolutizes a grid track's sizing lengths, recursing through `minmax()` and
-/// `repeat(auto-fill | auto-fit, …)`.
+#[doc = include_str!("absolutize.doc/absolutize_track.md")]
 fn absolutize_track(track: &GridTrack, ctx: &LengthContext) -> GridTrack {
     match track {
         GridTrack::Fixed(length) => GridTrack::Fixed(length.absolutize(ctx)),
@@ -223,45 +170,7 @@ fn absolutize_track(track: &GridTrack, ctx: &LengthContext) -> GridTrack {
     }
 }
 
-/// The absolute `font-size` of one node, in logical pixels (§4.14).
-///
-/// `font-size` is resolved **before** every other property because it is the base
-/// its own node's `em` (and `ch`) resolve against — so it cannot be folded with
-/// the context it defines. Its own relative units resolve against the *parent's*
-/// size instead, which is what CSS specifies:
-///
-/// * `em` and `%` are relative to `parent_font_size` (`1.5em` and `150%` are the
-///   same declaration on this property);
-/// * `rem` is relative to `root_font_size`, `vw`/`vh` to the viewport;
-/// * `ch` is relative to the **parent's** `0` advance, supplied as
-///   `parent_ch_width` — see below.
-///
-/// `parent_font_size` is the root's implicit parent value (the `medium` initial)
-/// for the root node, which is also what `rem` means on the root element.
-///
-/// # `font-size: 2ch` is not circular
-///
-/// It looks like it must be: `ch` is the advance of the `0` glyph in the font used
-/// to render the element, and that font's size is the very thing being computed.
-/// CSS Values 4 §6.1.2 cuts the knot explicitly, in the paragraph after the unit
-/// table:
-///
-/// > When used in the value of any `font-*` property on the element they refer to,
-/// > the font-relative lengths resolve against the computed metrics of the
-/// > **parent** element — or against the computed metrics corresponding to the
-/// > initial values of the font and line-height properties, if the element has no
-/// > parent.
-///
-/// So `2ch` here means two of the *parent's* `0` advances, which are fully known
-/// by the time this node is resolved — the same rule that already makes `em` and
-/// `%` resolvable on this property. `parent_ch_width` is that measurement.
-///
-/// [`None`] means no measurement was available (no [`ChMetrics`] port, or a port
-/// that could not measure). The fallback is then the parent's size — the same
-/// answer an unresolvable `font-size` gets, and deliberately *not* `ch_base`'s
-/// `0.5em` substitute, which would silently halve the text.
-///
-/// [`ChMetrics`]: super::ChMetrics
+#[doc = include_str!("absolutize.doc/absolute_font_size.md")]
 pub(super) fn absolute_font_size(
     specified: Option<Length>,
     parent_font_size: f32,

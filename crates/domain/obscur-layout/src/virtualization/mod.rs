@@ -1,4 +1,4 @@
-//! Virtualization module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod materialized_range;
 pub use materialized_range::MaterializedRange;
 mod overscan_policy;

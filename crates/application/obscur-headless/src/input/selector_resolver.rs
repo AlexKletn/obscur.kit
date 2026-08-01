@@ -1,4 +1,4 @@
-//! `SelectorResolver`: turning a [`SelectorTarget`] into a concrete node.
+#![doc = include_str!("selector_resolver.doc/_module.md")]
 
 use obscur_geometry::Point;
 use obscur_identity::{InternedSymbol, NodeId};
@@ -7,40 +7,18 @@ use obscur_view::view::{AUTOMATION_ID, TEST_ID, ViewValue};
 
 use crate::input::SelectorTarget;
 
-/// Resolves a [`SelectorTarget`] against a live runtime (spec §7.4, §7.5).
-///
-/// The descriptors were typed data that nothing consumed; this is the engine that
-/// consumes them. Resolution is read-only and side-effect free — it answers
-/// *which node*, never *what happens to it*; dispatch is
-/// [`SyntheticDispatcher`](crate::input::SyntheticDispatcher)'s job.
-///
-/// # Why a coordinate does not resolve to a node here
-///
-/// [`Coordinate`](SelectorTarget::Coordinate) deliberately has **no** resolution
-/// step. Hit-testing a point is the runtime's own job on the real input path, and
-/// re-implementing it here would produce a second, subtly different answer — the
-/// exact class of bug a headless test exists to catch. A coordinate is passed
-/// through to the dispatcher as-is, which lets the runtime hit-test it exactly as
-/// it would a real pointer.
+#[doc = include_str!("selector_resolver.doc/SelectorResolver.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SelectorResolver;
 
 impl SelectorResolver {
-    /// Creates a resolver.
+    #[doc = include_str!("selector_resolver.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Resolves `target` to a live node, or [`None`] when nothing matches.
-    ///
-    /// * [`Node`](SelectorTarget::Node) — returned only if the id is still live,
-    ///   so a stale id from a previous frame answers `None` rather than a
-    ///   recycled node.
-    /// * [`TestId`](SelectorTarget::TestId) — the first node, in tree order,
-    ///   carrying a matching `test-id` property.
-    /// * [`Coordinate`](SelectorTarget::Coordinate) — always `None`: see the
-    ///   type-level note. Use [`point_for`](Self::point_for) to aim a dispatch.
+    #[doc = include_str!("selector_resolver.doc/resolve.md")]
     #[must_use]
     pub fn resolve(self, runtime: &UiRuntime, target: &SelectorTarget) -> Option<NodeId> {
         match target {
@@ -51,13 +29,7 @@ impl SelectorResolver {
         }
     }
 
-    /// The viewport point a synthetic pointer aimed at `target` should land on,
-    /// or [`None`] when the target does not resolve to a laid-out node.
-    ///
-    /// A coordinate is its own point. A node or `test-id` resolves to the centre
-    /// of that node's retained layout box, so the event lands where a user
-    /// clicking that element would put it — and then travels the real input path,
-    /// hit-test and all.
+    #[doc = include_str!("selector_resolver.doc/point_for.md")]
     #[must_use]
     pub fn point_for(self, runtime: &UiRuntime, target: &SelectorTarget) -> Option<Point> {
         if let SelectorTarget::Coordinate(point) = target {
@@ -73,15 +45,7 @@ impl SelectorResolver {
         ))
     }
 
-    /// The first node, in tree order, whose `attribute` property equals `id`.
-    ///
-    /// Shared by `test-id` and `automation-id`: they differ only in which symbol
-    /// they read, so one lookup keyed by the symbol keeps them from drifting — and,
-    /// because the symbols are distinct, a target for one never matches the other.
-    ///
-    /// Both are read from the node's retained **properties** rather than from its
-    /// style attributes, which is what keeps §7.5's "does not affect CSS
-    /// specificity / layout / visual output" true by construction.
+    #[doc = include_str!("selector_resolver.doc/by_stable_id.md")]
     fn by_stable_id(runtime: &UiRuntime, attribute: InternedSymbol, id: &str) -> Option<NodeId> {
         runtime
             .tree()

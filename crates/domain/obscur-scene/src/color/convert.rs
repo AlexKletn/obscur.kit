@@ -1,27 +1,10 @@
-//! Canonical CSS Color 4 color-space conversions to sRGB.
-//!
-//! Pure, deterministic math that lowers the CSS Color 4 color functions
-//! (`hsl()`, `oklab()`, `oklch()`, `lab()`, `lch()`) down to gamma-encoded sRGB
-//! channels in `0.0..=1.0`. Each public function returns clamped sRGB so that a
-//! stylesheet's authored color always resolves to a paintable value.
-//!
-//! The formulas are re-derived from the CSS Color 4 specification
-//! (<https://www.w3.org/TR/css-color-4/>); nothing here is copied from an
-//! existing browser engine. Section references are cited inline.
-//!
-//! Gamut handling is a **simple per-channel clamp to `[0, 1]` after
-//! conversion** (see [`clamp_srgb`]). Full CSS gamut mapping (the CSS Color 4
-//! §13 binary-search chroma reduction in Oklch) is a deliberate later
-//! refinement and is not implemented here.
-
+#![doc = include_str!("convert.doc/_module.md")]
 // Color math uses the canonical single-letter component names from the spec
 // (L/a/b, R/G/B, L/M/S, h/s/l); renaming them would obscure the 1:1 mapping to
 // the CSS Color 4 formulas.
 #![allow(clippy::many_single_char_names)]
 
-/// sRGB electro-optical transfer: encode a linear-light channel to gamma-encoded
-/// sRGB (CSS Color 4 §10.2, "gam_sRGB"). Input and output are nominally
-/// `0.0..=1.0`; the sign is preserved for out-of-range inputs.
+#[doc = include_str!("convert.doc/srgb_encode.md")]
 #[must_use]
 pub fn srgb_encode(c: f64) -> f64 {
     let sign = if c < 0.0 { -1.0 } else { 1.0 };
@@ -33,9 +16,7 @@ pub fn srgb_encode(c: f64) -> f64 {
     }
 }
 
-/// Inverse sRGB transfer: decode a gamma-encoded sRGB channel to linear light
-/// (CSS Color 4 §10.2, "lin_sRGB"). Input and output are nominally `0.0..=1.0`;
-/// the sign is preserved for out-of-range inputs.
+#[doc = include_str!("convert.doc/srgb_decode.md")]
 #[must_use]
 pub fn srgb_decode(c: f64) -> f64 {
     let sign = if c < 0.0 { -1.0 } else { 1.0 };
@@ -47,24 +28,19 @@ pub fn srgb_decode(c: f64) -> f64 {
     }
 }
 
-/// Clamps one channel into `[0.0, 1.0]`.
+#[doc = include_str!("convert.doc/clamp_channel.md")]
 #[must_use]
 fn clamp_channel(c: f64) -> f64 {
     c.clamp(0.0, 1.0)
 }
 
-/// Clamps an sRGB triple into the `[0, 1]` gamut, per channel. This is the
-/// documented simple gamut treatment (see module docs).
+#[doc = include_str!("convert.doc/clamp_srgb.md")]
 #[must_use]
 pub fn clamp_srgb([r, g, b]: [f64; 3]) -> [f64; 3] {
     [clamp_channel(r), clamp_channel(g), clamp_channel(b)]
 }
 
-/// Converts `hsl()` to gamma-encoded sRGB (CSS Color 4 §7, "HSL to sRGB").
-///
-/// `hue` is in degrees (any real value; reduced mod 360), `sat` and `light` are
-/// fractions in `0.0..=1.0`. HSL is defined directly on gamma-encoded sRGB, so
-/// no transfer function is applied. Result is clamped to `[0, 1]`.
+#[doc = include_str!("convert.doc/hsl_to_srgb.md")]
 #[must_use]
 pub fn hsl_to_srgb(hue: f64, sat: f64, light: f64) -> [f64; 3] {
     // Normalize hue into [0, 360).
@@ -84,9 +60,7 @@ pub fn hsl_to_srgb(hue: f64, sat: f64, light: f64) -> [f64; 3] {
     clamp_srgb([f(0.0), f(8.0), f(4.0)])
 }
 
-/// Linear-light sRGB triple from Oklab (Björn Ottosson's Oklab, adopted by CSS
-/// Color 4 §9). `l` is `0.0..=1.0`; `a` and `b` are signed. Returns **linear**
-/// sRGB (no transfer function applied), unclamped.
+#[doc = include_str!("convert.doc/oklab_to_linear_srgb.md")]
 #[must_use]
 fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     // Oklab -> LMS' (inverse of the second Oklab matrix).
@@ -106,11 +80,7 @@ fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     [r, g, bl]
 }
 
-/// Oklab triple from **linear-light** sRGB (Björn Ottosson's Oklab, adopted by
-/// CSS Color 4 §9). Inputs are linear sRGB (no transfer function applied);
-/// returns `[L, a, b]` with `L` nominally `0.0..=1.0` and `a`/`b` signed. This is
-/// the exact inverse of [`oklab_to_linear_srgb`] and shares its canonical
-/// matrices; densifying a gradient's stops in Oklab needs this forward direction.
+#[doc = include_str!("convert.doc/linear_srgb_to_oklab.md")]
 #[must_use]
 pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> [f64; 3] {
     // Linear sRGB -> LMS (first Oklab matrix, folded to sRGB).
@@ -130,17 +100,14 @@ pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> [f64; 3] {
     [big_l, a, b_]
 }
 
-/// Converts `oklab()` to gamma-encoded sRGB (CSS Color 4 §9.2). `l` is
-/// `0.0..=1.0`; `a`/`b` are signed. Result is encoded and clamped to `[0, 1]`.
+#[doc = include_str!("convert.doc/oklab_to_srgb.md")]
 #[must_use]
 pub fn oklab_to_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     let [lr, lg, lb] = oklab_to_linear_srgb(l, a, b);
     clamp_srgb([srgb_encode(lr), srgb_encode(lg), srgb_encode(lb)])
 }
 
-/// Converts `oklch()` to gamma-encoded sRGB (CSS Color 4 §9.3). `l` is
-/// `0.0..=1.0`, `chroma` is `>= 0`, `hue` in degrees. Polar -> rectangular then
-/// the Oklab path.
+#[doc = include_str!("convert.doc/oklch_to_srgb.md")]
 #[must_use]
 pub fn oklch_to_srgb(l: f64, chroma: f64, hue_deg: f64) -> [f64; 3] {
     let h = hue_deg.to_radians();
@@ -149,11 +116,7 @@ pub fn oklch_to_srgb(l: f64, chroma: f64, hue_deg: f64) -> [f64; 3] {
     oklab_to_srgb(l, a, b)
 }
 
-/// Converts CIE Lab (D50) to gamma-encoded sRGB (CSS Color 4 §8 + §10.4).
-///
-/// `l` is the lightness in `0.0..=100.0`; `a`/`b` are signed. Steps: Lab -> XYZ
-/// (D50 white) -> linear sRGB via the CSS Color 4 combined Bradford-adapted
-/// matrix (D50 XYZ straight to linear sRGB) -> encode -> clamp.
+#[doc = include_str!("convert.doc/lab_to_srgb.md")]
 #[must_use]
 pub fn lab_to_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     // CSS Color 4 §8.1 constants.
@@ -203,9 +166,7 @@ pub fn lab_to_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     clamp_srgb([srgb_encode(lr), srgb_encode(lg), srgb_encode(lb)])
 }
 
-/// Converts CIE LCH (D50) to gamma-encoded sRGB (CSS Color 4 §8.3 + §10.4). `l`
-/// is `0.0..=100.0`, `chroma >= 0`, `hue` in degrees. Polar -> rectangular then
-/// the Lab path.
+#[doc = include_str!("convert.doc/lch_to_srgb.md")]
 #[must_use]
 pub fn lch_to_srgb(l: f64, chroma: f64, hue_deg: f64) -> [f64; 3] {
     let h = hue_deg.to_radians();

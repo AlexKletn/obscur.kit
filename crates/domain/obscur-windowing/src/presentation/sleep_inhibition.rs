@@ -1,32 +1,25 @@
-//! A request to inhibit system or display sleep while presenting (spec §6.5).
+#![doc = include_str!("sleep_inhibition.doc/_module.md")]
 
-/// What a sleep-inhibition request holds off (spec §6.5).
-///
-/// `SleepInhibitionScope` is a tightly-coupled part of [`SleepInhibition`]: it
-/// names what a request keeps awake and has no meaning apart from it, so it is
-/// colocated here rather than given its own module.
+#[doc = include_str!("sleep_inhibition.doc/SleepInhibitionScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SleepInhibitionScope {
-    /// Inhibit full system sleep, keeping the machine awake.
+    #[doc = include_str!("sleep_inhibition.doc/System.md")]
     System,
-    /// Inhibit only display sleep and the screensaver.
+    #[doc = include_str!("sleep_inhibition.doc/Display.md")]
     Display,
 }
 
-/// A request to inhibit sleep while presenting (spec §6.5).
-///
-/// The optional reason is a human-readable string surfaced to the OS, so users
-/// and diagnostics can see why sleep is being held off.
+#[doc = include_str!("sleep_inhibition.doc/SleepInhibition.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SleepInhibition {
-    /// What the request keeps awake.
+    #[doc = include_str!("sleep_inhibition.doc/scope.md")]
     pub scope: SleepInhibitionScope,
-    /// An optional human-readable reason surfaced to the OS.
+    #[doc = include_str!("sleep_inhibition.doc/reason.md")]
     pub reason: Option<Box<str>>,
 }
 
 impl SleepInhibition {
-    /// Creates a request to inhibit full system sleep with a reason.
+    #[doc = include_str!("sleep_inhibition.doc/system.md")]
     #[must_use]
     pub fn system(reason: impl Into<Box<str>>) -> Self {
         Self {
@@ -35,8 +28,7 @@ impl SleepInhibition {
         }
     }
 
-    /// Creates a request to inhibit display sleep and the screensaver with a
-    /// reason.
+    #[doc = include_str!("sleep_inhibition.doc/display.md")]
     #[must_use]
     pub fn display(reason: impl Into<Box<str>>) -> Self {
         Self {
@@ -45,7 +37,7 @@ impl SleepInhibition {
         }
     }
 
-    /// Creates a request for `scope` with no stated reason.
+    #[doc = include_str!("sleep_inhibition.doc/reasonless.md")]
     #[must_use]
     pub const fn reasonless(scope: SleepInhibitionScope) -> Self {
         Self {
@@ -54,22 +46,19 @@ impl SleepInhibition {
         }
     }
 
-    /// Returns what the request keeps awake.
+    #[doc = include_str!("sleep_inhibition.doc/scope_2.md")]
     #[must_use]
     pub const fn scope(&self) -> SleepInhibitionScope {
         self.scope
     }
 
-    /// Returns the human-readable reason, or `None` if unstated.
+    #[doc = include_str!("sleep_inhibition.doc/reason_2.md")]
     #[must_use]
     pub fn reason(&self) -> Option<&str> {
         self.reason.as_deref()
     }
 
-    /// Returns whether this request inhibits display sleep.
-    ///
-    /// This is `true` for both scopes: inhibiting full system sleep necessarily
-    /// keeps the display awake too.
+    #[doc = include_str!("sleep_inhibition.doc/inhibits_display.md")]
     #[must_use]
     pub const fn inhibits_display(&self) -> bool {
         matches!(

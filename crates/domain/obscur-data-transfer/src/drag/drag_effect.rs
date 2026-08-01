@@ -1,51 +1,33 @@
-//! The effect a drop will have on the dragged data (spec §6.21 drag and drop —
-//! effects).
+#![doc = include_str!("drag_effect.doc/_module.md")]
 
-/// The effect a completed drop will have on the dragged data (spec §6.21
-/// effects).
-///
-/// A drag negotiates an effect between what the source permits and what the
-/// target allows: dropping may [`Copy`](DragEffect::Copy) the data (leaving the
-/// original), [`Move`](DragEffect::Move) it (consuming the original), or create
-/// a [`Link`](DragEffect::Link) / reference to it. [`None`](DragEffect::None) is
-/// the absence of any acceptable effect — a drop under `None` is a no-op that
-/// cancels rather than commits. Use
-/// [`first_allowed`](DragEffect::first_allowed) to negotiate the effect a drop
-/// should carry from a target's allowed set and a preferred choice.
+#[doc = include_str!("drag_effect.doc/DragEffect.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum DragEffect {
-    /// No acceptable effect — a drop is a no-op / cancel (spec §6.21).
+    #[doc = include_str!("drag_effect.doc/None.md")]
     #[default]
     None,
-    /// Copy the data, leaving the original in place (spec §6.21).
+    #[doc = include_str!("drag_effect.doc/Copy.md")]
     Copy,
-    /// Move the data, consuming the original (spec §6.21).
+    #[doc = include_str!("drag_effect.doc/Move.md")]
     Move,
-    /// Create a link / reference to the data (spec §6.21).
+    #[doc = include_str!("drag_effect.doc/Link.md")]
     Link,
 }
 
 impl DragEffect {
-    /// Returns whether this is [`None`](DragEffect::None) — no acceptable effect
-    /// (spec §6.21).
+    #[doc = include_str!("drag_effect.doc/is_none.md")]
     #[must_use]
     pub const fn is_none(self) -> bool {
         matches!(self, Self::None)
     }
 
-    /// Returns whether this is [`Move`](DragEffect::Move) (spec §6.21).
+    #[doc = include_str!("drag_effect.doc/is_move.md")]
     #[must_use]
     pub const fn is_move(self) -> bool {
         matches!(self, Self::Move)
     }
 
-    /// Negotiates the effect a drop should carry (spec §6.21 effect
-    /// negotiation).
-    ///
-    /// Returns `preferred` when it is present in `allowed` and is not
-    /// [`None`](DragEffect::None); otherwise the first non-`None` entry of
-    /// `allowed`; otherwise [`None`](DragEffect::None) when `allowed` offers no
-    /// acceptable effect.
+    #[doc = include_str!("drag_effect.doc/first_allowed.md")]
     #[must_use]
     pub fn first_allowed(allowed: &[DragEffect], preferred: DragEffect) -> DragEffect {
         if !preferred.is_none() && allowed.contains(&preferred) {

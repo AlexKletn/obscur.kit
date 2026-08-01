@@ -1,14 +1,4 @@
-//! **SPECIFICATION-DERIVED** cases for §1.4 Runtime topology ("Multiple runtimes
-//! may coexist in one process. Global singletons are avoided…"), §3.7 Visibility
-//! and lifecycle ("Runtime lifecycle does not imply process lifecycle."), §3.2 UI
-//! transactions ("provisional systems such as DnD may use commit/cancel
-//! semantics") and §2.2 Tree model ("child identity is stable through explicit
-//! keys") — the invariants behind the §9.1 non-goals "process lifecycle
-//! ownership", "mandatory global state store" and "application-wide undo/redo".
-//!
-//! Every expected value was produced by an agent reading the specification with
-//! **no access to this repository's source**. A failure here is a defect report
-//! about the engine, and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch9_runtime_topology.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch9_support/mod.rs"]
@@ -25,7 +15,7 @@ use support::{approx, at, compile, el, runtime_id, txt, view};
 
 const VW: f32 = 1000.0;
 
-/// An element carrying a stable key and a class.
+#[doc = include_str!("spec_ch9_runtime_topology.doc/keyed.md")]
 fn keyed(id: u64, key: &str, class: &str) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
         .with_key(key)
@@ -36,12 +26,7 @@ fn keyed(id: u64, key: &str, class: &str) -> ViewNode {
         ]))
 }
 
-/// §3.7 Visibility and lifecycle — "The host decides whether to exit." and "A
-/// runtime may stop and release resources while the process continues."
-///
-/// NG-LIFECYCLE-01. (The "`last window closed` event is delivered" half is
-/// recorded as unexpressible: `WindowEvent` has no such variant and no window
-/// registry sits above the backend port to raise one.)
+#[doc = include_str!("spec_ch9_runtime_topology.doc/closing_the_last_window_neither_exits_the_process_nor_poisons_the_runtime.md")]
 #[test]
 fn closing_the_last_window_neither_exits_the_process_nor_poisons_the_runtime() {
     let sentinel = std::cell::Cell::new(0_u32);
@@ -77,10 +62,7 @@ fn closing_the_last_window_neither_exits_the_process_nor_poisons_the_runtime() {
     approx(h, 10.0, "the second window's first frame commits the tree");
 }
 
-/// §9.1 — "- process lifecycle ownership;" and §3.7 "Runtime lifecycle does not
-/// imply process lifecycle."
-///
-/// NG-LIFECYCLE-02.
+#[doc = include_str!("spec_ch9_runtime_topology.doc/a_second_runtime_initializes_fully_after_the_first_is_dropped.md")]
 #[test]
 fn a_second_runtime_initializes_fully_after_the_first_is_dropped() {
     let sheets = [compile(".a{width:20px;height:20px}")];
@@ -103,11 +85,7 @@ fn a_second_runtime_initializes_fully_after_the_first_is_dropped() {
     );
 }
 
-/// §1.4 Runtime topology — "Multiple runtimes may coexist in one process. Global
-/// singletons are avoided except where the platform makes them unavoidable." and
-/// §9.1 "- mandatory global state store;"
-///
-/// NG-MULTIRT-01.
+#[doc = include_str!("spec_ch9_runtime_topology.doc/two_runtimes_hold_separate_state_and_do_not_cross_invalidate.md")]
 #[test]
 fn two_runtimes_hold_separate_state_and_do_not_cross_invalidate() {
     let sheets = [compile(".a{width:10px;height:10px}")];
@@ -164,7 +142,7 @@ fn two_runtimes_hold_separate_state_and_do_not_cross_invalidate() {
     );
 }
 
-/// The first text child's content, as rendered in the retained tree.
+#[doc = include_str!("spec_ch9_runtime_topology.doc/text_of.md")]
 fn text_of(rt: &UiRuntime) -> String {
     let root = rt.tree().root().expect("a root");
     let mut stack = vec![root];
@@ -178,12 +156,7 @@ fn text_of(rt: &UiRuntime) -> String {
     String::new()
 }
 
-/// §3.2 UI transactions — "provisional systems such as DnD may use commit/cancel
-/// semantics;" and "heavyweight universal rollback is not required." (making
-/// concrete §9.1 "- application-wide undo/redo;")
-///
-/// NG-UNDO-01: cancelling a provisional drag transaction must not revert an
-/// unrelated, already-committed edit.
+#[doc = include_str!("spec_ch9_runtime_topology.doc/cancelling_a_provisional_drag_does_not_revert_a_committed_edit.md")]
 #[test]
 fn cancelling_a_provisional_drag_does_not_revert_a_committed_edit() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VW, VW));
@@ -212,11 +185,7 @@ fn cancelling_a_provisional_drag_does_not_revert_a_committed_edit() {
     );
 }
 
-/// §2.2 Tree model — "child identity is stable through explicit keys;" and
-/// "updates are expressed as new desired state rather than direct retained-tree
-/// mutation." (guardrail §9.6 "require arbitrary mutation of retained tree")
-///
-/// NG-KEYS-01.
+#[doc = include_str!("spec_ch9_runtime_topology.doc/retained_identity_and_per_node_state_follow_keys_not_positions.md")]
 #[test]
 fn retained_identity_and_per_node_state_follow_keys_not_positions() {
     let sheets = [compile(

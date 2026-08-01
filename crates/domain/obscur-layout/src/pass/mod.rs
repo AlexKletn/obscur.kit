@@ -1,4 +1,4 @@
-//! Pass module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod arrange_pass;
 pub use arrange_pass::ArrangePass;
 mod layout_pass_result;

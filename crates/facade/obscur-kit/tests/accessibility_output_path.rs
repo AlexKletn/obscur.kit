@@ -1,16 +1,4 @@
-//! Spec §7.1: the semantic tree's output path — an ordinary frame reaches an
-//! AccessKit client.
-//!
-//! The audit's §7-A closed the *builder* (a disabled control stopped being
-//! announced as enabled) and left the finding that outlived the fix: a correct
-//! semantic tree was computed and published to nobody, because `AccessKitBridge`
-//! was never constructed outside its own crate and `push_accessibility`'s only
-//! caller was a test. These tests drive the real frame path with a real AccessKit
-//! bridge installed and assert what the bridge was actually handed — a tree that
-//! merely got *built* would satisfy nothing here.
-//!
-//! The bridge is a workspace-unconditional dev-dependency rather than the facade's
-//! `accesskit` feature, so this runs under a plain `cargo test --workspace`.
+#![doc = include_str!("accessibility_output_path.doc/_module.md")]
 
 use accesskit::{Action, NodeId as AkNodeId, Role, Toggled, TreeUpdate};
 use obscur_accessibility_accesskit::bridge::AccessKitBridge;
@@ -28,8 +16,7 @@ fn runtime() -> UiRuntime {
     UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0))
 }
 
-/// An element with CSS type `local_name` plus the reserved state attributes in
-/// `state`, labelled by a single text child.
+#[doc = include_str!("accessibility_output_path.doc/element.md")]
 fn element(component: u64, local_name: &str, label: &str, state: &[ViewProperty]) -> ViewNode {
     let mut node = ViewNode::element(ComponentId::from_raw(component))
         .with_prop(ViewProperty::new(TYPE, ViewValue::Text(local_name.into())))
@@ -40,9 +27,7 @@ fn element(component: u64, local_name: &str, label: &str, state: &[ViewProperty]
     node
 }
 
-/// `root → region "Panel" → [ button "Save" (disabled), checkbox "Agree"
-/// (checked) ]` — a nested view, not a flat one, because the hierarchy is half of
-/// what §7.1 publishes.
+#[doc = include_str!("accessibility_output_path.doc/panel_view.md")]
 fn panel_view() -> View {
     let disabled = ViewProperty::new(DISABLED, ViewValue::Bool(true));
     let checked = ViewProperty::new(CHECKED, ViewValue::Bool(true));
@@ -57,8 +42,7 @@ fn panel_view() -> View {
     ]))
 }
 
-/// Installs a real AccessKit bridge and runs one frame, returning the handle a
-/// host would publish from.
+#[doc = include_str!("accessibility_output_path.doc/rendered_with_bridge.md")]
 fn rendered_with_bridge() -> Rc<RefCell<AccessKitBridge>> {
     let mut runtime = runtime();
     let bridge = Rc::new(RefCell::new(AccessKitBridge::new()));
@@ -67,7 +51,7 @@ fn rendered_with_bridge() -> Rc<RefCell<AccessKitBridge>> {
     bridge
 }
 
-/// The AccessKit node carrying `label`, with its id.
+#[doc = include_str!("accessibility_output_path.doc/labelled.md")]
 fn labelled(update: &TreeUpdate, label: &str) -> (AkNodeId, accesskit::Node) {
     update
         .nodes
@@ -77,8 +61,7 @@ fn labelled(update: &TreeUpdate, label: &str) -> (AkNodeId, accesskit::Node) {
         .unwrap_or_else(|| panic!("no AccessKit node labelled {label:?}"))
 }
 
-/// The headline: nobody called `push_accessibility`, and the platform bridge is
-/// nonetheless holding this frame's tree.
+#[doc = include_str!("accessibility_output_path.doc/an_ordinary_frame_lands_a_tree_update_on_the_accesskit_bridge.md")]
 #[test]
 fn an_ordinary_frame_lands_a_tree_update_on_the_accesskit_bridge() {
     let bridge = rendered_with_bridge();
@@ -92,8 +75,7 @@ fn an_ordinary_frame_lands_a_tree_update_on_the_accesskit_bridge() {
     assert_eq!(button.role(), Role::Button);
 }
 
-/// The §7-A state, all the way out: what the builder derives is what an assistive
-/// technology is told.
+#[doc = include_str!("accessibility_output_path.doc/the_published_tree_carries_the_state_the_builder_derived.md")]
 #[test]
 fn the_published_tree_carries_the_state_the_builder_derived() {
     let bridge = rendered_with_bridge();
@@ -115,9 +97,7 @@ fn the_published_tree_carries_the_state_the_builder_derived() {
     assert_eq!(checkbox.toggled(), Some(Toggled::True));
 }
 
-/// A screen reader navigates structure, so the tree must arrive nested: the
-/// runtime's projection carries no `Owns` relations, so hierarchy survives only
-/// if the snapshot's own child links do.
+#[doc = include_str!("accessibility_output_path.doc/the_published_tree_keeps_the_retained_trees_nesting.md")]
 #[test]
 fn the_published_tree_keeps_the_retained_trees_nesting() {
     let bridge = rendered_with_bridge();
@@ -156,8 +136,7 @@ fn the_published_tree_keeps_the_retained_trees_nesting() {
     );
 }
 
-/// The label a control gets from its text child is a real node in the tree, and
-/// AccessKit is told the control owns it.
+#[doc = include_str!("accessibility_output_path.doc/a_controls_text_child_stays_its_child.md")]
 #[test]
 fn a_controls_text_child_stays_its_child() {
     let bridge = rendered_with_bridge();
@@ -183,9 +162,7 @@ fn a_controls_text_child_stays_its_child() {
     );
 }
 
-/// Focus is what an assistive technology follows. The runtime pushes it with the
-/// tree, so the converted update names the focused node rather than falling back
-/// to the root — which is what a snapshot pushed without focus would arrive as.
+#[doc = include_str!("accessibility_output_path.doc/focus_reaches_the_bridge_with_the_tree.md")]
 #[test]
 fn focus_reaches_the_bridge_with_the_tree() {
     use obscur_kit::css::compiler::StylesheetCompiler;

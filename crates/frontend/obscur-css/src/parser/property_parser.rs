@@ -1,54 +1,39 @@
-//! The [`PropertyParser`] and its parsed declaration AST (spec §4.13/§4.14).
-//!
-//! Parses a single declaration `name: value !important?`. Custom properties
-//! (`--foo`) are accepted with their name kept verbatim. The value is delegated
-//! to [`super::value_parser::ValueParser`]; a trailing `!important` (case
-//! insensitive, with optional whitespace) is recognised and stripped.
+#![doc = include_str!("property_parser.doc/_module.md")]
 
 use crate::error::{CssParseError, CssParseErrorKind};
 use crate::source::{CssSource, SourceSpan};
 
-use super::stylesheet_parser::{CssToken, CssTokenKind, Tokenizer, slice_span};
+use super::css_tokenizer::{CssToken, CssTokenKind, Tokenizer};
+use super::token_cursor::slice_span;
 use super::value_parser::{ParsedValue, ValueParser};
 
-/// A single parsed CSS declaration (`color: red !important`).
+#[doc = include_str!("property_parser.doc/ParsedDeclaration.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedDeclaration {
-    /// The property name (verbatim, so `--custom` keeps its leading dashes).
+    #[doc = include_str!("property_parser.doc/name.md")]
     pub name: Box<str>,
-    /// The parsed component-value list.
+    #[doc = include_str!("property_parser.doc/value.md")]
     pub value: Vec<ParsedValue>,
-    /// Whether the declaration carried a trailing `!important`.
+    #[doc = include_str!("property_parser.doc/important.md")]
     pub important: bool,
-    /// The span covering the whole declaration.
+    #[doc = include_str!("property_parser.doc/span.md")]
     pub span: SourceSpan,
 }
 
-/// Parses a single declaration from a token slice or source.
-///
-/// The parser is stateless; a single instance may parse any number of
-/// declarations.
+#[doc = include_str!("property_parser.doc/PropertyParser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct PropertyParser {
     _private: (),
 }
 
 impl PropertyParser {
-    /// Creates a property parser.
+    #[doc = include_str!("property_parser.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { _private: () }
     }
 
-    /// Parses `source` as a single declaration.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`]: [`ExpectedColon`](CssParseErrorKind::ExpectedColon)
-    /// if the `:` is missing, [`UnexpectedToken`](CssParseErrorKind::UnexpectedToken)
-    /// if the property name is missing, or
-    /// [`InvalidValue`](CssParseErrorKind::InvalidValue) if the value is empty or
-    /// malformed.
+    #[doc = include_str!("property_parser.doc/parse.md")]
     pub fn parse(&self, source: &CssSource) -> Result<ParsedDeclaration, CssParseError> {
         let text = source.text();
         let eof = u32::try_from(text.len()).unwrap_or(u32::MAX);
@@ -59,11 +44,7 @@ impl PropertyParser {
         Self::parse_tokens(&tokens, eof)
     }
 
-    /// Parses a single declaration from an already-tokenized slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] as documented on [`PropertyParser::parse`].
+    #[doc = include_str!("property_parser.doc/parse_tokens.md")]
     pub(crate) fn parse_tokens(
         tokens: &[CssToken],
         eof: u32,
@@ -117,7 +98,7 @@ impl PropertyParser {
     }
 }
 
-/// Returns the index of the first non-whitespace token at or after `from`.
+#[doc = include_str!("property_parser.doc/skip_ws.md")]
 fn skip_ws(tokens: &[CssToken], from: usize) -> usize {
     let mut i = from;
     while matches!(tokens.get(i), Some(t) if t.is_whitespace()) {
@@ -126,7 +107,7 @@ fn skip_ws(tokens: &[CssToken], from: usize) -> usize {
     i
 }
 
-/// Trims leading and trailing whitespace tokens from a slice.
+#[doc = include_str!("property_parser.doc/trim_ws.md")]
 fn trim_ws(tokens: &[CssToken]) -> &[CssToken] {
     let mut start = 0;
     let mut end = tokens.len();
@@ -139,8 +120,7 @@ fn trim_ws(tokens: &[CssToken]) -> &[CssToken] {
     &tokens[start..end]
 }
 
-/// Detects and strips a trailing `!important` (case-insensitive, whitespace
-/// tolerant), returning the remaining value tokens and whether it was present.
+#[doc = include_str!("property_parser.doc/strip_important.md")]
 fn strip_important(tokens: &[CssToken]) -> (&[CssToken], bool) {
     let trimmed = trim_ws(tokens);
     let Some((last, rest)) = trimmed.split_last() else {

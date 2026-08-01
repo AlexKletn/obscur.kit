@@ -1,8 +1,4 @@
-//! **SPECIFICATION-DERIVED** semantic-selector cases for obscur.kit §7.5.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §7.5
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the engine, not a licence to edit the expectation.
+#![doc = include_str!("spec_ch7_selectors.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7_support/mod.rs"]
@@ -26,8 +22,7 @@ fn color_of(rt: &UiRuntime, node: NodeId) -> Option<StyleColor> {
         .and_then(ComputedValue::as_color)
 }
 
-/// An element with `class`, optionally carrying a `test-id` and an
-/// `automation-id`, plus `kids`.
+#[doc = include_str!("spec_ch7_selectors.doc/tagged.md")]
 fn tagged(
     id: u64,
     class: &str,
@@ -47,9 +42,7 @@ fn tagged(
     node
 }
 
-/// §7.5, verbatim: "Testing and DevTools use semantic selectors independent of
-/// CSS." and "These identifiers:" / "- do not affect CSS specificity;" /
-/// "- do not affect visual output;".
+#[doc = include_str!("spec_ch7_selectors.doc/a_test_id_is_not_a_css_attribute.md")]
 #[test]
 fn a_test_id_is_not_a_css_attribute() {
     let css = ".p { color: green } \
@@ -84,7 +77,7 @@ fn a_test_id_is_not_a_css_attribute() {
     );
 }
 
-/// §7.5: "These identifiers:" / "- do not affect layout;".
+#[doc = include_str!("spec_ch7_selectors.doc/test_ids_change_neither_geometry_nor_node_identity.md")]
 #[test]
 fn test_ids_change_neither_geometry_nor_node_identity() {
     let css = ".row { display: flex; flex-wrap: wrap; width: 300px; height: 100px } \
@@ -127,7 +120,7 @@ fn test_ids_change_neither_geometry_nor_node_identity() {
     );
 }
 
-/// A keyed row: an `.item` carrying both a stable key and a matching `test-id`.
+#[doc = include_str!("spec_ch7_selectors.doc/keyed.md")]
 fn keyed(key: &str) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(7))
         .with_key(ViewKey::new(StableKey::from(key)))
@@ -135,9 +128,7 @@ fn keyed(key: &str) -> ViewNode {
         .with_prop(ViewProperty::new(TEST_ID, ViewValue::Text(key.into())))
 }
 
-/// §7.5: "Available identifiers:" / "- stable component/node ID;" with §2.2
-/// "nodes keep stable IDs where identity is preserved;" and "child identity is
-/// stable through explicit keys;".
+#[doc = include_str!("spec_ch7_selectors.doc/a_node_id_survives_a_keyed_reorder.md")]
 #[test]
 fn a_node_id_survives_a_keyed_reorder() {
     let css = ".list { width: 300px; height: 200px } .item { width: 300px; height: 20px }";

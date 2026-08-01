@@ -1,0 +1,1 @@
+Clears all recorded telemetry.

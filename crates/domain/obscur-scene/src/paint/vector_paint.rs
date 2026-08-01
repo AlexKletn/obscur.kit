@@ -1,38 +1,18 @@
-//! `VectorPaint`: a vector shape's colour, possibly deferred to `currentColor`.
+#![doc = include_str!("vector_paint.doc/_module.md")]
 
 use crate::color::Color;
 
-/// How one vector shape is coloured — either a fixed colour, or the CSS
-/// `currentColor` keyword left **unresolved** (spec §5.17).
-///
-/// # Why `currentColor` is not a colour
-///
-/// Spec §5.17 requires `currentColor` to resolve from the computed `color`
-/// "allowing theme/state changes without reparsing". Baking it into a colour at
-/// parse time would defeat exactly that: a theme switch changes the computed
-/// `color`, and the vector document would have to be parsed again to follow it.
-/// So it is carried as its own variant all the way to composition, where the
-/// coordinator substitutes the node's computed `color` — the same treatment
-/// [`BoxShadow`](https://drafts.csswg.org/css-backgrounds/#box-shadow)'s absent
-/// colour already gets in this codebase.
-///
-/// A parsed vector document is therefore *theme-independent*: one parse serves
-/// every colour it will ever be drawn in.
+#[doc = include_str!("vector_paint.doc/VectorPaint.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VectorPaint {
-    /// A colour fixed by the document itself.
+    #[doc = include_str!("vector_paint.doc/Solid.md")]
     Solid(Color),
-    /// The CSS `currentColor` keyword: resolves to the painting node's computed
-    /// `color` at composition time.
+    #[doc = include_str!("vector_paint.doc/CurrentColor.md")]
     CurrentColor,
 }
 
 impl VectorPaint {
-    /// The colour this paint draws in when the painting node's computed `color`
-    /// is `current`.
-    ///
-    /// A [`Solid`](Self::Solid) ignores `current` — a colour the document fixed
-    /// is not the host's to override.
+    #[doc = include_str!("vector_paint.doc/resolve.md")]
     #[must_use]
     pub const fn resolve(self, current: Color) -> Color {
         match self {
@@ -41,7 +21,7 @@ impl VectorPaint {
         }
     }
 
-    /// Whether this paint defers to the computed `color`.
+    #[doc = include_str!("vector_paint.doc/is_current_color.md")]
     #[must_use]
     pub const fn is_current_color(self) -> bool {
         matches!(self, Self::CurrentColor)

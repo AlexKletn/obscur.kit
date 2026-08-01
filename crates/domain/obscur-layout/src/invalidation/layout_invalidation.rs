@@ -1,72 +1,18 @@
-//! An accumulator of pending relayouts, keyed by node and typed reason.
+#![doc = include_str!("layout_invalidation.doc/_module.md")]
 
 use crate::context::LayoutContext;
 use crate::invalidation::{LayoutInvalidationReason, PropagationResult};
 use obscur_identity::NodeId;
 use std::collections::HashMap;
 
-/// Accumulates the set of layout contexts that must be recomputed, each tagged
-/// with the typed [`LayoutInvalidationReason`] that first invalidated it
-/// (spec §4.3).
-///
-/// # Status: the layout phase consumes this, on both halves
-///
-/// `UiRuntime::layout_phase` populates one of these from real per-node style
-/// deltas and hands it to `LayoutCoordinator::layout_invalidated`, which
-/// classifies it once into the two sets its two caches need. **Measure**: it drops
-/// exactly the `MeasureCache` entries this set can have invalidated and serves
-/// every other node's size without re-measuring. **Arrange**: it drops the
-/// `ArrangeCache` keys of the upward closure of that set, and a node whose key
-/// survives *and* whose recomputed origin/constraints still match is served from
-/// its retained absolute boxes instead of re-running its subtree's algorithms. So
-/// a hover that changes one node's width re-measures and re-arranges that node and
-/// its ancestor chain, not the tree.
-///
-/// What that does **not** yet cover, stated plainly:
-///
-/// * **This set alone never decides that a node may be skipped, and must not.**
-///   `arrange` writes *absolute* positions, so a node the set does not mention
-///   still moves when an earlier sibling grows. The retained-box path is gated on
-///   this set **and** on the node's freshly recomputed arrange key; §4.3's
-///   propagation is still performed rather than inferred from this accumulator.
-/// * **The walk is still O(nodes).** A served subtree is still traversed to copy
-///   its retained boxes into the frame's map. Layout-algorithm runs and text
-///   shaping are the costs this set removes, not the traversal.
-/// * **The `note_*` gates below are not what the runtime calls.** It records
-///   through [`invalidate`](Self::invalidate) /
-///   [`note_style_changed`](Self::note_style_changed) only. The downward gate is
-///   instead exact-by-construction in the measure cache's key (a child
-///   re-measures precisely when its constraints differ), and the upward gate is a
-///   whole-ancestor-chain closure rather than a
-///   [`PropagationResult`]-driven early stop, because nothing populates a
-///   [`LayoutContext`]'s [`LayoutDependency`](crate::context::LayoutDependency) in
-///   production. Until something does,
-///   [`note_constraints_changed`](Self::note_constraints_changed),
-///   [`note_child_changed`](Self::note_child_changed) and
-///   [`note_upward`](Self::note_upward) are offered to a consumer that does not
-///   exist yet — read them as a contract, not as shipped behaviour.
-///
-/// It is **decoupled from the tree**: it neither stores nor walks parent/child
-/// links. The runtime performs the actual tree walk — finding parents, children,
-/// and their [`LayoutContext`]s — and feeds the observed changes here. This type
-/// only records and merges pending work and, through its `note_*` methods, offers
-/// the §4.3 gate decisions:
-///
-/// - **propagate down only on constraint change** — [`note_constraints_changed`](Self::note_constraints_changed),
-/// - **propagate up only on geometry change** (and stop at containment) —
-///   [`note_upward`](Self::note_upward),
-/// - re-measure a context when one of its depended-on children changed —
-///   [`note_child_changed`](Self::note_child_changed).
-///
-/// Merging is deterministic: on a repeat invalidation of the same node the
-/// **first** recorded reason is kept, and no operation ever panics.
+#[doc = include_str!("layout_invalidation.doc/LayoutInvalidation.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LayoutInvalidation {
     pending: HashMap<NodeId, LayoutInvalidationReason>,
 }
 
 impl LayoutInvalidation {
-    /// Creates an empty accumulator with no pending relayouts.
+    #[doc = include_str!("layout_invalidation.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -74,65 +20,53 @@ impl LayoutInvalidation {
         }
     }
 
-    /// Records that `node` must be recomputed for the given `reason`.
-    ///
-    /// If `node` is already pending, the existing (first-recorded) reason is
-    /// kept; the new reason is discarded. This keeps merging deterministic and
-    /// order-stable, and never panics.
+    #[doc = include_str!("layout_invalidation.doc/invalidate.md")]
     pub fn invalidate(&mut self, node: NodeId, reason: LayoutInvalidationReason) {
         self.pending.entry(node).or_insert(reason);
     }
 
-    /// Whether `node` is currently pending recomputation.
+    #[doc = include_str!("layout_invalidation.doc/is_invalidated.md")]
     #[must_use]
     pub fn is_invalidated(&self, node: NodeId) -> bool {
         self.pending.contains_key(&node)
     }
 
-    /// The reason `node` was invalidated, if it is pending.
+    #[doc = include_str!("layout_invalidation.doc/reason.md")]
     #[must_use]
     pub fn reason(&self, node: NodeId) -> Option<LayoutInvalidationReason> {
         self.pending.get(&node).copied()
     }
 
-    /// The number of distinct nodes pending recomputation.
+    #[doc = include_str!("layout_invalidation.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.pending.len()
     }
 
-    /// Whether nothing is pending.
+    #[doc = include_str!("layout_invalidation.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
-    /// Iterates over the pending `(node, reason)` entries without consuming.
+    #[doc = include_str!("layout_invalidation.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (&NodeId, &LayoutInvalidationReason)> {
         self.pending.iter()
     }
 
-    /// Removes and returns the pending map, leaving this accumulator empty.
+    #[doc = include_str!("layout_invalidation.doc/take.md")]
     #[must_use]
     pub fn take(&mut self) -> HashMap<NodeId, LayoutInvalidationReason> {
         std::mem::take(&mut self.pending)
     }
 
-    /// Alias for [`take`](Self::take): drains the pending map, leaving this
-    /// accumulator empty.
+    #[doc = include_str!("layout_invalidation.doc/drain.md")]
     #[must_use]
     pub fn drain(&mut self) -> HashMap<NodeId, LayoutInvalidationReason> {
         self.take()
     }
 
-    /// **Downward gate.** Invalidates `ctx`'s node with
-    /// [`ConstraintsChanged`](LayoutInvalidationReason::ConstraintsChanged)
-    /// **iff** the context's size depends on the incoming constraints
-    /// (`ctx.should_remeasure(true, None)`), and returns whether it did.
-    ///
-    /// This encodes §4.3's "propagate down only when constraints change": a
-    /// context whose measured size is independent of its constraints is not
-    /// invalidated by a constraint change.
+    #[doc = include_str!("layout_invalidation.doc/note_constraints_changed.md")]
     pub fn note_constraints_changed(&mut self, ctx: &LayoutContext) -> bool {
         if ctx.should_remeasure(true, None) {
             self.invalidate(ctx.node(), LayoutInvalidationReason::ConstraintsChanged);
@@ -142,13 +76,7 @@ impl LayoutInvalidation {
         }
     }
 
-    /// Invalidates `ctx`'s node with
-    /// [`ChildSizeChanged`](LayoutInvalidationReason::ChildSizeChanged) **iff**
-    /// `child`'s size feeds this context's measure
-    /// (`ctx.should_remeasure(false, Some(child))`), and returns whether it did.
-    ///
-    /// A context that does not depend on `child` is left untouched (§4.3:
-    /// recompute only what the dependency graph says is affected).
+    #[doc = include_str!("layout_invalidation.doc/note_child_changed.md")]
     pub fn note_child_changed(&mut self, ctx: &LayoutContext, child: NodeId) -> bool {
         if ctx.should_remeasure(false, Some(child)) {
             self.invalidate(ctx.node(), LayoutInvalidationReason::ChildSizeChanged);
@@ -158,26 +86,12 @@ impl LayoutInvalidation {
         }
     }
 
-    /// Invalidates `node` with
-    /// [`StyleChanged`](LayoutInvalidationReason::StyleChanged).
-    ///
-    /// A change to a node's own layout-affecting style always requires
-    /// re-laying-out that node, so this is unconditional.
+    #[doc = include_str!("layout_invalidation.doc/note_style_changed.md")]
     pub fn note_style_changed(&mut self, node: NodeId) {
         self.invalidate(node, LayoutInvalidationReason::StyleChanged);
     }
 
-    /// **Upward gate.** When a child's `child_result` continues upward
-    /// ([`PropagationResult::continues_upward`]), invalidates `parent_ctx`'s
-    /// node with
-    /// [`ChildSizeChanged`](LayoutInvalidationReason::ChildSizeChanged) and
-    /// returns `true` so the runtime knows to keep walking up. If the child's
-    /// geometry was stable or contained, nothing is recorded and `false` is
-    /// returned.
-    ///
-    /// This encodes §4.3's "propagate up only when output geometry changes" and
-    /// the containment stop, delegating the decision to the child's
-    /// [`PropagationResult`].
+    #[doc = include_str!("layout_invalidation.doc/note_upward.md")]
     pub fn note_upward(
         &mut self,
         parent_ctx: &LayoutContext,

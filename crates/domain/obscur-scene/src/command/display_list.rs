@@ -1,31 +1,17 @@
-//! An ordered, immutable sequence of paint commands.
+#![doc = include_str!("display_list.doc/_module.md")]
 
 use core::slice::Iter;
 
 use super::PaintCommand;
 
-/// An ordered, immutable sequence of [`PaintCommand`]s with a **deterministic
-/// paint order** (spec §5.1).
-///
-/// The order of the commands *is* the paint order: a renderer executes them
-/// front to back, so the same list renders identically across backends. The
-/// list is a flat stream in which [`PaintCommand::PushClip`] /
-/// [`PaintCommand::PushLayer`] open nested regions closed by their matching
-/// pops.
-///
-/// A **well-formed** list is *balanced* — see [`is_balanced`]. Renderers rely
-/// on this invariant; an unbalanced list has a dangling push or a stray pop and
-/// cannot be consumed safely. Balance is checkable, not enforced: constructing
-/// a `DisplayList` never validates it.
-///
-/// [`is_balanced`]: DisplayList::is_balanced
+#[doc = include_str!("display_list.doc/DisplayList.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DisplayList {
     commands: Vec<PaintCommand>,
 }
 
 impl DisplayList {
-    /// Creates an empty display list.
+    #[doc = include_str!("display_list.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -33,46 +19,36 @@ impl DisplayList {
         }
     }
 
-    /// Creates a display list from an existing sequence of commands, preserving
-    /// their order as the paint order. The commands are taken verbatim and are
-    /// not validated for balance.
+    #[doc = include_str!("display_list.doc/from_commands.md")]
     #[must_use]
     pub fn from_commands(commands: Vec<PaintCommand>) -> Self {
         Self { commands }
     }
 
-    /// The commands in paint order.
+    #[doc = include_str!("display_list.doc/commands.md")]
     #[must_use]
     pub fn commands(&self) -> &[PaintCommand] {
         &self.commands
     }
 
-    /// Iterates over the commands in paint order.
+    #[doc = include_str!("display_list.doc/iter.md")]
     pub fn iter(&self) -> Iter<'_, PaintCommand> {
         self.commands.iter()
     }
 
-    /// The number of commands in the list.
+    #[doc = include_str!("display_list.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.commands.len()
     }
 
-    /// Whether the list contains no commands.
+    #[doc = include_str!("display_list.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.commands.is_empty()
     }
 
-    /// Whether the list is balanced: every [`PaintCommand::PushClip`] /
-    /// [`PaintCommand::PushLayer`] has a matching pop, pushes and pops nest
-    /// correctly, and the running nesting depth never drops below zero.
-    ///
-    /// Computed by folding [`PaintCommand::nesting_delta`] over the stream: the
-    /// running depth must never go negative (a stray pop) and must end at zero
-    /// (no dangling push). A well-formed list — such as one produced by a
-    /// balanced [`DisplayListBuilder`](crate::command::DisplayListBuilder) — is
-    /// balanced.
+    #[doc = include_str!("display_list.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
         let mut depth: i32 = 0;

@@ -1,41 +1,23 @@
-//! A font's vertical line metrics at a concrete size (spec §5.10).
+#![doc = include_str!("line_metrics.doc/_module.md")]
 
-/// The vertical metrics of a single line of text at a specific font size, in
-/// **logical pixels** (spec §5.10).
-///
-/// Where [`FontMetrics`](crate::font::FontMetrics) carries a font's *design*
-/// metrics in font units, `LineMetrics` is the same information already scaled to
-/// a concrete `font_size`, so the runtime can size a text box and place its
-/// baseline without knowing the font's units-per-em. A
-/// [`TextShaper`](crate::shaping::TextShaper) produces it via
-/// [`line_metrics`](crate::shaping::TextShaper::line_metrics).
-///
-/// Following the layout convention (and unlike raw font tables), [`descent`] is
-/// stored as a **positive magnitude** below the baseline, so
-/// [`line_height`](Self::line_height) is a plain sum.
-///
-/// [`descent`]: Self::descent
+#[doc = include_str!("line_metrics.doc/LineMetrics.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LineMetrics {
-    /// The ascent above the baseline, in logical pixels (non-negative).
+    #[doc = include_str!("line_metrics.doc/ascent.md")]
     ascent: f32,
-    /// The descent below the baseline, in logical pixels, as a positive
-    /// magnitude.
+    #[doc = include_str!("line_metrics.doc/descent.md")]
     descent: f32,
-    /// Extra leading between lines, in logical pixels.
+    #[doc = include_str!("line_metrics.doc/line_gap.md")]
     line_gap: f32,
 }
 
 impl LineMetrics {
-    /// The fraction of the font size used as the ascent by the idealized default
-    /// ([`idealized`](Self::idealized)).
+    #[doc = include_str!("line_metrics.doc/IDEAL_ASCENT_RATIO.md")]
     pub const IDEAL_ASCENT_RATIO: f32 = 0.8;
-    /// The fraction of the font size used as the descent by the idealized default
-    /// ([`idealized`](Self::idealized)).
+    #[doc = include_str!("line_metrics.doc/IDEAL_DESCENT_RATIO.md")]
     pub const IDEAL_DESCENT_RATIO: f32 = 0.2;
 
-    /// Creates line metrics from an `ascent`, a positive-magnitude `descent`, and
-    /// a `line_gap`, all in logical pixels.
+    #[doc = include_str!("line_metrics.doc/new.md")]
     #[must_use]
     pub const fn new(ascent: f32, descent: f32, line_gap: f32) -> Self {
         Self {
@@ -45,13 +27,7 @@ impl LineMetrics {
         }
     }
 
-    /// The idealized metrics for `font_size`: `ascent = 0.8·size`,
-    /// `descent = 0.2·size`, `line_gap = 0` — so
-    /// [`line_height`](Self::line_height) equals `font_size` exactly.
-    ///
-    /// This is the deterministic fallback used when no real font is available
-    /// (the [`TextShaper`](crate::shaping::TextShaper) trait default and any
-    /// no-font adapter path), which is what keeps headless output reproducible.
+    #[doc = include_str!("line_metrics.doc/idealized.md")]
     #[must_use]
     pub fn idealized(font_size: f32) -> Self {
         Self::new(
@@ -61,34 +37,31 @@ impl LineMetrics {
         )
     }
 
-    /// Returns the ascent above the baseline, in logical pixels.
+    #[doc = include_str!("line_metrics.doc/ascent_2.md")]
     #[must_use]
     pub const fn ascent(&self) -> f32 {
         self.ascent
     }
 
-    /// Returns the descent below the baseline, in logical pixels (positive
-    /// magnitude).
+    #[doc = include_str!("line_metrics.doc/descent_2.md")]
     #[must_use]
     pub const fn descent(&self) -> f32 {
         self.descent
     }
 
-    /// Returns the extra leading between lines, in logical pixels.
+    #[doc = include_str!("line_metrics.doc/line_gap_2.md")]
     #[must_use]
     pub const fn line_gap(&self) -> f32 {
         self.line_gap
     }
 
-    /// Returns the natural line height: `ascent + descent + line_gap`, in logical
-    /// pixels.
+    #[doc = include_str!("line_metrics.doc/line_height.md")]
     #[must_use]
     pub fn line_height(&self) -> f32 {
         self.ascent + self.descent + self.line_gap
     }
 
-    /// Returns the baseline offset from the top of the line box: the
-    /// [`ascent`](Self::ascent), in logical pixels.
+    #[doc = include_str!("line_metrics.doc/baseline.md")]
     #[must_use]
     pub const fn baseline(&self) -> f32 {
         self.ascent

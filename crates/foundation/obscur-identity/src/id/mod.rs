@@ -1,4 +1,4 @@
-//! Id module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod component_id;
 mod correlation_id;
 mod frame_id;

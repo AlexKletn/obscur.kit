@@ -1,5 +1,4 @@
-//! `Localizer`: the current locale, its provider, and the fallback between them
-//! (spec §7.2).
+#![doc = include_str!("localizer.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 use obscur_text::shaping::TextDirection;
@@ -9,52 +8,18 @@ use crate::locale::LanguageTag;
 use crate::message::{MessageArgs, MessageKey};
 use crate::plural::PluralRules;
 
-/// The whole of §7.2's localization abstraction, assembled: a **key** and
-/// **parameters** resolved against a **current locale**, through a **replaceable
-/// provider**, with **fallback**, answering in a direction the **RTL** and **text
-/// shaping** layers can use.
-///
-/// Everything it needs to be non-Anglocentric is held here rather than assumed:
-/// the locale is a [`LanguageTag`] (default `und`, not `en`), the plural rules are
-/// the *locale's* CLDR rules recomputed whenever the locale changes, and the
-/// fallback chain ends at the root rather than at English.
-///
-/// # Example
-///
-/// ```
-/// # use obscur_localization::catalog::{Localizer, MessageCatalog};
-/// # use obscur_localization::locale::LanguageTag;
-/// # use obscur_localization::message::MessageArgs;
-/// let ru = LanguageTag::parse("ru-RU").expect("valid tag");
-/// let mut catalog = MessageCatalog::new();
-/// catalog
-///     .insert(
-///         &LanguageTag::parse("ru").expect("valid tag"),
-///         "files",
-///         "{n, plural, one{# файл} few{# файла} many{# файлов} other{# файла}}",
-///     )
-///     .expect("valid pattern");
-///
-/// let localizer = Localizer::new(ru).with_provider(Box::new(catalog));
-/// let files = |n| localizer.format("files", &MessageArgs::new().with_integer("n", n));
-///
-/// assert_eq!(files(1), "1 файл");     // and 21, and 101
-/// assert_eq!(files(2), "2 файла");    // and 22
-/// assert_eq!(files(5), "5 файлов");   // and 11, and 111
-/// ```
+#[doc = include_str!("localizer.doc/Localizer.md")]
 pub struct Localizer {
-    /// The current locale (spec §7.2).
+    #[doc = include_str!("localizer.doc/locale.md")]
     locale: LanguageTag,
-    /// `locale`'s CLDR cardinal rules, recomputed on every locale change so the
-    /// two can never disagree.
+    #[doc = include_str!("localizer.doc/rules.md")]
     rules: PluralRules,
-    /// The replaceable provider messages are read through.
+    #[doc = include_str!("localizer.doc/provider.md")]
     provider: Box<dyn MessageProvider>,
 }
 
 impl Localizer {
-    /// Creates a localizer for `locale` over the
-    /// [`EmptyMessageProvider`] — no messages until one is installed.
+    #[doc = include_str!("localizer.doc/new.md")]
     #[must_use]
     pub fn new(locale: LanguageTag) -> Self {
         Self {
@@ -64,81 +29,55 @@ impl Localizer {
         }
     }
 
-    /// Installs `provider`, replacing the previous one (spec §7.2 replaceable
-    /// provider; fluent builder).
+    #[doc = include_str!("localizer.doc/with_provider.md")]
     #[must_use]
     pub fn with_provider(mut self, provider: Box<dyn MessageProvider>) -> Self {
         self.provider = provider;
         self
     }
 
-    /// Installs `provider`, replacing the previous one.
+    #[doc = include_str!("localizer.doc/set_provider.md")]
     pub fn set_provider(&mut self, provider: Box<dyn MessageProvider>) {
         self.provider = provider;
     }
 
-    /// Returns the current locale (spec §7.2).
+    #[doc = include_str!("localizer.doc/locale_2.md")]
     #[must_use]
     pub fn locale(&self) -> &LanguageTag {
         &self.locale
     }
 
-    /// Switches the current locale, recomputing its plural rules.
-    ///
-    /// The rules are derived here and nowhere else, so a locale switch cannot
-    /// leave the previous language's categories behind — the failure mode that
-    /// would show as Russian text pluralised by English rules.
+    #[doc = include_str!("localizer.doc/set_locale.md")]
     pub fn set_locale(&mut self, locale: LanguageTag) {
         self.rules = PluralRules::cardinal(&locale);
         self.locale = locale;
     }
 
-    /// Returns the current locale's cardinal plural rules.
+    #[doc = include_str!("localizer.doc/plural_rules.md")]
     #[must_use]
     pub fn plural_rules(&self) -> &PluralRules {
         &self.rules
     }
 
-    /// Returns the current locale's base writing direction (spec §7.2 RTL
-    /// integration, §7.3).
+    #[doc = include_str!("localizer.doc/direction.md")]
     #[must_use]
     pub fn direction(&self) -> TextDirection {
         self.locale.direction()
     }
 
-    /// Returns the current locale's language subtag — the BCP-47 hint the shaper
-    /// takes (spec §7.2 text shaping integration).
-    ///
-    /// A shaper wants the language, not the full tag: it decides
-    /// language-sensitive OpenType features (`locl`) and, through it, whether Serbian
-    /// Cyrillic gets its own italic **б**. The region is not its business.
+    #[doc = include_str!("localizer.doc/language.md")]
     #[must_use]
     pub fn language(&self) -> &str {
         self.locale.language()
     }
 
-    /// Returns whether the installed provider can supply messages at all
-    /// (spec §7.2).
+    #[doc = include_str!("localizer.doc/availability.md")]
     #[must_use]
     pub fn availability(&self) -> SupportLevel {
         self.provider.availability()
     }
 
-    /// Formats the message `key` with `args` in the current locale (spec §7.2).
-    ///
-    /// Fallback is [`LanguageTag::fallback_chain`]: `ru-RU`, then `ru`, then
-    /// `und`. The first locale the provider has a pattern for wins, and it is
-    /// formatted under the **current locale's** plural rules — not the matched
-    /// locale's, which are the same rules in every case the chain can produce and
-    /// would be a lie in none.
-    ///
-    /// # A missing key renders as itself
-    ///
-    /// Not as English, and not as empty. `format("file.count", …)` with nothing
-    /// registered returns `"file.count"` — visible on screen, greppable in a
-    /// screenshot, and impossible to mistake for a translation. A toolkit that
-    /// fell back to an English default string would make English the schema, which
-    /// is the thing §7.2 exists to prevent.
+    #[doc = include_str!("localizer.doc/format.md")]
     #[must_use]
     pub fn format(&self, key: impl Into<MessageKey>, args: &MessageArgs) -> String {
         let key = key.into();
@@ -152,16 +91,14 @@ impl Localizer {
 }
 
 impl Default for Localizer {
-    /// A localizer for the root locale over the empty provider: no messages, no
-    /// plural distinctions, and honest about both.
+    #[doc = include_str!("localizer.doc/default.md")]
     fn default() -> Self {
         Self::new(LanguageTag::root())
     }
 }
 
 impl std::fmt::Debug for Localizer {
-    /// Names the locale and provider availability; `dyn MessageProvider` is not
-    /// [`Debug`], which is why this is written out.
+    #[doc = include_str!("localizer.doc/fmt.md")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Localizer")
             .field("locale", &self.locale)

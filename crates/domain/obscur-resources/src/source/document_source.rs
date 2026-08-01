@@ -1,20 +1,6 @@
-//! A resource backed by a host document handle (spec §5.16, §6.10).
+#![doc = include_str!("document_source.doc/_module.md")]
 
-/// A resource backed by a document the host resolves (spec §5.16 `DocumentHandle`,
-/// §6.10 file pickers).
-///
-/// The concrete `DocumentHandle` type lives in the platform layer and is not a
-/// dependency of this crate, so a document source models it abstractly: an opaque
-/// `token` string the host resolves back to its document, plus an optional
-/// `path_hint`.
-///
-/// The kit does not read the document itself here — this is a pure description.
-/// A loader or host resolves the token to actual bytes later (spec §5.15: the kit
-/// performs no arbitrary I/O by itself).
-///
-/// The `path_hint` is *not* necessarily a real filesystem path (spec §6.10): a
-/// file picker may hand back only a display name or a sandboxed identifier, so the
-/// hint is advisory metadata for display or logging, never something to open.
+#[doc = include_str!("document_source.doc/DocumentSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DocumentSource {
     token: Box<str>,
@@ -22,7 +8,7 @@ pub struct DocumentSource {
 }
 
 impl DocumentSource {
-    /// Creates a document source from an opaque host handle token.
+    #[doc = include_str!("document_source.doc/new.md")]
     #[must_use]
     pub fn new(token: impl Into<Box<str>>) -> Self {
         Self {
@@ -31,22 +17,20 @@ impl DocumentSource {
         }
     }
 
-    /// Returns this source with its advisory path hint set (spec §6.10).
-    ///
-    /// The hint is not necessarily a real filesystem path; see the type docs.
+    #[doc = include_str!("document_source.doc/with_path_hint.md")]
     #[must_use]
     pub fn with_path_hint(mut self, path_hint: impl Into<Box<str>>) -> Self {
         self.path_hint = Some(path_hint.into());
         self
     }
 
-    /// Returns the opaque handle token the host resolves (spec §5.16).
+    #[doc = include_str!("document_source.doc/token.md")]
     #[must_use]
     pub fn token(&self) -> &str {
         &self.token
     }
 
-    /// Returns the advisory path hint, if any (spec §6.10).
+    #[doc = include_str!("document_source.doc/path_hint.md")]
     #[must_use]
     pub fn path_hint(&self) -> Option<&str> {
         self.path_hint.as_deref()

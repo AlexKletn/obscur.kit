@@ -1,34 +1,23 @@
-//! The selectable attributes used to pick a concrete font face (spec §5.18).
+#![doc = include_str!("font_attributes.doc/_module.md")]
 
 use crate::span::{FontSlant, FontWeight};
 
-/// The selectable attributes a [`FontProvider`](crate::font::FontProvider) uses
-/// to pick a concrete face within a family (spec §5.18).
-///
-/// A family names *which* typeface; these attributes name *which cut* of it —
-/// its weight, slant, and width. The provider chooses the registered face whose
-/// attributes are nearest the requested ones by [`FontAttributes::distance`].
+#[doc = include_str!("font_attributes.doc/FontAttributes.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FontAttributes {
-    /// The requested weight (default [`FontWeight::NORMAL`]).
+    #[doc = include_str!("font_attributes.doc/weight.md")]
     pub weight: FontWeight,
-    /// The requested slant (default [`FontSlant::Normal`]).
+    #[doc = include_str!("font_attributes.doc/slant.md")]
     pub slant: FontSlant,
-    /// The requested width (default [`FontStretch::Normal`]).
+    #[doc = include_str!("font_attributes.doc/stretch.md")]
     pub stretch: FontStretch,
 }
 
 impl FontAttributes {
-    /// The penalty added to a [`distance`](Self::distance) when two faces differ
-    /// in slant.
-    ///
-    /// It is large relative to a typical weight step (100) so a slant mismatch
-    /// outweighs a modest weight difference: an upright request prefers a
-    /// heavier upright face over a same-weight italic.
+    #[doc = include_str!("font_attributes.doc/SLANT_PENALTY.md")]
     const SLANT_PENALTY: u32 = 500;
 
-    /// Creates attributes at their defaults: [`FontWeight::NORMAL`],
-    /// [`FontSlant::Normal`], and [`FontStretch::Normal`].
+    #[doc = include_str!("font_attributes.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -38,42 +27,28 @@ impl FontAttributes {
         }
     }
 
-    /// Returns these attributes with `weight` set.
+    #[doc = include_str!("font_attributes.doc/with_weight.md")]
     #[must_use]
     pub const fn with_weight(mut self, weight: FontWeight) -> Self {
         self.weight = weight;
         self
     }
 
-    /// Returns these attributes with `slant` set.
+    #[doc = include_str!("font_attributes.doc/with_slant.md")]
     #[must_use]
     pub const fn with_slant(mut self, slant: FontSlant) -> Self {
         self.slant = slant;
         self
     }
 
-    /// Returns these attributes with `stretch` set.
+    #[doc = include_str!("font_attributes.doc/with_stretch.md")]
     #[must_use]
     pub const fn with_stretch(mut self, stretch: FontStretch) -> Self {
         self.stretch = stretch;
         self
     }
 
-    /// Returns a heuristic distance from `self` to `other`, where `0` means an
-    /// exact match and larger values mean a poorer fit (spec §5.18).
-    ///
-    /// A provider uses this to pick the nearest available face for a request.
-    /// The distance is the weighted sum of three terms:
-    ///
-    /// * the absolute weight difference (`|weight - other.weight|`, one unit per
-    ///   point on the `1..=1000` axis),
-    /// * a flat [`SLANT_PENALTY`](Self::SLANT_PENALTY) when the slants differ,
-    ///   and
-    /// * the absolute difference of the two [`FontStretch::percentage`] values
-    ///   (one unit per whole percent of width).
-    ///
-    /// It is symmetric and monotonic in the weight difference, so a request for
-    /// a light weight ranks progressively heavier faces progressively worse.
+    #[doc = include_str!("font_attributes.doc/distance.md")]
     #[must_use]
     pub fn distance(&self, other: &FontAttributes) -> u32 {
         let weight_diff = u32::from(self.weight.value().abs_diff(other.weight.value()));
@@ -92,37 +67,31 @@ impl FontAttributes {
     }
 }
 
-/// A font's width, from [`UltraCondensed`](FontStretch::UltraCondensed) to
-/// [`UltraExpanded`](FontStretch::UltraExpanded) (spec §5.18).
-///
-/// Variants are declared narrowest-to-widest, so the derived [`Ord`] ranks them
-/// by width and providers can find the nearest available width. The default is
-/// [`FontStretch::Normal`].
+#[doc = include_str!("font_attributes.doc/FontStretch.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FontStretch {
-    /// 50% of normal width.
+    #[doc = include_str!("font_attributes.doc/UltraCondensed.md")]
     UltraCondensed,
-    /// 62.5% of normal width.
+    #[doc = include_str!("font_attributes.doc/ExtraCondensed.md")]
     ExtraCondensed,
-    /// 75% of normal width.
+    #[doc = include_str!("font_attributes.doc/Condensed.md")]
     Condensed,
-    /// 87.5% of normal width.
+    #[doc = include_str!("font_attributes.doc/SemiCondensed.md")]
     SemiCondensed,
-    /// 100% (normal) width; the default.
+    #[doc = include_str!("font_attributes.doc/Normal.md")]
     Normal,
-    /// 112.5% of normal width.
+    #[doc = include_str!("font_attributes.doc/SemiExpanded.md")]
     SemiExpanded,
-    /// 125% of normal width.
+    #[doc = include_str!("font_attributes.doc/Expanded.md")]
     Expanded,
-    /// 150% of normal width.
+    #[doc = include_str!("font_attributes.doc/ExtraExpanded.md")]
     ExtraExpanded,
-    /// 200% of normal width.
+    #[doc = include_str!("font_attributes.doc/UltraExpanded.md")]
     UltraExpanded,
 }
 
 impl FontStretch {
-    /// Returns the CSS width percentage of this stretch, where
-    /// [`FontStretch::Normal`] is `100.0` (spec §5.18).
+    #[doc = include_str!("font_attributes.doc/percentage.md")]
     #[must_use]
     pub const fn percentage(&self) -> f32 {
         match self {
@@ -140,7 +109,7 @@ impl FontStretch {
 }
 
 impl Default for FontStretch {
-    /// The default width is [`FontStretch::Normal`].
+    #[doc = include_str!("font_attributes.doc/default.md")]
     fn default() -> Self {
         Self::Normal
     }

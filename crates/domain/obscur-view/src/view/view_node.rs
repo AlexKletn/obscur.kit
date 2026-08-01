@@ -1,48 +1,36 @@
-//! `ViewNode`: the core recursive node of the desired view tree.
+#![doc = include_str!("view_node.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
 use super::{CLASS, ViewEventBinding, ViewFragment, ViewKey, ViewProperty, ViewValue};
 
-/// A single node in a component's desired declarative view tree.
-///
-/// The desired tree is *plain data*: cloneable, comparable, and free of any
-/// retained-tree references (`NodeId`), runtime handles, or closures. Updates
-/// are expressed by producing a new desired tree rather than mutating a
-/// retained one (spec §2.2). Keyed identity used for reconciliation lives here
-/// as an optional [`ViewKey`]; meaningful structure and text are both real
-/// nodes (spec §4.16).
-///
-/// Because element props carry [`super::ViewValue`] (which contains an `f64`),
-/// this enum derives only `Debug`, `Clone`, and `PartialEq`.
+#[doc = include_str!("view_node.doc/ViewNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewNode {
-    /// A component element: a keyed, propertied node with event bindings and
-    /// recursively nested children.
+    #[doc = include_str!("view_node.doc/Element.md")]
     Element {
-        /// Stable id of the component this element renders (spec §2.15).
+        #[doc = include_str!("view_node.doc/component.md")]
         component: ComponentId,
-        /// Optional explicit key for keyed reconciliation.
+        #[doc = include_str!("view_node.doc/key.md")]
         key: Option<ViewKey>,
-        /// Properties flowed *down* into the element.
+        #[doc = include_str!("view_node.doc/props.md")]
         props: Vec<ViewProperty>,
-        /// Event bindings whose actions flow *up*.
+        #[doc = include_str!("view_node.doc/events.md")]
         events: Vec<ViewEventBinding>,
-        /// Recursively nested children.
+        #[doc = include_str!("view_node.doc/children.md")]
         children: ViewFragment,
     },
-    /// A text node — text is real structure in the tree (spec §4.16).
+    #[doc = include_str!("view_node.doc/Text.md")]
     Text {
-        /// Optional explicit key for keyed reconciliation.
+        #[doc = include_str!("view_node.doc/key_2.md")]
         key: Option<ViewKey>,
-        /// The literal text content.
+        #[doc = include_str!("view_node.doc/content.md")]
         content: Box<str>,
     },
 }
 
 impl ViewNode {
-    /// Creates an unkeyed element node for `component` with no props, events,
-    /// or children.
+    #[doc = include_str!("view_node.doc/element.md")]
     #[must_use]
     pub fn element(component: ComponentId) -> Self {
         Self::Element {
@@ -54,19 +42,7 @@ impl ViewNode {
         }
     }
 
-    /// Creates a **slot outlet**: the position in a component's own output where
-    /// the children an author assigned to the slot called `name` are projected
-    /// (spec §2.12).
-    ///
-    /// This is the half of a slot that a component owns. The other half is the
-    /// author's `<h1 slot="header"/>`; [`project_slots`](super::project_slots)
-    /// joins them, replacing this node with that content before the output is
-    /// reconciled — so an outlet never becomes a retained node, filled or not.
-    ///
-    /// `name` must be one of the slots the component's
-    /// [`ComponentContract`](crate::component::ComponentContract) declares: that
-    /// declaration is what both front ends check an author's assignment against,
-    /// so an outlet naming an undeclared slot can never receive anything.
+    #[doc = include_str!("view_node.doc/slot.md")]
     #[must_use]
     pub fn slot(name: impl Into<Box<str>>) -> Self {
         Self::element(super::SLOT_OUTLET).with_prop(ViewProperty::new(
@@ -75,17 +51,7 @@ impl ViewNode {
         ))
     }
 
-    /// Creates a **virtual-collection marker**: the node a `<VirtualFor>` lowers
-    /// to, carrying the per-row `template` as its children and the estimated row
-    /// `row_extent` (logical pixels along the scroll axis) as a reserved property
-    /// (spec §2.11, §4.9).
-    ///
-    /// This is the half of a `<VirtualFor>` the front end can build: the window
-    /// it stands for is a function of the viewport, which the runtime owns, so
-    /// [`realize_virtual_collections`](super::realize_virtual_collections)
-    /// replaces this marker with a viewport-bounded window of `template` clones
-    /// before the output is reconciled — the marker itself never becomes a
-    /// retained node, the same way a slot outlet never does.
+    #[doc = include_str!("view_node.doc/virtual_collection.md")]
     #[must_use]
     pub fn virtual_collection(row_extent: f32, template: ViewFragment) -> Self {
         Self::element(super::VIRTUAL_COLLECTION)
@@ -96,12 +62,7 @@ impl ViewNode {
             .with_children(template)
     }
 
-    /// Creates a virtual-list marker: `count` items of `row_extent` each, realized
-    /// through the row builder registered under `list_id` (spec §4.9).
-    ///
-    /// The builder is deliberately absent from the view — a `View` is plain data and
-    /// a closure is not — so the runtime holds it and this names it. That split is
-    /// what lets the model carry every item while only the visible nodes are built.
+    #[doc = include_str!("view_node.doc/virtual_list.md")]
     #[must_use]
     pub fn virtual_list(list_id: InternedSymbol, count: usize, row_extent: f32) -> Self {
         Self::element(super::VIRTUAL_COLLECTION)
@@ -119,16 +80,7 @@ impl ViewNode {
             ))
     }
 
-    /// Tags a virtual-list marker with a **scroll-reset token** (spec §4.9): when the
-    /// token differs from the one the runtime last saw for this list, the list's
-    /// scroll offset is reset to the top before its window is computed.
-    ///
-    /// Use it when the same list shows *different content* over time — a file manager
-    /// entering a new directory — so a scroll offset that belonged to the old content
-    /// is discarded rather than carried into the new. Pass a value that changes
-    /// exactly when the content is replaced (a generation counter is the usual shape);
-    /// a list whose content only grows or shrinks in place should not tag one, so its
-    /// position survives. No-op on a node that is not a virtual-list marker.
+    #[doc = include_str!("view_node.doc/with_virtual_scroll_reset.md")]
     #[must_use]
     pub fn with_virtual_scroll_reset(self, token: u64) -> Self {
         #[expect(
@@ -139,7 +91,7 @@ impl ViewNode {
         self.with_prop(ViewProperty::new(super::VIRTUAL_SCROLL_RESET, value))
     }
 
-    /// Creates an unkeyed text node holding `content`.
+    #[doc = include_str!("view_node.doc/text.md")]
     #[must_use]
     pub fn text(content: impl Into<Box<str>>) -> Self {
         Self::Text {
@@ -148,7 +100,7 @@ impl ViewNode {
         }
     }
 
-    /// Returns this node's explicit key, if any.
+    #[doc = include_str!("view_node.doc/key_3.md")]
     #[must_use]
     pub fn key(&self) -> Option<&ViewKey> {
         match self {
@@ -156,7 +108,7 @@ impl ViewNode {
         }
     }
 
-    /// Sets this node's explicit key, returning the updated node.
+    #[doc = include_str!("view_node.doc/with_key.md")]
     #[must_use]
     pub fn with_key(mut self, new_key: impl Into<ViewKey>) -> Self {
         let new_key = new_key.into();
@@ -166,7 +118,7 @@ impl ViewNode {
         self
     }
 
-    /// Appends a property to an element node. No-op on a text node.
+    #[doc = include_str!("view_node.doc/with_prop.md")]
     #[must_use]
     pub fn with_prop(mut self, prop: ViewProperty) -> Self {
         if let Self::Element { props, .. } = &mut self {
@@ -175,7 +127,7 @@ impl ViewNode {
         self
     }
 
-    /// Appends an event binding to an element node. No-op on a text node.
+    #[doc = include_str!("view_node.doc/with_event.md")]
     #[must_use]
     pub fn with_event(mut self, event: ViewEventBinding) -> Self {
         if let Self::Element { events, .. } = &mut self {
@@ -184,7 +136,7 @@ impl ViewNode {
         self
     }
 
-    /// Sets the children of an element node. No-op on a text node.
+    #[doc = include_str!("view_node.doc/with_children.md")]
     #[must_use]
     pub fn with_children(mut self, new_children: ViewFragment) -> Self {
         if let Self::Element { children, .. } = &mut self {
@@ -193,14 +145,7 @@ impl ViewNode {
         self
     }
 
-    /// Sets this element's `class` attribute (spec §4.13), the input the cascade
-    /// matches `.name` rules against. A no-op on a text node, like
-    /// [`with_prop`](Self::with_prop).
-    ///
-    /// The shorthand for the single most common styling operation — it is exactly
-    /// `self.with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))`.
-    /// Like a `class="a b"` attribute, `class` carries the whole space-separated
-    /// list; call it once with every class rather than chaining it.
+    #[doc = include_str!("view_node.doc/class.md")]
     #[must_use]
     pub fn class(self, class: impl Into<Box<str>>) -> Self {
         self.with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))

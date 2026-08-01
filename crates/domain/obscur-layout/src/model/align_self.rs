@@ -1,34 +1,25 @@
-//! Per-item grid alignment override (`justify-self` / `align-self`).
+#![doc = include_str!("align_self.doc/_module.md")]
 
 use crate::model::AlignItems;
 
-/// How a single grid item aligns within its cell on one axis, overriding the
-/// container's [`AlignItems`] default (spec §4.1 grid, `justify-self` /
-/// `align-self`).
-///
-/// [`Auto`](Self::Auto) — the default — inherits the container's items default
-/// (`justify-items` for the inline axis, `align-items` for the block axis); the
-/// concrete values position the item within its cell exactly like the matching
-/// [`AlignItems`] value.
+#[doc = include_str!("align_self.doc/AlignSelf.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AlignSelf {
-    /// Inherit the container's items default for this axis (the initial value).
+    #[doc = include_str!("align_self.doc/Auto.md")]
     #[default]
     Auto,
-    /// Align the item toward the start of the cell.
+    #[doc = include_str!("align_self.doc/Start.md")]
     Start,
-    /// Align the item toward the end of the cell.
+    #[doc = include_str!("align_self.doc/End.md")]
     End,
-    /// Center the item within the cell.
+    #[doc = include_str!("align_self.doc/Center.md")]
     Center,
-    /// Stretch the item to fill the cell.
+    #[doc = include_str!("align_self.doc/Stretch.md")]
     Stretch,
 }
 
 impl AlignSelf {
-    /// Resolves the effective per-axis alignment against the container's items
-    /// default: [`Auto`](Self::Auto) yields the container's value, every other
-    /// value maps to the matching [`AlignItems`] variant.
+    #[doc = include_str!("align_self.doc/resolve.md")]
     #[must_use]
     pub const fn resolve(self, container: AlignItems) -> AlignItems {
         match self {

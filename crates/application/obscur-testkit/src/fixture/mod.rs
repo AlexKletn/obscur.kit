@@ -1,3 +1,36 @@
-//! Fixture module.
+#![doc = include_str!("mod.doc/_module.md")]
+mod button_element;
+mod class_rule;
+mod counter_panel;
+mod editable_panel;
+mod hover_box;
+mod image_panel;
+mod interaction_panel;
+mod key_event;
+mod long_press_panel;
+mod mouse_event;
+mod resolved_frame;
+mod scrolling_list;
+mod single_line_field;
 mod test_fixture;
+mod text_area;
+mod touch_contact;
+mod virtual_row_list;
+
+pub use button_element::ButtonElement;
+pub use class_rule::ClassRule;
+pub use counter_panel::CounterPanel;
+pub use editable_panel::EditablePanel;
+pub use hover_box::HoverBox;
+pub use image_panel::ImagePanel;
+pub use interaction_panel::InteractionPanel;
+pub use key_event::{char_press, named_press};
+pub use long_press_panel::LongPressPanel;
+pub use mouse_event::{mouse, mouse_at};
+pub use resolved_frame::render_resolved;
+pub use scrolling_list::ScrollingList;
+pub use single_line_field::SingleLineField;
 pub use test_fixture::TestFixture;
+pub use text_area::TextArea;
+pub use touch_contact::{finger, finger_at, untrusted_finger};
+pub use virtual_row_list::VirtualRowList;

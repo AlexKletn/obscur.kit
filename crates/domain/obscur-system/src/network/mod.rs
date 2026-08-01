@@ -1,4 +1,4 @@
-//! Network module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod credential_handle;
 pub use credential_handle::CredentialHandle;
 mod network_request;

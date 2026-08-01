@@ -1,38 +1,23 @@
-//! `MountContext`: the per-hook context handed to `on_mount`.
+#![doc = include_str!("mount_context.doc/_module.md")]
 
 use core::ops::{Deref, DerefMut};
 
 use crate::component::ComponentContext;
 
-/// The context passed to
-/// [`Component::on_mount`](crate::component::Component::on_mount) when an
-/// instance is first mounted (spec §2.1).
-///
-/// It is a thin wrapper that borrows the underlying [`ComponentContext`]; first
-/// mount carries no phase-specific data beyond the context itself, so this type
-/// simply forwards to it. Access the context through
-/// [`context`](Self::context), or transparently via the [`Deref`]/[`DerefMut`]
-/// impls (e.g. to open a scoped subscription during mount).
-///
-/// # Borrows
-///
-/// `MountContext<'ctx, 'scope>` borrows a `ComponentContext<'scope>` mutably for
-/// `'ctx`. Two lifetimes are required because `ComponentContext` is invariant in
-/// its own borrow lifetime, so the wrapper cannot reuse a single lifetime for
-/// both the outer borrow and the context's inner borrows.
+#[doc = include_str!("mount_context.doc/MountContext.md")]
 #[derive(Debug)]
 pub struct MountContext<'ctx, 'scope> {
     context: &'ctx mut ComponentContext<'scope>,
 }
 
 impl<'ctx, 'scope> MountContext<'ctx, 'scope> {
-    /// Wraps a borrowed [`ComponentContext`] for the mount hook.
+    #[doc = include_str!("mount_context.doc/new.md")]
     #[must_use]
     pub fn new(context: &'ctx mut ComponentContext<'scope>) -> Self {
         Self { context }
     }
 
-    /// Mutable access to the underlying [`ComponentContext`].
+    #[doc = include_str!("mount_context.doc/context.md")]
     #[must_use]
     pub fn context(&mut self) -> &mut ComponentContext<'scope> {
         self.context

@@ -1,4 +1,4 @@
-//! A clip applied to subsequent drawing.
+#![doc = include_str!("clip.doc/_module.md")]
 
 use obscur_geometry::{CornerRadii, Rect};
 
@@ -6,57 +6,47 @@ use crate::path::Path;
 
 use super::{ClipShape, Mask};
 
-/// A clip restricting subsequent drawing to a region (spec §5.8).
-///
-/// A clip is either a geometric [`ClipShape`] or a [`Mask`]. Shape clips are
-/// cheap: they confine drawing to a rectangle, rounded rectangle, or path.
-/// Mask clips derive coverage from separate source content and may therefore
-/// require an offscreen pass. A `Clip` is a backend-independent descriptor and
-/// references no GPU or renderer types.
+#[doc = include_str!("clip.doc/Clip.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Clip {
-    /// A geometric clip confining drawing to a shape.
+    #[doc = include_str!("clip.doc/Shape.md")]
     Shape(ClipShape),
-    /// A mask clip modulating coverage from source content.
+    #[doc = include_str!("clip.doc/Mask.md")]
     Mask(Mask),
 }
 
 impl Clip {
-    /// Creates a rectangular shape clip.
+    #[doc = include_str!("clip.doc/rect.md")]
     #[must_use]
     pub const fn rect(rect: Rect) -> Self {
         Self::Shape(ClipShape::rect(rect))
     }
 
-    /// Creates a rounded-rectangular shape clip.
+    #[doc = include_str!("clip.doc/rounded_rect.md")]
     #[must_use]
     pub const fn rounded_rect(rect: Rect, radii: CornerRadii) -> Self {
         Self::Shape(ClipShape::rounded_rect(rect, radii))
     }
 
-    /// Creates a path shape clip.
+    #[doc = include_str!("clip.doc/path.md")]
     #[must_use]
     pub fn path(path: Path) -> Self {
         Self::Shape(ClipShape::path(path))
     }
 
-    /// Creates a mask clip.
+    #[doc = include_str!("clip.doc/mask.md")]
     #[must_use]
     pub const fn mask(mask: Mask) -> Self {
         Self::Mask(mask)
     }
 
-    /// Returns whether this clip is a [`Clip::Mask`].
+    #[doc = include_str!("clip.doc/is_mask.md")]
     #[must_use]
     pub const fn is_mask(&self) -> bool {
         matches!(self, Self::Mask(_))
     }
 
-    /// The clip's axis-aligned bounding rectangle.
-    ///
-    /// For a shape clip this is the shape's bounds (see [`ClipShape::bounds`]).
-    /// For a mask clip this is `None`: a mask's extent depends on its source
-    /// content, which is not known to the clip itself. Never panics.
+    #[doc = include_str!("clip.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         match self {

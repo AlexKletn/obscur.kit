@@ -1,53 +1,38 @@
-//! `RecoveryResult`: the outcome of a single recovery decision (spec §1.7).
+#![doc = include_str!("recovery_result.doc/_module.md")]
 
 use obscur_diagnostics::RecoveryAction;
 
-/// The outcome of a recovery decision for a failed unit of work (spec §1.7).
-///
-/// A recovery decision follows the spec's *contain → (retry | fallback) |
-/// propagate* rule. This value records which of those three branches was taken
-/// so the runtime can act on it — rerun the unit, keep the fallback UI, or hand
-/// the failure to an enclosing boundary — and report the choice to diagnostics
-/// via [`recovery_action`](Self::recovery_action).
+#[doc = include_str!("recovery_result.doc/RecoveryResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecoveryResult {
-    /// The boundary is enabled and has retry budget left; the failed unit will
-    /// be retried.
+    #[doc = include_str!("recovery_result.doc/Retried.md")]
     Retried,
-    /// The boundary is enabled but out of retries; the fallback UI is kept in
-    /// place of the failed subtree.
+    #[doc = include_str!("recovery_result.doc/FellBack.md")]
     FellBack,
-    /// The boundary is disabled; the failure escapes to the nearest enclosing
-    /// boundary.
+    #[doc = include_str!("recovery_result.doc/Propagated.md")]
     Propagated,
 }
 
 impl RecoveryResult {
-    /// Whether the decision was to retry the failed unit ([`Retried`](Self::Retried)).
+    #[doc = include_str!("recovery_result.doc/is_retried.md")]
     #[must_use]
     pub const fn is_retried(self) -> bool {
         matches!(self, Self::Retried)
     }
 
-    /// Whether the decision was to keep the fallback UI ([`FellBack`](Self::FellBack)).
+    #[doc = include_str!("recovery_result.doc/is_fallback.md")]
     #[must_use]
     pub const fn is_fallback(self) -> bool {
         matches!(self, Self::FellBack)
     }
 
-    /// Whether the failure escaped to an enclosing boundary
-    /// ([`Propagated`](Self::Propagated)).
+    #[doc = include_str!("recovery_result.doc/is_propagated.md")]
     #[must_use]
     pub const fn is_propagated(self) -> bool {
         matches!(self, Self::Propagated)
     }
 
-    /// Maps this outcome to the [`RecoveryAction`] reported to diagnostics.
-    ///
-    /// - [`Retried`](Self::Retried) → [`RecoveryAction::Retried`]
-    /// - [`FellBack`](Self::FellBack) → [`RecoveryAction::BoundaryReplaced`]
-    /// - [`Propagated`](Self::Propagated) → [`RecoveryAction::None`] (no
-    ///   recovery happened at this boundary; the failure was handed outward)
+    #[doc = include_str!("recovery_result.doc/recovery_action.md")]
     #[must_use]
     pub const fn recovery_action(self) -> RecoveryAction {
         match self {

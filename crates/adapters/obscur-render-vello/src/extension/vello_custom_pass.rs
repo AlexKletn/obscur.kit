@@ -1,18 +1,6 @@
-//! The adapter-side descriptor of a trusted custom render pass (spec §5.3).
+#![doc = include_str!("vello_custom_pass.doc/_module.md")]
 
-/// A named, trusted custom render pass gated by a capability check (spec §5.3).
-///
-/// Spec §5.3 permits trusted extensions to inject custom render passes, but only
-/// behind capability checks — in this backend, the
-/// [`custom_shaders`](obscur_render::renderer::RendererCapabilities::has_custom_shaders)
-/// capability plus a live GPU device. A real pass records wgpu commands against
-/// the device; since the device is host-provided and optional (spec §2.7), this
-/// type is the descriptor half: it names the pass and records whether it needs a
-/// device, so the runtime can decide up front whether the pass is permitted.
-///
-/// Wiring an actual `wgpu::RenderPass` is a future refinement; the name and
-/// permission contract here is the stable surface a trusted extension registers
-/// against.
+#[doc = include_str!("vello_custom_pass.doc/VelloCustomPass.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VelloCustomPass {
     name: Box<str>,
@@ -20,10 +8,7 @@ pub struct VelloCustomPass {
 }
 
 impl VelloCustomPass {
-    /// Creates a device-requiring custom pass with the given `name`.
-    ///
-    /// A custom pass records GPU commands, so it defaults to requiring a device;
-    /// use [`Self::device_free`] for a pass that does not.
+    #[doc = include_str!("vello_custom_pass.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self {
@@ -32,7 +17,7 @@ impl VelloCustomPass {
         }
     }
 
-    /// Creates a custom pass that does not require a GPU device.
+    #[doc = include_str!("vello_custom_pass.doc/device_free.md")]
     #[must_use]
     pub fn device_free(name: impl Into<Box<str>>) -> Self {
         Self {
@@ -41,22 +26,19 @@ impl VelloCustomPass {
         }
     }
 
-    /// The pass's name.
+    #[doc = include_str!("vello_custom_pass.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Whether this pass needs a GPU device to run.
+    #[doc = include_str!("vello_custom_pass.doc/requires_device.md")]
     #[must_use]
     pub const fn requires_device(&self) -> bool {
         self.requires_device
     }
 
-    /// Whether the pass is permitted to run given the availability of a device.
-    ///
-    /// A device-requiring pass (spec §5.3) is permitted only when a device is
-    /// present; a device-free pass is always permitted.
+    #[doc = include_str!("vello_custom_pass.doc/is_permitted.md")]
     #[must_use]
     pub const fn is_permitted(&self, has_device: bool) -> bool {
         !self.requires_device || has_device

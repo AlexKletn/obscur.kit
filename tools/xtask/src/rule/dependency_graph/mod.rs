@@ -1,4 +1,4 @@
-//! Graph-based dependency architecture checks (spec §3.16, §5.9).
+#![doc = include_str!("mod.doc/_module.md")]
 
 pub(crate) mod check;
 pub(crate) mod crate_node;

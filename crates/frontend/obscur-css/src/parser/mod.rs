@@ -1,8 +1,8 @@
-//! CSS parsers: tokenizer and hand-rolled parsers producing the crate's own
-//! parsed-AST (spec §4.13). Entry point: [`StylesheetParser`].
+#![doc = include_str!("mod.doc/_module.md")]
 
 mod container_query_parser;
 pub use container_query_parser::{ContainerCondition, ContainerQueryParser, ParsedContainerQuery};
+mod css_tokenizer;
 mod media_query_parser;
 pub use media_query_parser::{
     MediaComparator, MediaCondition, MediaQualifier, MediaQueryParser, ParsedMediaQuery,
@@ -20,5 +20,6 @@ pub use stylesheet_parser::{
     KeyframeSelector, ParsedContainerRule, ParsedKeyframe, ParsedKeyframesRule, ParsedMediaRule,
     ParsedRule, ParsedStyleRule, ParsedStylesheet, StylesheetParser,
 };
+mod token_cursor;
 mod value_parser;
 pub use value_parser::{ParsedValue, ValueParser};

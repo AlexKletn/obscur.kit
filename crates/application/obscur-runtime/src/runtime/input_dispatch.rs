@@ -1,27 +1,18 @@
-//! [`InputDispatch`]: what dispatching one queued [`InputEvent`] produced.
+#![doc = include_str!("input_dispatch.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use super::{KeyDispatch, PointerDispatch};
 
-/// The result of dispatching one queued
-/// [`InputEvent`](super::InputEvent), in the order the events were queued
-/// (spec §3.4 phase 3).
-///
-/// Each variant carries exactly what the matching immediate entry point returns —
-/// [`handle_pointer`](super::UiRuntime::handle_pointer) and friends — because the
-/// queue dispatches through those same functions. Queuing an event and handling it
-/// immediately differ in *when*, never in *what*.
+#[doc = include_str!("input_dispatch.doc/InputDispatch.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputDispatch {
-    /// What [`handle_pointer`](super::UiRuntime::handle_pointer) returned.
+    #[doc = include_str!("input_dispatch.doc/Pointer.md")]
     Pointer(PointerDispatch),
-    /// What [`handle_key`](super::UiRuntime::handle_key) returned.
+    #[doc = include_str!("input_dispatch.doc/Key.md")]
     Key(KeyDispatch),
-    /// Whether [`handle_ime`](super::UiRuntime::handle_ime) consumed the
-    /// composition.
+    #[doc = include_str!("input_dispatch.doc/Composition.md")]
     Composition(bool),
-    /// The node [`handle_scroll`](super::UiRuntime::handle_scroll) scrolled, if
-    /// any.
+    #[doc = include_str!("input_dispatch.doc/Scroll.md")]
     Scroll(Option<NodeId>),
 }

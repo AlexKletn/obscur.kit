@@ -1,0 +1,1 @@
+A compositing layer descriptor.

@@ -1,77 +1,59 @@
-//! Typed parameters captured from a route pattern match (spec §6.13).
+#![doc = include_str!("route_params.doc/_module.md")]
 
 use std::collections::BTreeMap;
 use std::collections::btree_map;
 use std::str::FromStr;
 
-/// The named parameters captured when a [`RoutePattern`] matches a path
-/// (spec §6.13).
-///
-/// Parameters are stored as string key/value pairs in a [`BTreeMap`], which
-/// keeps iteration in deterministic (sorted-by-key) order regardless of capture
-/// order. The strings are the raw path segments captured by `:name` and
-/// `*name` pattern segments.
-///
-/// The "typed params" feature of §6.13 is provided by
-/// [`get_parsed`](RouteParams::get_parsed), which parses a captured string into
-/// any [`FromStr`] target on demand.
-///
-/// [`RoutePattern`]: crate::route::RoutePattern
+#[doc = include_str!("route_params.doc/RouteParams.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RouteParams {
-    /// The captured parameters, keyed by name for deterministic iteration.
+    #[doc = include_str!("route_params.doc/values.md")]
     values: BTreeMap<Box<str>, Box<str>>,
 }
 
 impl RouteParams {
-    /// Creates an empty set of parameters.
+    #[doc = include_str!("route_params.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Inserts a parameter, replacing any existing value for the same key.
+    #[doc = include_str!("route_params.doc/insert.md")]
     pub fn insert(&mut self, key: impl Into<Box<str>>, value: impl Into<Box<str>>) {
         self.values.insert(key.into(), value.into());
     }
 
-    /// Returns the raw string value for `key`, if present.
+    #[doc = include_str!("route_params.doc/get.md")]
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&str> {
         self.values.get(key).map(|v| &**v)
     }
 
-    /// Returns the value for `key` parsed into `T` via [`FromStr`] (spec §6.13
-    /// typed params).
-    ///
-    /// Returns `None` when the key is absent *or* when the stored string fails
-    /// to parse as `T`; the two failure modes are intentionally
-    /// indistinguishable, since a caller asking for a typed value only cares
-    /// whether a valid `T` is available.
+    #[doc = include_str!("route_params.doc/get_parsed.md")]
     #[must_use]
     pub fn get_parsed<T: FromStr>(&self, key: &str) -> Option<T> {
         self.get(key).and_then(|v| v.parse().ok())
     }
 
-    /// Returns whether a parameter named `key` is present.
+    #[doc = include_str!("route_params.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, key: &str) -> bool {
         self.values.contains_key(key)
     }
 
-    /// Returns the number of captured parameters.
+    #[doc = include_str!("route_params.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.values.len()
     }
 
-    /// Returns whether no parameters are captured.
+    #[doc = include_str!("route_params.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 
-    /// Returns an iterator over the parameters in sorted key order.
+    #[doc = include_str!("route_params.doc/iter.md")]
     pub fn iter(&self) -> btree_map::Iter<'_, Box<str>, Box<str>> {
         self.values.iter()
     }

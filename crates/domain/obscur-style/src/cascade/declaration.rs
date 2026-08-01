@@ -1,23 +1,10 @@
-//! A single declaration participating in the cascade: [`Declaration`] (§4.14).
+#![doc = include_str!("declaration.doc/_module.md")]
 
 use crate::cascade::{CascadeOrigin, CascadePriority, ImportantFlag};
 use crate::property::{PropertyId, PropertyValue};
 use crate::selector::{SelectorId, SelectorSpecificity};
 
-/// One declaration that applies to a node and competes in the cascade (§4.14).
-///
-/// A declaration pairs a target [`PropertyId`] with the [`PropertyValue`] to
-/// assign, together with everything needed to rank it against the other
-/// declarations that matched the same node: its `!important` flag, its
-/// [`CascadeOrigin`], the [`SelectorSpecificity`] of the rule that produced it,
-/// and its `source_order` position within that origin's stream.
-///
-/// The optional [`selector`](Declaration::selector) records which compiled
-/// selector produced the declaration, purely as provenance for diagnostics; it
-/// plays no part in ranking.
-///
-/// Because [`PropertyValue`] carries `f32` payloads it is not [`Eq`]; this type
-/// therefore derives [`PartialEq`] but not [`Eq`].
+#[doc = include_str!("declaration.doc/Declaration.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     property: PropertyId,
@@ -30,10 +17,7 @@ pub struct Declaration {
 }
 
 impl Declaration {
-    /// Creates a declaration from its cascade inputs.
-    ///
-    /// `source_order` is the declaration's position within its origin stream;
-    /// larger means later, and later wins ties within a cascade band.
+    #[doc = include_str!("declaration.doc/new.md")]
     #[must_use]
     pub const fn new(
         property: PropertyId,
@@ -55,53 +39,49 @@ impl Declaration {
         }
     }
 
-    /// Returns the property this declaration assigns.
+    #[doc = include_str!("declaration.doc/property.md")]
     #[must_use]
     pub const fn property(&self) -> PropertyId {
         self.property
     }
 
-    /// Returns the value this declaration assigns.
+    #[doc = include_str!("declaration.doc/value.md")]
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.value
     }
 
-    /// Returns whether this declaration is `!important`.
+    #[doc = include_str!("declaration.doc/important.md")]
     #[must_use]
     pub const fn important(&self) -> ImportantFlag {
         self.important
     }
 
-    /// Returns the origin this declaration comes from.
+    #[doc = include_str!("declaration.doc/origin.md")]
     #[must_use]
     pub const fn origin(&self) -> CascadeOrigin {
         self.origin
     }
 
-    /// Returns the specificity of the rule that produced this declaration.
+    #[doc = include_str!("declaration.doc/specificity.md")]
     #[must_use]
     pub const fn specificity(&self) -> SelectorSpecificity {
         self.specificity
     }
 
-    /// Returns the declaration's position within its origin stream.
+    #[doc = include_str!("declaration.doc/source_order.md")]
     #[must_use]
     pub const fn source_order(&self) -> u32 {
         self.source_order
     }
 
-    /// Returns the compiled selector that produced this declaration, if any
-    /// (provenance only; not used for ranking).
+    #[doc = include_str!("declaration.doc/selector.md")]
     #[must_use]
     pub const fn selector(&self) -> Option<SelectorId> {
         self.selector
     }
 
-    /// Returns this declaration's [`CascadePriority`] — its total-order sort key
-    /// in the cascade.
-    ///
-    /// The declaration with the greatest priority wins for its property.
+    #[doc = include_str!("declaration.doc/priority.md")]
     #[must_use]
     pub const fn priority(&self) -> CascadePriority {
         CascadePriority::new(

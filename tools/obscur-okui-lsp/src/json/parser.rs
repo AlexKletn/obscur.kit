@@ -1,18 +1,8 @@
-//! `parse`: a hand-rolled recursive-descent JSON parser.
+#![doc = include_str!("parser.doc/_module.md")]
 
 use crate::json::{JsonError, JsonValue};
 
-/// Parses `input` into a [`JsonValue`], or returns a [`JsonError`] locating the
-/// first problem.
-///
-/// Accepts the full JSON grammar the LSP needs: objects, arrays, strings (with
-/// `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t` and `\uXXXX` escapes, including
-/// UTF-16 surrogate pairs), numbers, `true`/`false`/`null`. Trailing content
-/// after a single top-level value is rejected.
-///
-/// # Errors
-///
-/// Returns a [`JsonError`] when `input` is not a single well-formed JSON value.
+#[doc = include_str!("parser.doc/parse.md")]
 pub fn parse(input: &str) -> Result<JsonValue, JsonError> {
     let chars: Vec<char> = input.chars().collect();
     let mut parser = ParseState {
@@ -28,7 +18,7 @@ pub fn parse(input: &str) -> Result<JsonValue, JsonError> {
     Ok(value)
 }
 
-/// The mutable cursor over the input character slice.
+#[doc = include_str!("parser.doc/ParseState.md")]
 struct ParseState<'a> {
     chars: &'a [char],
     pos: usize,

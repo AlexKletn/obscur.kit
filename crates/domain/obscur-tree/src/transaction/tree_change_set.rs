@@ -1,38 +1,24 @@
-//! `TreeChangeSet`: the ordered batch of staged tree changes.
+#![doc = include_str!("tree_change_set.doc/_module.md")]
 
 use super::TreeChange;
 
-/// An ordered, staged batch of [`TreeChange`]s.
-///
-/// This is pure data: it never touches a tree. It is the payload a
-/// [`TreeTransaction`](super::TreeTransaction) accumulates while it is being
-/// built, and — later, as a planned integration — the shape the reconciler will
-/// emit instead of mutating the tree directly.
-///
-/// Alongside the change list it tracks how many
-/// [`CreateNode`](TreeChange::CreateNode) operations have been staged, so the
-/// transaction can hand out stable [`StagedRef::New`](super::StagedRef::New)
-/// indices in stage order.
+#[doc = include_str!("tree_change_set.doc/TreeChangeSet.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TreeChangeSet {
-    /// The staged operations, in application order.
+    #[doc = include_str!("tree_change_set.doc/changes.md")]
     changes: Vec<TreeChange>,
-    /// Number of [`CreateNode`](TreeChange::CreateNode) ops staged so far.
+    #[doc = include_str!("tree_change_set.doc/creations.md")]
     creations: u32,
 }
 
 impl TreeChangeSet {
-    /// Creates an empty change set.
+    #[doc = include_str!("tree_change_set.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Appends a change, keeping the creation counter in sync.
-    ///
-    /// Internal append path used by [`TreeTransaction`](super::TreeTransaction);
-    /// callers stage changes through the transaction's typed methods rather
-    /// than pushing raw [`TreeChange`]s here.
+    #[doc = include_str!("tree_change_set.doc/push.md")]
     pub(crate) fn push(&mut self, change: TreeChange) {
         if matches!(change, TreeChange::CreateNode { .. }) {
             self.creations = self.creations.saturating_add(1);
@@ -40,38 +26,36 @@ impl TreeChangeSet {
         self.changes.push(change);
     }
 
-    /// Returns the staged changes in application order.
+    #[doc = include_str!("tree_change_set.doc/changes_2.md")]
     #[must_use]
     pub fn changes(&self) -> &[TreeChange] {
         &self.changes
     }
 
-    /// Returns an iterator over the staged changes in application order.
+    #[doc = include_str!("tree_change_set.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = &TreeChange> {
         self.changes.iter()
     }
 
-    /// Returns the number of staged changes.
+    #[doc = include_str!("tree_change_set.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.changes.len()
     }
 
-    /// Returns `true` if no changes have been staged.
+    #[doc = include_str!("tree_change_set.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty()
     }
 
-    /// Returns the number of [`CreateNode`](TreeChange::CreateNode) operations
-    /// staged, i.e. the number of distinct
-    /// [`StagedRef::New`](super::StagedRef::New) indices in use.
+    #[doc = include_str!("tree_change_set.doc/creation_count.md")]
     #[must_use]
     pub fn creation_count(&self) -> u32 {
         self.creations
     }
 
-    /// Consumes the set, yielding the owned change list for application.
+    #[doc = include_str!("tree_change_set.doc/into_changes.md")]
     pub(crate) fn into_changes(self) -> Vec<TreeChange> {
         self.changes
     }

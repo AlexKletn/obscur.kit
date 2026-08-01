@@ -1,4 +1,4 @@
-//! Text shaping, layout, editing and IME.
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

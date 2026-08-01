@@ -1,43 +1,38 @@
-//! Presentation and lifecycle state of a window (spec §6.2).
+#![doc = include_str!("window_state.doc/_module.md")]
 
-/// The presentation state of a window: how it is currently shown on screen
-/// (spec §6.2).
-///
-/// This models the mutually exclusive presentation modes a window can be in. It
-/// is a pure, backend-agnostic value; a backend maps each variant onto the
-/// platform's own window states.
+#[doc = include_str!("window_state.doc/WindowState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WindowState {
-    /// A regular, restored window sized by its properties.
+    #[doc = include_str!("window_state.doc/Normal.md")]
     Normal,
-    /// Iconified/hidden to the taskbar or dock.
+    #[doc = include_str!("window_state.doc/Minimized.md")]
     Minimized,
-    /// Expanded to fill the available work area (excluding system chrome).
+    #[doc = include_str!("window_state.doc/Maximized.md")]
     Maximized,
-    /// Occupying the entire display, typically without decorations.
+    #[doc = include_str!("window_state.doc/Fullscreen.md")]
     Fullscreen,
 }
 
 impl WindowState {
-    /// Returns whether the window is in the [`WindowState::Normal`] state.
+    #[doc = include_str!("window_state.doc/is_normal.md")]
     #[must_use]
     pub const fn is_normal(self) -> bool {
         matches!(self, Self::Normal)
     }
 
-    /// Returns whether the window is minimized.
+    #[doc = include_str!("window_state.doc/is_minimized.md")]
     #[must_use]
     pub const fn is_minimized(self) -> bool {
         matches!(self, Self::Minimized)
     }
 
-    /// Returns whether the window is maximized.
+    #[doc = include_str!("window_state.doc/is_maximized.md")]
     #[must_use]
     pub const fn is_maximized(self) -> bool {
         matches!(self, Self::Maximized)
     }
 
-    /// Returns whether the window is fullscreen.
+    #[doc = include_str!("window_state.doc/is_fullscreen.md")]
     #[must_use]
     pub const fn is_fullscreen(self) -> bool {
         matches!(self, Self::Fullscreen)
@@ -45,7 +40,7 @@ impl WindowState {
 }
 
 impl Default for WindowState {
-    /// The default presentation state is [`WindowState::Normal`].
+    #[doc = include_str!("window_state.doc/default.md")]
     fn default() -> Self {
         Self::Normal
     }

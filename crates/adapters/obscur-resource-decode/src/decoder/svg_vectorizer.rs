@@ -1,4 +1,4 @@
-//! `SvgVectorizer`: SVG source → a [`SceneVector`], keeping `currentColor` deferred.
+#![doc = include_str!("svg_vectorizer.doc/_module.md")]
 
 use obscur_geometry::{Point, Size};
 use obscur_resources::port::VectorDecoder;
@@ -7,60 +7,22 @@ use obscur_scene::color::Color;
 use obscur_scene::paint::{SceneVector, VectorPaint, VectorShape};
 use obscur_scene::path::Path;
 
-/// Two improbable, *distinct* colours injected as the document's `color` on two
-/// separate parses. See [`SvgVectorizer`] for why there are two.
+#[doc = include_str!("svg_vectorizer.doc/PROBE_A.md")]
 const PROBE_A: &str = "#010203";
 const PROBE_B: &str = "#fdfeff";
 
-/// Converts SVG source into a [`SceneVector`] whose `currentColor` paints are
-/// still unresolved (spec §5.17).
-///
-/// # The problem
-///
-/// `usvg` resolves `currentColor` **at parse time**: it reads the element's
-/// `color` attribute, falling back to black, and bakes the result into the paint.
-/// Nothing in its output distinguishes `fill="currentColor"` from `fill="black"`.
-/// Following a theme change would therefore mean re-parsing the document with a
-/// different injected colour — which is exactly what §5.17 forbids
-/// ("...allowing theme/state changes **without reparsing**").
-///
-/// # The approach
-///
-/// Parse **twice**, injecting a different `color` each time via `usvg`'s
-/// stylesheet option, and compare the two results shape by shape:
-///
-/// * a paint that came out **different** was `currentColor` — it followed the
-///   injected colour, so it is recorded as [`VectorPaint::CurrentColor`] and
-///   resolved per frame from the computed `color`;
-/// * a paint that came out **identical** was fixed by the document, and is
-///   recorded as [`VectorPaint::Solid`].
-///
-/// This is exact rather than heuristic: no sentinel colour can be mistaken for an
-/// authored one, because detection turns on whether a paint *responded to* the
-/// injection, not on what value it holds. The cost is one extra parse per
-/// document, paid once at load — never per frame, which is the whole point.
-///
-/// It also gets a subtle case right for free: an SVG that declares its own
-/// `color` (e.g. `<g color="blue"><path fill="currentColor"/></g>`) resolves
-/// identically under both probes, so it is recorded as solid blue and the host's
-/// computed `color` does **not** override it — matching how a browser treats a
-/// nested `color` declaration.
+#[doc = include_str!("svg_vectorizer.doc/SvgVectorizer.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SvgVectorizer;
 
 impl SvgVectorizer {
-    /// Creates a vectorizer.
+    #[doc = include_str!("svg_vectorizer.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Parses `bytes` into a [`SceneVector`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ResourceError::DecodeFailed`] when the source is not a valid SVG
-    /// document.
+    #[doc = include_str!("svg_vectorizer.doc/vectorize.md")]
     pub fn vectorize(self, bytes: &[u8]) -> Result<SceneVector, ResourceError> {
         let a = parse_with(bytes, PROBE_A)?;
         let b = parse_with(bytes, PROBE_B)?;
@@ -106,7 +68,7 @@ impl SvgVectorizer {
     }
 }
 
-/// Classifies one paint by whether it responded to the injected colour.
+#[doc = include_str!("svg_vectorizer.doc/resolve_paint.md")]
 fn resolve_paint(from_a: Color, from_b: Option<Color>) -> VectorPaint {
     match from_b {
         Some(other) if other != from_a => VectorPaint::CurrentColor,
@@ -114,11 +76,7 @@ fn resolve_paint(from_a: Color, from_b: Option<Color>) -> VectorPaint {
     }
 }
 
-/// Parses `bytes` with `color` injected as the root's `color` property.
-///
-/// The stylesheet targets `svg` rather than `*` deliberately: it seeds the root
-/// so `currentColor` inherits down, while an element that declares its own colour
-/// still wins for its own subtree.
+#[doc = include_str!("svg_vectorizer.doc/parse_with.md")]
 fn parse_with(bytes: &[u8], color: &str) -> Result<usvg::Tree, ResourceError> {
     let options = usvg::Options {
         style_sheet: Some(format!("svg {{ color: {color} }}")),
@@ -128,17 +86,14 @@ fn parse_with(bytes: &[u8], color: &str) -> Result<usvg::Tree, ResourceError> {
         .map_err(|err| ResourceError::DecodeFailed(err.to_string().into()))
 }
 
-/// One shape as read out of a `usvg` tree, with its paints still concrete.
+#[doc = include_str!("svg_vectorizer.doc/RawShape.md")]
 struct RawShape {
     path: Path,
     fill: Option<Color>,
     stroke: Option<(Color, f32)>,
 }
 
-/// Flattens `group`'s paths into `out` in paint order.
-///
-/// Non-path nodes (images, nested text, groups' own filters/masks) contribute no
-/// geometry here — see [`SceneVector`]'s scope note.
+#[doc = include_str!("svg_vectorizer.doc/collect.md")]
 fn collect(group: &usvg::Group, out: &mut Vec<RawShape>) {
     for node in group.children() {
         match node {
@@ -160,8 +115,7 @@ fn collect(group: &usvg::Group, out: &mut Vec<RawShape>) {
     }
 }
 
-/// The colour of a solid `usvg` paint, or [`None`] for a gradient/pattern — which
-/// this layer does not model (see [`SceneVector`]'s scope note).
+#[doc = include_str!("svg_vectorizer.doc/solid.md")]
 fn solid(paint: &usvg::Paint) -> Option<Color> {
     match paint {
         usvg::Paint::Color(color) => Some(Color::rgba(
@@ -174,7 +128,7 @@ fn solid(paint: &usvg::Paint) -> Option<Color> {
     }
 }
 
-/// Converts a `usvg`/`tiny-skia` path into the scene's own [`Path`].
+#[doc = include_str!("svg_vectorizer.doc/convert_path.md")]
 fn convert_path(data: &usvg::tiny_skia_path::Path) -> Path {
     let mut path = Path::new();
     for segment in data.segments() {

@@ -1,4 +1,4 @@
-//! Performance module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod performance_budget;
 mod span_attribution;
 pub use span_attribution::SpanAttribution;

@@ -1,32 +1,27 @@
-//! `SyntaxTree`: the whole parsed lossless tree.
+#![doc = include_str!("syntax_tree.doc/_module.md")]
 
 use crate::syntax::SyntaxNode;
 
-/// A whole parsed `.okui` document as a lossless syntax tree (spec §2.8).
-///
-/// The tree owns a single root [`SyntaxNode`]. Because every leaf keeps its
-/// exact source slice, [`SyntaxTree::text`] reconstructs the original source
-/// byte-for-byte — the losslessness guarantee that lets tooling round-trip and
-/// re-print `.okui` sources without data loss.
+#[doc = include_str!("syntax_tree.doc/SyntaxTree.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyntaxTree {
     root: SyntaxNode,
 }
 
 impl SyntaxTree {
-    /// Creates a tree from its root node.
+    #[doc = include_str!("syntax_tree.doc/new.md")]
     #[must_use]
     pub const fn new(root: SyntaxNode) -> Self {
         Self { root }
     }
 
-    /// Returns the tree's root node.
+    #[doc = include_str!("syntax_tree.doc/root.md")]
     #[must_use]
     pub const fn root(&self) -> &SyntaxNode {
         &self.root
     }
 
-    /// Reconstructs the full source the tree was built from.
+    #[doc = include_str!("syntax_tree.doc/text.md")]
     #[must_use]
     pub fn text(&self) -> String {
         self.root.text()

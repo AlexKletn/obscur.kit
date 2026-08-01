@@ -1,5 +1,4 @@
-//! Graph-based architecture checks: layering direction, the facade-dependency
-//! ban, and workspace cycles (spec §3.16, §5.9).
+#![doc = include_str!("check.doc/_module.md")]
 
 use std::path::Path;
 
@@ -11,11 +10,10 @@ const RULE_LAYERING: &str = "dependency-layering";
 const RULE_FACADE: &str = "facade-dependency";
 const RULE_CYCLE: &str = "dependency-cycle";
 
-/// The umbrella crate; no internal crate may depend on it (spec §2.10, §5.6).
+#[doc = include_str!("check.doc/FACADE_CRATE.md")]
 const FACADE_CRATE: &str = "obscur-kit";
 
-/// Builds the workspace dependency graph from member manifests and runs the
-/// layering, facade-ban and cycle checks.
+#[doc = include_str!("check.doc/check.md")]
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
     let graph = WorkspaceGraph::from_root(root);
     let mut out = Vec::new();
@@ -25,7 +23,7 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
     out
 }
 
-/// Flags any `obscur-*` edge that crosses an allowed dependency direction.
+#[doc = include_str!("check.doc/layering_violations.md")]
 fn layering_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     let mut out = Vec::new();
     for source in &graph.nodes {
@@ -57,7 +55,7 @@ fn layering_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     out
 }
 
-/// Flags any non-facade crate that depends on the umbrella `obscur-kit`.
+#[doc = include_str!("check.doc/facade_violations.md")]
 fn facade_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     let mut out = Vec::new();
     for source in &graph.nodes {
@@ -78,7 +76,7 @@ fn facade_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     out
 }
 
-/// Flags the first dependency cycle among workspace crates, if any.
+#[doc = include_str!("check.doc/cycle_violations.md")]
 fn cycle_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     let Some(cycle) = graph.find_cycle() else {
         return Vec::new();

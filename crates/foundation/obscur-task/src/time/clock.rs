@@ -1,10 +1,9 @@
-//! Clock port.
+#![doc = include_str!("clock.doc/_module.md")]
 
 use super::Instant;
 
-/// A monotonic clock. Adapters provide a real system clock; headless tests
-/// provide a deterministic one (spec §3.3).
+#[doc = include_str!("clock.doc/Clock.md")]
 pub trait Clock {
-    /// Returns the current instant on this clock's timeline.
+    #[doc = include_str!("clock.doc/now.md")]
     fn now(&self) -> Instant;
 }

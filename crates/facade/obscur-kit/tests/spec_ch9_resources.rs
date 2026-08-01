@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** cases for §5.15 Resource Hub ("URL through
-//! user/host loader"; "The kit does not perform arbitrary network access by
-//! itself"; "loading/ready/failed states") and §3.4 ("The synchronous frame
-//! phase must stay short and deterministic") — the invariants behind the §9.1
-//! non-goal "arbitrary networking in the core".
-//!
-//! Every expected value was produced by an agent reading the specification with
-//! **no access to this repository's source**. A failure here is a defect report
-//! about the engine, and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch9_resources.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch9_support/mod.rs"]
@@ -22,31 +14,7 @@ use support::{compile, el, runtime, view};
 const VW: f32 = 1000.0;
 const REMOTE: &str = "https://example.invalid/a.png";
 
-/// §5.15 Resource Hub — "Sources:" / "- URL through user/host loader;" and "The
-/// kit does not perform arbitrary network access by itself."
-///
-/// NG-URLIMG-01.
-///
-/// WEAKENED 2026-07-19: this asserted the handle reaches the TERMINAL `failed`
-/// state with no host loader registered, and measured `Pending`. §5.15 lists
-/// "- loading/ready/failed states;" among the hub's Features and "- URL through
-/// user/host loader;" among its Sources, and closes with "The kit does not
-/// perform arbitrary network access by itself." That the three states exist is
-/// not a statement about which one an unserviceable request lands in, and the
-/// text nowhere says the hub must synthesise a terminal failure for a source it
-/// has no loader for — parking until a loader is installed is at least as
-/// defensible, and is what a hot-reloaded or late-bound loader would want.
-///
-/// What is kept, and strengthened, is the sentence that IS normative: with no
-/// loader, nothing fetched anything, so the handle must not be `Ready`. An
-/// implementation that quietly performed an HTTP GET now fails here. The
-/// frame-still-paints and reached-the-hub assertions are unchanged.
-///
-/// Candidate spec amendment: state the terminal behaviour of a request whose
-/// source has no registered loader — `failed` immediately, or `loading` until
-/// one appears — and if the latter, whether a diagnostic is emitted, because a
-/// handle parked in `loading` forever is indistinguishable from a slow network
-/// to every caller of `state()`.
+#[doc = include_str!("spec_ch9_resources.doc/a_url_background_without_a_host_loader_fails_terminally_and_still_paints.md")]
 #[test]
 fn a_url_background_without_a_host_loader_fails_terminally_and_still_paints() {
     let sheet = compile(&format!(
@@ -95,13 +63,7 @@ fn a_url_background_without_a_host_loader_fails_terminally_and_still_paints() {
     );
 }
 
-/// §3.4 Frame pipeline — "The synchronous frame phase must stay short and
-/// deterministic." and §5.15 "Features:" / "- async load/decode/compile;" /
-/// "- loading/ready/failed states;"
-///
-/// NG-ASYNC-01: an image whose load never completes must not block the frame; it
-/// paints its reserved box in `loading`, and no further frame is requested until
-/// the completion arrives.
+#[doc = include_str!("spec_ch9_resources.doc/a_never_completing_image_load_does_not_block_the_frame.md")]
 #[test]
 fn a_never_completing_image_load_does_not_block_the_frame() {
     let sheet = compile(".a{width:100px;height:100px;background-color:rgb(0,255,0)}");

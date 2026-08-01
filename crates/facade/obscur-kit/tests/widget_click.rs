@@ -1,13 +1,4 @@
-//! End-to-end proof that the **widget library is clickable**: a real
-//! [`Button`](obscur_kit::widgets::button::Button), rendered through the
-//! embeddable [`UiRuntime`](obscur_kit::runtime::UiRuntime), dispatches its bound
-//! command when the runtime detects a pointer click on it — and the reactive
-//! re-render loop rebuilds the view from the mutated state.
-//!
-//! This exercises the fix that aligns the `Button`'s click binding to the
-//! reserved [`EVENT_CLICK`](obscur_kit::view::view::EVENT_CLICK) event symbol the
-//! runtime's click resolver looks up. Before the fix the button bound a
-//! widget-local event symbol, so a runtime click on it resolved to no command.
+#![doc = include_str!("widget_click.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::Cell;
@@ -25,12 +16,10 @@ use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 
-/// App-owned increment command the counter button binds and the app registers.
+#[doc = include_str!("widget_click.doc/CMD_INC.md")]
 const CMD_INC: InternedSymbol = InternedSymbol::from_raw(0x1_C0DE);
 
-/// Builds the counter view from `count`: a **real** [`Button`] whose label is the
-/// current count and whose click fires `CMD_INC`. The button's own node is tagged
-/// with the `btn` class so the stylesheet can size it into a hit-testable box.
+#[doc = include_str!("widget_click.doc/counter_view.md")]
 fn counter_view(count: i32) -> View {
     let node = Button::new(count.to_string(), CMD_INC)
         .view()
@@ -42,16 +31,14 @@ fn counter_view(count: i32) -> View {
     View::single(node)
 }
 
-/// `.btn { width: 100px; height: 50px; background-color: green }` — sizes the
-/// button element to a 100x50 box at the origin so a pointer at its centre
-/// (`(50, 25)`) hits it.
+#[doc = include_str!("widget_click.doc/button_sheet.md")]
 fn button_sheet() -> Stylesheet {
     let css = ".btn { width: 100px; height: 50px; background-color: #5cb85c; }";
     let parsed = StylesheetParser::new(&CssSource::anonymous(css)).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A left-button pointer event of `kind` at `(x, y)`.
+#[doc = include_str!("widget_click.doc/mouse.md")]
 fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     // This test clicks a REAL button as a user would; a real gesture is trusted,
     // and only a trusted click runs its gated default action (§2.3 step 4, now
@@ -66,8 +53,7 @@ fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     .as_trusted()
 }
 
-/// The content of the first text node in the retained tree — the button's label,
-/// which is the rendered counter value the reactive loop rebuilt.
+#[doc = include_str!("widget_click.doc/tree_text.md")]
 fn tree_text(runtime: &UiRuntime) -> String {
     runtime
         .tree()

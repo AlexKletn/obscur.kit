@@ -1,0 +1,1 @@
+Discards all saved focus.

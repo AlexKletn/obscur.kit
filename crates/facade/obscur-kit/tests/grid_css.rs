@@ -1,41 +1,4 @@
-//! End-to-end verification that **authored CSS grid** reaches the layout engine
-//! and produces the expected [`LayoutBox`](obscur_kit::layout::model::LayoutBox)
-//! geometry through the *real* live pipeline (spec §4.1/§4.2).
-//!
-//! Every test drives the genuine path — author CSS text (`display: grid` with
-//! `grid-template-columns`/`-rows`, `gap`, `repeat(…)`, `minmax(…)`), compile it
-//! through the real `obscur-css` frontend (`source -> parse -> compile ->
-//! matchable Stylesheet`), and render one frame on a [`UiRuntime`] via
-//! [`render_now`](UiRuntime::render_now), which runs `reconcile -> match ->
-//! cascade -> resolve (ComputedStyles) -> grid-templates -> layout
-//! (LayoutBoxes)`. The assertions read the *actual* absolute [`LayoutBox`]
-//! coordinates the pipeline produced (`runtime.layout_boxes()`), never a
-//! hand-built `GridTemplate`/`LayoutStyle`, so a regression anywhere in the chain
-//! (CSS lowering → resolver → `grid_template_for` conversion →
-//! `GridLayout::with_template` dispatch → the track-sizing algorithm) fails the
-//! run.
-//!
-//! # Container sizing
-//!
-//! A grid container honours its own explicit `width`/`height`: [`GridLayout`]
-//! sizes its tracks (and distributes `fr` space) against the authored extent, and
-//! the container box *is* that size. A container with no explicit size fills the
-//! available extent its parent flow hands down (the viewport) — the
-//! fill-available default. Tests that author an explicit container size render
-//! under a larger viewport and assert the container is its authored size;
-//! `auto_placement_wraps_to_second_row` keeps a viewport-driven (auto) case to
-//! prove the fill-available default still holds.
-//!
-//! # Proven vs still limited
-//!
-//! Proven end-to-end here: fixed / percentage / `fr` / `auto` / `minmax` column
-//! tracks, `fr` free-space distribution, `gap` on both axes, `repeat(N, …)`
-//! expansion, `repeat(auto-fill, …)` sized from the container extent, row-major
-//! auto-placement into implicit rows, and explicit fixed row tracks. Percentage
-//! tracks resolve against the container's own content extent inside the algorithm
-//! (`30%` of a `400px` container → `120px`). Still out of scope (documented in
-//! steps 1-2, not exercised here): line-based placement / spanning, dense packing,
-//! named lines, and alignment of an item within its track.
+#![doc = include_str!("grid_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -47,15 +10,14 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`] through the
-/// real CSS frontend (`source -> parse -> compile`).
+#[doc = include_str!("grid_css.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Tags a view node with a `class` attribute so authored selectors match it.
+#[doc = include_str!("grid_css.doc/tag.md")]
 fn tag(node: ViewNode, cls: &str) -> ViewNode {
     node.with_prop(ViewProperty::new(CLASS, ViewValue::Text(cls.into())))
 }
@@ -64,10 +26,10 @@ fn el(id: u64) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
 }
 
-/// The class each grid child carries, in order.
+#[doc = include_str!("grid_css.doc/CHILD_CLASSES.md")]
 const CHILD_CLASSES: [&str; 5] = ["a", "b", "c", "d", "e"];
 
-/// A `.grid` container holding `n` children classed `.a`, `.b`, `.c`, … in order.
+#[doc = include_str!("grid_css.doc/grid_view.md")]
 fn grid_view(n: usize) -> View {
     let kids: Vec<ViewNode> = (0..n)
         .map(|i| tag(el(100 + i as u64), CHILD_CLASSES[i]))
@@ -76,10 +38,7 @@ fn grid_view(n: usize) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![container]))
 }
 
-/// Renders one real frame for `css` + a `.grid` container of `n` children under a
-/// `width` x `height` viewport (the available extent an auto-sized container
-/// fills), and returns each child's [`NodeId`] in authored order plus the driven
-/// runtime.
+#[doc = include_str!("grid_css.doc/drive.md")]
 fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId>) {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
     let sheet = compile(css);
@@ -96,13 +55,13 @@ fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId
     (rt, kids)
 }
 
-/// The single `.grid` container [`NodeId`].
+#[doc = include_str!("grid_css.doc/container.md")]
 fn container(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
     rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
-/// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.
+#[doc = include_str!("grid_css.doc/geom.md")]
 fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
     let b = rt
         .layout_boxes()

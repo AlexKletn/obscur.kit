@@ -1,33 +1,20 @@
-//! The ending-size of a style-local `radial-gradient(...)` (spec §5.2).
+#![doc = include_str!("radial_size.doc/_module.md")]
 
 use crate::property::Length;
 
-/// The ending size (extent) of a CSS `radial-gradient(...)`: one of the four
-/// extent keywords or an explicit radius length.
-///
-/// The extent keywords place the gradient's `100%` ring relative to the painted
-/// box and the gradient's center; the scene coordinator resolves each against
-/// the box at paint time. An explicit [`RadialSize::Length`] is a concrete
-/// radius (an absolute `px` at paint time; a percentage is resolved against the
-/// box). The CSS initial — used when no size is authored — is
-/// [`RadialSize::FarthestCorner`].
+#[doc = include_str!("radial_size.doc/RadialSize.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum RadialSize {
-    /// The `100%` ring reaches the box side/corner **closest** to the center
-    /// along each axis (`closest-side`).
+    #[doc = include_str!("radial_size.doc/ClosestSide.md")]
     ClosestSide,
-    /// The `100%` ring reaches the box corner **closest** to the center
-    /// (`closest-corner`).
+    #[doc = include_str!("radial_size.doc/ClosestCorner.md")]
     ClosestCorner,
-    /// The `100%` ring reaches the box side/corner **farthest** from the center
-    /// along each axis (`farthest-side`).
+    #[doc = include_str!("radial_size.doc/FarthestSide.md")]
     FarthestSide,
-    /// The `100%` ring reaches the box corner **farthest** from the center
-    /// (`farthest-corner`); the CSS default.
+    #[doc = include_str!("radial_size.doc/FarthestCorner.md")]
     #[default]
     FarthestCorner,
-    /// An explicit radius length (an absolute `px`, or a percentage resolved
-    /// against the box at paint time).
+    #[doc = include_str!("radial_size.doc/Length.md")]
     Length(Length),
 }
 

@@ -32,3 +32,11 @@ obscur-data-transfer = { workspace = true }
 # combining sequence or ZWJ emoji) before driving the pure editing buffer, whose
 # own grapheme motion is a documented one-`char` approximation (spec §5.11).
 unicode-segmentation = { workspace = true }
+
+# The §2.4 test harness. It depends on this crate, so the dependency can only be
+# a dev one — and that is not a cycle: a dev-dependency builds a separate target,
+# and the graph rule in `xtask` skips dev-dependencies by construction. The point
+# of taking it is that the unit tests in `src/` and the integration tests in
+# `tests/` share one set of fixtures instead of keeping two copies apart.
+[dev-dependencies]
+obscur-testkit = { workspace = true }

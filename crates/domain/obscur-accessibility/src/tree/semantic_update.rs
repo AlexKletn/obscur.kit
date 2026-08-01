@@ -1,36 +1,26 @@
-//! An incremental change an adapter applies without a full re-push (§7.1).
+#![doc = include_str!("semantic_update.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// An incremental change to the semantic tree an adapter applies without a full
-/// snapshot re-push (spec §7.1).
-///
-/// After the initial snapshot, adapters keep the platform accessibility tree in
-/// sync by replaying a stream of these fine-grained updates rather than pushing
-/// a fresh snapshot on every frame. Each variant names the primary affected
-/// node (if any); [`affected`](Self::affected) extracts it and
-/// [`is_structural`](Self::is_structural) distinguishes changes that reshape the
-/// tree from pure content or focus changes.
+#[doc = include_str!("semantic_update.doc/SemanticUpdate.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SemanticUpdate {
-    /// A node was added to the tree.
+    #[doc = include_str!("semantic_update.doc/NodeAdded.md")]
     NodeAdded(NodeId),
-    /// A node was removed from the tree.
+    #[doc = include_str!("semantic_update.doc/NodeRemoved.md")]
     NodeRemoved(NodeId),
-    /// A node's semantic data (name, state, value, …) changed in place.
+    #[doc = include_str!("semantic_update.doc/NodeChanged.md")]
     NodeChanged(NodeId),
-    /// The structure below this node changed (children added/removed/reordered).
+    #[doc = include_str!("semantic_update.doc/SubtreeChanged.md")]
     SubtreeChanged(NodeId),
-    /// The tree root changed, to the given node or to none.
+    #[doc = include_str!("semantic_update.doc/RootChanged.md")]
     RootChanged(Option<NodeId>),
-    /// Accessibility focus moved, to the given node or was cleared.
+    #[doc = include_str!("semantic_update.doc/FocusChanged.md")]
     FocusChanged(Option<NodeId>),
 }
 
 impl SemanticUpdate {
-    /// Returns the primary node this update concerns, or `None` for a
-    /// [`RootChanged(None)`](Self::RootChanged) or
-    /// [`FocusChanged(None)`](Self::FocusChanged).
+    #[doc = include_str!("semantic_update.doc/affected.md")]
     #[must_use]
     pub const fn affected(&self) -> Option<NodeId> {
         match self {
@@ -42,12 +32,7 @@ impl SemanticUpdate {
         }
     }
 
-    /// Returns whether this update reshapes the tree structure —
-    /// [`NodeAdded`](Self::NodeAdded), [`NodeRemoved`](Self::NodeRemoved),
-    /// [`SubtreeChanged`](Self::SubtreeChanged), or
-    /// [`RootChanged`](Self::RootChanged) — as opposed to a pure content
-    /// ([`NodeChanged`](Self::NodeChanged)) or focus
-    /// ([`FocusChanged`](Self::FocusChanged)) change.
+    #[doc = include_str!("semantic_update.doc/is_structural.md")]
     #[must_use]
     pub const fn is_structural(&self) -> bool {
         matches!(

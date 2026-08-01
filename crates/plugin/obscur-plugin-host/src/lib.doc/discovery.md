@@ -1,0 +1,1 @@
+Finding plugins on disk.

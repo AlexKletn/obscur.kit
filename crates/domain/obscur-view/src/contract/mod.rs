@@ -1,4 +1,4 @@
-//! Contract module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod capability_contract;
 pub use capability_contract::CapabilityContract;
 mod capability_requirement;

@@ -1,5 +1,4 @@
-//! Protocol messages: versioning, handshake, commands, snapshots, events, and
-//! subscriptions (spec §7.6/§7.7).
+#![doc = include_str!("mod.doc/_module.md")]
 
 mod command_message;
 pub use command_message::{CommandId, CommandKind, CommandMessage, ControlAction, InjectedEvent};

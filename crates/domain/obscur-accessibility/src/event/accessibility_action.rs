@@ -1,30 +1,22 @@
-//! An inbound action request from assistive technology (spec §7.1).
+#![doc = include_str!("accessibility_action.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use crate::semantic::{SemanticAction, SemanticValue};
 
-/// An inbound action request delivered from assistive technology (spec §7.1).
-///
-/// When a screen reader or other AT asks to activate, focus, or set the value of
-/// a node, a platform bridge (UIA / AX / AT-SPI / web) delivers it up as one of
-/// these. It then enters the **same command/event model as ordinary input**: an
-/// AT-requested activation is dispatched exactly like a pointer or key press.
-///
-/// The [`value`](Self::value) payload is carried only for value-setting actions
-/// such as [`SemanticAction::SetValue`]; it is `None` otherwise.
+#[doc = include_str!("accessibility_action.doc/AccessibilityAction.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccessibilityAction {
-    /// The retained node the action targets.
+    #[doc = include_str!("accessibility_action.doc/target.md")]
     target: NodeId,
-    /// The requested action.
+    #[doc = include_str!("accessibility_action.doc/action.md")]
     action: SemanticAction,
-    /// The value payload, present for value-setting actions.
+    #[doc = include_str!("accessibility_action.doc/value.md")]
     value: Option<SemanticValue>,
 }
 
 impl AccessibilityAction {
-    /// Creates a request for `action` on `target` with no value payload.
+    #[doc = include_str!("accessibility_action.doc/new.md")]
     #[must_use]
     pub const fn new(target: NodeId, action: SemanticAction) -> Self {
         Self {
@@ -34,27 +26,26 @@ impl AccessibilityAction {
         }
     }
 
-    /// Returns a copy with `value` attached as the payload (e.g. for
-    /// [`SemanticAction::SetValue`]).
+    #[doc = include_str!("accessibility_action.doc/with_value.md")]
     #[must_use]
     pub fn with_value(mut self, value: SemanticValue) -> Self {
         self.value = Some(value);
         self
     }
 
-    /// Returns the retained node the action targets.
+    #[doc = include_str!("accessibility_action.doc/target_2.md")]
     #[must_use]
     pub const fn target(&self) -> NodeId {
         self.target
     }
 
-    /// Returns the requested action.
+    #[doc = include_str!("accessibility_action.doc/action_2.md")]
     #[must_use]
     pub const fn action(&self) -> SemanticAction {
         self.action
     }
 
-    /// Returns the value payload, if any.
+    #[doc = include_str!("accessibility_action.doc/value_2.md")]
     #[must_use]
     pub const fn value(&self) -> Option<&SemanticValue> {
         self.value.as_ref()

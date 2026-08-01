@@ -1,24 +1,4 @@
-//! The typed value a property can hold.
-//!
-//! [`PropertyValue`] is the typed result the cascade works with — never CSS
-//! source text. Keyword-valued properties (for example `display: block`) store
-//! their keyword as an [`InternedSymbol`] handle, not a string: matching is done
-//! on the interned identity, not by comparing characters.
-//!
-//! Two kinds of value are resolved *before* computed values are produced:
-//!
-//! * the CSS-wide keywords [`PropertyValue::Inherit`], [`PropertyValue::Initial`]
-//!   and [`PropertyValue::Unset`], and
-//! * an unresolved custom-property reference [`PropertyValue::CustomRef`]
-//!   (`var(--name)`), which is substituted during custom-property resolution
-//!   (§4.14) before computed-value resolution runs.
-//!
-//! `calc()` / `min()` / `max()` / `clamp()` and relative/viewport units are
-//! modelled: a plain relative unit is a [`PropertyValue::Length`] carrying the
-//! relevant [`Length`] variant, and a math function is a
-//! [`PropertyValue::Calc`] holding a symbolic [`LengthExpr`]. Both resolve to
-//! concrete pixels at the layout/compute step against a
-//! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
+#![doc = include_str!("property_value.doc/_module.md")]
 
 use crate::property::{
     BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
@@ -27,195 +7,69 @@ use crate::property::{
 };
 use obscur_identity::InternedSymbol;
 
-/// A typed CSS property value.
-///
-/// Because [`PropertyValue::Number`], [`PropertyValue::Length`] and
-/// [`PropertyValue::Color`] carry `f32` data, this type derives [`PartialEq`]
-/// but not [`Eq`]/[`Hash`].
+#[doc = include_str!("property_value.doc/PropertyValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropertyValue {
-    /// A keyword value, identified by its interned symbol (for example the
-    /// symbols for `block`, `flex` or `hidden`). The symbol is an identity
-    /// handle, not a string to be matched character-by-character.
+    #[doc = include_str!("property_value.doc/Keyword.md")]
     Keyword(InternedSymbol),
-    /// A length value (see [`Length`]).
+    #[doc = include_str!("property_value.doc/Length.md")]
     Length(Length),
-    /// A symbolic `calc()` / `min()` / `max()` / `clamp()` length expression
-    /// (see [`LengthExpr`]), resolved to concrete pixels at the layout/compute
-    /// step against a [`LengthContext`](crate::property::LengthContext).
+    #[doc = include_str!("property_value.doc/Calc.md")]
     Calc(LengthExpr),
-    /// A bare number (for example the value of `opacity`).
+    #[doc = include_str!("property_value.doc/Number.md")]
     Number(f32),
-    /// A color value (see [`StyleColor`]).
+    #[doc = include_str!("property_value.doc/Color.md")]
     Color(StyleColor),
-    /// A `linear-gradient(...)` background image (see [`LinearGradient`]): the
-    /// value of `background-image` when it is an authored linear gradient. The
-    /// gradient carries its angle (CSS convention) and resolved color stops; the
-    /// scene coordinator turns the angle plus the painted box's bounds into the
-    /// concrete gradient axis when it builds the fill brush (spec §5.2).
+    #[doc = include_str!("property_value.doc/LinearGradient.md")]
     LinearGradient(LinearGradient),
-    /// A `radial-gradient(...)` background image (see [`RadialGradient`]): the
-    /// value of `background-image` when it is an authored radial gradient. The
-    /// gradient carries its box-relative shape / size / center and resolved color
-    /// stops; the scene coordinator turns those plus the painted box's bounds into
-    /// the concrete center and radius when it builds the fill brush (spec §5.2).
+    #[doc = include_str!("property_value.doc/RadialGradient.md")]
     RadialGradient(RadialGradient),
-    /// A `conic-gradient(...)` background image (see [`ConicGradient`]): the value
-    /// of `background-image` when it is an authored conic gradient. The gradient
-    /// carries its starting angle (CSS convention), box-relative center, and
-    /// resolved color stops; the scene coordinator turns those plus the painted
-    /// box's bounds into the concrete center and sweep start angle when it builds
-    /// the fill brush (spec §5.2).
+    #[doc = include_str!("property_value.doc/ConicGradient.md")]
     ConicGradient(ConicGradient),
-    /// A `url(...)` background image: the value of `background-image` when it is
-    /// an authored image reference. The payload is the **raw** URL/path string
-    /// exactly as authored (unquoted or with its quotes stripped), *not* resolved
-    /// against any base — the runtime hands it to a `ResourceLoader` /
-    /// `ResourceDecoder` and, once decoded, the scene coordinator paints the
-    /// resulting image stretched over the node's box (spec §5.2, §5.16). A URL
-    /// whose image is not yet loaded simply paints nothing (the background-color
-    /// shows through).
+    #[doc = include_str!("property_value.doc/BackgroundImageUrl.md")]
     BackgroundImageUrl(Box<str>),
-    /// A multi-layer `background-image` list: two or more comma-separated image
-    /// layers (see [`BackgroundLayer`]), in CSS author order (first = top). CSS
-    /// paints layers back-to-front, so the scene coordinator emits the list in
-    /// reverse (last-listed = bottom, painted first). The **one-layer** case is
-    /// never this variant — it keeps the flat single-value variant
-    /// ([`LinearGradient`](Self::LinearGradient) / [`RadialGradient`](Self::RadialGradient)
-    /// / [`ConicGradient`](Self::ConicGradient) / [`BackgroundImageUrl`](Self::BackgroundImageUrl))
-    /// so a single-layer background stays byte-identical (spec §5.2).
+    #[doc = include_str!("property_value.doc/BackgroundLayers.md")]
     BackgroundLayers(Box<[BackgroundLayer]>),
-    /// A `background-size` value (see [`BackgroundSize`]): how one copy of the
-    /// `background-image` is scaled (`cover` / `contain` / `auto` / explicit
-    /// per-axis lengths). The scene coordinator resolves it against the box and
-    /// the image's intrinsic size to a concrete tile width/height at paint time.
+    #[doc = include_str!("property_value.doc/BackgroundSize.md")]
     BackgroundSize(BackgroundSize),
-    /// A `background-position` value (see [`BackgroundPosition`]): where the sized
-    /// image tile's origin sits within the box, one length/percentage per axis.
+    #[doc = include_str!("property_value.doc/BackgroundPosition.md")]
     BackgroundPosition(BackgroundPosition),
-    /// A `background-repeat` value (see [`BackgroundRepeat`]): whether the sized
-    /// image tile is tiled along each axis to fill the box.
+    #[doc = include_str!("property_value.doc/BackgroundRepeat.md")]
     BackgroundRepeat(BackgroundRepeat),
-    /// An `object-fit` value (see [`ObjectFit`]): how a replaced element's content
-    /// (e.g. an `<img>`'s pixels) is scaled within its content box. The scene
-    /// coordinator resolves it against the box and the image's intrinsic size to a
-    /// concrete tile rect at paint time.
+    #[doc = include_str!("property_value.doc/ObjectFit.md")]
     ObjectFit(ObjectFit),
-    /// An ordered `box-shadow` list, in author order: the value of `box-shadow`.
-    /// Each [`BoxShadow`] carries its offsets, blur, spread, optional color, and
-    /// `inset` flag; `box-shadow: none` lowers to an **empty** list. CSS paints
-    /// the first-listed shadow on top, so the scene coordinator emits the list in
-    /// reverse order (spec §5.2).
+    #[doc = include_str!("property_value.doc/BoxShadow.md")]
     BoxShadow(Box<[BoxShadow]>),
-    /// An ordered `filter` op list, in author order: the value of `filter` reduced
-    /// to the functions the pipeline can honor. Each entry is a [`FilterOp`] —
-    /// either a `drop-shadow(...)` (painted BEHIND the element like a `box-shadow`
-    /// drop shadow) or a `blur(<length>)` (a real gaussian over the element's
-    /// composited subtree on the GPU backend). Order is preserved. Other filter
-    /// functions (`brightness()`, `contrast()`, color-matrix, …) are out of scope
-    /// and dropped at lower time; `filter: none` / empty lowers to an **empty**
-    /// list (painting nothing).
+    #[doc = include_str!("property_value.doc/Filter.md")]
     Filter(Box<[FilterOp]>),
-    /// An ordered `font-family` list, in author order. Each entry is either a
-    /// concrete family name (for example `"Helvetica Neue"`) or a generic
-    /// keyword (`"serif"`, `"sans-serif"`, `"monospace"`, `"cursive"`,
-    /// `"fantasy"`, `"system-ui"`). Family names are stored **as strings**, not
-    /// interned symbols: the runtime matches them against its font registry by
-    /// string, so this value crosses the CSS/runtime interner boundary without a
-    /// shared interner.
+    #[doc = include_str!("property_value.doc/FontFamilies.md")]
     FontFamilies(Box<[Box<str>]>),
-    /// A grid track list, in author order: the value of `grid-template-columns`
-    /// or `grid-template-rows`. The [`GridTrackList`] carries the [`GridTrack`]
-    /// sizing functions (`100px`, `1fr`, `auto`, `minmax(…)`; `repeat(…)` already
-    /// expanded to a flat list) plus the `[name]` names on each grid line. The
-    /// runtime converts each [`GridTrack`] to `obscur_layout`'s `TrackSize`, and
-    /// resolves a child's named-line placement against the line names, when it
-    /// bridges the computed style into a grid layout input (spec §4.1, §4.13).
+    #[doc = include_str!("property_value.doc/GridTracks.md")]
     GridTracks(GridTrackList),
-    /// A single grid line placement edge: the value of one `grid-column-start` /
-    /// `grid-column-end` / `grid-row-start` / `grid-row-end` longhand. The
-    /// [`GridLineValue`] is a style-local line edge (`auto`, a 1-based line index,
-    /// or `span N`); the runtime converts it to `obscur_layout`'s `GridLine` and
-    /// assembles the four edges into a `GridPlacement` when it bridges the computed
-    /// style into a grid layout input (spec §4.13).
+    #[doc = include_str!("property_value.doc/GridLine.md")]
     GridLine(GridLineValue),
-    /// A parsed `grid-template-areas` grid: the value of a grid container's
-    /// `grid-template-areas`. The [`GridAreaTemplate`] carries every named area's
-    /// line-number rectangle (already validated as a filled rectangle at parse
-    /// time); the runtime looks a child's `grid-area: <name>` up against its
-    /// container's template to resolve a concrete placement (spec §4.2).
+    #[doc = include_str!("property_value.doc/GridAreas.md")]
     GridAreas(GridAreaTemplate),
-    /// A `grid-area: <custom-ident>` named-area reference on a grid item: the area
-    /// name to resolve against the item's container `grid-template-areas`. The name
-    /// is kept **as a string** (not an interned symbol) because it is matched
-    /// against the container template's area names in the runtime, which does not
-    /// share this crate's interner (spec §4.2). The numeric `grid-area:
-    /// a / b / c / d` line form does not produce this value; it expands to the four
-    /// [`GridLine`](PropertyValue::GridLine) longhands instead.
+    #[doc = include_str!("property_value.doc/GridAreaName.md")]
     GridAreaName(Box<str>),
-    /// A plain string literal: the value of the `content` property on a
-    /// `::before` / `::after` generated-content rule (§4.16), stored **as a
-    /// string** (its quotes stripped) because the runtime paints it directly and
-    /// never crosses it into the interner. It is not a computed value of any real
-    /// element's box — the runtime reads it off a matched pseudo-element rule to
-    /// build a decoration-only inline box.
+    #[doc = include_str!("property_value.doc/String.md")]
     String(Box<str>),
-    /// A resolved CSS 2D `transform`: the authored `<transform-function>+` list
-    /// composed left-to-right into a single 2x3 affine (see [`Transform`]).
-    /// `transform: none` lowers to an absent value, not this. The scene
-    /// coordinator wraps the affine about the element's `transform-origin` and
-    /// brackets the subtree's paint with it (spec §5.2).
+    #[doc = include_str!("property_value.doc/Transform.md")]
     Transform(Transform),
-    /// A resolved CSS `transform-origin` (see [`TransformOrigin`]): the point a
-    /// `transform` pivots about, defaulting to the box center (`50% 50%`).
+    #[doc = include_str!("property_value.doc/TransformOrigin.md")]
     TransformOrigin(TransformOrigin),
-    /// An unresolved `var(--name)` reference to a custom property, named by its
-    /// interned symbol. This is a pre-resolution placeholder: it is substituted
-    /// with the referenced custom property's value before computed-value
-    /// resolution (§4.14).
+    #[doc = include_str!("property_value.doc/CustomRef.md")]
     CustomRef(InternedSymbol),
-    /// The CSS-wide `inherit` keyword.
+    #[doc = include_str!("property_value.doc/Inherit.md")]
     Inherit,
-    /// The CSS-wide `initial` keyword.
+    #[doc = include_str!("property_value.doc/Initial.md")]
     Initial,
-    /// The CSS-wide `unset` keyword (behaves as `inherit` for inherited
-    /// properties and `initial` otherwise).
+    #[doc = include_str!("property_value.doc/Unset.md")]
     Unset,
 }
 
 impl PropertyValue {
-    /// Returns `true` when resolving this value needs the `0` glyph measured —
-    /// that is, when it contains a `ch` term anywhere.
-    ///
-    /// # Why a caller asks first
-    ///
-    /// Every other unit folds from numbers the caller already has. `ch` alone
-    /// needs text *shaped* to answer, which costs a font-fallback chain and a
-    /// shaping call. Since almost no stylesheet writes `ch`, a caller checks this
-    /// first and measures only on a hit; the overwhelmingly common answer is
-    /// `false`, and this scan allocates nothing to produce it.
-    ///
-    /// # This must mirror `absolutize_value`
-    ///
-    /// This predicate exists to decide whether the computed-value step should pay
-    /// for a measurement before folding a value. It is therefore only correct if
-    /// it answers `true` for **every** value that fold could resolve a `ch` in —
-    /// a `false` here means the fold runs without a `ch` base, and any `ch` inside
-    /// survives as a symbolic term that paint reads as `0`.
-    ///
-    /// So the two walks are a pair: `absolutize_value` visits every [`Length`] a
-    /// [`PropertyValue`] carries, and this visits the same ones asking only
-    /// [`Length::is_ch`]. Both matches are exhaustive rather than wildcarded, so a
-    /// new length-bearing variant cannot quietly default to "no `ch` here" in
-    /// either.
-    ///
-    /// This used to answer `false` for [`BoxShadow`](Self::BoxShadow),
-    /// [`BackgroundSize`](Self::BackgroundSize) and friends — a documented gap that
-    /// made `box-shadow: 1ch 0` resolve to `0` silently. That gap was a
-    /// *consequence* of `ch` being unresolvable at computed-value time: widening
-    /// the predicate alone would have bought a shaping call whose answer nothing
-    /// read. Now that [`ChMetrics`](crate::computed::ChMetrics) threads the
-    /// measurement into the fold, the answer is read, and these arms close with it.
+    #[doc = include_str!("property_value.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
@@ -256,7 +110,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the color if this value is a [`PropertyValue::Color`].
+    #[doc = include_str!("property_value.doc/as_color.md")]
     #[must_use]
     pub const fn as_color(&self) -> Option<StyleColor> {
         match self {
@@ -265,8 +119,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the linear gradient if this value is a
-    /// [`PropertyValue::LinearGradient`].
+    #[doc = include_str!("property_value.doc/as_linear_gradient.md")]
     #[must_use]
     pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
         match self {
@@ -275,8 +128,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the radial gradient if this value is a
-    /// [`PropertyValue::RadialGradient`].
+    #[doc = include_str!("property_value.doc/as_radial_gradient.md")]
     #[must_use]
     pub const fn as_radial_gradient(&self) -> Option<&RadialGradient> {
         match self {
@@ -285,8 +137,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the conic gradient if this value is a
-    /// [`PropertyValue::ConicGradient`].
+    #[doc = include_str!("property_value.doc/as_conic_gradient.md")]
     #[must_use]
     pub const fn as_conic_gradient(&self) -> Option<&ConicGradient> {
         match self {
@@ -295,8 +146,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the raw `url(...)` string if this value is a
-    /// [`PropertyValue::BackgroundImageUrl`] (the authored URL/path, unresolved).
+    #[doc = include_str!("property_value.doc/as_background_image_url.md")]
     #[must_use]
     pub fn as_background_image_url(&self) -> Option<&str> {
         match self {
@@ -305,12 +155,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the ordered multi-layer `background-image` list if this value is a
-    /// [`PropertyValue::BackgroundLayers`] (two or more layers, in author order).
-    ///
-    /// A single-layer background is *not* this variant (it stays a flat
-    /// gradient/url value), so callers that want to treat both cases uniformly
-    /// must also check the single accessors.
+    #[doc = include_str!("property_value.doc/as_background_layers.md")]
     #[must_use]
     pub fn as_background_layers(&self) -> Option<&[BackgroundLayer]> {
         match self {
@@ -319,8 +164,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the `background-size` if this value is a
-    /// [`PropertyValue::BackgroundSize`].
+    #[doc = include_str!("property_value.doc/as_background_size.md")]
     #[must_use]
     pub const fn as_background_size(&self) -> Option<BackgroundSize> {
         match self {
@@ -329,8 +173,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the `background-position` if this value is a
-    /// [`PropertyValue::BackgroundPosition`].
+    #[doc = include_str!("property_value.doc/as_background_position.md")]
     #[must_use]
     pub const fn as_background_position(&self) -> Option<BackgroundPosition> {
         match self {
@@ -339,8 +182,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the `background-repeat` if this value is a
-    /// [`PropertyValue::BackgroundRepeat`].
+    #[doc = include_str!("property_value.doc/as_background_repeat.md")]
     #[must_use]
     pub const fn as_background_repeat(&self) -> Option<BackgroundRepeat> {
         match self {
@@ -349,7 +191,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the `object-fit` if this value is a [`PropertyValue::ObjectFit`].
+    #[doc = include_str!("property_value.doc/as_object_fit.md")]
     #[must_use]
     pub const fn as_object_fit(&self) -> Option<ObjectFit> {
         match self {
@@ -358,8 +200,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the ordered `box-shadow` list if this value is a
-    /// [`PropertyValue::BoxShadow`] (an empty slice for `box-shadow: none`).
+    #[doc = include_str!("property_value.doc/as_box_shadows.md")]
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
         match self {
@@ -368,10 +209,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the ordered `filter` op list if this value is a
-    /// [`PropertyValue::Filter`] (an empty slice for `filter: none` or a filter
-    /// with no honored functions). Each entry is a [`FilterOp`]
-    /// (a `drop-shadow(...)` or a `blur(<length>)`), in author order.
+    #[doc = include_str!("property_value.doc/as_filter_ops.md")]
     #[must_use]
     pub fn as_filter_ops(&self) -> Option<&[FilterOp]> {
         match self {
@@ -380,8 +218,7 @@ impl PropertyValue {
         }
     }
 
-    /// Builds a [`PropertyValue::FontFamilies`] from an ordered iterator of
-    /// family / generic-keyword names, preserving author order.
+    #[doc = include_str!("property_value.doc/font_families.md")]
     #[must_use]
     pub fn font_families<I, S>(names: I) -> Self
     where
@@ -391,8 +228,7 @@ impl PropertyValue {
         Self::FontFamilies(names.into_iter().map(Into::into).collect())
     }
 
-    /// Returns the ordered `font-family` list if this value is a
-    /// [`PropertyValue::FontFamilies`].
+    #[doc = include_str!("property_value.doc/as_font_families.md")]
     #[must_use]
     pub fn as_font_families(&self) -> Option<&[Box<str>]> {
         match self {
@@ -401,8 +237,7 @@ impl PropertyValue {
         }
     }
 
-    /// Builds a [`PropertyValue::GridTracks`] from an ordered iterator of
-    /// [`GridTrack`]s (with no line names), preserving author order.
+    #[doc = include_str!("property_value.doc/grid_tracks.md")]
     #[must_use]
     pub fn grid_tracks<I>(tracks: I) -> Self
     where
@@ -411,15 +246,13 @@ impl PropertyValue {
         Self::GridTracks(GridTrackList::from_tracks(tracks))
     }
 
-    /// Builds a [`PropertyValue::GridTracks`] from a [`GridTrackList`] (tracks +
-    /// `[name]` line names).
+    #[doc = include_str!("property_value.doc/grid_track_list.md")]
     #[must_use]
     pub const fn grid_track_list(list: GridTrackList) -> Self {
         Self::GridTracks(list)
     }
 
-    /// Returns the ordered grid track slice if this value is a
-    /// [`PropertyValue::GridTracks`].
+    #[doc = include_str!("property_value.doc/as_grid_tracks.md")]
     #[must_use]
     pub fn as_grid_tracks(&self) -> Option<&[GridTrack]> {
         match self {
@@ -428,8 +261,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the full grid track list (tracks + line names) if this value is a
-    /// [`PropertyValue::GridTracks`].
+    #[doc = include_str!("property_value.doc/as_grid_track_list.md")]
     #[must_use]
     pub const fn as_grid_track_list(&self) -> Option<&GridTrackList> {
         match self {
@@ -438,10 +270,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the grid line edge if this value is a [`PropertyValue::GridLine`].
-    ///
-    /// Returns a borrow so a [`GridLineValue::Named`] name is read without an
-    /// allocation; numeric / span / auto edges are the common case.
+    #[doc = include_str!("property_value.doc/as_grid_line.md")]
     #[must_use]
     pub fn as_grid_line(&self) -> Option<&GridLineValue> {
         match self {
@@ -450,8 +279,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the parsed grid-area template if this value is a
-    /// [`PropertyValue::GridAreas`].
+    #[doc = include_str!("property_value.doc/as_grid_areas.md")]
     #[must_use]
     pub const fn as_grid_areas(&self) -> Option<&GridAreaTemplate> {
         match self {
@@ -460,8 +288,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the named-area reference if this value is a
-    /// [`PropertyValue::GridAreaName`].
+    #[doc = include_str!("property_value.doc/as_grid_area_name.md")]
     #[must_use]
     pub fn as_grid_area_name(&self) -> Option<&str> {
         match self {
@@ -470,8 +297,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the resolved transform if this value is a
-    /// [`PropertyValue::Transform`].
+    #[doc = include_str!("property_value.doc/as_transform.md")]
     #[must_use]
     pub const fn as_transform(&self) -> Option<Transform> {
         match self {
@@ -480,8 +306,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the transform origin if this value is a
-    /// [`PropertyValue::TransformOrigin`].
+    #[doc = include_str!("property_value.doc/as_transform_origin.md")]
     #[must_use]
     pub const fn as_transform_origin(&self) -> Option<TransformOrigin> {
         match self {
@@ -490,7 +315,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the length if this value is a [`PropertyValue::Length`].
+    #[doc = include_str!("property_value.doc/as_length.md")]
     #[must_use]
     pub const fn as_length(&self) -> Option<Length> {
         match self {
@@ -499,7 +324,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns the length expression if this value is a [`PropertyValue::Calc`].
+    #[doc = include_str!("property_value.doc/as_calc.md")]
     #[must_use]
     pub const fn as_calc(&self) -> Option<&LengthExpr> {
         match self {
@@ -508,8 +333,7 @@ impl PropertyValue {
         }
     }
 
-    /// Returns `true` when this value is one of the CSS-wide keywords
-    /// (`inherit`, `initial`, `unset`).
+    #[doc = include_str!("property_value.doc/is_wide_keyword.md")]
     #[must_use]
     pub const fn is_wide_keyword(&self) -> bool {
         matches!(self, Self::Inherit | Self::Initial | Self::Unset)

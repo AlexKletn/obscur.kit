@@ -1,31 +1,24 @@
-//! The [`SelectionAnchor`] holding the fixed anchor and moving lead of a range
-//! selection (item-selection model).
+#![doc = include_str!("selection_anchor.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// The anchor and lead endpoints of a range selection.
-///
-/// Range (shift) selection extends from a fixed [`anchor`](Self::anchor) — set
-/// on the initial click — to a moving [`lead`](Self::lead), the currently
-/// active item. A shift-click updates only the lead, keeping the anchor put, so
-/// the selected span sweeps from the anchor to wherever the lead lands. When
-/// the two endpoints coincide the anchor is *collapsed* onto a single item.
+#[doc = include_str!("selection_anchor.doc/SelectionAnchor.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SelectionAnchor {
-    /// The fixed end of the range, set on the initial click.
+    #[doc = include_str!("selection_anchor.doc/anchor.md")]
     anchor: NodeId,
-    /// The moving end of the range: the currently active item.
+    #[doc = include_str!("selection_anchor.doc/lead.md")]
     lead: NodeId,
 }
 
 impl SelectionAnchor {
-    /// Creates an anchor spanning from `anchor` to `lead`.
+    #[doc = include_str!("selection_anchor.doc/new.md")]
     #[must_use]
     pub const fn new(anchor: NodeId, lead: NodeId) -> Self {
         Self { anchor, lead }
     }
 
-    /// Creates a collapsed anchor where both endpoints are `node`.
+    #[doc = include_str!("selection_anchor.doc/collapsed.md")]
     #[must_use]
     pub const fn collapsed(node: NodeId) -> Self {
         Self {
@@ -34,19 +27,19 @@ impl SelectionAnchor {
         }
     }
 
-    /// Returns the fixed end of the range.
+    #[doc = include_str!("selection_anchor.doc/anchor_2.md")]
     #[must_use]
     pub const fn anchor(&self) -> NodeId {
         self.anchor
     }
 
-    /// Returns the moving end of the range (the active item).
+    #[doc = include_str!("selection_anchor.doc/lead_2.md")]
     #[must_use]
     pub const fn lead(&self) -> NodeId {
         self.lead
     }
 
-    /// Returns whether the anchor and lead coincide (a single-item span).
+    #[doc = include_str!("selection_anchor.doc/is_collapsed.md")]
     #[must_use]
     pub const fn is_collapsed(&self) -> bool {
         self.anchor.raw() == self.lead.raw()

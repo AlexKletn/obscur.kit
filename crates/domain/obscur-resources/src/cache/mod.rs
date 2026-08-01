@@ -1,4 +1,4 @@
-//! Cache module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod cache_budget;
 pub use cache_budget::CacheBudget;
 mod cache_entry;

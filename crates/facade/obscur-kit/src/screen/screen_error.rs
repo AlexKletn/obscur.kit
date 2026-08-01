@@ -1,27 +1,16 @@
-//! [`ScreenError`] — why an `.okui` source could not become an [`OkuiScreen`].
+#![doc = include_str!("screen_error.doc/_module.md")]
 
-/// Why [`OkuiScreen::compile`](super::OkuiScreen::compile) rejected a source.
-///
-/// The two variants are the two halves of the front end: the `.okui` **parser**
-/// (syntax) and the **compiler** (§2.13 contract validation, §2.12 slots,
-/// capabilities). Each carries one message per diagnostic rather than a single
-/// joined string, so a host can report them individually — and neither is ever a
-/// silently empty screen, which is what a `.okui` root that failed to compile used
-/// to render as.
-///
-/// `AppError` converts from this, so a windowed
-/// application sees one error type; the split is kept here because the screen
-/// front end is display-free and usable without `App`.
+#[doc = include_str!("screen_error.doc/ScreenError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScreenError {
-    /// The source did not parse; one message per parse error.
+    #[doc = include_str!("screen_error.doc/Parse.md")]
     Parse(Vec<String>),
-    /// The source parsed but failed to compile; one message per diagnostic.
+    #[doc = include_str!("screen_error.doc/Compile.md")]
     Compile(Vec<String>),
 }
 
 impl ScreenError {
-    /// The diagnostics behind this failure, in report order.
+    #[doc = include_str!("screen_error.doc/messages.md")]
     #[must_use]
     pub fn messages(&self) -> &[String] {
         match self {

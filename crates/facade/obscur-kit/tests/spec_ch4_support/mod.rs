@@ -1,4 +1,4 @@
-//! Shared harness for the §4 spec-derived conformance tests.
+#![doc = include_str!("mod.doc/_module.md")]
 
 pub mod harness;
 

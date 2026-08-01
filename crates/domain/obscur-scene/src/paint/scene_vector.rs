@@ -1,4 +1,4 @@
-//! `SceneVector`: a parsed vector document that stays vector through the scene.
+#![doc = include_str!("scene_vector.doc/_module.md")]
 
 use obscur_geometry::Size;
 
@@ -6,84 +6,52 @@ use crate::color::Color;
 use crate::paint::{Paint, Stroke, VectorPaint};
 use crate::path::Path;
 
-/// One shape of a [`SceneVector`]: an outline with an optional fill and an
-/// optional stroke.
-///
-/// Both are optional and independent, exactly as in SVG: a shape may be filled,
-/// stroked, both (two paints over one outline), or — for a `<path>` used only as
-/// a clip source — neither.
+#[doc = include_str!("scene_vector.doc/VectorShape.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorShape {
-    /// The outline, in the document's own coordinate space.
+    #[doc = include_str!("scene_vector.doc/path.md")]
     pub path: Path,
-    /// The interior paint, or [`None`] for `fill="none"`.
+    #[doc = include_str!("scene_vector.doc/fill.md")]
     pub fill: Option<VectorPaint>,
-    /// The outline paint and its width, or [`None`] for `stroke="none"`.
+    #[doc = include_str!("scene_vector.doc/stroke.md")]
     pub stroke: Option<(VectorPaint, f32)>,
 }
 
-/// A parsed vector document (spec §5.17).
-///
-/// # Vector, not pixels
-///
-/// Spec §5.17: "SVG remains vector through the scene pipeline where possible."
-/// This is that representation — outlines and paints, never a rasterized bitmap.
-/// It composes to
-/// [`DrawPath`](crate::command::PaintCommand::DrawPath) commands, which both
-/// renderers already consume, so an SVG is rasterized once at the same
-/// resolution as everything else the frame draws rather than being sampled from
-/// a pre-rendered image.
-///
-/// # Parsed once, drawn in any colour
-///
-/// A shape's paint is a [`VectorPaint`], so `currentColor` survives parsing
-/// unresolved. That is what lets §5.17's "theme/state changes without reparsing"
-/// hold: the document is colour-independent, and the coordinator substitutes the
-/// painting node's computed `color` per frame.
-///
-/// # Scope
-///
-/// Fills and strokes of solid or `currentColor` paint. SVG gradients, patterns,
-/// masks, filters and text are **not** carried: they would each need a mapping
-/// onto the scene's own model, and inventing one would be worse than reporting
-/// the gap. A document using them keeps its geometry; those paints are dropped.
+#[doc = include_str!("scene_vector.doc/SceneVector.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneVector {
-    /// The document's intrinsic size, from its `width`/`height`/`viewBox` —
-    /// the box `object-fit` scales from (spec §5.16).
+    #[doc = include_str!("scene_vector.doc/size.md")]
     size: Size,
-    /// The shapes, in paint order.
+    #[doc = include_str!("scene_vector.doc/shapes.md")]
     shapes: Vec<VectorShape>,
 }
 
 impl SceneVector {
-    /// Creates a vector document of intrinsic `size` holding `shapes` in paint
-    /// order.
+    #[doc = include_str!("scene_vector.doc/new.md")]
     #[must_use]
     pub fn new(size: Size, shapes: Vec<VectorShape>) -> Self {
         Self { size, shapes }
     }
 
-    /// The document's intrinsic size.
+    #[doc = include_str!("scene_vector.doc/size_2.md")]
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    /// The shapes, in paint order.
+    #[doc = include_str!("scene_vector.doc/shapes_2.md")]
     #[must_use]
     pub fn shapes(&self) -> &[VectorShape] {
         &self.shapes
     }
 
-    /// Whether the document draws nothing.
+    #[doc = include_str!("scene_vector.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.shapes.is_empty()
     }
 
-    /// Whether any shape defers to the computed `color`, i.e. this document's
-    /// appearance follows the theme.
+    #[doc = include_str!("scene_vector.doc/uses_current_color.md")]
     #[must_use]
     pub fn uses_current_color(&self) -> bool {
         self.shapes.iter().any(|shape| {
@@ -94,11 +62,7 @@ impl SceneVector {
         })
     }
 
-    /// The `(path, paint)` pairs to draw this document in, with every
-    /// `currentColor` resolved against `current`.
-    ///
-    /// A shape with both a fill and a stroke yields two pairs — fill first, so
-    /// the stroke sits over it, as SVG paints them.
+    #[doc = include_str!("scene_vector.doc/resolved.md")]
     #[must_use]
     pub fn resolved(&self, current: Color) -> Vec<(Path, Paint)> {
         let mut out = Vec::with_capacity(self.shapes.len());

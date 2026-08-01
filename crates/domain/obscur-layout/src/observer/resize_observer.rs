@@ -1,28 +1,21 @@
-//! The [`ResizeObserver`] — watches a node's size only (spec §4.4).
-//!
-//! Like all geometry observers it reports the coalesced net change after layout
-//! commit. Unlike a [`LayoutObserver`](super::LayoutObserver), it watches only
-//! the [`Size`]: a position-only move (same size, different origin) does not
-//! fire.
+#![doc = include_str!("resize_observer.doc/_module.md")]
 
 use obscur_geometry::Size;
 use obscur_identity::NodeId;
 
-/// A coalesced size change reported by a [`ResizeObserver`] (spec §4.4).
-///
-/// `previous` is `None` on the first observation and `Some` thereafter.
+#[doc = include_str!("resize_observer.doc/ResizeChange.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResizeChange {
-    /// The observed node.
+    #[doc = include_str!("resize_observer.doc/node.md")]
     pub node: NodeId,
-    /// The size before this change, or `None` on the first observation.
+    #[doc = include_str!("resize_observer.doc/previous.md")]
     pub previous: Option<Size>,
-    /// The newly-committed size.
+    #[doc = include_str!("resize_observer.doc/current.md")]
     pub current: Size,
 }
 
 impl ResizeChange {
-    /// Constructs a resize change event.
+    #[doc = include_str!("resize_observer.doc/new.md")]
     #[must_use]
     pub const fn new(node: NodeId, previous: Option<Size>, current: Size) -> Self {
         Self {
@@ -33,8 +26,7 @@ impl ResizeChange {
     }
 }
 
-/// Watches one node's [`Size`], firing when the size changes and ignoring
-/// position-only moves (spec §4.4).
+#[doc = include_str!("resize_observer.doc/ResizeObserver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResizeObserver {
     node: NodeId,
@@ -42,30 +34,25 @@ pub struct ResizeObserver {
 }
 
 impl ResizeObserver {
-    /// Creates an observer for `node`. It has not yet observed any size, so the
-    /// first [`observe`](Self::observe) fires with the initial value.
+    #[doc = include_str!("resize_observer.doc/new_2.md")]
     #[must_use]
     pub const fn new(node: NodeId) -> Self {
         Self { node, last: None }
     }
 
-    /// The observed node.
+    #[doc = include_str!("resize_observer.doc/node_2.md")]
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    /// The last observed size, or `None` before the first observation.
+    #[doc = include_str!("resize_observer.doc/last.md")]
     #[must_use]
     pub const fn last(self) -> Option<Size> {
         self.last
     }
 
-    /// Records the newly-committed size, returning a [`ResizeChange`] when it
-    /// differs from the last observed size (or on the first observation).
-    ///
-    /// Returns `None` when the size is unchanged. Updates the stored size on a
-    /// fire.
+    #[doc = include_str!("resize_observer.doc/observe.md")]
     #[must_use]
     pub fn observe(&mut self, current: Size) -> Option<ResizeChange> {
         if self.last == Some(current) {
@@ -76,7 +63,7 @@ impl ResizeObserver {
         Some(ResizeChange::new(self.node, previous, current))
     }
 
-    /// Forgets the last observed size, so the next observation fires afresh.
+    #[doc = include_str!("resize_observer.doc/reset.md")]
     pub const fn reset(&mut self) {
         self.last = None;
     }

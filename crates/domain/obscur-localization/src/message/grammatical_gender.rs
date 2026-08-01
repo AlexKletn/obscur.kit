@@ -1,87 +1,67 @@
-//! `GrammaticalGender`: a CLDR grammatical-gender value (spec §7.2 gender).
+#![doc = include_str!("grammatical_gender.doc/_module.md")]
 
 use std::fmt;
 
-/// A grammatical gender, as a CLDR value name.
-///
-/// # Why this is not an enum
-///
-/// Because the set is not fixed. `specs/cldr/grammaticalFeatures.xml` gives
-/// Russian `masculine feminine neuter`, Polish `animate inanimate personal
-/// feminine neuter`, and other locales `common` — seven distinct values across
-/// the file, in locale-specific combinations that do not nest. A closed Rust enum
-/// of the three genders Russian happens to have would be exactly the mistake §7.2
-/// is guarding against, one language further along.
-///
-/// So this is an open newtype over a value name, with the seven values CLDR
-/// currently uses as associated constants, and no rejection of anything else. A
-/// gender selects a message arm by name (see
-/// [`MessagePattern`](crate::message::MessagePattern)); the *catalogue* decides
-/// which names its translation distinguishes, because only it knows.
+#[doc = include_str!("grammatical_gender.doc/GrammaticalGender.md")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GrammaticalGender(Box<str>);
 
 impl GrammaticalGender {
-    /// Creates a gender from a CLDR value name.
+    #[doc = include_str!("grammatical_gender.doc/new.md")]
     #[must_use]
     pub fn new(value: impl Into<Box<str>>) -> Self {
         Self(value.into())
     }
 
-    /// Returns the value name, as a message arm is spelled.
+    #[doc = include_str!("grammatical_gender.doc/as_str.md")]
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// `masculine` — CLDR value; used by e.g. `ru`, `de`, `es`.
+    #[doc = include_str!("grammatical_gender.doc/masculine.md")]
     #[must_use]
     pub fn masculine() -> Self {
         Self::new("masculine")
     }
 
-    /// `feminine` — CLDR value; used by e.g. `ru`, `pl`, `fr`.
+    #[doc = include_str!("grammatical_gender.doc/feminine.md")]
     #[must_use]
     pub fn feminine() -> Self {
         Self::new("feminine")
     }
 
-    /// `neuter` — CLDR value; used by e.g. `ru`, `pl`, `de`.
+    #[doc = include_str!("grammatical_gender.doc/neuter.md")]
     #[must_use]
     pub fn neuter() -> Self {
         Self::new("neuter")
     }
 
-    /// `common` — CLDR value; used by e.g. `da`, `sv`, `nl`.
+    #[doc = include_str!("grammatical_gender.doc/common.md")]
     #[must_use]
     pub fn common() -> Self {
         Self::new("common")
     }
 
-    /// `animate` — CLDR value; used by e.g. `pl`.
+    #[doc = include_str!("grammatical_gender.doc/animate.md")]
     #[must_use]
     pub fn animate() -> Self {
         Self::new("animate")
     }
 
-    /// `inanimate` — CLDR value; used by e.g. `pl`.
+    #[doc = include_str!("grammatical_gender.doc/inanimate.md")]
     #[must_use]
     pub fn inanimate() -> Self {
         Self::new("inanimate")
     }
 
-    /// `personal` — CLDR value; used by e.g. `pl`.
+    #[doc = include_str!("grammatical_gender.doc/personal.md")]
     #[must_use]
     pub fn personal() -> Self {
         Self::new("personal")
     }
 
-    /// Every gender value that appears anywhere in
-    /// `specs/cldr/grammaticalFeatures.xml`, for a catalogue that wants to check
-    /// its arms against the known space.
-    ///
-    /// This is CLDR's union as of release-48, **not** a closed set: `new` accepts
-    /// any name, and a locale outside CLDR may need one that is not here.
+    #[doc = include_str!("grammatical_gender.doc/cldr_values.md")]
     #[must_use]
     pub fn cldr_values() -> [Self; 7] {
         [

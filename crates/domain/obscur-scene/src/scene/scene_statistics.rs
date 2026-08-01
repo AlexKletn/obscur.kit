@@ -1,14 +1,8 @@
-//! Per-scene diagnostic counters for `DevTools` and telemetry.
+#![doc = include_str!("scene_statistics.doc/_module.md")]
 
 use crate::command::{DisplayList, PaintCommand};
 
-/// Per-scene counters surfaced to `DevTools` and performance telemetry
-/// (spec §7.9).
-///
-/// These are **diagnostic metrics only**: they describe the shape of a
-/// [`DisplayList`] (how many commands, draws, layers, and clips it contains)
-/// and never bear on rendering correctness. A renderer must not depend on them;
-/// they exist purely for observability.
+#[doc = include_str!("scene_statistics.doc/SceneStatistics.md")]
 // The shared `_count` postfix is intentional: every field is a diagnostic
 // tally, and the postfix documents that uniformly (spec §7.9).
 #[allow(clippy::struct_field_names)]
@@ -21,10 +15,7 @@ pub struct SceneStatistics {
 }
 
 impl SceneStatistics {
-    /// Creates a statistics record from explicit counts.
-    ///
-    /// The counts are diagnostic only and are stored verbatim; this constructor
-    /// does not cross-check them for consistency.
+    #[doc = include_str!("scene_statistics.doc/new.md")]
     #[must_use]
     pub const fn new(
         command_count: usize,
@@ -40,40 +31,31 @@ impl SceneStatistics {
         }
     }
 
-    /// The total number of [`PaintCommand`]s in the scene.
+    #[doc = include_str!("scene_statistics.doc/command_count.md")]
     #[must_use]
     pub const fn command_count(self) -> usize {
         self.command_count
     }
 
-    /// The number of [`PaintCommand::DrawPath`] commands in the scene.
+    #[doc = include_str!("scene_statistics.doc/draw_count.md")]
     #[must_use]
     pub const fn draw_count(self) -> usize {
         self.draw_count
     }
 
-    /// The number of [`PaintCommand::PushLayer`] commands in the scene.
+    #[doc = include_str!("scene_statistics.doc/layer_count.md")]
     #[must_use]
     pub const fn layer_count(self) -> usize {
         self.layer_count
     }
 
-    /// The number of [`PaintCommand::PushClip`] commands in the scene.
+    #[doc = include_str!("scene_statistics.doc/clip_count.md")]
     #[must_use]
     pub const fn clip_count(self) -> usize {
         self.clip_count
     }
 
-    /// Computes statistics by folding over a [`DisplayList`], counting each
-    /// command category.
-    ///
-    /// `command_count` is the total command count; `draw_count`, `layer_count`,
-    /// and `clip_count` count the drawing leaf commands
-    /// ([`PaintCommand::DrawPath`], [`PaintCommand::DrawText`],
-    /// [`PaintCommand::DrawShadow`], [`PaintCommand::DrawImage`], and
-    /// [`PaintCommand::BackdropFilter`]),
-    /// [`PaintCommand::PushLayer`], and [`PaintCommand::PushClip`] respectively.
-    /// Pops are counted only towards `command_count`.
+    #[doc = include_str!("scene_statistics.doc/from_display_list.md")]
     #[must_use]
     pub fn from_display_list(list: &DisplayList) -> Self {
         let mut stats = Self::new(list.len(), 0, 0, 0);

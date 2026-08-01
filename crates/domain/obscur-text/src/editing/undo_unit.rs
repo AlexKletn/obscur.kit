@@ -1,61 +1,43 @@
-//! A coalescable group of transactions that undo/redo as one step
-//! (spec §5.11 undo primitives; §5.12 IME — one composition is one undo unit).
+#![doc = include_str!("undo_unit.doc/_module.md")]
 
 use crate::selection::TextSelection;
 
 use super::EditTransaction;
 
-/// What produced an [`UndoUnit`], governing whether consecutive units coalesce
-/// (spec §5.11 undo primitives; §5.12).
-///
-/// The undo stack merges runs of the same fine-grained activity so a burst of
-/// typing or deletion undoes as one step, while structural edits stay atomic. A
-/// [`Composition`](Self::Composition) is never merged: per spec §5.12 "one
-/// composition is one undo unit".
+#[doc = include_str!("undo_unit.doc/UndoKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UndoKind {
-    /// Character insertion from ordinary typing — coalesces with adjacent typing.
+    #[doc = include_str!("undo_unit.doc/Typing.md")]
     Typing,
-    /// Backspace/Delete runs — coalesce with adjacent deletion.
+    #[doc = include_str!("undo_unit.doc/Deletion.md")]
     Deletion,
-    /// A single IME composition — one composition is one undo unit (§5.12);
-    /// never coalesces.
+    #[doc = include_str!("undo_unit.doc/Composition.md")]
     Composition,
-    /// A clipboard paste — atomic; never coalesces.
+    #[doc = include_str!("undo_unit.doc/Paste.md")]
     Paste,
-    /// Any other edit (programmatic, replace, etc.) — atomic; never coalesces.
+    #[doc = include_str!("undo_unit.doc/Other.md")]
     Other,
 }
 
 impl UndoKind {
-    /// Returns whether two adjacent units of *this same* kind may merge into one
-    /// undo step. Only [`Typing`](Self::Typing) and [`Deletion`](Self::Deletion)
-    /// coalesce; the atomic kinds never do.
+    #[doc = include_str!("undo_unit.doc/is_coalescing.md")]
     #[must_use]
     pub const fn is_coalescing(&self) -> bool {
         matches!(self, Self::Typing | Self::Deletion)
     }
 }
 
-/// A group of [`EditTransaction`]s that undo and redo as a single step (spec
-/// §5.11 editing engine — local undo/redo primitives; §5.12).
-///
-/// One user-visible action can splice text in several places (multi-caret edit)
-/// or accrete over time (a typing run), yet must undo atomically. An
-/// [`UndoUnit`] bundles those transactions and tags them with an
-/// [`UndoKind`](UndoKind) that decides whether the next action merges into this
-/// unit or starts a new one. Undoing a unit applies its [`invert`](Self::invert);
-/// redoing re-applies the original edits.
+#[doc = include_str!("undo_unit.doc/UndoUnit.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct UndoUnit {
-    /// The edits in this unit, in the order they were applied.
+    #[doc = include_str!("undo_unit.doc/edits.md")]
     edits: Vec<EditTransaction>,
-    /// The activity that produced the unit; governs coalescing.
+    #[doc = include_str!("undo_unit.doc/kind.md")]
     kind: UndoKind,
 }
 
 impl UndoUnit {
-    /// Creates an empty unit of the given `kind`.
+    #[doc = include_str!("undo_unit.doc/new.md")]
     #[must_use]
     pub const fn new(kind: UndoKind) -> Self {
         Self {
@@ -64,7 +46,7 @@ impl UndoUnit {
         }
     }
 
-    /// Creates a unit of `kind` holding the single edit `edit`.
+    #[doc = include_str!("undo_unit.doc/single.md")]
     #[must_use]
     pub fn single(edit: EditTransaction, kind: UndoKind) -> Self {
         Self {
@@ -73,54 +55,42 @@ impl UndoUnit {
         }
     }
 
-    /// Appends `edit` to this unit (as the newest edit in application order).
+    #[doc = include_str!("undo_unit.doc/push.md")]
     pub fn push(&mut self, edit: EditTransaction) {
         self.edits.push(edit);
     }
 
-    /// Returns whether the unit holds no edits.
+    #[doc = include_str!("undo_unit.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.edits.is_empty()
     }
 
-    /// Returns the number of edits in the unit.
+    #[doc = include_str!("undo_unit.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.edits.len()
     }
 
-    /// Returns the edits in application order.
+    #[doc = include_str!("undo_unit.doc/edits_2.md")]
     #[must_use]
     pub fn edits(&self) -> &[EditTransaction] {
         &self.edits
     }
 
-    /// Returns the kind that produced this unit.
+    #[doc = include_str!("undo_unit.doc/kind_2.md")]
     #[must_use]
     pub const fn kind(&self) -> UndoKind {
         self.kind
     }
 
-    /// Returns whether a new action of `other_kind` should merge into this unit
-    /// rather than open a fresh one.
-    ///
-    /// True only when the kinds match *and* the kind is coalescing
-    /// ([`Typing`](UndoKind::Typing) or [`Deletion`](UndoKind::Deletion)):
-    /// typing merges with typing and deletion with deletion, but never with each
-    /// other, and [`Composition`](UndoKind::Composition)/[`Paste`](UndoKind::Paste)/[`Other`](UndoKind::Other)
-    /// never merge.
+    #[doc = include_str!("undo_unit.doc/can_coalesce_with.md")]
     #[must_use]
     pub const fn can_coalesce_with(&self, other_kind: UndoKind) -> bool {
         self.kind.is_coalescing() && self.kind_eq(other_kind)
     }
 
-    /// Returns the inverse unit: each edit inverted *and* the sequence reversed.
-    ///
-    /// Edits applied in order `e0, e1, …, eN` must be undone in the opposite
-    /// order — the inverse of `eN` first — because each edit's byte offsets
-    /// assume the prior edits are already in place. The reversed, inverted
-    /// sequence therefore restores the pre-unit state. The kind is preserved.
+    #[doc = include_str!("undo_unit.doc/invert.md")]
     #[must_use]
     pub fn invert(&self) -> UndoUnit {
         UndoUnit {
@@ -134,21 +104,19 @@ impl UndoUnit {
         }
     }
 
-    /// Returns the selection recorded before the unit's first edit, or `None`
-    /// when the unit is empty.
+    #[doc = include_str!("undo_unit.doc/selection_before.md")]
     #[must_use]
     pub fn selection_before(&self) -> Option<TextSelection> {
         self.edits.first().map(EditTransaction::selection_before)
     }
 
-    /// Returns the selection recorded after the unit's last edit, or `None` when
-    /// the unit is empty.
+    #[doc = include_str!("undo_unit.doc/selection_after.md")]
     #[must_use]
     pub fn selection_after(&self) -> Option<TextSelection> {
         self.edits.last().map(EditTransaction::selection_after)
     }
 
-    /// Const-friendly equality of two [`UndoKind`]s.
+    #[doc = include_str!("undo_unit.doc/kind_eq.md")]
     const fn kind_eq(&self, other: UndoKind) -> bool {
         matches!(
             (self.kind, other),

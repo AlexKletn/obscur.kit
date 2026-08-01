@@ -9,3 +9,19 @@ publish = false
 
 [lints]
 workspace = true
+
+# Spec §2.4: the testkit is a harness, not a tier. It depends on the runtime it
+# drives and on the crates whose values a test has to build (views, stylesheets,
+# pointer events, resource ports) — and nothing depends on it except test
+# targets, which take it as a dev-dependency.
+[dependencies]
+obscur-identity = { workspace = true }
+obscur-geometry = { workspace = true }
+obscur-interaction = { workspace = true }
+obscur-resources = { workspace = true }
+obscur-runtime = { workspace = true }
+obscur-scene = { workspace = true }
+obscur-style = { workspace = true }
+obscur-task = { workspace = true }
+obscur-tree = { workspace = true }
+obscur-view = { workspace = true }

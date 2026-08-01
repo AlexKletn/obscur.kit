@@ -1,19 +1,14 @@
-//! Diagnostic sink port.
+#![doc = include_str!("diagnostic_sink.doc/_module.md")]
 
 use crate::diagnostic::Diagnostic;
 
-/// A destination for structured diagnostics. Adapters may mirror these into
-/// `tracing`, `DevTools` or test buffers (spec §7.8).
+#[doc = include_str!("diagnostic_sink.doc/DiagnosticSink.md")]
 pub trait DiagnosticSink {
-    /// Records a diagnostic.
+    #[doc = include_str!("diagnostic_sink.doc/emit.md")]
     fn emit(&self, diagnostic: &Diagnostic);
 }
 
-/// A diagnostic sink that discards everything it receives.
-///
-/// The default destination for an engine that has not been given a real sink:
-/// diagnostics are still *produced* — so a failure follows exactly the same code
-/// path whether or not anyone is listening — and then dropped.
+#[doc = include_str!("diagnostic_sink.doc/NullDiagnosticSink.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NullDiagnosticSink;
 

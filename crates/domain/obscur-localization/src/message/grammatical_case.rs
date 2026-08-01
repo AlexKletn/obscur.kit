@@ -1,86 +1,61 @@
-//! `GrammaticalCase`: a CLDR grammatical-case value (spec §7.2 case variants).
+#![doc = include_str!("grammatical_case.doc/_module.md")]
 
 use std::fmt;
 
-/// A grammatical case, as a CLDR value name.
-///
-/// Open for the same reason [`GrammaticalGender`](super::GrammaticalGender) is,
-/// only more so: `specs/cldr/grammaticalFeatures.xml` lists **28** distinct case
-/// values across its locales, and the eight Russian uses (`nominative genitive
-/// dative accusative instrumental prepositional vocative locative`) are not a
-/// superset of anyone else's — Hungarian alone contributes `delative`,
-/// `sublative`, `superessive`, `terminative` and more.
-///
-/// Case variants matter to a UI toolkit for a plain reason: a message that
-/// interpolates a noun cannot use the dictionary form everywhere. Russian «нет
-/// {file}» needs the genitive of the word that «{file}» is nominative for. The
-/// mechanism is the same as gender's — the case selects an arm by name — and the
-/// *catalogue*, which is the only party that knows the actual word forms, holds
-/// them.
+#[doc = include_str!("grammatical_case.doc/GrammaticalCase.md")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GrammaticalCase(Box<str>);
 
 impl GrammaticalCase {
-    /// Creates a case from a CLDR value name.
+    #[doc = include_str!("grammatical_case.doc/new.md")]
     #[must_use]
     pub fn new(value: impl Into<Box<str>>) -> Self {
         Self(value.into())
     }
 
-    /// Returns the value name, as a message arm is spelled.
+    #[doc = include_str!("grammatical_case.doc/as_str.md")]
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// `nominative` — the dictionary form.
+    #[doc = include_str!("grammatical_case.doc/nominative.md")]
     #[must_use]
     pub fn nominative() -> Self {
         Self::new("nominative")
     }
 
-    /// `genitive`.
+    #[doc = include_str!("grammatical_case.doc/genitive.md")]
     #[must_use]
     pub fn genitive() -> Self {
         Self::new("genitive")
     }
 
-    /// `dative`.
+    #[doc = include_str!("grammatical_case.doc/dative.md")]
     #[must_use]
     pub fn dative() -> Self {
         Self::new("dative")
     }
 
-    /// `accusative`.
+    #[doc = include_str!("grammatical_case.doc/accusative.md")]
     #[must_use]
     pub fn accusative() -> Self {
         Self::new("accusative")
     }
 
-    /// `instrumental`.
+    #[doc = include_str!("grammatical_case.doc/instrumental.md")]
     #[must_use]
     pub fn instrumental() -> Self {
         Self::new("instrumental")
     }
 
-    /// `prepositional`.
+    #[doc = include_str!("grammatical_case.doc/prepositional.md")]
     #[must_use]
     pub fn prepositional() -> Self {
         Self::new("prepositional")
     }
 
-    /// The eight cases `specs/cldr/grammaticalFeatures.xml` gives Russian, in the
-    /// order that file lists them:
-    ///
-    /// ```text
-    /// <grammaticalFeatures targets="nominal" locales="ru">
-    ///   <grammaticalCase values="nominative genitive dative accusative instrumental prepositional vocative locative"/>
-    ///   <grammaticalGender values="masculine feminine neuter"/>
-    /// </grammaticalFeatures>
-    /// ```
-    ///
-    /// Provided because §7.2 names Russian's case variants specifically. It is
-    /// Russian's list, not *the* list — see the type docs.
+    #[doc = include_str!("grammatical_case.doc/russian_values.md")]
     #[must_use]
     pub fn russian_values() -> [Self; 8] {
         [

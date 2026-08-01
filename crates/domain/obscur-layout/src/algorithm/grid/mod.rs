@@ -1,4 +1,4 @@
-//! Grid track model: the sizing functions and templates a grid lays out with.
+#![doc = include_str!("mod.doc/_module.md")]
 mod auto_repeat;
 pub use auto_repeat::{AutoRepeat, AutoRepeatMode};
 mod grid_auto_flow;

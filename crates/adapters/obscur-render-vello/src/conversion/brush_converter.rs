@@ -1,9 +1,4 @@
-//! Converts obscur-scene paint sources ([`Brush`], [`Stroke`]) into peniko/kurbo.
-//!
-//! Pure, backend-local conversion (spec §2.7). Solid and gradient brushes map to
-//! [`peniko::Brush`]; stroke style maps to a [`kurbo::Stroke`]. Stop colors and
-//! offsets, and the stroke's width/join/cap, are preserved exactly (spec §5.2 —
-//! the adapter keeps paint data authoritative and delegates only rasterization).
+#![doc = include_str!("brush_converter.doc/_module.md")]
 
 use obscur_scene::color::Color;
 use obscur_scene::color::convert::{linear_srgb_to_oklab, oklab_to_srgb, srgb_decode};
@@ -13,69 +8,26 @@ use vello::peniko;
 
 use super::color_converter::ColorConverter;
 
-/// Color space in which gradient stops are interpolated.
-///
-/// Per **CSS Images Module Level 4 §3.4** ("Color Stops and Transition Hints"),
-/// a gradient with no authored `in <color-space>` interpolates its stops in
-/// **Oklab** — the default rectangular color-interpolation space for `color-mix`
-/// and gradients (CSS Color 4 §12). peniko itself defaults a `Gradient` to sRGB
-/// (`ColorSpaceTag::Srgb`), which produces the muddy dark midpoint of e.g.
-/// `linear-gradient(red, green)`.
-///
-/// We set this tag on every gradient (forward-compatible with a Vello that honors
-/// it), but this Vello/peniko build **rasterizes the ramp in sRGB regardless of
-/// the tag** (verified by the `gradient_oklab_proof` example: the tag alone left
-/// the red→green midpoint at the muddy sRGB `(127, 64, 0)`). So the CSS-correct
-/// interpolation is produced by **densifying** the stops in Oklab (see
-/// [`BrushConverter::stops`]) before handing them to peniko; the tag is kept as a
-/// belt-and-suspenders default that stays correct if Vello later honors it.
-///
-/// Hue direction stays peniko's default (`shorter`); Oklab is rectangular so hue
-/// direction is irrelevant here. Parsing an explicit `in <color-space>` from the
-/// stylesheet is a future extension — the domain model does not yet carry an
-/// authored interpolation space, so Oklab (the CSS default) is applied
-/// unconditionally.
+#[doc = include_str!("brush_converter.doc/GRADIENT_INTERPOLATION_CS.md")]
 const GRADIENT_INTERPOLATION_CS: peniko::color::ColorSpaceTag = peniko::color::ColorSpaceTag::Oklab;
 
-/// Number of linear sub-segments each authored stop pair is split into when
-/// densifying in Oklab. `N` segments insert `N - 1` interior Oklab-interpolated
-/// stops between each authored pair; peniko's per-stop sampling (sRGB-linear
-/// between adjacent stops) then closely approximates the true Oklab ramp. 16 keeps
-/// the mid-range hues visually smooth while staying far under any ramp limit.
+#[doc = include_str!("brush_converter.doc/DENSIFY_SEGMENTS.md")]
 const DENSIFY_SEGMENTS: usize = 16;
 
-/// A converter from obscur-scene paint sources to peniko/kurbo equivalents.
-///
-/// It owns a [`ColorConverter`] so brush and gradient-stop colors go through the
-/// same sRGB mapping.
-///
-/// # Gradient mapping
-///
-/// - [`Brush::Linear`] → [`peniko::Gradient::new_linear`] over the same axis.
-/// - [`Brush::Radial`] → [`peniko::Gradient::new_radial`] over the same
-///   center/radius. The domain models a concentric radial gradient, which is the
-///   single-circle case of peniko's radial gradient.
-/// - [`Brush::Conic`] → [`peniko::Gradient::new_sweep`]. The domain conic
-///   gradient sweeps one full turn clockwise from `start_angle`, so it maps to a
-///   sweep over `[start_angle, start_angle + 2π]`. peniko's sweep advances in the
-///   same offset direction, so the stop offsets and colors are preserved; only
-///   the exact angular rasterization is Vello's (spec §5.2).
-///
-/// In every case the gradient's color stops (offset + converted color) and its
-/// [extend mode](obscur_scene::paint::ExtendMode) carry over unchanged.
+#[doc = include_str!("brush_converter.doc/BrushConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct BrushConverter {
     color: ColorConverter,
 }
 
 impl BrushConverter {
-    /// Creates a brush converter using the given color converter.
+    #[doc = include_str!("brush_converter.doc/new.md")]
     #[must_use]
     pub const fn new(color: ColorConverter) -> Self {
         Self { color }
     }
 
-    /// Converts an obscur-scene [`Brush`] into a [`peniko::Brush`].
+    #[doc = include_str!("brush_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, brush: &Brush) -> peniko::Brush {
         match brush {
@@ -115,15 +67,7 @@ impl BrushConverter {
         }
     }
 
-    /// The optional brush transform to pass alongside [`convert`](Self::convert)
-    /// when filling/stroking with this brush.
-    ///
-    /// A [`Brush::Radial`] with an **elliptical** ending shape is emitted by
-    /// [`convert`](Self::convert) as a concentric *circle* gradient of the x-axis
-    /// radius; this transform stretches that circle into the authored ellipse by
-    /// scaling the y-axis by `radius_y / radius` about the gradient center (spec
-    /// §3.2). Every other brush (solid, linear, conic, or a circular radial) needs
-    /// no brush transform and yields [`None`].
+    #[doc = include_str!("brush_converter.doc/brush_transform.md")]
     #[must_use]
     pub fn brush_transform(brush: &Brush) -> Option<kurbo::Affine> {
         match brush {
@@ -140,13 +84,7 @@ impl BrushConverter {
         }
     }
 
-    /// Converts an obscur-scene [`Stroke`] style into a [`kurbo::Stroke`].
-    ///
-    /// Width, join, both caps, and the miter limit are carried across; the
-    /// stroke's brush is handled separately by the scene converter. A non-empty
-    /// [`Stroke::dash`] is mapped onto kurbo's dash pattern (widened to `f64`)
-    /// with its phase offset, so a dashed scene stroke rasterizes as dashes; an
-    /// empty dash leaves kurbo's default (solid) dash, byte-identical to before.
+    #[doc = include_str!("brush_converter.doc/stroke.md")]
     #[must_use]
     pub fn stroke(&self, stroke: &Stroke) -> kurbo::Stroke {
         let k = kurbo::Stroke::new(f64::from(stroke.width()))
@@ -163,23 +101,7 @@ impl BrushConverter {
         }
     }
 
-    /// Converts obscur-scene gradient stops into peniko color stops, **densified in
-    /// Oklab** so Vello rasterizes the CSS-correct interpolation.
-    ///
-    /// CSS Images 4 §3.4 interpolates a gradient's stops in Oklab by default, but
-    /// this Vello/peniko build samples the ramp linearly in sRGB regardless of
-    /// `interpolation_cs` (see [`GRADIENT_INTERPOLATION_CS`]). To honor the spec we
-    /// pre-compute [`DENSIFY_SEGMENTS`]`- 1` interior stops between each authored
-    /// pair by interpolating in **Oklab with premultiplied alpha** (convert each
-    /// endpoint sRGB→linear→Oklab, premultiply by alpha, lerp `L,a,b,α`,
-    /// un-premultiply, convert Oklab→sRGB) — reusing the CSS Color 4 conversions in
-    /// [`obscur_scene::color::convert`]. peniko's sRGB-linear sampling between the
-    /// now-dense stops closely approximates the true Oklab ramp.
-    ///
-    /// Authored stops keep their **exact** converted color and offset (the endpoints
-    /// are not round-tripped through Oklab); only the inserted interior stops are
-    /// Oklab-computed. A gradient with fewer than two stops has nothing to
-    /// interpolate and passes through unchanged (byte-identical to before).
+    #[doc = include_str!("brush_converter.doc/stops.md")]
     fn stops(self, stops: &[obscur_scene::paint::GradientStop]) -> Vec<peniko::ColorStop> {
         if stops.len() < 2 {
             return stops
@@ -216,15 +138,7 @@ impl BrushConverter {
     }
 }
 
-/// Interpolates two straight-alpha sRGB [`Color`]s in **Oklab with premultiplied
-/// alpha** at parameter `t ∈ [0, 1]`, returning a peniko sRGB color.
-///
-/// CSS Color 4 §12.2 interpolates in the (rectangular) Oklab space over
-/// premultiplied components. Each endpoint is taken from gamma sRGB → linear sRGB
-/// ([`srgb_decode`]) → Oklab ([`linear_srgb_to_oklab`]), premultiplied by its
-/// alpha; the four components `L,a,b,α` lerp linearly; the result is
-/// un-premultiplied and mapped back with [`oklab_to_srgb`]. A zero interpolated
-/// alpha yields a fully transparent black (no division by zero).
+#[doc = include_str!("brush_converter.doc/oklab_lerp.md")]
 // The Oklab component names (L/a/b) are the canonical single-letter names from
 // CSS Color 4 §9; renaming them would obscure the 1:1 mapping to the spec.
 #[allow(clippy::many_single_char_names)]
@@ -252,7 +166,7 @@ fn oklab_lerp(a: Color, b: Color, t: f64) -> peniko::Color {
     peniko::Color::new([r as f32, g as f32, blue as f32, alpha as f32])
 }
 
-/// Maps an obscur-scene extend mode to a peniko extend mode.
+#[doc = include_str!("brush_converter.doc/extend.md")]
 fn extend(mode: obscur_scene::paint::ExtendMode) -> peniko::Extend {
     match mode {
         obscur_scene::paint::ExtendMode::Pad => peniko::Extend::Pad,
@@ -261,7 +175,7 @@ fn extend(mode: obscur_scene::paint::ExtendMode) -> peniko::Extend {
     }
 }
 
-/// Maps an obscur-scene line join to a kurbo join.
+#[doc = include_str!("brush_converter.doc/join.md")]
 fn join(join: LineJoin) -> kurbo::Join {
     match join {
         LineJoin::Miter => kurbo::Join::Miter,
@@ -270,7 +184,7 @@ fn join(join: LineJoin) -> kurbo::Join {
     }
 }
 
-/// Maps an obscur-scene line cap to a kurbo cap.
+#[doc = include_str!("brush_converter.doc/cap.md")]
 fn cap(cap: LineCap) -> kurbo::Cap {
     match cap {
         LineCap::Butt => kurbo::Cap::Butt,

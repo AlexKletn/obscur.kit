@@ -1,11 +1,4 @@
-//! **SPECIFICATION-DERIVED** case for §3.1 View state — "No magic two-way
-//! binding is provided: - values flow down; - typed actions/commands flow up." —
-//! the one concrete instance of the §9.6 guardrail "mix application state with
-//! view state".
-//!
-//! Every expected value was produced by an agent reading the specification with
-//! **no access to this repository's source**. A failure here is a defect report
-//! about the engine, and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch9_view_contract.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch9_support/mod.rs"]
@@ -21,11 +14,7 @@ use support::{Shared, compile};
 
 const VW: f32 = 1000.0;
 
-/// §3.1 View state — "No magic two-way binding is provided: - values flow down;
-/// - typed actions/commands flow up."
-///
-/// NG-BINDING-01: typing into an input must not write back into the source the
-/// value was read from; the change must arrive as a typed event instead.
+#[doc = include_str!("spec_ch9_view_contract.doc/typing_into_a_bound_input_does_not_mutate_its_source.md")]
 #[test]
 fn typing_into_a_bound_input_does_not_mutate_its_source() {
     let source = Shared::new(String::from("abc"));

@@ -1,19 +1,15 @@
-//! Event-stream topic identifiers (spec §7.6).
+#![doc = include_str!("topic.doc/_module.md")]
 
-/// A subscribable event stream.
-///
-/// A [`Subscribe`](super::CommandKind::Subscribe) command names one of these,
-/// and every [`ProtocolEvent`](super::ProtocolEvent) is tagged with the topic
-/// it belongs to.
+#[doc = include_str!("topic.doc/Topic.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Topic {
-    /// Structured diagnostics (traces, warnings, errors).
+    #[doc = include_str!("topic.doc/Diagnostics.md")]
     Diagnostics,
-    /// Lifecycle transitions of the runtime and its components.
+    #[doc = include_str!("topic.doc/Lifecycle.md")]
     Lifecycle,
-    /// Frame production and commit events.
+    #[doc = include_str!("topic.doc/Frames.md")]
     Frames,
-    /// Focus-change events.
+    #[doc = include_str!("topic.doc/Focus.md")]
     Focus,
 }
 

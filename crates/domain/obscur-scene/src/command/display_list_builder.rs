@@ -1,4 +1,4 @@
-//! An incremental builder for [`DisplayList`]s.
+#![doc = include_str!("display_list_builder.doc/_module.md")]
 
 use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect};
 
@@ -11,23 +11,7 @@ use crate::text::GlyphRun;
 
 use super::{DisplayList, PaintCommand};
 
-/// A builder that appends [`PaintCommand`]s in paint order while tracking
-/// push/pop nesting (spec §5.1).
-///
-/// Commands are appended in the exact order they are issued; that order becomes
-/// the display list's deterministic paint order. The builder maintains a live
-/// nesting [`depth`] using saturating arithmetic, so a stray pop can never
-/// underflow.
-///
-/// The builder does **not** enforce balance: [`build`] returns the accumulated
-/// commands verbatim without auto-closing any open clips or layers. An
-/// unbalanced builder therefore yields an unbalanced [`DisplayList`], which the
-/// caller can detect via [`DisplayList::is_balanced`]. A `pop_*` call on an
-/// empty stack is recorded verbatim as its command, but keeps [`depth`] clamped
-/// at zero so it never underflows or panics.
-///
-/// [`depth`]: DisplayListBuilder::depth
-/// [`build`]: DisplayListBuilder::build
+#[doc = include_str!("display_list_builder.doc/DisplayListBuilder.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DisplayListBuilder {
     commands: Vec<PaintCommand>,
@@ -35,7 +19,7 @@ pub struct DisplayListBuilder {
 }
 
 impl DisplayListBuilder {
-    /// Creates an empty builder with a nesting depth of zero.
+    #[doc = include_str!("display_list_builder.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -44,40 +28,30 @@ impl DisplayListBuilder {
         }
     }
 
-    /// Appends a [`PaintCommand::DrawPath`] painting `path` with `paint`.
-    /// Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/draw.md")]
     pub fn draw(&mut self, path: Path, paint: Paint) -> &mut Self {
         self.commands.push(PaintCommand::DrawPath { path, paint });
         self
     }
 
-    /// Appends a fill: a [`PaintCommand::DrawPath`] with `Paint::fill(brush)`.
-    /// Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/fill.md")]
     pub fn fill(&mut self, path: Path, brush: Brush) -> &mut Self {
         self.draw(path, Paint::fill(brush))
     }
 
-    /// Appends a filled rectangle, building the path with [`Path::rect`] and
-    /// filling it with `brush`. Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/fill_rect.md")]
     pub fn fill_rect(&mut self, rect: Rect, brush: Brush) -> &mut Self {
         self.fill(Path::rect(rect), brush)
     }
 
-    /// Appends a [`PaintCommand::DrawText`] drawing the pre-shaped `run` at
-    /// `origin` (its top-left in absolute scene coordinates), painted with
-    /// `brush`. This is a leaf command; the run's glyphs were shaped once in the
-    /// `obscur-text` domain. Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/draw_text.md")]
     pub fn draw_text(&mut self, origin: Point, run: GlyphRun, brush: Brush) -> &mut Self {
         self.commands
             .push(PaintCommand::DrawText { origin, run, brush });
         self
     }
 
-    /// Appends a [`PaintCommand::DrawImage`] drawing the decoded `image` as one
-    /// copy scaled to `tile`, clipped to `region`, and tiled along the `repeat_x` /
-    /// `repeat_y` axes to fill `region`. This is a leaf command (no nesting effect).
-    /// A full-box stretch is `tile == region` with both repeat flags `false`.
-    /// Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/draw_image.md")]
     pub fn draw_image(
         &mut self,
         image: SceneImage,
@@ -96,10 +70,7 @@ impl DisplayListBuilder {
         self
     }
 
-    /// Appends a [`PaintCommand::DrawShadow`] painting a CSS `box-shadow` for the
-    /// border box `rect` with corner `radii`, the resolved `color`, blur radius
-    /// `blur`, `spread`, `offset`, and the `inset` flag. This is a leaf command
-    /// (no nesting effect). Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/draw_shadow.md")]
     #[allow(clippy::too_many_arguments)]
     pub fn draw_shadow(
         &mut self,
@@ -123,12 +94,7 @@ impl DisplayListBuilder {
         self
     }
 
-    /// Appends a [`PaintCommand::BackdropFilter`] frosting (blurring) the backdrop
-    /// — everything already painted behind this point — within the border box
-    /// `bounds`, clipped to the rounded `radii`, by the CSS blur radius `blur`.
-    /// This is a leaf command (no nesting effect); it must be issued **before** the
-    /// element's own background so the element paints over the frosted backdrop.
-    /// Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/backdrop_filter.md")]
     pub fn backdrop_filter(&mut self, bounds: Rect, radii: CornerRadii, blur: f32) -> &mut Self {
         self.commands.push(PaintCommand::BackdropFilter {
             bounds,
@@ -138,90 +104,66 @@ impl DisplayListBuilder {
         self
     }
 
-    /// Appends a stroke: a [`PaintCommand::DrawPath`] with
-    /// `Paint::stroke(stroke)`. Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/stroke.md")]
     pub fn stroke(&mut self, path: Path, stroke: Stroke) -> &mut Self {
         self.draw(path, Paint::stroke(stroke))
     }
 
-    /// Appends a [`PaintCommand::PushTransform`] and increments the nesting depth.
-    /// Everything drawn until the matching [`pop_transform`](Self::pop_transform)
-    /// is mapped by `transform`. Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/push_transform.md")]
     pub fn push_transform(&mut self, transform: AffineTransform) -> &mut Self {
         self.commands.push(PaintCommand::PushTransform(transform));
         self.depth = self.depth.saturating_add(1);
         self
     }
 
-    /// Appends a [`PaintCommand::PopTransform`] and decrements the nesting depth
-    /// (saturating at zero). The command is always recorded, even if the stack is
-    /// already empty. Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/pop_transform.md")]
     pub fn pop_transform(&mut self) -> &mut Self {
         self.commands.push(PaintCommand::PopTransform);
         self.depth = self.depth.saturating_sub(1);
         self
     }
 
-    /// Appends a [`PaintCommand::PushClip`] and increments the nesting depth.
-    /// Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/push_clip.md")]
     pub fn push_clip(&mut self, clip: Clip) -> &mut Self {
         self.commands.push(PaintCommand::PushClip(clip));
         self.depth = self.depth.saturating_add(1);
         self
     }
 
-    /// Appends a [`PaintCommand::PopClip`] and decrements the nesting depth
-    /// (saturating at zero). The command is always recorded, even if the stack
-    /// is already empty. Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/pop_clip.md")]
     pub fn pop_clip(&mut self) -> &mut Self {
         self.commands.push(PaintCommand::PopClip);
         self.depth = self.depth.saturating_sub(1);
         self
     }
 
-    /// Appends a [`PaintCommand::PushLayer`] and increments the nesting depth.
-    /// Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/push_layer.md")]
     pub fn push_layer(&mut self, layer: SceneLayer) -> &mut Self {
         self.commands.push(PaintCommand::PushLayer(layer));
         self.depth = self.depth.saturating_add(1);
         self
     }
 
-    /// Appends a [`PaintCommand::PopLayer`] and decrements the nesting depth
-    /// (saturating at zero). The command is always recorded, even if the stack
-    /// is already empty. Returns `&mut Self` for chaining.
+    #[doc = include_str!("display_list_builder.doc/pop_layer.md")]
     pub fn pop_layer(&mut self) -> &mut Self {
         self.commands.push(PaintCommand::PopLayer);
         self.depth = self.depth.saturating_sub(1);
         self
     }
 
-    /// The current nesting depth: the number of clips/layers pushed but not yet
-    /// popped. Clamped at zero, so a stray pop never underflows.
+    #[doc = include_str!("display_list_builder.doc/depth.md")]
     #[must_use]
     pub fn depth(&self) -> u32 {
         self.depth
     }
 
-    /// Whether the builder is currently balanced, i.e. [`depth`] is zero.
-    ///
-    /// Note this tracks the running depth clamped at zero; a builder with a
-    /// stray pop followed by a balancing push reports balanced here, yet the
-    /// resulting list is not — use [`DisplayList::is_balanced`] on the built
-    /// list for the authoritative check.
-    ///
-    /// [`depth`]: DisplayListBuilder::depth
+    #[doc = include_str!("display_list_builder.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
         self.depth == 0
     }
 
-    /// Consumes the builder and returns the accumulated [`DisplayList`] **as
-    /// is**, in paint order.
-    ///
-    /// This does **not** auto-close open clips or layers: if the builder is
-    /// unbalanced, the returned list is unbalanced too. Callers who need the
-    /// guarantee should verify [`DisplayList::is_balanced`].
+    #[doc = include_str!("display_list_builder.doc/build.md")]
     #[must_use]
     pub fn build(self) -> DisplayList {
         DisplayList::from_commands(self.commands)

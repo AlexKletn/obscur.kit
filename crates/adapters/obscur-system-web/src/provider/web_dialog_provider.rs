@@ -1,36 +1,14 @@
-//! A web [`DialogProvider`] backed by `window.confirm`/`window.alert`
-//! (spec §6.9).
-//!
-//! [`WebDialogProvider`] implements the pure
-//! [`DialogProvider`](obscur_system::dialog::DialogProvider) port over the
-//! synchronous browser dialogs [`Window::confirm_with_message`](web_sys::Window::confirm_with_message)
-//! and [`Window::alert_with_message`](web_sys::Window::alert_with_message). Only
-//! message and confirmation dialogs have a synchronous browser primitive: file
-//! and folder pickers require asynchronous `<input type="file">` DOM interaction,
-//! which cannot be expressed through this synchronous port, so those requests are
-//! reported [`SupportLevel::Unavailable`] / [`DialogResult::Unsupported`]. Wiring
-//! them over an async surface is a documented future refinement.
-//!
-//! All browser calls are gated behind `#[cfg(target_arch = "wasm32")]`; on any
-//! other target every request is [`DialogResult::Unsupported`], keeping the host
-//! build honest.
+#![doc = include_str!("web_dialog_provider.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 use obscur_system::dialog::{DialogProvider, DialogRequest, DialogResult};
 
-/// A web [`DialogProvider`] backed by `window.confirm`/`window.alert`
-/// (spec §6.9).
-///
-/// The provider is stateless. [`Self::origin`] is `"web"`; [`Self::supports`]
-/// reports [`SupportLevel::Native`] for message and confirmation dialogs and
-/// [`SupportLevel::Unavailable`] for file/folder dialogs (which need async DOM
-/// interaction); and [`Self::present`] drives the corresponding synchronous
-/// browser dialog.
+#[doc = include_str!("web_dialog_provider.doc/WebDialogProvider.md")]
 #[derive(Debug, Clone, Default)]
 pub struct WebDialogProvider;
 
 impl WebDialogProvider {
-    /// Creates a web dialog provider (spec §6.9).
+    #[doc = include_str!("web_dialog_provider.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self

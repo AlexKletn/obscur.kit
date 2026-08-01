@@ -1,34 +1,19 @@
-//! [`MotionPlayback`] — the playback controls an animation or transition starts
-//! with (spec §4.17; css-animations-1 §3.6/§3.8/§3.9, css-transitions-1 §2.4).
+#![doc = include_str!("motion_playback.doc/_module.md")]
 
 use obscur_motion::timeline::{FillMode, PlaybackDirection, RepeatCount};
 
-/// How a started motion plays: its start delay, how many iterations it runs,
-/// which direction iteration 1 takes, whether iterations alternate, and whether
-/// the value fills the delay.
-///
-/// [`default`](Self::default) is every CSS initial value — no delay, exactly one
-/// forward iteration, no alternation, no fill — which is what
-/// [`UiRuntime::animate`](crate::UiRuntime::animate) starts a motion with.
-///
-/// The direction plus alternation pair models `animation-direction` exactly:
-/// `alternate` is `Forward` + alternating and `alternate-reverse` is `Reverse` +
-/// alternating, so **iteration 1** takes the named direction. That is the
-/// spec's one-based parity — css-animations-1 §3.6: "For the purpose of
-/// determining whether an iteration is even or odd, iterations start counting
-/// from 1."
+#[doc = include_str!("motion_playback.doc/MotionPlayback.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionPlayback {
-    /// The start delay, in seconds. Negative seeks that far into the play cycle
-    /// at start.
+    #[doc = include_str!("motion_playback.doc/delay_secs.md")]
     pub delay_secs: f32,
-    /// How many iterations to run.
+    #[doc = include_str!("motion_playback.doc/repeat.md")]
     pub repeat: RepeatCount,
-    /// The direction iteration 1 plays in.
+    #[doc = include_str!("motion_playback.doc/direction.md")]
     pub direction: PlaybackDirection,
-    /// Whether each iteration flips direction.
+    #[doc = include_str!("motion_playback.doc/alternates.md")]
     pub alternates: bool,
-    /// Whether the value applies during the start delay.
+    #[doc = include_str!("motion_playback.doc/fill.md")]
     pub fill: FillMode,
 }
 
@@ -45,8 +30,7 @@ impl Default for MotionPlayback {
 }
 
 impl MotionPlayback {
-    /// The default playback with only the start delay set — the shape a CSS
-    /// `transition` needs, since `transition-delay` is its one playback control.
+    #[doc = include_str!("motion_playback.doc/delayed.md")]
     #[must_use]
     pub fn delayed(delay_secs: f32) -> Self {
         Self {

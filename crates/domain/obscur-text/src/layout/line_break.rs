@@ -1,39 +1,27 @@
-//! Line-break opportunities discovered in a run of text (spec §5.10).
+#![doc = include_str!("line_break.doc/_module.md")]
 
 use super::WhiteSpace;
 
-/// The kind of a [`LineBreak`] opportunity (spec §5.10).
-///
-/// A [`Soft`](Self::Soft) break is a *permitted* wrap point (for example after a
-/// run of whitespace) that a line-breaking pass may or may not take; a
-/// [`Hard`](Self::Hard) break is *mandatory* (for example a `'\n'`) and always
-/// ends the line.
+#[doc = include_str!("line_break.doc/BreakKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BreakKind {
-    /// A permitted (optional) wrap point, e.g. after a space.
+    #[doc = include_str!("line_break.doc/Soft.md")]
     Soft,
-    /// A mandatory break, e.g. a line feed.
+    #[doc = include_str!("line_break.doc/Hard.md")]
     Hard,
 }
 
-/// A single line-break opportunity: a byte offset in the source text where a
-/// line may (soft) or must (hard) break (spec §5.10).
-///
-/// The [`offset`](Self::offset) is a **byte** index into the UTF-8 source and
-/// marks the position at which the following text would start a new line. Breaks
-/// order by `offset` first, then by [`kind`](Self::kind) (soft before hard),
-/// which the derived [`Ord`] provides.
+#[doc = include_str!("line_break.doc/LineBreak.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LineBreak {
-    /// The byte offset in the source where the break may or must occur.
+    #[doc = include_str!("line_break.doc/offset.md")]
     offset: usize,
-    /// Whether the break is optional ([`BreakKind::Soft`]) or mandatory
-    /// ([`BreakKind::Hard`]).
+    #[doc = include_str!("line_break.doc/kind.md")]
     kind: BreakKind,
 }
 
 impl LineBreak {
-    /// Creates a [`Soft`](BreakKind::Soft) (permitted) break at byte `offset`.
+    #[doc = include_str!("line_break.doc/soft.md")]
     #[must_use]
     pub const fn soft(offset: usize) -> Self {
         Self {
@@ -42,7 +30,7 @@ impl LineBreak {
         }
     }
 
-    /// Creates a [`Hard`](BreakKind::Hard) (mandatory) break at byte `offset`.
+    #[doc = include_str!("line_break.doc/hard.md")]
     #[must_use]
     pub const fn hard(offset: usize) -> Self {
         Self {
@@ -51,48 +39,25 @@ impl LineBreak {
         }
     }
 
-    /// Returns the byte offset in the source where the break occurs.
+    #[doc = include_str!("line_break.doc/offset_2.md")]
     #[must_use]
     pub const fn offset(&self) -> usize {
         self.offset
     }
 
-    /// Returns the break's [`BreakKind`].
+    #[doc = include_str!("line_break.doc/kind_2.md")]
     #[must_use]
     pub const fn kind(&self) -> BreakKind {
         self.kind
     }
 
-    /// Returns whether this break is mandatory ([`BreakKind::Hard`]).
+    #[doc = include_str!("line_break.doc/is_mandatory.md")]
     #[must_use]
     pub const fn is_mandatory(&self) -> bool {
         matches!(self.kind, BreakKind::Hard)
     }
 
-    /// Finds the line-break opportunities in `text` under a `white_space` mode
-    /// (CSS Text 3 §3 white-space table, §5.10).
-    ///
-    /// This is a deliberately **simplified** approximation of the Unicode line
-    /// breaking algorithm (UAX #14); full, tailored breaking is an adapter
-    /// concern. The `white_space` mode selects which breaks a run yields:
-    ///
-    /// - a [`Hard`](BreakKind::Hard) break just after each `'\n'` (its offset is
-    ///   the byte index of the character following the newline) — but **only**
-    ///   when [`white_space.preserves_segment_breaks()`](WhiteSpace::preserves_segment_breaks)
-    ///   (`pre` / `pre-wrap` / `pre-line`). Under `normal` / `nowrap` a segment
-    ///   break has already been collapsed to a space at the pre-shape seam, so it
-    ///   is treated here as ordinary whitespace;
-    /// - a [`Soft`](BreakKind::Soft) break after each maximal run of whitespace,
-    ///   at the byte offset of the first non-whitespace character that follows it
-    ///   (the break sits *before* the next word) — but **only** when
-    ///   [`white_space.wraps()`](WhiteSpace::wraps) (`normal` / `pre-wrap` /
-    ///   `pre-line`). Under `nowrap` / `pre` no soft break is emitted, so the
-    ///   wrapper lays each segment on a single (possibly overflowing) line.
-    ///
-    /// A whitespace run that contains a preserved segment break yields only the
-    /// mandatory break, never a duplicate soft break at the same position.
-    /// Offsets are byte-correct for UTF-8 because iteration is by
-    /// [`str::char_indices`]. The returned breaks are in ascending offset order.
+    #[doc = include_str!("line_break.doc/opportunities.md")]
     #[must_use]
     pub fn opportunities(text: &str, white_space: WhiteSpace) -> Vec<Self> {
         let mut breaks = Vec::new();
@@ -125,15 +90,7 @@ impl LineBreak {
     }
 }
 
-/// Whether `ch` is a CJK **ideograph** — a large, well-defined set of Unicode
-/// blocks whose characters may line-break between one another by default (UAX #14
-/// class `ID`; CSS Text 3 §5.2 `word-break: normal`).
-///
-/// This is the Han-ideograph subset of UAX#14 class `ID`: the CJK Unified
-/// Ideographs and their extensions plus the compatibility ideographs. Kana and
-/// the CJK symbol/punctuation blocks (which carry additional tailoring rules) are
-/// deliberately excluded so the default breaker stays simple and deterministic;
-/// full UAX#14 tailoring is an adapter concern (see [`LineBreaker`]).
+#[doc = include_str!("line_break.doc/is_cjk_ideograph.md")]
 #[must_use]
 pub(crate) fn is_cjk_ideograph(ch: char) -> bool {
     matches!(
@@ -148,45 +105,13 @@ pub(crate) fn is_cjk_ideograph(ch: char) -> bool {
     )
 }
 
-/// A replaceable **line-break-opportunity port** (spec §5.10, UAX #14).
-///
-/// This is the seam through which a full Unicode line-breaking (UAX #14) or CJK
-/// adapter can supply break opportunities without changing the wrapping engine —
-/// the exact analogue of the [`Hyphenator`](super::Hyphenator) port for interior
-/// hyphenation. The domain wraps text through a `&dyn LineBreaker`; the default
-/// implementation ([`DefaultLineBreaker`]) reproduces the historical
-/// whitespace-and-forced-break behaviour plus basic inter-ideograph CJK breaks,
-/// while a host may install a tailored adapter behind the xtask boundary.
-///
-/// # Contract
-///
-/// - The returned breaks are byte offsets into `text` (UTF-8), each marking a
-///   position at which the following text may (soft) or must (hard) start a new
-///   line, in **ascending** offset order.
-/// - The result must be **deterministic**: the same `text` and `white_space`
-///   always yield the same opportunities, so the measure and compose passes agree
-///   on the same lines.
-///
-/// It is deliberately **object-safe** so the runtime can hold a
-/// `Box<dyn LineBreaker>` / pass a `&dyn LineBreaker`.
+#[doc = include_str!("line_break.doc/LineBreaker.md")]
 pub trait LineBreaker {
-    /// Returns the line-break opportunities in `text` under a `white_space` mode,
-    /// in ascending offset order (spec §5.10, UAX #14).
+    #[doc = include_str!("line_break.doc/opportunities_2.md")]
     fn opportunities(&self, text: &str, white_space: WhiteSpace) -> Vec<LineBreak>;
 }
 
-/// The domain-default [`LineBreaker`]: the simplified whitespace / forced-break
-/// opportunities of [`LineBreak::opportunities`], **plus** a soft break between
-/// two adjacent CJK ideographs so unspaced CJK text wraps out of the box (spec
-/// §5.10, UAX #14 class `ID`).
-///
-/// For text containing **no** CJK ideographs — the common Latin / Cyrillic /
-/// whitespace-delimited case — this is *byte-identical* to
-/// [`LineBreak::opportunities`]: the CJK pass adds nothing and the untouched
-/// vector is returned. A host installs a real [`LineBreaker`] adapter for full
-/// UAX#14 tailoring (kana, punctuation, `word-break: keep-all` letter clustering,
-/// …); `keep-all`'s suppression of these inter-ideograph breaks is applied by the
-/// wrapper, so it is honoured even with this default breaker.
+#[doc = include_str!("line_break.doc/DefaultLineBreaker.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DefaultLineBreaker;
 

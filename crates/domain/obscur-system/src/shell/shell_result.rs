@@ -1,45 +1,32 @@
-//! The outcome of a shell open request (spec §6.11 — shell integration).
+#![doc = include_str!("shell_result.doc/_module.md")]
 
-/// The outcome a [`ShellProvider`](crate::shell::ShellProvider) returns for a
-/// [`ShellTarget`](crate::shell::ShellTarget) (spec §6.11).
-///
-/// The four outcomes mirror the spec's vocabulary: the target was opened, was
-/// denied, is unsupported, or failed. [`Denied`](Self::Denied) and
-/// [`Unsupported`](Self::Unsupported) are *recoverable* — the app can fall back to
-/// another strategy — whereas [`Failed`](Self::Failed) is terminal and carries a
-/// human-readable reason.
+#[doc = include_str!("shell_result.doc/ShellResult.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellResult {
-    /// The shell opened the target.
+    #[doc = include_str!("shell_result.doc/Opened.md")]
     Opened,
-    /// Opening was denied by permission policy.
+    #[doc = include_str!("shell_result.doc/Denied.md")]
     Denied,
-    /// The provider does not support this kind of target.
+    #[doc = include_str!("shell_result.doc/Unsupported.md")]
     Unsupported,
-    /// Opening was attempted but failed, carrying a human-readable reason.
+    #[doc = include_str!("shell_result.doc/Failed.md")]
     Failed(Box<str>),
 }
 
 impl ShellResult {
-    /// Returns whether the target was opened (spec §6.11).
+    #[doc = include_str!("shell_result.doc/is_opened.md")]
     #[must_use]
     pub const fn is_opened(&self) -> bool {
         matches!(self, Self::Opened)
     }
 
-    /// Returns whether the outcome is recoverable — the app may fall back to
-    /// another strategy (spec §6.11).
-    ///
-    /// [`Denied`](Self::Denied) and [`Unsupported`](Self::Unsupported) are
-    /// recoverable; [`Failed`](Self::Failed) is terminal and
-    /// [`Opened`](Self::Opened) needs no recovery.
+    #[doc = include_str!("shell_result.doc/is_recoverable.md")]
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         matches!(self, Self::Denied | Self::Unsupported)
     }
 
-    /// Returns the failure reason when the outcome is [`Failed`](Self::Failed),
-    /// else `None` (spec §6.11).
+    #[doc = include_str!("shell_result.doc/failure_reason.md")]
     #[must_use]
     pub fn failure_reason(&self) -> Option<&str> {
         match self {

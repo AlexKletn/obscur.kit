@@ -1,6 +1,5 @@
-//! HashValidator (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("hash_validator.doc/_module.md")]
 
-/// Placeholder for the `HashValidator` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("hash_validator.doc/HashValidator.md")]
 #[derive(Debug)]
 pub struct HashValidator;

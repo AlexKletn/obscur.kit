@@ -1,4 +1,4 @@
-//! Transfer module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod transfer_error;
 pub use transfer_error::TransferError;
 mod transfer_limit;

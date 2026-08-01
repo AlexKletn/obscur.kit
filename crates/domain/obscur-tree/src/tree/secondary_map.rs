@@ -1,28 +1,17 @@
-//! A projection map keyed by `NodeId` that augments — never replaces — identity.
+#![doc = include_str!("secondary_map.doc/_module.md")]
 
 use std::collections::HashMap;
 
 use obscur_identity::NodeId;
 
-/// A map from [`NodeId`] to a projection value `V`.
-///
-/// Heavy per-node projections — layout boxes, paint data, accessibility nodes,
-/// backend handles — live in secondary maps keyed by the node's stable
-/// [`NodeId`] (spec §1.5). A secondary map **augments** identity: the `NodeId`
-/// remains owned and minted by the
-/// [`RetainedTree`](super::RetainedTree), and this map merely attaches derived
-/// data to it. It never becomes an alternate identity of its own.
-///
-/// This Phase-1 implementation is backed by a
-/// [`HashMap`]. A dense generational-vector variant (indexing directly by slot,
-/// like the arena) is a later optimization behind this same API.
+#[doc = include_str!("secondary_map.doc/SecondaryMap.md")]
 #[derive(Debug, Clone)]
 pub struct SecondaryMap<V> {
     entries: HashMap<NodeId, V>,
 }
 
 impl<V> SecondaryMap<V> {
-    /// Creates an empty secondary map.
+    #[doc = include_str!("secondary_map.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -30,47 +19,47 @@ impl<V> SecondaryMap<V> {
         }
     }
 
-    /// Inserts `value` for `id`, returning the previous value if one was present.
+    #[doc = include_str!("secondary_map.doc/insert.md")]
     pub fn insert(&mut self, id: NodeId, value: V) -> Option<V> {
         self.entries.insert(id, value)
     }
 
-    /// Returns a shared reference to the value attached to `id`, if any.
+    #[doc = include_str!("secondary_map.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&V> {
         self.entries.get(&id)
     }
 
-    /// Returns a mutable reference to the value attached to `id`, if any.
+    #[doc = include_str!("secondary_map.doc/get_mut.md")]
     #[must_use]
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut V> {
         self.entries.get_mut(&id)
     }
 
-    /// Removes and returns the value attached to `id`, if any.
+    #[doc = include_str!("secondary_map.doc/remove.md")]
     pub fn remove(&mut self, id: NodeId) -> Option<V> {
         self.entries.remove(&id)
     }
 
-    /// Returns `true` if a value is attached to `id`.
+    #[doc = include_str!("secondary_map.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.entries.contains_key(&id)
     }
 
-    /// Returns the number of attached values.
+    #[doc = include_str!("secondary_map.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns `true` if no values are attached.
+    #[doc = include_str!("secondary_map.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Iterates over every `(NodeId, &V)` pair, in unspecified order.
+    #[doc = include_str!("secondary_map.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &V)> {
         self.entries.iter().map(|(id, value)| (*id, value))
     }

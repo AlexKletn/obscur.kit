@@ -1,20 +1,11 @@
-//! §4.12 CSS as the styling language — spec-derived conformance cases.
-//!
-//! Expected values come from the specification text quoted on each test. They
-//! must not be edited to make a case pass.
+#![doc = include_str!("spec_ch4b_css_language.doc/_module.md")]
 
 mod spec_ch4b_support;
 
 use obscur_kit::css::cache::StylesheetCache;
 use obscur_kit::css::source::{CssSource, SourceId};
 
-/// §4.12: "CSS parsing is cached per unique source/version and invalidated
-/// explicitly."
-///
-/// The byte-identical source `S` is applied to scope A and then to scope B. The
-/// second apply must be a **cache hit** — `S` is parsed exactly once across the
-/// two applies and both scopes share the same parsed-sheet handle. After the
-/// explicit invalidation call, the third apply is a miss and reparses.
+#[doc = include_str!("spec_ch4b_css_language.doc/ch4_12_a_parse_is_cached_per_source_and_explicitly_invalidated.md")]
 #[test]
 fn ch4_12_a_parse_is_cached_per_source_and_explicitly_invalidated() {
     const S: &str = ".card { color: red; } .inner { color: blue; }";

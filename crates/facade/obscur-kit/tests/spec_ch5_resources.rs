@@ -1,8 +1,4 @@
-//! **SPECIFICATION-DERIVED** Resource-Hub and startup cases for obscur.kit §5.15
-//! ("Resource Hub") and §5.21 ("Startup").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §5 with
-//! **no access to this repository's source**.
+#![doc = include_str!("spec_ch5_resources.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(feature = "resource-decode", feature = "render-cpu"))]
 
@@ -29,10 +25,10 @@ use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue}
 
 use support::{at, compile, geom};
 
-/// The viewport every case renders under.
+#[doc = include_str!("spec_ch5_resources.doc/VW.md")]
 const VW: f32 = 200.0;
 
-/// A diagnostic sink that records every diagnostic the runtime emits.
+#[doc = include_str!("spec_ch5_resources.doc/Recorder.md")]
 struct Recorder {
     seen: Rc<RefCell<Vec<Diagnostic>>>,
 }
@@ -43,7 +39,7 @@ impl DiagnosticSink for Recorder {
     }
 }
 
-/// A loader that counts its invocations and hands back fixed bytes.
+#[doc = include_str!("spec_ch5_resources.doc/CountingLoader.md")]
 struct CountingLoader {
     calls: Arc<AtomicUsize>,
     bytes: Arc<[u8]>,
@@ -63,7 +59,7 @@ impl ResourceLoader for CountingLoader {
     }
 }
 
-/// A loader that never yields bytes — the "loader that never completes" of §5.21.
+#[doc = include_str!("spec_ch5_resources.doc/NeverLoader.md")]
 struct NeverLoader {
     calls: Arc<AtomicUsize>,
 }
@@ -79,7 +75,7 @@ impl ResourceLoader for NeverLoader {
     }
 }
 
-/// A decoder that refuses everything, so a failure is a *state*, not a panic.
+#[doc = include_str!("spec_ch5_resources.doc/GarbageDecoder.md")]
 struct GarbageDecoder;
 
 impl ResourceDecoder for GarbageDecoder {
@@ -92,12 +88,7 @@ impl ResourceDecoder for GarbageDecoder {
     }
 }
 
-/// §5.15 "Features: … - versioning; - stale-job rejection; - development hot
-/// reload;".
-///
-/// A job that started under version 1 and finishes *after* a hot reload to
-/// version 2 must be discarded — last-writer-wins is correct in almost every
-/// ordering, which is exactly why the inverted order has to be driven explicitly.
+#[doc = include_str!("spec_ch5_resources.doc/rs_01_a_stale_decode_job_is_rejected.md")]
 #[test]
 fn rs_01_a_stale_decode_job_is_rejected() {
     let mut hub = ResourceHub::new();
@@ -143,9 +134,7 @@ fn rs_01_a_stale_decode_job_is_rejected() {
     );
 }
 
-/// §5.15 "The kit does not perform arbitrary network access by itself." With §4.13
-/// "Excluded or restricted: … - arbitrary network loading via `url()` and
-/// `@import`;".
+#[doc = include_str!("spec_ch5_resources.doc/rs_02_no_loader_means_no_implicit_network_access.md")]
 #[test]
 fn rs_02_no_loader_means_no_implicit_network_access() {
     let seen: Rc<RefCell<Vec<Diagnostic>>> = Rc::default();
@@ -211,8 +200,7 @@ fn rs_02_no_loader_means_no_implicit_network_access() {
     );
 }
 
-/// §5.15 "- loading/ready/failed states;" with §1.6 "panic is not normal control
-/// flow;" and "failures should be localized to the smallest safe scope".
+#[doc = include_str!("spec_ch5_resources.doc/rs_03_a_failed_load_is_a_state_not_a_panic_and_not_a_retry_loop.md")]
 #[test]
 fn rs_03_a_failed_load_is_a_state_not_a_panic_and_not_a_retry_loop() {
     let seen: Rc<RefCell<Vec<Diagnostic>>> = Rc::default();
@@ -275,9 +263,7 @@ fn rs_03_a_failed_load_is_a_state_not_a_panic_and_not_a_retry_loop() {
     );
 }
 
-/// §5.21 "Progressive startup targets: - minimal path to first interactive frame;
-/// … - no wait for all resources; - placeholders and fallback first; - later
-/// visual improvement."
+#[doc = include_str!("spec_ch5_resources.doc/st_01_the_first_frame_does_not_wait_on_resources.md")]
 #[test]
 fn st_01_the_first_frame_does_not_wait_on_resources() {
     let calls = Arc::new(AtomicUsize::new(0));

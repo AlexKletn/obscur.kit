@@ -1,23 +1,14 @@
-//! `Conditional`: the typed AST view of an `<If>`/`<ElseIf>`/`<Else>` element
-//! (spec §2.11).
+#![doc = include_str!("conditional.doc/_module.md")]
 
 use crate::ast::{Element, Expression};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-/// Typed AST wrapper over a [`Conditional`](SyntaxKind::Conditional) syntax node
-/// — an `<If>`, `<ElseIf>` or `<Else>` control-flow element (spec §2.11).
-///
-/// A conditional is element-shaped, so its tag name, attributes and content are
-/// read through the shared [`Element`] view; this wrapper adds the
-/// control-flow-specific accessors [`keyword`](Self::keyword),
-/// [`condition`](Self::condition) and [`body`](Self::body). The branch condition
-/// is carried by a `cond={…}` attribute (absent on a bare `<Else>`).
+#[doc = include_str!("conditional.doc/Conditional.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Conditional(SyntaxNode);
 
 impl Conditional {
-    /// Casts a syntax node to a `Conditional`, returning `Some` iff its kind is
-    /// [`Conditional`](SyntaxKind::Conditional).
+    #[doc = include_str!("conditional.doc/cast.md")]
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if node.kind() == SyntaxKind::Conditional {
@@ -27,35 +18,30 @@ impl Conditional {
         }
     }
 
-    /// Returns the wrapped syntax node.
+    #[doc = include_str!("conditional.doc/syntax.md")]
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    /// Returns the same node viewed through the shared [`Element`] wrapper.
-    ///
-    /// [`Element::cast`] accepts the conditional's kind, so this never fails.
+    #[doc = include_str!("conditional.doc/as_element.md")]
     fn as_element(&self) -> Element {
         Element::cast(self.0.clone()).expect("Conditional is element-shaped")
     }
 
-    /// Returns the control-flow keyword — the tag name (`"If"`, `"ElseIf"` or
-    /// `"Else"`).
+    #[doc = include_str!("conditional.doc/keyword.md")]
     #[must_use]
     pub fn keyword(&self) -> Option<String> {
         self.as_element().tag_name()
     }
 
-    /// Returns the branch condition — the value expression of the `cond`
-    /// attribute (`None` for a bare `<Else>`).
+    #[doc = include_str!("conditional.doc/condition.md")]
     #[must_use]
     pub fn condition(&self) -> Option<Expression> {
         self.as_element().attribute("cond")?.value_expression()
     }
 
-    /// Iterates the conditional's body — its content children (see
-    /// [`Element::children`]).
+    #[doc = include_str!("conditional.doc/body.md")]
     pub fn body(&self) -> impl Iterator<Item = SyntaxNode> + use<> {
         self.as_element().children()
     }

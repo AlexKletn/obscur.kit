@@ -1,23 +1,4 @@
-//! **Proof: CSS Text 3 `letter-spacing` (§8.1), `word-spacing` (§8.2), and
-//! `text-transform` (§2.1) in the live text path.**
-//!
-//! Renders five text blocks through the REAL runtime + software [`CpuRenderer`]
-//! (no GPU), stitched top-to-bottom into `target/text_spacing_transform_proof.png`,
-//! and machine-checks the composed `DrawText` runs before writing the PNG:
-//!
-//! - **A — baseline `hello`** (no spacing): the reference run width `W0`.
-//! - **B — `hello` with `letter-spacing: 6px`**: the painted run is visibly wider;
-//!   its advance ≈ `W0 + 6·N` for the `N = 5` typographic character units (the
-//!   tracking is added once per cluster, §8.1).
-//! - **C — `ab cd` baseline** vs **D — `ab cd` with `word-spacing: 12px`**: the
-//!   two-word run grows by exactly `12px` — the extra spacing lands on the single
-//!   word separator (§8.2), not on every character.
-//! - **E — `hello` with `text-transform: uppercase`**: the shaped/painted run's
-//!   source text is `HELLO` (the string is cased BEFORE shaping, §2.1).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example text_spacing_transform_proof \
-//!   --features "render-cpu text-harfrust text-unicode"`
+#![doc = include_str!("text_spacing_transform_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -40,14 +21,13 @@ use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The logical extent each block is laid out and rasterized under (wide enough
-/// that every word stays on one line).
+#[doc = include_str!("text_spacing_transform_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 44.0);
 
-/// The font size the blocks author (px).
+#[doc = include_str!("text_spacing_transform_proof.doc/FONT_SIZE.md")]
 const FONT_SIZE: f32 = 20.0;
 
-/// One painted text run: its source text and its total advance width (px).
+#[doc = include_str!("text_spacing_transform_proof.doc/Run.md")]
 #[derive(Clone, Debug)]
 struct Run {
     text: String,
@@ -103,14 +83,14 @@ fn main() {
     );
 }
 
-/// The single non-empty `DrawText` run painted for a block, or panics.
+#[doc = include_str!("text_spacing_transform_proof.doc/first_run.md")]
 fn first_run(runs: &[Run]) -> &Run {
     runs.iter()
         .find(|r| !r.text.trim().is_empty())
         .expect("block emits a non-empty text run")
 }
 
-/// Machine-checks the five blocks' painted runs against the CSS Text 3 rules.
+#[doc = include_str!("text_spacing_transform_proof.doc/verify.md")]
 fn verify(a: &[Run], b: &[Run], c: &[Run], d: &[Run], e: &[Run]) {
     let w0 = first_run(a).advance; // baseline "hello"
     let w1 = first_run(b).advance; // "hello" + letter-spacing: 6px
@@ -150,8 +130,7 @@ fn verify(a: &[Run], b: &[Run], c: &[Run], d: &[Run], e: &[Run]) {
     );
 }
 
-/// Renders one text `block` through the real runtime and returns its rasterized
-/// pixmap plus the painted `DrawText` runs (text + advance width).
+#[doc = include_str!("text_spacing_transform_proof.doc/render_block.md")]
 fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Run>) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
     let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
@@ -194,7 +173,7 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Run>) {
     (renderer.pixmap().expect("a rasterized frame").clone(), runs)
 }
 
-/// The view: a single `.block` element wrapping one text node, inside `.page`.
+#[doc = include_str!("text_spacing_transform_proof.doc/block_view.md")]
 fn block_view(content: &str) -> View {
     let block = ViewNode::element(ComponentId::from_raw(1))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("block".into())))
@@ -205,7 +184,7 @@ fn block_view(content: &str) -> View {
     View::single(page)
 }
 
-/// Vertically stacks `pixmaps` into one image with thin gray dividers.
+#[doc = include_str!("text_spacing_transform_proof.doc/stack.md")]
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
     let width = pixmaps
@@ -236,7 +215,7 @@ fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// Compiles CSS text into a runtime-matchable [`Stylesheet`] at `origin`.
+#[doc = include_str!("text_spacing_transform_proof.doc/compile.md")]
 fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
@@ -246,7 +225,7 @@ fn compile(css: &str, origin: CascadeOrigin) -> Stylesheet {
         .matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("text_spacing_transform_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -254,8 +233,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the CPU renderer so glyph handles line up.
+#[doc = include_str!("text_spacing_transform_proof.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -273,12 +251,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("text_spacing_transform_proof.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("text_spacing_transform_proof.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

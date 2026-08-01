@@ -1,27 +1,4 @@
-//! Bridging a live [`UiRuntime`] into the external DevTools endpoint (spec §7.6).
-//!
-//! The DevTools server serves inspect requests from an
-//! [`crate::devtools_server::bridge::InspectSource`] the host
-//! provides; [`inspect_source_from`] builds one from a runtime's
-//! [`inspect_snapshot`](crate::runtime::UiRuntime::inspect_snapshot), so an
-//! external agent connecting over the socket sees the *real* tree, layout and
-//! styles instead of a placeholder. The runtime refreshes the source after a
-//! frame and hands it to the endpoint (the host-provides-device pattern), which
-//! keeps the source `Send`-able onto the serving thread without borrowing the
-//! runtime.
-//!
-//! # The pushed half
-//!
-//! Inspecting is pull; a subscription is push. [`DiagnosticEventSink`] and
-//! [`RuntimeEventPublisher`] are the producers that give a subscription
-//! something to deliver — they turn the runtime's real diagnostics, tree commits
-//! and focus changes into protocol events on an
-//! [`crate::devtools_server::transport::EventQueue`] that
-//! [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events)
-//! fans out. A host that serves with plain
-//! [`serve`](obscur_devtools_server::transport::SocketTransport::serve) instead
-//! has no such loop, and its endpoint therefore *denies* subscriptions rather
-//! than granting one nothing would service.
+#![doc = include_str!("devtools.doc/_module.md")]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -39,10 +16,7 @@ use crate::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind,
 use crate::perf::FrameStats;
 use crate::runtime::{PointerDispatch, UiRuntime};
 
-/// Builds a [`SnapshotInspectSource`] populated from `runtime`'s current live
-/// state: the full annotated tree (Tree), per-node geometry (Layout), per-node
-/// computed styles (Styles), and the focus/hover summary (Focus). Targets the
-/// runtime does not describe fall back to the source's typed default.
+#[doc = include_str!("devtools.doc/inspect_source_from.md")]
 #[must_use]
 pub fn inspect_source_from(runtime: &UiRuntime) -> SnapshotInspectSource {
     let snapshot = runtime.inspect_snapshot();
@@ -197,43 +171,12 @@ pub fn inspect_source_from(runtime: &UiRuntime) -> SnapshotInspectSource {
         .with_snapshot(Inspectable::Caches, caches)
 }
 
-/// Renders an optional node id as `#N` or `none`.
+#[doc = include_str!("devtools.doc/node_label.md")]
 fn node_label(raw: Option<u64>) -> String {
     raw.map_or_else(|| "none".to_owned(), |id| format!("#{id}"))
 }
 
-/// Applies one authorized [`InjectedEvent`] (drained from the endpoint) to
-/// `runtime` — the write half of the agent loop over the protocol (spec §7.6).
-///
-/// Pointer presses/releases map to a synthetic [`PointerEvent`] the runtime
-/// hit-tests exactly like real input, so an external agent can drive clicks and
-/// focus. Key injection is not yet mapped (a stable keycode → the runtime's
-/// structured `KeyEvent` needs a keymap — a follow-up); such events are ignored.
-///
-/// # These events are untrusted, and must stay that way
-///
-/// Whoever holds an `Inject`-scoped token reaches this function, so nothing it
-/// builds is a user gesture. Each event is left at
-/// [`EventTrust::Untrusted`](obscur_interaction::event::EventTrust::Untrusted) —
-/// [`PointerEvent::new`]'s default — and the runtime reports that out through
-/// [`PointerDispatch::trust`](crate::runtime::PointerDispatch::trust),
-/// which is what lets an application distinguish a driven click from a real one.
-///
-/// **Never call `PointerEvent::as_trusted` here.** That method exists for a
-/// platform adapter holding an actual OS event; calling it on this path would
-/// make injected input indistinguishable from a real gesture, which is the exact
-/// condition this flag exists to rule out. `injected_pointer_is_not_trusted` in
-/// `tests/devtools_live.rs` fails if it is ever added.
-///
-/// # Returns
-///
-/// The [`PointerDispatch`] the runtime produced, or [`None`] for an event this
-/// path does not map (the key variants). Returning it is what makes the
-/// untrusted mark *actionable*: `handle_pointer` reports trust only in its
-/// return value — a direct call records nothing in
-/// [`UiRuntime::take_input_dispatches`], which the queued path fills — so a
-/// function that swallowed the dispatch would leave a host no way to tell that
-/// the click it just applied came from an agent rather than a person.
+#[doc = include_str!("devtools.doc/apply_injected.md")]
 pub fn apply_injected(runtime: &mut UiRuntime, event: InjectedEvent) -> Option<PointerDispatch> {
     // Deliberately NOT `.as_trusted()` — see the note above.
     let pointer = |kind, x: i32, y: i32| {
@@ -256,9 +199,7 @@ pub fn apply_injected(runtime: &mut UiRuntime, event: InjectedEvent) -> Option<P
     }
 }
 
-/// Applies one authorized [`ControlAction`] (drained from the endpoint) to
-/// `runtime`. `SetInspectMode` toggles the in-window overlay; frame-scheduling
-/// actions (pause/resume/step) are left to the host's own frame loop policy.
+#[doc = include_str!("devtools.doc/apply_control.md")]
 pub fn apply_control(runtime: &mut UiRuntime, action: ControlAction) {
     match action {
         ControlAction::SetInspectMode(on) => runtime.set_inspect_mode(on),
@@ -266,12 +207,7 @@ pub fn apply_control(runtime: &mut UiRuntime, action: ControlAction) {
     }
 }
 
-/// Renders host-side frame performance ([`FrameStats`]) as the
-/// [`Inspectable::Rendering`] snapshot payload (spec §7.9), so an external
-/// DevTools client sees live FPS + CPU/GPU timings instead of a placeholder.
-///
-/// A host attaches it to the source it serves, e.g.
-/// `inspect_source_from(&rt).with_snapshot(Inspectable::Rendering, perf_payload(&stats))`.
+#[doc = include_str!("devtools.doc/perf_payload.md")]
 #[must_use]
 pub fn perf_payload(stats: &FrameStats) -> SnapshotPayload {
     let ms = |d: std::time::Duration| d.as_secs_f32() * 1000.0;
@@ -302,52 +238,28 @@ pub fn perf_payload(stats: &FrameStats) -> SnapshotPayload {
     .with_detail(detail)
 }
 
-/// Builds the full live inspect source a windowed host publishes each frame:
-/// [`inspect_source_from`] (tree/layout/styles/focus) plus the
-/// [`Inspectable::Rendering`] frame-perf snapshot from `stats`. One call so a
-/// host does not re-assemble the two every frame.
+#[doc = include_str!("devtools.doc/live_source.md")]
 #[must_use]
 pub fn live_source(runtime: &UiRuntime, stats: &FrameStats) -> SnapshotInspectSource {
     inspect_source_from(runtime).with_snapshot(Inspectable::Rendering, perf_payload(stats))
 }
 
-/// A thread-shareable [`InspectSource`] whose backing snapshot the host swaps out
-/// each frame while a serving thread reads it (spec §7.6 host-provides-device).
-///
-/// The host holds one handle and calls [`set`](Self::set) after every frame with
-/// a freshly built [`SnapshotInspectSource`] (e.g. from [`inspect_source_from`]
-/// plus [`perf_payload`]); a [`clone`](Clone::clone) handed to a
-/// [`DevToolsEndpoint`](obscur_devtools_server::endpoint::DevToolsEndpoint) on a
-/// serving thread answers every inspect from the latest snapshot. Cloning shares
-/// the same inner state (an `Arc`), so updates on one handle are visible on all.
-///
-/// # Pay only while someone is watching
-///
-/// Building a live source walks the whole tree and formats every node
-/// ([`inspect_source_from`]), which is far too expensive to do on a frame nobody
-/// is inspecting. The serving side brackets each session with
-/// [`client_connected`](Self::client_connected)/[`client_disconnected`](Self::client_disconnected),
-/// and the host gates its publish on [`has_client`](Self::has_client) — so an
-/// unobserved window pays nothing.
+#[doc = include_str!("devtools.doc/SharedInspectSource.md")]
 #[derive(Clone, Default)]
 pub struct SharedInspectSource {
     inner: Arc<Mutex<SnapshotInspectSource>>,
-    /// Live DevTools sessions; the host only publishes while this is non-zero.
+    #[doc = include_str!("devtools.doc/clients.md")]
     clients: Arc<AtomicUsize>,
 }
 
 impl SharedInspectSource {
-    /// Creates a shared source backed by an empty snapshot, with no clients.
+    #[doc = include_str!("devtools.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Replaces the backing snapshot with `source` (called by the host while
-    /// [`has_client`](Self::has_client)).
-    ///
-    /// A poisoned lock (a serving thread panicked mid-read) is recovered rather
-    /// than propagated, so a DevTools client fault never takes down the host.
+    #[doc = include_str!("devtools.doc/set.md")]
     pub fn set(&self, source: SnapshotInspectSource) {
         let mut guard = self
             .inner
@@ -356,19 +268,18 @@ impl SharedInspectSource {
         *guard = source;
     }
 
-    /// Whether at least one DevTools session is currently connected — the host's
-    /// gate for doing the (expensive) live-source build at all.
+    #[doc = include_str!("devtools.doc/has_client.md")]
     #[must_use]
     pub fn has_client(&self) -> bool {
         self.clients.load(Ordering::Relaxed) > 0
     }
 
-    /// Registers a newly accepted DevTools session (called by the serving side).
+    #[doc = include_str!("devtools.doc/client_connected.md")]
     pub fn client_connected(&self) {
         self.clients.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Retires a finished DevTools session (called by the serving side).
+    #[doc = include_str!("devtools.doc/client_disconnected.md")]
     pub fn client_disconnected(&self) {
         // Saturating: an unmatched disconnect must never wrap to "many clients".
         let _ = self
@@ -388,34 +299,13 @@ impl InspectSource for SharedInspectSource {
     }
 }
 
-/// Republishes the runtime's structured diagnostics (§7.8) as DevTools
-/// [`Topic::Diagnostics`] events (§7.6), so an external subscriber sees a failure
-/// as it happens rather than by polling for it.
-///
-/// Install it on the runtime with
-/// [`set_diagnostic_sink`](crate::runtime::UiRuntime::set_diagnostic_sink) and
-/// hand a [`clone`](Clone::clone) of the same [`EventQueue`] to
-/// [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events).
-/// The sink states only *what happened*; the serving thread's endpoint still
-/// decides who — if anyone — is subscribed and may hear it, so installing this
-/// grants a client nothing it was not already authorised for.
-///
-/// # What reaches it
-///
-/// Exactly what reaches the runtime's sink: component-render failures and the
-/// §1.7 boundary decision taken for each. Layout, style, renderer and resource
-/// failures still take their own paths and do not arrive here — see
-/// `set_diagnostic_sink`'s own list. The [`DiagnosticContext`] (node, component)
-/// is **not** carried onto the wire: [`EventKind::Diagnostic`] has no field for
-/// it, so a subscriber gets severity, code and message only.
-///
-/// [`DiagnosticContext`]: crate::diagnostics::DiagnosticContext
+#[doc = include_str!("devtools.doc/DiagnosticEventSink.md")]
 pub struct DiagnosticEventSink {
     events: EventQueue,
 }
 
 impl DiagnosticEventSink {
-    /// Creates a sink publishing onto `events`.
+    #[doc = include_str!("devtools.doc/new_2.md")]
     #[must_use]
     pub fn new(events: EventQueue) -> Self {
         Self { events }
@@ -438,7 +328,7 @@ impl DiagnosticSink for DiagnosticEventSink {
     }
 }
 
-/// Maps the runtime's severity ladder onto the protocol's identical one.
+#[doc = include_str!("devtools.doc/event_severity.md")]
 const fn event_severity(severity: DiagnosticSeverity) -> EventSeverity {
     match severity {
         DiagnosticSeverity::Trace => EventSeverity::Trace,
@@ -449,40 +339,17 @@ const fn event_severity(severity: DiagnosticSeverity) -> EventSeverity {
     }
 }
 
-/// Publishes a live runtime's frame and focus transitions onto a DevTools
-/// [`EventQueue`] (spec §7.6 [`Topic::Frames`] / [`Topic::Focus`]).
-///
-/// The host calls [`publish`](Self::publish) once per frame; each call compares
-/// the runtime's real state against what was last published and emits an event
-/// only on a genuine change — so the stream reports transitions the runtime
-/// actually made, and an idle frame produces nothing.
-///
-/// # What it reports, and what it does not
-///
-/// * [`Topic::Frames`] — one [`EventKind::FrameCommitted`] per advance of the
-///   runtime's [`commit_version`](crate::runtime::UiRuntime::commit_version),
-///   carrying that version as the id. A frame whose reconcile changed nothing
-///   does not advance the version, so it is not reported: the topic is
-///   *tree-commit* events, not present/vsync events.
-/// * [`Topic::Focus`] — one [`EventKind::FocusChanged`] per change of
-///   [`focused`](crate::runtime::UiRuntime::focused).
-/// * [`Topic::Lifecycle`] — **nothing**. The runtime exposes no lifecycle
-///   transition stream to derive it from, so a `Lifecycle` subscriber on a host
-///   that publishes only through this type is granted a subscription that stays
-///   silent. That gap is open.
+#[doc = include_str!("devtools.doc/RuntimeEventPublisher.md")]
 pub struct RuntimeEventPublisher {
     events: EventQueue,
-    /// The last commit stamp published, seeded from the runtime at
-    /// [`attach`](Self::attach) so the publisher reports what happens *after* it
-    /// is installed and never invents a frame for state that predates it.
+    #[doc = include_str!("devtools.doc/last_commit.md")]
     last_commit: VersionStamp,
-    /// The last focus target published, seeded the same way.
+    #[doc = include_str!("devtools.doc/last_focus.md")]
     last_focus: Option<NodeId>,
 }
 
 impl RuntimeEventPublisher {
-    /// Starts publishing `runtime`'s transitions onto `events`, taking the
-    /// runtime's current commit version and focus as the baseline.
+    #[doc = include_str!("devtools.doc/attach.md")]
     #[must_use]
     pub fn attach(runtime: &UiRuntime, events: EventQueue) -> Self {
         Self {
@@ -492,9 +359,7 @@ impl RuntimeEventPublisher {
         }
     }
 
-    /// Publishes an event for each of `runtime`'s transitions since the last
-    /// call. Cheap enough for every frame: two reads and two comparisons when
-    /// nothing changed.
+    #[doc = include_str!("devtools.doc/publish.md")]
     pub fn publish(&mut self, runtime: &UiRuntime) {
         let commit = runtime.commit_version();
         if commit != self.last_commit {

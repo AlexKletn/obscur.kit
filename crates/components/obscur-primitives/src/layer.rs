@@ -1,16 +1,9 @@
-//! `Layer`: a compositing-layer primitive (spec §2.6, §5.1).
+#![doc = include_str!("layer.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A compositing layer that groups children with an applied opacity.
-///
-/// `Layer` is one of the minimal built-in primitives (spec §2.6). It maps to a
-/// scene compositing layer (spec §5.1): its children are rendered into an
-/// isolated layer that is then composited with the layer's `opacity`, so
-/// group-level transparency and blending apply as one unit. It is a leaf
-/// element primitive: it lowers to a [`ViewNode::Element`] carrying its opacity
-/// as a property and its children as the element's fragment.
+#[doc = include_str!("layer.doc/Layer.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     children: Vec<ViewNode>,
@@ -18,7 +11,7 @@ pub struct Layer {
 }
 
 impl Default for Layer {
-    /// A fully opaque layer with no children.
+    #[doc = include_str!("layer.doc/default.md")]
     fn default() -> Self {
         Self {
             children: Vec::new(),
@@ -28,41 +21,33 @@ impl Default for Layer {
 }
 
 impl Layer {
-    /// Stable component id for the layer primitive (see
-    /// [`Container::COMPONENT_ID`] for the shared id scheme).
-    ///
-    /// [`Container::COMPONENT_ID`]: crate::Container::COMPONENT_ID
+    #[doc = include_str!("layer.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0007);
 
-    /// Property name for the layer opacity (see [`Image::PROP_SRC`] for the
-    /// shared prop-symbol scheme).
-    ///
-    /// [`Image::PROP_SRC`]: crate::Image::PROP_SRC
+    #[doc = include_str!("layer.doc/PROP_OPACITY.md")]
     pub const PROP_OPACITY: InternedSymbol = InternedSymbol::from_raw(0x00C1_0701);
 
-    /// Creates a default, fully opaque layer with no children.
+    #[doc = include_str!("layer.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Appends a child node, returning the updated layer.
+    #[doc = include_str!("layer.doc/child.md")]
     #[must_use]
     pub fn child(mut self, node: ViewNode) -> Self {
         self.children.push(node);
         self
     }
 
-    /// Sets the layer opacity, clamped to `0.0..=1.0`, returning the updated
-    /// layer.
+    #[doc = include_str!("layer.doc/with_opacity.md")]
     #[must_use]
     pub fn with_opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
-    /// Lowers this layer into its [`ViewNode::Element`], emitting the opacity
-    /// property and its children as the fragment.
+    #[doc = include_str!("layer.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::element(Self::COMPONENT_ID)
@@ -73,7 +58,7 @@ impl Layer {
             .with_children(ViewFragment::from_nodes(self.children))
     }
 
-    /// Lowers this layer into a single-node [`View`].
+    #[doc = include_str!("layer.doc/view.md")]
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

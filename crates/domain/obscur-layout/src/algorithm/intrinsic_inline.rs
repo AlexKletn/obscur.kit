@@ -1,32 +1,14 @@
-//! Resolving the inline-axis intrinsic sizing keywords by measuring content.
+#![doc = include_str!("intrinsic_inline.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 
 use crate::algorithm::{ChildMeasurer, LayoutChild};
 use crate::model::Dimension;
 
-/// The inline space offered to content that is being asked how *wide it wants to
-/// be* — unbounded, so nothing wraps that does not have to.
-///
-/// Infinity rather than a large finite number on purpose. A sentinel like
-/// `1e6` is a number the layout can accidentally *use*: a `50%` child would
-/// resolve against it and come out 500000px, and a `max-content` box would
-/// silently be half a million pixels wide instead of visibly wrong. Infinity
-/// cannot be mistaken for a real length —
-/// [`Dimension::resolve`](crate::model::Dimension::resolve) tests `is_finite` and
-/// treats a percentage against it as `auto`, which is exactly what CSS Sizing 3
-/// §5.1 requires of an indefinite basis.
+#[doc = include_str!("intrinsic_inline.doc/UNBOUNDED.md")]
 const UNBOUNDED: f32 = f32::INFINITY;
 
-/// The widest `children` want when each is offered `offer` of inline space.
-///
-/// The returned width is a **content** width in the parent's content box:
-/// each child's own horizontal margins are subtracted from what it is offered and
-/// added back to what it contributes, so the answer is the space the run needs,
-/// margins included (CSS 2.1 §10.3.3).
-///
-/// Blocks stack, so the widest child decides — not the sum, which is what an
-/// inline or flex row would want.
+#[doc = include_str!("intrinsic_inline.doc/probe.md")]
 fn probe(
     children: &[LayoutChild],
     offer: f32,
@@ -52,38 +34,7 @@ fn probe(
     widest
 }
 
-/// Resolves an intrinsic inline sizing keyword to a concrete content width, or
-/// [`None`] when `width` is not an intrinsic keyword (spec §4.2, CSS Sizing 3
-/// §4.1).
-///
-/// * `min-content` — every child offered **no** inline space, so each shrinks to
-///   the widest thing it cannot break (its longest word, or its own minimum).
-/// * `max-content` — every child offered **unbounded** inline space, so nothing
-///   wraps that does not have to.
-/// * `fit-content` — `min(max-content, max(min-content, stretch))`: take what the
-///   content wants, but neither overflow the space available nor squeeze below
-///   what cannot break (CSS 2.1 §10.3.5's shrink-to-fit).
-///
-/// `stretch` is the content width this box would have taken under `width: auto`
-/// (the space its container offers), and is used only by `fit-content`.
-///
-/// # This is a content width, so `box-sizing` does not apply
-///
-/// An authored `width` is a border-box length under `box-sizing: border-box`, and
-/// the caller maps it accordingly. An intrinsic keyword authors no length at all:
-/// what comes back from measuring is already the content's own width, so there is
-/// nothing for `box-sizing` to reinterpret. Border and padding are added around it
-/// either way.
-///
-/// # Cost
-///
-/// Each keyword costs one extra measuring pass over the children (`fit-content`
-/// two), on top of the real one. The measure cache memoizes on
-/// `(node, constraints)`, and a probe's constraints differ from the final ones by
-/// construction, so these do not collapse into the final measure — an intrinsic
-/// width genuinely measures its subtree more than once. That is inherent to the
-/// keywords (a browser does the same), and it is why they are resolved only when
-/// authored.
+#[doc = include_str!("intrinsic_inline.doc/intrinsic_inline_size.md")]
 pub(crate) fn intrinsic_inline_size(
     width: Dimension,
     children: &[LayoutChild],

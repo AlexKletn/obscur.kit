@@ -1,72 +1,59 @@
-//! The visual highlight rectangles of a selection (spec §5.11).
+#![doc = include_str!("selection_geometry.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
 use crate::layout::{ParagraphLayout, ParagraphLine};
 
-/// The visual highlight of a [`TextSelection`](super::TextSelection) as a set of
-/// rectangles (spec §5.11 editing engine).
-///
-/// A selection that spans several wrapped lines is drawn as one partial
-/// rectangle per covered line — the leading line from the start offset to its
-/// trailing edge, whole intermediate lines, and the trailing line from its start
-/// to the end offset. Each rectangle is derived from the layout's per-line caret
-/// geometry (see the `caret_rect` idiom on the layout hit-tester); this type is
-/// a pure container that stores those rectangles and answers spatial queries
-/// over them. It performs no layout of its own.
+#[doc = include_str!("selection_geometry.doc/SelectionGeometry.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SelectionGeometry {
-    /// The highlight rectangles, one partial rect per covered line.
+    #[doc = include_str!("selection_geometry.doc/rects.md")]
     rects: Vec<Rect>,
 }
 
 impl SelectionGeometry {
-    /// Creates an empty geometry with no rectangles.
+    #[doc = include_str!("selection_geometry.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self { rects: Vec::new() }
     }
 
-    /// Creates a geometry from an existing list of rectangles.
+    #[doc = include_str!("selection_geometry.doc/from_rects.md")]
     #[must_use]
     pub const fn from_rects(rects: Vec<Rect>) -> Self {
         Self { rects }
     }
 
-    /// Creates a geometry holding a single rectangle (a one-line selection).
+    #[doc = include_str!("selection_geometry.doc/single.md")]
     #[must_use]
     pub fn single(rect: Rect) -> Self {
         Self { rects: vec![rect] }
     }
 
-    /// Appends a rectangle to the highlight.
+    #[doc = include_str!("selection_geometry.doc/push.md")]
     pub fn push(&mut self, rect: Rect) {
         self.rects.push(rect);
     }
 
-    /// Returns the highlight rectangles in the order they were added.
+    #[doc = include_str!("selection_geometry.doc/rects_2.md")]
     #[must_use]
     pub fn rects(&self) -> &[Rect] {
         &self.rects
     }
 
-    /// Returns whether the geometry holds no rectangles.
+    #[doc = include_str!("selection_geometry.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rects.is_empty()
     }
 
-    /// Returns the number of rectangles.
+    #[doc = include_str!("selection_geometry.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.rects.len()
     }
 
-    /// Returns the union bounding box of every rectangle, or `None` when the
-    /// geometry is empty.
-    ///
-    /// The bounds run from the minimum origin (top-left) to the maximum right
-    /// and bottom edges across all rectangles.
+    #[doc = include_str!("selection_geometry.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         let (first, rest) = self.rects.split_first()?;
@@ -86,33 +73,13 @@ impl SelectionGeometry {
         ))
     }
 
-    /// Returns whether any rectangle contains `point`.
+    #[doc = include_str!("selection_geometry.doc/contains_point.md")]
     #[must_use]
     pub fn contains_point(&self, point: Point) -> bool {
         self.rects.iter().any(|rect| rect.contains(point))
     }
 
-    /// Builds the per-line highlight for the byte span `start..end` over a wrapped
-    /// `layout` (spec §5.11 editing engine).
-    ///
-    /// A selection that spans several wrapped lines paints one rectangle per
-    /// covered line: the **leading** line runs from the start offset's pen x to
-    /// that line's trailing edge, whole **interior** lines span their full used
-    /// width, and the **trailing** line runs from its content start to the end
-    /// offset's pen x. The rectangles are in *paragraph-local* coordinates — x is
-    /// the line's alignment [`x_offset`](ParagraphLine::x_offset) plus the
-    /// within-line pen x, y is the line box's [`top`](ParagraphLine::top) — so the
-    /// caller translates them by the text box origin (and any horizontal scroll)
-    /// to place them on screen.
-    ///
-    /// The within-line pen x is the sum of THAT line's spaced/tabbed glyph
-    /// advances whose source cluster falls before the offset — the same advances
-    /// the line's glyphs paint from — so a span confined to ONE line yields exactly
-    /// the single rectangle the caret-driven highlight produced before. A collapsed
-    /// span (`start == end`) and any zero-width per-line extent (e.g. a downstream
-    /// caret's sliver at a soft-wrap boundary, or an empty line) contribute no
-    /// rectangle. Determinism: the covered lines and their advances are a pure
-    /// function of the layout and the two offsets.
+    #[doc = include_str!("selection_geometry.doc/from_paragraph.md")]
     #[must_use]
     pub fn from_paragraph(layout: &ParagraphLayout, start: usize, end: usize) -> Self {
         let (lo, hi) = (start.min(end), start.max(end));
@@ -151,10 +118,7 @@ impl SelectionGeometry {
         Self { rects }
     }
 
-    /// Pushes one within-line highlight rectangle spanning pen x `[x_from, x_to)`
-    /// onto `rects`, translated by the line's alignment offset and boxed at the
-    /// line's top/height. A zero/negative extent (a boundary sliver) paints nothing
-    /// and is dropped.
+    #[doc = include_str!("selection_geometry.doc/push_extent.md")]
     fn push_extent(rects: &mut Vec<Rect>, line: &ParagraphLine, x_from: f32, x_to: f32) {
         let width = x_to - x_from;
         if width > 0.0 {

@@ -1,34 +1,20 @@
-//! The [`ScrollDriver`] scroll-driven motion source (spec §4.17).
+#![doc = include_str!("scroll_driver.doc/_module.md")]
 
 use crate::driver::MotionDriver;
 
-/// A scroll-driven [`MotionDriver`]: a scroll offset mapped onto `[0, 1]` across
-/// a scroll range (spec §4.17 "scroll signals — scroll-linked animations").
-///
-/// The driver maps the current scroll `offset` from the range `[start, end]`
-/// that the animation spans onto normalized progress via
-/// `(offset - start) / (end - start)`, clamped to `[0, 1]`. This is the **domain
-/// half** of a scroll-linked animation: the driver does no scrolling and reads
-/// no viewport — the interaction/scroll subsystem feeds it the latest offset via
-/// [`set_offset`](Self::set_offset), and the driver deterministically turns that
-/// into progress. A degenerate range (`start == end`) has no width to normalize
-/// against and yields progress `0`.
+#[doc = include_str!("scroll_driver.doc/ScrollDriver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollDriver {
-    /// The current scroll position.
+    #[doc = include_str!("scroll_driver.doc/offset.md")]
     offset: f32,
-    /// The scroll position mapped to progress `0` (the animation's start).
+    #[doc = include_str!("scroll_driver.doc/start.md")]
     start: f32,
-    /// The scroll position mapped to progress `1` (the animation's end).
+    #[doc = include_str!("scroll_driver.doc/end.md")]
     end: f32,
 }
 
 impl ScrollDriver {
-    /// Creates a driver over the scroll range `[start, end]`, starting with its
-    /// `offset` at `start` (progress `0`).
-    ///
-    /// If the endpoints are equal the range is degenerate and progress is always
-    /// `0`.
+    #[doc = include_str!("scroll_driver.doc/new.md")]
     #[must_use]
     pub const fn new(start: f32, end: f32) -> Self {
         Self {
@@ -38,35 +24,31 @@ impl ScrollDriver {
         }
     }
 
-    /// Returns this driver with its current scroll `offset` set.
+    #[doc = include_str!("scroll_driver.doc/with_offset.md")]
     #[must_use]
     pub const fn with_offset(mut self, offset: f32) -> Self {
         self.offset = offset;
         self
     }
 
-    /// Sets the current scroll offset (spec §4.17).
-    ///
-    /// The scroll subsystem reports its latest scroll position here and the
-    /// driver re-normalizes it on the next [`progress`](MotionDriver::progress)
-    /// read.
+    #[doc = include_str!("scroll_driver.doc/set_offset.md")]
     pub fn set_offset(&mut self, offset: f32) {
         self.offset = offset;
     }
 
-    /// Returns the current scroll offset.
+    #[doc = include_str!("scroll_driver.doc/offset_2.md")]
     #[must_use]
     pub const fn offset(&self) -> f32 {
         self.offset
     }
 
-    /// Returns the scroll position mapped to progress `0`.
+    #[doc = include_str!("scroll_driver.doc/start_2.md")]
     #[must_use]
     pub const fn start(&self) -> f32 {
         self.start
     }
 
-    /// Returns the scroll position mapped to progress `1`.
+    #[doc = include_str!("scroll_driver.doc/end_2.md")]
     #[must_use]
     pub const fn end(&self) -> f32 {
         self.end
@@ -74,9 +56,7 @@ impl ScrollDriver {
 }
 
 impl MotionDriver for ScrollDriver {
-    /// Returns `((offset - start) / (end - start)).clamp(0.0, 1.0)` (spec §4.17).
-    ///
-    /// A degenerate range (`start == end`) has no width and yields `0.0`.
+    #[doc = include_str!("scroll_driver.doc/progress.md")]
     fn progress(&self) -> f32 {
         let span = self.end - self.start;
         if span == 0.0 {
@@ -85,8 +65,7 @@ impl MotionDriver for ScrollDriver {
         ((self.offset - self.start) / span).clamp(0.0, 1.0)
     }
 
-    /// Always `true`: scroll can move either way at any time, so the driver is
-    /// never considered settled.
+    #[doc = include_str!("scroll_driver.doc/is_active.md")]
     fn is_active(&self) -> bool {
         true
     }

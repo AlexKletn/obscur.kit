@@ -1,26 +1,4 @@
-//! The built-in **user-agent (UA) default stylesheet** — the toolkit's neutral,
-//! overridable base look for the built-in controls (spec §4.14).
-//!
-//! This is the toolkit's analogue of a browser's UA stylesheet: a small set of
-//! rules, keyed on each control's stable CSS *type* (`button`, `input`,
-//! `checkbox`, `select`, …), compiled at the **lowest** cascade origin
-//! ([`CascadeOrigin::SystemDefault`]). Installed on a
-//! [`UiRuntime`](crate::runtime::UiRuntime) via
-//! [`set_default_stylesheet`](crate::runtime::UiRuntime::set_default_stylesheet)
-//! (or automatically by
-//! [`KitBootstrap::install_default_stylesheet`](crate::bootstrap::KitBootstrap::install_default_stylesheet)),
-//! it is matched *below* every author/theme sheet, so any author rule of the same
-//! or higher specificity overrides it — exactly the browser UA-sheet contract.
-//!
-//! It gives the base controls the kit's **Wireframe** look: a grayscale
-//! specification-sheet aesthetic (ink `#2b2a27` on paper `#faf9f6`, hairline
-//! `1.5px` borders, `2px` radii) with the full interaction-state set — a hover
-//! fill shift, a `2px dashed` focus ring with offset, an inverted `:active`, a
-//! dashed muted `:disabled`, and a filled `:checked` — plus `a`, `fieldset`, and
-//! `table` rules. It leans only on properties and interaction pseudo-classes the
-//! engine actually restyles (`:hover`, `:focus`, `:active`, `:disabled`,
-//! `:checked`). Because it sits at `SystemDefault`, any author/theme sheet
-//! overrides it, so themed demos keep their own look untouched.
+#![doc = include_str!("default_stylesheet.doc/_module.md")]
 
 use crate::css::compiler::StylesheetCompiler;
 use crate::css::parser::StylesheetParser;
@@ -28,24 +6,13 @@ use crate::css::source::CssSource;
 use crate::style::cascade::CascadeOrigin;
 use crate::style::matching::Stylesheet;
 
-/// The raw CSS text of the UA default stylesheet.
-///
-/// Exposed so a host can inspect, extend, or re-compile it under a different
-/// origin. The compiled form is [`ua_stylesheet`].
+#[doc = include_str!("default_stylesheet.doc/ua_css.md")]
 #[must_use]
 pub const fn ua_css() -> &'static str {
     UA_CSS
 }
 
-/// Compiles the UA default stylesheet into a runtime-matchable [`Stylesheet`] at
-/// the [`CascadeOrigin::SystemDefault`] origin — the lowest in the cascade, so any
-/// author/theme declaration overrides it (§4.14).
-///
-/// Hand the result to
-/// [`UiRuntime::set_default_stylesheet`](crate::runtime::UiRuntime::set_default_stylesheet)
-/// (or let
-/// [`KitBootstrap::install_default_stylesheet`](crate::bootstrap::KitBootstrap::install_default_stylesheet)
-/// do it) to give an app the toolkit's overridable base component look.
+#[doc = include_str!("default_stylesheet.doc/ua_stylesheet.md")]
 #[must_use]
 pub fn ua_stylesheet() -> Stylesheet {
     let source = CssSource::anonymous(UA_CSS);
@@ -56,17 +23,7 @@ pub fn ua_stylesheet() -> Stylesheet {
         .matchable
 }
 
-/// The kit's **Wireframe** base look — a grayscale specification-sheet aesthetic
-/// (ink `#2b2a27` on paper `#faf9f6`, hairline `1.5px` borders, tight `2px` radii,
-/// a dashed focus ring, an inverted `:active`, a dashed muted `:disabled`, and a
-/// filled `:checked`), keyed on each control's stable CSS type and restricted to
-/// properties the engine renders. This is the DEFAULT look every bare control
-/// gets; author/theme sheets sit above `SystemDefault` and override it freely.
-///
-/// Palette: ink `#2b2a27`, muted `#5a584f`, faint `#9b998f`, disabled-ink
-/// `#b7b5ad`, surface `#faf9f6`, hover-fill `#e4e2db`, field-hover `#f4f2ec`,
-/// disabled-fill `#f2f0ea`, rule `#d6d4cc`. Fonts are the host's (the source kit's
-/// IBM Plex is not bundled), so only sizes/weights are set.
+#[doc = include_str!("default_stylesheet.doc/UA_CSS.md")]
 const UA_CSS: &str = "\
 button {\
   padding: 11px 20px;\

@@ -1,27 +1,10 @@
-//! [`TransactionCommit`]: the immutable record of a committed UI transaction (spec §3.2).
+#![doc = include_str!("transaction_commit.doc/_module.md")]
 
 use obscur_identity::VersionStamp;
 
 use super::ui_operation::UiOperation;
 
-/// The immutable record produced when a [`UiTransaction`] is committed atomically
-/// at a frame boundary (spec §3.2).
-///
-/// It carries the normalized operations that were applied together with the
-/// [`VersionStamp`] stamped at commit time. The frame's tree mutation is enacted
-/// through this record: the [`ReconcileEnactor`] stages a reconcile as a
-/// validated [`UiTransaction`], applies it, and produces this commit — the single
-/// authoritative hand-off between staging and application, which is what makes
-/// the commit *atomic* (either the whole batch is recorded here or none of it is)
-/// and *versioned* (the stamp advances only when the tree actually changed). Both
-/// the [`FramePipeline`] and the [`UiRuntime`] drive their per-frame reconcile
-/// through that enactor, so this record is produced on the live frame path rather
-/// than only in unit tests.
-///
-/// [`UiTransaction`]: crate::transaction::UiTransaction
-/// [`ReconcileEnactor`]: crate::transaction::ReconcileEnactor
-/// [`FramePipeline`]: crate::frame::FramePipeline
-/// [`UiRuntime`]: crate::UiRuntime
+#[doc = include_str!("transaction_commit.doc/TransactionCommit.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionCommit {
     operations: Vec<UiOperation>,
@@ -29,8 +12,7 @@ pub struct TransactionCommit {
 }
 
 impl TransactionCommit {
-    /// Creates a commit record from the applied `operations` and the `version`
-    /// stamped at the frame boundary.
+    #[doc = include_str!("transaction_commit.doc/new.md")]
     #[must_use]
     pub fn new(operations: Vec<UiOperation>, version: VersionStamp) -> Self {
         Self {
@@ -39,31 +21,31 @@ impl TransactionCommit {
         }
     }
 
-    /// Returns the committed normalized operations in application order.
+    #[doc = include_str!("transaction_commit.doc/operations.md")]
     #[must_use]
     pub fn operations(&self) -> &[UiOperation] {
         &self.operations
     }
 
-    /// Returns the commit version stamped at the frame boundary.
+    #[doc = include_str!("transaction_commit.doc/version.md")]
     #[must_use]
     pub const fn version(&self) -> VersionStamp {
         self.version
     }
 
-    /// Returns `true` if the commit carries no operations.
+    #[doc = include_str!("transaction_commit.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()
     }
 
-    /// Returns the number of committed operations.
+    #[doc = include_str!("transaction_commit.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.operations.len()
     }
 
-    /// Returns `true` if any committed operation is a root replacement.
+    #[doc = include_str!("transaction_commit.doc/is_root_replacement.md")]
     #[must_use]
     pub fn is_root_replacement(&self) -> bool {
         self.operations.iter().any(UiOperation::is_root_replacement)

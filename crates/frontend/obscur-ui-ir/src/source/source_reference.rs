@@ -1,17 +1,8 @@
-//! A span within a named source [`SourceReference`] (spec §2.5 source maps).
+#![doc = include_str!("source_reference.doc/_module.md")]
 
 use crate::source::SourceLocation;
 
-/// A span within a named source (spec §2.5).
-///
-/// Pairs a source identifier (`source` — a path, logical name, or other id)
-/// with a `[start, end]` range of [`SourceLocation`]s. `start` is expected to
-/// precede or equal `end` by byte offset; construction does not reorder them,
-/// and [`SourceReference::byte_len`] saturates rather than underflowing if the
-/// invariant is violated.
-///
-/// The source name is stored as a `Box<str>` to keep each reference compact and
-/// immutable once built.
+#[doc = include_str!("source_reference.doc/SourceReference.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceReference {
     source: Box<str>,
@@ -20,7 +11,7 @@ pub struct SourceReference {
 }
 
 impl SourceReference {
-    /// Creates a reference to the span `[start, end]` within `source`.
+    #[doc = include_str!("source_reference.doc/new.md")]
     #[must_use]
     pub fn new(source: impl Into<Box<str>>, start: SourceLocation, end: SourceLocation) -> Self {
         Self {
@@ -30,39 +21,37 @@ impl SourceReference {
         }
     }
 
-    /// Creates an empty reference to the single point `at` within `source`
-    /// (`start == end`).
+    #[doc = include_str!("source_reference.doc/point.md")]
     #[must_use]
     pub fn point(source: impl Into<Box<str>>, at: SourceLocation) -> Self {
         Self::new(source, at, at)
     }
 
-    /// Returns the source identifier (path, logical name, or id).
+    #[doc = include_str!("source_reference.doc/source.md")]
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
     }
 
-    /// Returns the start of the span.
+    #[doc = include_str!("source_reference.doc/start.md")]
     #[must_use]
     pub const fn start(&self) -> SourceLocation {
         self.start
     }
 
-    /// Returns the end of the span.
+    #[doc = include_str!("source_reference.doc/end.md")]
     #[must_use]
     pub const fn end(&self) -> SourceLocation {
         self.end
     }
 
-    /// Returns the length of the span in bytes (`end.offset - start.offset`),
-    /// saturating to `0` if the offsets are out of order.
+    #[doc = include_str!("source_reference.doc/byte_len.md")]
     #[must_use]
     pub const fn byte_len(&self) -> u32 {
         self.end.offset().saturating_sub(self.start.offset())
     }
 
-    /// Returns whether the span is empty (`start == end`).
+    #[doc = include_str!("source_reference.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.start == self.end

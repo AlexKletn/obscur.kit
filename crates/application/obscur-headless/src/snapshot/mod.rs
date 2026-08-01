@@ -1,4 +1,4 @@
-//! Snapshot module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod pipeline_snapshot;
 pub use pipeline_snapshot::PipelineSnapshot;
 mod normalized_node;

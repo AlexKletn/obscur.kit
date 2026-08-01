@@ -1,10 +1,4 @@
-//! **SPECIFICATION-DERIVED** form-control cases for obscur.kit §5.14 ("Form
-//! controls").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §5.14
-//! (with §3.1 "No magic two-way binding is provided: - values flow down; - typed
-//! actions/commands flow up") and WHATWG HTML's `input`/`change`/`readonly`
-//! model, with **no access to this repository's source**.
+#![doc = include_str!("spec_ch5_forms.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch5_support/mod.rs"]
@@ -25,22 +19,22 @@ use obscur_kit::widgets::input::Input;
 
 use support::{at, compile};
 
-/// The first field's command symbol.
+#[doc = include_str!("spec_ch5_forms.doc/CMD_A.md")]
 const CMD_A: InternedSymbol = InternedSymbol::from_raw(0x0F01);
-/// The second field's command symbol.
+#[doc = include_str!("spec_ch5_forms.doc/CMD_B.md")]
 const CMD_B: InternedSymbol = InternedSymbol::from_raw(0x0F02);
 
-/// The viewport every case in this file renders under.
+#[doc = include_str!("spec_ch5_forms.doc/VW.md")]
 const VW: f32 = 400.0;
 
-/// The stylesheet every case lays its fields out under.
+#[doc = include_str!("spec_ch5_forms.doc/sheets.md")]
 fn sheets() -> Vec<Stylesheet> {
     vec![compile(
         "input { display: block; width: 160px; height: 40px; font-size: 16px }",
     )]
 }
 
-/// Clicks `node`'s centre through the real pointer path.
+#[doc = include_str!("spec_ch5_forms.doc/click.md")]
 fn click(runtime: &mut UiRuntime, node: NodeId) {
     let b = runtime
         .layout_boxes()
@@ -65,14 +59,14 @@ fn click(runtime: &mut UiRuntime, node: NodeId) {
     ));
 }
 
-/// Types one printable character through the real keyboard path.
+#[doc = include_str!("spec_ch5_forms.doc/type_char.md")]
 fn type_char(runtime: &mut UiRuntime, ch: char) {
     let logical = Some(LogicalKey::character(ch));
     runtime.handle_key(KeyEvent::press(PhysicalKey::KeyA, logical));
     runtime.handle_key(KeyEvent::release(PhysicalKey::KeyA, logical));
 }
 
-/// The text of every `DrawText` run in the last frame.
+#[doc = include_str!("spec_ch5_forms.doc/painted.md")]
 fn painted(runtime: &UiRuntime) -> Vec<String> {
     runtime
         .snapshot()
@@ -86,12 +80,7 @@ fn painted(runtime: &UiRuntime) -> Vec<String> {
         .collect()
 }
 
-/// §5.14 "Minimal value model: … - controlled/uncontrolled; - current value;"
-/// with §3.1 "No magic two-way binding is provided: - values flow down; - typed
-/// actions/commands flow up."
-///
-/// A *controlled* field whose value prop never changes must never drift: the
-/// keystroke is reported as a proposal and refused.
+#[doc = include_str!("spec_ch5_forms.doc/fm_01_a_controlled_value_does_not_drift.md")]
 #[test]
 fn fm_01_a_controlled_value_does_not_drift() {
     let proposals: Rc<RefCell<Vec<String>>> = Rc::default();
@@ -150,10 +139,7 @@ fn fm_01_a_controlled_value_does_not_drift() {
     );
 }
 
-/// §5.14 "- current value; - committed value; - input event; - change event;".
-///
-/// `input` fires per keystroke; `change` fires **once**, at commit (blur), and
-/// only when the value actually changed.
+#[doc = include_str!("spec_ch5_forms.doc/fm_02_input_fires_per_keystroke_and_change_fires_once_at_commit.md")]
 #[test]
 fn fm_02_input_fires_per_keystroke_and_change_fires_once_at_commit() {
     let inputs: Rc<RefCell<Vec<String>>> = Rc::default();
@@ -217,9 +203,7 @@ fn fm_02_input_fires_per_keystroke_and_change_fires_once_at_commit() {
     );
 }
 
-/// §5.14 "- disabled; - readonly; - invalid." `readonly` and `disabled` are
-/// **distinct**: a readonly field still focuses, still takes a caret and a
-/// selection (WHATWG HTML §attr-input-readonly); a disabled one does neither.
+#[doc = include_str!("spec_ch5_forms.doc/fm_03_readonly_is_not_disabled.md")]
 #[test]
 fn fm_03_readonly_is_not_disabled() {
     let inputs: Rc<RefCell<Vec<String>>> = Rc::default();
@@ -299,7 +283,7 @@ fn fm_03_readonly_is_not_disabled() {
     );
 }
 
-/// Presses the platform select-all chord (`Ctrl` held, then `A`).
+#[doc = include_str!("spec_ch5_forms.doc/select_all.md")]
 fn select_all(runtime: &mut UiRuntime) {
     runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
     let a = Some(LogicalKey::character('a'));

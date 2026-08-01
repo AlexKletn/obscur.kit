@@ -1,4 +1,4 @@
-//! Hub module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod resource_entry;
 pub use resource_entry::ResourceEntry;
 mod resource_hub;

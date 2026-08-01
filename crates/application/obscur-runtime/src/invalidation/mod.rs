@@ -1,4 +1,4 @@
-//! Invalidation module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod invalidation;
 pub use invalidation::Invalidation;
 mod invalidation_kind;

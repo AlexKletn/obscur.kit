@@ -1,4 +1,4 @@
-//! Rule: pure crates never depend on platform/adapter crates (spec §5.6).
+#![doc = include_str!("dependency_direction.doc/_module.md")]
 
 use std::fs;
 use std::path::Path;
@@ -26,7 +26,7 @@ const BANNED_DEPS: &[&str] = &[
     "raw-window-handle",
 ];
 
-/// Scans pure-crate `Cargo.toml` files for banned dependencies.
+#[doc = include_str!("dependency_direction.doc/check.md")]
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
     let mut out = Vec::new();
     for dir in PURE_DIRS {

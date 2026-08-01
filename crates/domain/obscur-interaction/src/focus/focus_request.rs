@@ -1,93 +1,81 @@
-//! The [`FocusRequest`] describing a requested focus move (spec §7.1 focus).
+#![doc = include_str!("focus_request.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// Why focus is being moved (spec §7.1).
-///
-/// A tightly-coupled companion to [`FocusRequest`]: the request names *what* to
-/// focus while the reason records *why*, letting the runtime distinguish, for
-/// example, keyboard-driven from pointer-driven focus. It is passed alongside a
-/// request to the focus state machine rather than embedded in the request enum.
+#[doc = include_str!("focus_request.doc/FocusReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusReason {
-    /// Focus moved by explicit application code.
+    #[doc = include_str!("focus_request.doc/Programmatic.md")]
     Programmatic,
-    /// Focus moved as a result of a pointer interaction.
+    #[doc = include_str!("focus_request.doc/Pointer.md")]
     Pointer,
-    /// Focus moved by keyboard navigation (e.g. Tab).
+    #[doc = include_str!("focus_request.doc/Keyboard.md")]
     Keyboard,
-    /// Focus moved by restoring a previously focused node when a scope closed.
+    #[doc = include_str!("focus_request.doc/Restore.md")]
     Restore,
 }
 
-/// A request to move focus (spec §7.1).
-///
-/// A `FocusRequest` names the *target* of a focus move: a specific node, a
-/// directional/tab step, the first or last tab stop, or clearing focus. It is a
-/// pure command value; the focus state machine resolves it against the current
-/// state and reports a [`FocusResult`](super::FocusResult). The motivating
-/// [`FocusReason`] is supplied separately.
+#[doc = include_str!("focus_request.doc/FocusRequest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusRequest {
-    /// Focus the identified node.
+    #[doc = include_str!("focus_request.doc/Node.md")]
     Node(NodeId),
-    /// Move focus to the next node in tab order.
+    #[doc = include_str!("focus_request.doc/Next.md")]
     Next,
-    /// Move focus to the previous node in tab order.
+    #[doc = include_str!("focus_request.doc/Previous.md")]
     Previous,
-    /// Move focus to the first node in tab order.
+    #[doc = include_str!("focus_request.doc/First.md")]
     First,
-    /// Move focus to the last node in tab order.
+    #[doc = include_str!("focus_request.doc/Last.md")]
     Last,
-    /// Clear focus (blur), leaving nothing focused.
+    #[doc = include_str!("focus_request.doc/Clear.md")]
     Clear,
 }
 
 impl FocusRequest {
-    /// Requests focus of the specific node `node`.
+    #[doc = include_str!("focus_request.doc/node.md")]
     #[must_use]
     pub const fn node(node: NodeId) -> Self {
         Self::Node(node)
     }
 
-    /// Requests focus of the next node in tab order.
+    #[doc = include_str!("focus_request.doc/next.md")]
     #[must_use]
     pub const fn next() -> Self {
         Self::Next
     }
 
-    /// Requests focus of the previous node in tab order.
+    #[doc = include_str!("focus_request.doc/previous.md")]
     #[must_use]
     pub const fn previous() -> Self {
         Self::Previous
     }
 
-    /// Requests focus of the first node in tab order.
+    #[doc = include_str!("focus_request.doc/first.md")]
     #[must_use]
     pub const fn first() -> Self {
         Self::First
     }
 
-    /// Requests focus of the last node in tab order.
+    #[doc = include_str!("focus_request.doc/last.md")]
     #[must_use]
     pub const fn last() -> Self {
         Self::Last
     }
 
-    /// Requests clearing focus (blur).
+    #[doc = include_str!("focus_request.doc/clear.md")]
     #[must_use]
     pub const fn clear() -> Self {
         Self::Clear
     }
 
-    /// Returns whether this is a directional tab step ([`Next`](Self::Next) or
-    /// [`Previous`](Self::Previous)).
+    #[doc = include_str!("focus_request.doc/is_directional.md")]
     #[must_use]
     pub const fn is_directional(self) -> bool {
         matches!(self, Self::Next | Self::Previous)
     }
 
-    /// Returns the target node for a [`Node`](Self::Node) request, else `None`.
+    #[doc = include_str!("focus_request.doc/target_node.md")]
     #[must_use]
     pub const fn target_node(self) -> Option<NodeId> {
         match self {

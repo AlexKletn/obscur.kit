@@ -1,4 +1,4 @@
-//! Transition module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod layout_transition;
 pub use layout_transition::LayoutTransition;
 mod shared_element_transition;

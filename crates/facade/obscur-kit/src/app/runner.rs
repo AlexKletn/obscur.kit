@@ -1,9 +1,4 @@
-//! The winit [`ApplicationHandler`] behind [`App::run`](super::App::run): it owns
-//! the window, the GPU-backed Vello renderer, the swapchain surface, and the
-//! embeddable [`UiRuntime`], and composes the kit's own facilities
-//! ([`KitBootstrap`], [`CssPipeline`], the winit converters) rather than
-//! hand-wiring them again. Lifted from the `uikit_window` / `windowed_counter`
-//! examples so an application does not spell out ~700 lines to open one window.
+#![doc = include_str!("runner.doc/_module.md")]
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -34,27 +29,13 @@ use crate::text::ime::{CompositionEvent, Preedit};
 use crate::view::view::{View, ViewNode};
 use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 
-/// Pixels scrolled per wheel line, when the platform reports whole lines rather
-/// than raw pixels.
+#[doc = include_str!("runner.doc/WHEEL_LINE_STEP.md")]
 const WHEEL_LINE_STEP: f32 = 48.0;
 
-/// The largest time step a single frame may advance motion by, in seconds.
-///
-/// A window that was occluded, starved or dragged between monitors can resume
-/// after an arbitrary gap; without a clamp the first frame back would advance
-/// every animation by that whole gap and they would all appear to have finished
-/// while the window was hidden.
+#[doc = include_str!("runner.doc/MAX_FRAME_DELTA.md")]
 const MAX_FRAME_DELTA: f32 = 0.1;
 
-/// Rolling per-phase frame timings, printed every [`REPORT_EVERY`] presented
-/// frames when `OBSCUR_FRAME_STATS=1` is set.
-///
-/// This exists because the kit measures nothing itself: §7.9's
-/// [`PerformanceSpan`](crate::diagnostics::performance::PerformanceSpan) carries a
-/// name and a subsystem but **no duration**, and the DevTools protocol has no
-/// timing field, so neither telemetry nor an attached inspector can answer "why is
-/// this slow". Until a span records elapsed time, this is the honest way to profile
-/// a running app.
+#[doc = include_str!("runner.doc/FrameStats.md")]
 #[derive(Default)]
 struct FrameStats {
     frames: u32,
@@ -64,11 +45,11 @@ struct FrameStats {
     worst: std::time::Duration,
 }
 
-/// How many presented frames each stats line covers.
+#[doc = include_str!("runner.doc/REPORT_EVERY.md")]
 const REPORT_EVERY: u32 = 60;
 
 impl FrameStats {
-    /// Folds one presented frame in, printing a summary every [`REPORT_EVERY`].
+    #[doc = include_str!("runner.doc/record.md")]
     fn record(
         &mut self,
         build: std::time::Duration,
@@ -99,8 +80,7 @@ impl FrameStats {
     }
 }
 
-/// Builds the runtime, forwards the app's root builder + command handlers + CSS,
-/// then opens the window and runs the event loop to completion.
+#[doc = include_str!("runner.doc/run.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     title: String,
@@ -131,12 +111,7 @@ pub(super) fn run(
     )
 }
 
-/// [`run`] for a builder that reads the frame's [`FrameInfo`].
-///
-/// The runner owns the window, so it owns the only authoritative viewport: it keeps
-/// the current one in a cell, refreshes it whenever the surface changes, and hands
-/// the builder a snapshot each frame. That is what lets an app window its own list
-/// to what is visible instead of building a node per item.
+#[doc = include_str!("runner.doc/run_with_frame.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_with_frame(
     title: String,
@@ -266,11 +241,7 @@ fn run_inner(
     }
 }
 
-/// Installs the filesystem image resources and the threaded blocking executor when
-/// their adapters are compiled in (both are in the `full` set the windowed feature
-/// gate implies). A standalone window is not a headless host, so the *real*
-/// executor is correct here — a `url()` image lands a frame later and
-/// [`poll_resource_tasks`](UiRuntime::poll_resource_tasks) on wake repaints for it.
+#[doc = include_str!("runner.doc/install_resources.md")]
 #[allow(unused_variables)]
 fn install_resources(boot: &KitBootstrap, runtime: &mut UiRuntime) {
     #[cfg(all(feature = "resource-fs", feature = "resource-decode"))]
@@ -284,10 +255,7 @@ fn install_resources(boot: &KitBootstrap, runtime: &mut UiRuntime) {
     }
 }
 
-/// Installs the real text stack over the host's system fonts (bundled last-resort
-/// fallback appended by [`install_text_stack`](KitBootstrap::install_text_stack)),
-/// and hands the renderer the *same* id→bytes assignment so scene font handles
-/// line up with what it rasterizes — the codified fix for the id-matching problem.
+#[doc = include_str!("runner.doc/install_text.md")]
 #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
 fn install_text(
     boot: &KitBootstrap,
@@ -315,84 +283,56 @@ fn install_text(
     crate::bootstrap::InstalledFonts::default()
 }
 
-/// The winit application the runner drives: the window, the GPU renderer, the
-/// swapchain surface, and the embeddable runtime, all created lazily on `resumed`.
+#[doc = include_str!("runner.doc/AppRunner.md")]
 struct AppRunner {
     title: String,
     app_id: String,
     size: (f32, f32),
     runtime: UiRuntime,
-    /// The CSS pipeline, alive for the app's lifetime because it owns the §4.12 parse
-    /// cache: a replacement through [`AppControl::set_stylesheets`] re-parses only what
-    /// changed identity, and a fresh pipeline per install would throw that away.
+    #[doc = include_str!("runner.doc/css.md")]
     css: CssPipeline,
-    /// The application's handle onto this runtime. Everything it queued is applied
-    /// once per committed frame — see [`AppRunner::render_frame`] for where, and
-    /// [`AppControl`] for why it is a queue rather than an accessor.
+    #[doc = include_str!("runner.doc/control.md")]
     control: AppControl,
     window: Option<Arc<Window>>,
     surface: Option<VelloSurface>,
     device: Option<wgpu::Device>,
     renderer: Option<VelloRenderer>,
-    /// The display's HiDPI device-pixel ratio (winit `scale_factor`).
+    #[doc = include_str!("runner.doc/scale_factor.md")]
     scale_factor: f64,
-    /// Last cursor position in physical px, so a `MouseInput` (which carries none)
-    /// dispatches at the cursor.
+    #[doc = include_str!("runner.doc/cursor.md")]
     cursor: (f64, f64),
-    /// The instant the app started, and the origin of every pointer event's
-    /// logical timestamp — see [`now_micros`](AppRunner::now_micros).
+    #[doc = include_str!("runner.doc/epoch.md")]
     epoch: std::time::Instant,
-    /// When the previous frame ran, so the next one can advance motion by the
-    /// time that actually elapsed. `None` until the first frame.
+    #[doc = include_str!("runner.doc/last_frame.md")]
     last_frame: Option<std::time::Instant>,
-    /// A window/GPU failure recorded on `resumed` (which cannot return a `Result`)
-    /// so [`run`] can surface it instead of returning `Ok` on a blank window.
+    #[doc = include_str!("runner.doc/init_failure.md")]
     init_failure: Option<AppError>,
-    /// The app's leftover-wheel handler, if it registered one.
+    #[doc = include_str!("runner.doc/scroll.md")]
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
-    /// What the window was last told about text entry, so [`sync_ime`] only speaks
-    /// to the platform when the answer actually changed.
-    ///
-    /// [`sync_ime`]: AppRunner::sync_ime
+    #[doc = include_str!("runner.doc/ime_allowed.md")]
     ime_allowed: bool,
-    /// The viewport snapshot a frame-aware builder reads, refreshed on every
-    /// surface change.
+    #[doc = include_str!("runner.doc/frame_info.md")]
     frame_info: Option<Rc<Cell<FrameInfo>>>,
-    /// Per-phase frame timings, present only when `OBSCUR_FRAME_STATS=1` is set.
+    #[doc = include_str!("runner.doc/stats.md")]
     stats: Option<FrameStats>,
-    /// The renderer's font hand-off table, kept so faces the text stack pulls in
-    /// from the host mid-run can be handed over too — see
-    /// [`InstalledFonts::take_discovered`](crate::bootstrap::InstalledFonts::take_discovered).
+    #[doc = include_str!("runner.doc/fonts.md")]
     fonts: Option<crate::bootstrap::InstalledFonts>,
 }
 
 impl AppRunner {
-    /// Microseconds since the app started — the logical timestamp every pointer
-    /// event this runner dispatches carries.
-    ///
-    /// The interaction domain never reads a clock (it takes the time as data), so
-    /// supplying one is the platform adapter's job, and nothing did it: every
-    /// event went out stamped `0`. That is not a cosmetic gap — the runtime's
-    /// multi-click test is *same target, within the click window, within the
-    /// radius*, and with every press at time `0` the window condition
-    /// (`0 - 0 <= 500ms`) is vacuously true. A press on the same spot was a
-    /// double click no matter how many seconds apart, so a file-manager row
-    /// clicked twice a minute apart opened the directory. Only the elapsed clock
-    /// makes the window mean anything.
+    #[doc = include_str!("runner.doc/now_micros.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn now_micros(&self) -> u64 {
         self.epoch.elapsed().as_micros() as u64
     }
 
-    /// The device-pixel scale the runtime renders at: the display density, floored
-    /// so a degenerate `0` never divides the viewport.
+    #[doc = include_str!("runner.doc/scale.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn scale(&self) -> f32 {
         (self.scale_factor as f32).max(0.05)
     }
 
-    /// Points the runtime's viewport + device scale at the swapchain's physical
-    /// extent and the display density — the kit's HiDPI mapping in one call.
+    #[doc = include_str!("runner.doc/sync_surface.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn sync_surface(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
@@ -413,9 +353,7 @@ impl AppRunner {
         }
     }
 
-    /// Runs a scheduler-gated reactive frame, reads the committed scene, and
-    /// presents it on-screen via the Vello offscreen-render + blit path. A lost
-    /// swapchain is reconfigured and the frame skipped (the next redraw recovers).
+    #[doc = include_str!("runner.doc/render_frame.md")]
     #[allow(clippy::cast_precision_loss)]
     fn render_frame(&mut self) {
         // Only present when a frame was actually produced. A redraw request that
@@ -511,30 +449,14 @@ impl AppRunner {
         }
     }
 
-    /// Requests a redraw of the live window, if any.
+    #[doc = include_str!("runner.doc/request_redraw.md")]
     fn request_redraw(&self) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
     }
 
-    /// Offers the platform's text-entry facility to the focused element, and takes
-    /// it back when focus leaves it (spec §5.12; §6.15 on a touch device).
-    ///
-    /// On a desktop this arms the IME. On a tablet it is what raises and drops the
-    /// **on-screen keyboard**, so getting it wrong is not a subtlety: a window that
-    /// claims text entry for its whole life keeps a keyboard over an app with
-    /// nothing to type into, which is what the calculator did on a real tablet.
-    ///
-    /// The runtime owns focus, so it answers *whether* — this only mirrors the
-    /// answer onto the window, and only when it changed, because
-    /// `set_ime_allowed` is a round trip to the compositor and focus is
-    /// recomputed far more often than it moves.
-    ///
-    /// Called after every window event rather than from the places focus can
-    /// change: focus moves on a click, a Tab, a key that dismisses a field, and
-    /// from an app's own command handler during a frame. Enumerating those is a
-    /// list that goes stale; asking once per event cannot.
+    #[doc = include_str!("runner.doc/sync_ime.md")]
     fn sync_ime(&mut self) {
         let wanted = self.runtime.focus_accepts_text();
         if wanted == self.ime_allowed {
@@ -546,18 +468,9 @@ impl AppRunner {
         }
     }
 
-    /// Assembles a domain button [`PointerEvent`] at the tracked cursor, reusing
-    /// [`PointerConverter::kind`] to map the winit state (the converter has no
-    /// public builder for a button transition *at a position*).
+    #[doc = include_str!("runner.doc/pointer_button_event.md")]
     #[allow(clippy::cast_possible_truncation)]
-    /// Builds the press/release for a left-button change.
-    ///
-    /// It goes through [`PointerConverter`]'s `pressed`/`released` builders rather
-    /// than `PointerEvent::new`, because those are the ones that mark the event
-    /// **trusted** (§2.3). This is the platform-adapter path — a real user gesture —
-    /// and a gated default action (the click → command dispatch) only runs for a
-    /// trusted event, so building the event by hand here silently disabled every
-    /// click in every `App`.
+    #[doc = include_str!("runner.doc/pointer_button_event_2.md")]
     fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
         let at = PhysicalPosition::new(self.cursor.0, self.cursor.1);
         let converter = PointerConverter::new();
@@ -576,9 +489,7 @@ impl AppRunner {
 }
 
 impl ApplicationHandler for AppRunner {
-    /// Creates the window + GPU renderer once the platform is ready, wires the text
-    /// stack, enables IME, and schedules the first frame. A window or GPU failure
-    /// records the reason and exits the loop (never panics — the headless CI path).
+    #[doc = include_str!("runner.doc/resumed.md")]
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -768,9 +679,7 @@ impl ApplicationHandler for AppRunner {
         self.sync_ime();
     }
 
-    /// Polls for landed resource loads each turn: the real blocking executor lands
-    /// a `url()` image a frame later, so an otherwise idle UI repaints when it
-    /// arrives (spec §1.5 / §3.3).
+    #[doc = include_str!("runner.doc/about_to_wait.md")]
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if self.runtime.poll_resource_tasks() > 0 {
             self.runtime.request_frame(FrameReason::UiCommit);
@@ -789,9 +698,7 @@ impl ApplicationHandler for AppRunner {
     }
 }
 
-/// Initialises a wgpu swapchain surface + device/queue for on-screen rendering
-/// from an `Arc<Window>` (the standard pollster `Instance → Surface → Adapter →
-/// Device → Queue` chain, exactly as the windowed examples do).
+#[doc = include_str!("runner.doc/init_gpu.md")]
 fn init_gpu(
     window: &Arc<Window>,
 ) -> Result<

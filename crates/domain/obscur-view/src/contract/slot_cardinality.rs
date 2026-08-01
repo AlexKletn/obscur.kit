@@ -1,22 +1,18 @@
-//! `SlotCardinality`: how many children a slot may hold (spec §2.11, §2.12).
+#![doc = include_str!("slot_cardinality.doc/_module.md")]
 
-/// The number of children a named slot may accept (spec §2.11, §2.12).
-///
-/// Cardinality is an independent trait of a slot, so it lives in its own type
-/// rather than being encoded as loose counts on the slot contract. This keeps
-/// the common shapes explicit and typed.
+#[doc = include_str!("slot_cardinality.doc/SlotCardinality.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotCardinality {
-    /// The slot must contain exactly one child.
+    #[doc = include_str!("slot_cardinality.doc/ExactlyOne.md")]
     ExactlyOne,
-    /// The slot may contain zero or one child.
+    #[doc = include_str!("slot_cardinality.doc/Optional.md")]
     Optional,
-    /// The slot may contain any number of children, including none.
+    #[doc = include_str!("slot_cardinality.doc/Many.md")]
     Many,
 }
 
 impl SlotCardinality {
-    /// Returns whether the given number of children satisfies this cardinality.
+    #[doc = include_str!("slot_cardinality.doc/accepts.md")]
     #[must_use]
     pub const fn accepts(self, count: usize) -> bool {
         match self {

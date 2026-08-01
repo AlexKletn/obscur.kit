@@ -1,68 +1,45 @@
-//! The complete description of a layer surface (spec §6.5).
+#![doc = include_str!("layer_surface_config.doc/_module.md")]
 
 use obscur_geometry::Size;
 
 use super::{LayerAnchor, LayerExclusiveZone, LayerKeyboardInteractivity, LayerKind, LayerOutput};
 
-/// Everything a compositor needs to place a layer surface, as plain data.
-///
-/// This is the whole request. It carries no connection, no protocol object and
-/// no platform type, which is what lets it be built, inspected and tested
-/// without a Wayland session — and what lets a non-Wayland backend refuse it
-/// honestly rather than approximate it.
-///
-/// # Size and anchoring interact
-///
-/// The requested [`size`](Self::size) is only honoured on an axis the surface is
-/// **not** stretched along. A top bar anchored left+right gets the output's
-/// width whatever it asked for; only its height comes from here. A surface must
-/// therefore take its real extent from the configure event, never from this
-/// request. See [`LayerAnchor::stretches_horizontally`].
-///
-/// A zero on a stretched axis is the idiomatic way to say "you decide".
+#[doc = include_str!("layer_surface_config.doc/LayerSurfaceConfig.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerSurfaceConfig {
-    /// The compositor's identifier for this surface, used by its rules and by
-    /// the user's configuration to target it. Conventionally short and stable,
-    /// e.g. `"panel"`.
+    #[doc = include_str!("layer_surface_config.doc/namespace.md")]
     pub namespace: String,
-    /// Which stacking band the surface sits in.
+    #[doc = include_str!("layer_surface_config.doc/layer.md")]
     pub layer: LayerKind,
-    /// Which edges it is pinned to — and, for opposite pairs, stretched between.
+    #[doc = include_str!("layer_surface_config.doc/anchor.md")]
     pub anchor: LayerAnchor,
-    /// The size wanted on any axis the anchoring does not decide, in logical
-    /// pixels.
+    #[doc = include_str!("layer_surface_config.doc/size.md")]
     pub size: Size,
-    /// How much space to reserve from other surfaces.
+    #[doc = include_str!("layer_surface_config.doc/exclusive_zone.md")]
     pub exclusive_zone: LayerExclusiveZone,
-    /// Gaps between the surface and the edges it is anchored to, in logical
-    /// pixels. An unanchored edge's margin is ignored.
+    #[doc = include_str!("layer_surface_config.doc/margin.md")]
     pub margin: Margins,
-    /// Whether the surface takes keyboard focus.
+    #[doc = include_str!("layer_surface_config.doc/keyboard_interactivity.md")]
     pub keyboard_interactivity: LayerKeyboardInteractivity,
-    /// Which output to place the surface on.
+    #[doc = include_str!("layer_surface_config.doc/output.md")]
     pub output: LayerOutput,
 }
 
-/// Per-edge gaps between a layer surface and the edges it is anchored to.
-///
-/// Separate from [`Insets`](obscur_geometry::Insets) because these are **integer
-/// logical pixels** in the protocol, and rounding a float at the boundary is a
-/// decision better made once, here, than at every call site.
+#[doc = include_str!("layer_surface_config.doc/Margins.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Margins {
-    /// Gap from the top edge.
+    #[doc = include_str!("layer_surface_config.doc/top.md")]
     pub top: i32,
-    /// Gap from the right edge.
+    #[doc = include_str!("layer_surface_config.doc/right.md")]
     pub right: i32,
-    /// Gap from the bottom edge.
+    #[doc = include_str!("layer_surface_config.doc/bottom.md")]
     pub bottom: i32,
-    /// Gap from the left edge.
+    #[doc = include_str!("layer_surface_config.doc/left.md")]
     pub left: i32,
 }
 
 impl Margins {
-    /// The same gap on every edge.
+    #[doc = include_str!("layer_surface_config.doc/uniform.md")]
     #[must_use]
     pub const fn uniform(px: i32) -> Self {
         Self {
@@ -75,12 +52,7 @@ impl Margins {
 }
 
 impl LayerSurfaceConfig {
-    /// A surface in the given namespace, with every other choice at its default:
-    /// the `Top` band, no anchor, no reservation, no keyboard.
-    ///
-    /// Unanchored and with a zero size this asks the compositor for a centred
-    /// surface of its own choosing, which is a legal request but rarely the
-    /// intended one — the constructors below are.
+    #[doc = include_str!("layer_surface_config.doc/new.md")]
     #[must_use]
     pub fn new(namespace: impl Into<String>) -> Self {
         Self {
@@ -95,12 +67,7 @@ impl LayerSurfaceConfig {
         }
     }
 
-    /// A bar across the top of the output, `height` logical pixels tall,
-    /// reserving exactly that much space from everything else.
-    ///
-    /// The reservation is the difference between a bar and a floating strip that
-    /// maximised windows slide underneath, so it is part of the constructor
-    /// rather than something to remember afterwards.
+    #[doc = include_str!("layer_surface_config.doc/top_bar.md")]
     #[must_use]
     pub fn top_bar(namespace: impl Into<String>, height: u32) -> Self {
         Self {
@@ -112,7 +79,7 @@ impl LayerSurfaceConfig {
         }
     }
 
-    /// A bar across the bottom of the output, reserving its own height.
+    #[doc = include_str!("layer_surface_config.doc/bottom_bar.md")]
     #[must_use]
     pub fn bottom_bar(namespace: impl Into<String>, height: u32) -> Self {
         Self {
@@ -124,8 +91,7 @@ impl LayerSurfaceConfig {
         }
     }
 
-    /// A full-output overlay above everything, reserving nothing and ignoring
-    /// every other reservation — the lock-screen / on-screen-keyboard shape.
+    #[doc = include_str!("layer_surface_config.doc/overlay.md")]
     #[must_use]
     pub fn overlay(namespace: impl Into<String>) -> Self {
         Self {
@@ -136,53 +102,49 @@ impl LayerSurfaceConfig {
         }
     }
 
-    /// Sets the stacking band.
+    #[doc = include_str!("layer_surface_config.doc/with_layer.md")]
     #[must_use]
     pub const fn with_layer(mut self, layer: LayerKind) -> Self {
         self.layer = layer;
         self
     }
 
-    /// Sets the anchored edges.
+    #[doc = include_str!("layer_surface_config.doc/with_anchor.md")]
     #[must_use]
     pub const fn with_anchor(mut self, anchor: LayerAnchor) -> Self {
         self.anchor = anchor;
         self
     }
 
-    /// Sets the requested size, in logical pixels.
+    #[doc = include_str!("layer_surface_config.doc/with_size.md")]
     #[must_use]
     pub const fn with_size(mut self, size: Size) -> Self {
         self.size = size;
         self
     }
 
-    /// Sets how much space to reserve.
+    #[doc = include_str!("layer_surface_config.doc/with_exclusive_zone.md")]
     #[must_use]
     pub const fn with_exclusive_zone(mut self, zone: LayerExclusiveZone) -> Self {
         self.exclusive_zone = zone;
         self
     }
 
-    /// Sets the per-edge margins.
+    #[doc = include_str!("layer_surface_config.doc/with_margin.md")]
     #[must_use]
     pub const fn with_margin(mut self, margin: Margins) -> Self {
         self.margin = margin;
         self
     }
 
-    /// Places the surface on a particular output, by connector name.
-    ///
-    /// A name that matches nothing connected falls back to the compositor's
-    /// choice rather than failing — a panel must still appear when a monitor is
-    /// unplugged.
+    #[doc = include_str!("layer_surface_config.doc/with_output.md")]
     #[must_use]
     pub fn with_output(mut self, output: LayerOutput) -> Self {
         self.output = output;
         self
     }
 
-    /// Sets whether the surface takes keyboard focus.
+    #[doc = include_str!("layer_surface_config.doc/with_keyboard_interactivity.md")]
     #[must_use]
     pub const fn with_keyboard_interactivity(
         mut self,
@@ -192,13 +154,7 @@ impl LayerSurfaceConfig {
         self
     }
 
-    /// The size the surface should *request*, with a zero on every axis the
-    /// anchoring stretches — the encoding a compositor reads as "you decide".
-    ///
-    /// Asking for a width while anchored to both side edges is not an error and
-    /// not honoured; normalising it here means the request sent on the wire says
-    /// what will actually happen, so a surface that later disagrees with its
-    /// configure event has a real reason to.
+    #[doc = include_str!("layer_surface_config.doc/requested_size.md")]
     #[must_use]
     pub fn requested_size(&self) -> (u32, u32) {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

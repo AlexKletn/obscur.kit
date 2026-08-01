@@ -1,0 +1,1 @@
+An interned symbolic key.

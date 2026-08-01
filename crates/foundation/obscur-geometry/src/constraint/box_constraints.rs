@@ -1,35 +1,20 @@
-//! Min/max box constraints for the measure pass.
+#![doc = include_str!("box_constraints.doc/_module.md")]
 
 use crate::primitive::Size;
 
-/// Lower and upper bounds on a box's logical size, passed down during the
-/// measure phase of layout (spec §4.2).
+#[doc = include_str!("box_constraints.doc/BoxConstraints.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxConstraints {
-    /// Minimum size.
+    #[doc = include_str!("box_constraints.doc/min.md")]
     pub min: Size,
-    /// Maximum size. Components may be [`f32::INFINITY`] for unbounded axes.
+    #[doc = include_str!("box_constraints.doc/max.md")]
     pub max: Size,
-    /// The **containing block's content size**, when the caller knows it — the
-    /// basis a percentage size resolves against (CSS 2.1 §10.2).
-    ///
-    /// `min`/`max` cannot answer this. They are a *range*, and a range means two
-    /// different things at two different moments: "I have decided your size"
-    /// while arranging, and "how small could you be?" while measuring — a
-    /// `min-content` question arrives as a tight `0`. A box that resolved its own
-    /// `width: 100%` against that range therefore read its own border box as its
-    /// containing block and came back one padding wider, every level down.
-    ///
-    /// [`None`] means the caller did not say, and a percentage falls back to
-    /// resolving against `max` — the behaviour every caller had before this
-    /// existed. Servo threads the same distinction as
-    /// `SizeConstraint = Definite | MinMax`; this is its first half, carried
-    /// alongside the range rather than replacing it.
+    #[doc = include_str!("box_constraints.doc/percent_basis.md")]
     pub percent_basis: Option<Size>,
 }
 
 impl BoxConstraints {
-    /// Constraints that admit any size from zero up to `max`.
+    #[doc = include_str!("box_constraints.doc/loose.md")]
     #[must_use]
     pub const fn loose(max: Size) -> Self {
         Self {
@@ -39,36 +24,28 @@ impl BoxConstraints {
         }
     }
 
-    /// Returns these constraints with the containing block's content size
-    /// attached, so a percentage size resolves against **it** rather than against
-    /// whatever range the box was handed.
-    ///
-    /// Set it wherever the caller already knows the containing block — arranging
-    /// a child, laying out a root against the viewport. A measure pass asking a
-    /// box how small it can be knows no such thing and leaves it unset.
+    #[doc = include_str!("box_constraints.doc/with_percent_basis.md")]
     #[must_use]
     pub const fn with_percent_basis(mut self, basis: Size) -> Self {
         self.percent_basis = Some(basis);
         self
     }
 
-    /// The width a percentage resolves against: the containing block's content
-    /// width when known, else the upper bound (the pre-existing behaviour).
+    #[doc = include_str!("box_constraints.doc/percent_width.md")]
     #[must_use]
     pub fn percent_width(self) -> f32 {
         self.percent_basis
             .map_or(self.max.width, |basis| basis.width)
     }
 
-    /// The height a percentage resolves against — see
-    /// [`percent_width`](Self::percent_width).
+    #[doc = include_str!("box_constraints.doc/percent_height.md")]
     #[must_use]
     pub fn percent_height(self) -> f32 {
         self.percent_basis
             .map_or(self.max.height, |basis| basis.height)
     }
 
-    /// Constraints that force exactly `size`.
+    #[doc = include_str!("box_constraints.doc/tight.md")]
     #[must_use]
     pub const fn tight(size: Size) -> Self {
         Self {
@@ -78,7 +55,7 @@ impl BoxConstraints {
         }
     }
 
-    /// Clamps a desired size into these constraints.
+    #[doc = include_str!("box_constraints.doc/constrain.md")]
     #[must_use]
     pub fn constrain(self, desired: Size) -> Size {
         Size::new(
@@ -87,51 +64,7 @@ impl BoxConstraints {
         )
     }
 
-    /// Resolves a desired size the way a box that is allowed to **overflow**
-    /// should be sized: a *tight* axis dictates, a *loose* axis only offers.
-    ///
-    /// Per axis:
-    ///
-    /// * **tight** (`min == max`, as built by [`tight`](Self::tight)) — the caller
-    ///   is not offering space, it is assigning a size. The desired value is
-    ///   ignored and the assigned one is used. An absolutely-positioned box with
-    ///   both insets set, and the root under the viewport, are sized this way.
-    /// * **loose** (`min < max`, as built by [`loose`](Self::loose)) — `max` is the
-    ///   space *available*, not a ceiling the content is obliged to fit. Content
-    ///   that needs more reports more, and the result exceeds `max`. The value is
-    ///   still floored at `min`.
-    ///
-    /// # Why this exists next to `constrain`
-    ///
-    /// [`constrain`](Self::constrain) caps at `max` unconditionally, which reports
-    /// the space a box was *offered* rather than the size it actually took. For
-    /// content that fits, the two agree. For content that does not, `constrain`
-    /// answers with a number that was never true — and the caller cannot tell,
-    /// because overflow and exact-fit come back identical. That matters most for
-    /// intrinsic sizing, where the whole question is "how much does this need?":
-    /// a `min-content` probe offers zero space, and under `constrain` every answer
-    /// would be zero.
-    ///
-    /// `constrain` remains right wherever the caller genuinely means "clip this
-    /// into range" rather than "size this box".
-    ///
-    /// # A zero axis reads as an offer, not an assignment
-    ///
-    /// `loose(Size::ZERO)` and `tight(Size::ZERO)` are the *same value* — both are
-    /// `min == max == 0` — so at zero these two intents are genuinely
-    /// indistinguishable in this model, and this method has to pick one. It picks
-    /// **offer**: a zero axis means "there is no space here", and the box reports
-    /// what it needs.
-    ///
-    /// That is the reading with something real behind it. "You have no space" is
-    /// the `min-content` probe, which must work; "you must be exactly zero" is a
-    /// degenerate assignment (an absolutely-positioned box stretched across a
-    /// zero-wide containing block), and answering it with the content's own size
-    /// costs nothing that was not already collapsed. Reading it the other way would
-    /// silently make every `min-content` answer zero.
-    ///
-    /// Telling the two apart for real needs tightness carried explicitly rather
-    /// than inferred from the numbers — a change to this type, not to this method.
+    #[doc = include_str!("box_constraints.doc/constrain_allowing_overflow.md")]
     #[must_use]
     pub fn constrain_allowing_overflow(self, desired: Size) -> Size {
         Size::new(
@@ -141,13 +74,7 @@ impl BoxConstraints {
     }
 }
 
-/// One axis of [`BoxConstraints::constrain_allowing_overflow`].
-///
-/// `min >= max` covers the tight case (`min == max`) and, defensively, an
-/// over-constrained one — in both the bounds leave no choice to make, so the upper
-/// bound is used rather than propagating a contradiction. `max > 0` keeps a zero
-/// axis out of that branch: see the note on
-/// [`constrain_allowing_overflow`](BoxConstraints::constrain_allowing_overflow).
+#[doc = include_str!("box_constraints.doc/resolve_axis.md")]
 fn resolve_axis(desired: f32, min: f32, max: f32) -> f32 {
     if min >= max && max > 0.0 {
         max

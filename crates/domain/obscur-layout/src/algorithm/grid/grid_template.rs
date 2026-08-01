@@ -1,36 +1,8 @@
-//! `GridTemplate`: the column and row track lists of a grid.
+#![doc = include_str!("grid_template.doc/_module.md")]
 
 use super::{TrackList, TrackSize};
 
-/// The track template of a grid: its column and row sizing functions.
-///
-/// A `GridTemplate` is the CSS `grid-template-columns` / `grid-template-rows`
-/// pair, each a [`TrackList`] (spec §4.1) — explicit tracks plus an optional
-/// `repeat(auto-fill | auto-fit, …)` auto-repetition. Columns drive the horizontal
-/// track sizing; rows drive the vertical. The auto-repeat (if any) is expanded to
-/// a concrete track vector inside the layout algorithm, where the container's
-/// content extent — the basis for the repetition count — is known.
-///
-/// # Implicit rows
-///
-/// `rows` may be **empty** (or shorter than the number of rows the items occupy).
-/// Rows past the end of the explicit list are *implicit* and are sized as
-/// [`TrackSize::Auto`] — as tall as the tallest item placed in them. An empty
-/// `rows` list therefore yields an all-auto-row grid, which is the common
-/// "columns only" template.
-///
-/// `columns` should be non-empty; the grid algorithm treats an empty column list
-/// as a single flexible column so layout always has at least one column to place
-/// items into.
-///
-/// # Implicit-track sizes (`grid-auto-columns` / `grid-auto-rows`)
-///
-/// [`auto_columns`](Self::auto_columns) / [`auto_rows`](Self::auto_rows) hold the
-/// sizing functions for *implicit* tracks — those created past the explicit
-/// template by placement / auto-flow. The list is **cycled**: the n-th implicit
-/// track on an axis uses index `n % len`. An **empty** list means the default
-/// single content-sized `auto` (byte-identical to the historical behaviour where
-/// every implicit track was `Auto`).
+#[doc = include_str!("grid_template.doc/GridTemplate.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GridTemplate {
     columns: TrackList,
@@ -40,12 +12,7 @@ pub struct GridTemplate {
 }
 
 impl GridTemplate {
-    /// Builds a template from explicit `columns` and `rows` track vectors (no
-    /// auto-repeat).
-    ///
-    /// Pass an empty `rows` vector for a columns-only template whose rows are all
-    /// implicit (auto). This is the common no-repeat constructor; each vector
-    /// becomes a [`TrackList::from_tracks`].
+    #[doc = include_str!("grid_template.doc/new.md")]
     #[must_use]
     pub fn new(columns: Vec<TrackSize>, rows: Vec<TrackSize>) -> Self {
         Self {
@@ -56,8 +23,7 @@ impl GridTemplate {
         }
     }
 
-    /// Builds a template from column and row [`TrackList`]s (each of which may
-    /// carry an auto-repeat).
+    #[doc = include_str!("grid_template.doc/from_track_lists.md")]
     #[must_use]
     pub fn from_track_lists(columns: TrackList, rows: TrackList) -> Self {
         Self {
@@ -68,7 +34,7 @@ impl GridTemplate {
         }
     }
 
-    /// Builds a columns-only template; every row is implicit (auto).
+    #[doc = include_str!("grid_template.doc/columns_only.md")]
     #[must_use]
     pub fn columns_only(columns: Vec<TrackSize>) -> Self {
         Self {
@@ -79,13 +45,7 @@ impl GridTemplate {
         }
     }
 
-    /// Returns a copy with the implicit-track sizing lists (`grid-auto-columns` /
-    /// `grid-auto-rows`) replaced.
-    ///
-    /// Each list sizes the *implicit* tracks on its axis, cycled by the n-th
-    /// implicit track using index `n % len`. An empty list keeps the default
-    /// content-sized `auto` for that axis (byte-identical to the historical
-    /// all-`Auto` implicit tracks).
+    #[doc = include_str!("grid_template.doc/with_auto_tracks.md")]
     #[must_use]
     pub fn with_auto_tracks(
         mut self,
@@ -97,25 +57,25 @@ impl GridTemplate {
         self
     }
 
-    /// The column track list.
+    #[doc = include_str!("grid_template.doc/columns.md")]
     #[must_use]
     pub const fn columns(&self) -> &TrackList {
         &self.columns
     }
 
-    /// The row track list (may be empty → all rows implicit/auto).
+    #[doc = include_str!("grid_template.doc/rows.md")]
     #[must_use]
     pub const fn rows(&self) -> &TrackList {
         &self.rows
     }
 
-    /// The `grid-auto-columns` sizes for implicit column tracks (empty → `auto`).
+    #[doc = include_str!("grid_template.doc/auto_columns.md")]
     #[must_use]
     pub fn auto_columns(&self) -> &[TrackSize] {
         &self.auto_columns
     }
 
-    /// The `grid-auto-rows` sizes for implicit row tracks (empty → `auto`).
+    #[doc = include_str!("grid_template.doc/auto_rows.md")]
     #[must_use]
     pub fn auto_rows(&self) -> &[TrackSize] {
         &self.auto_rows

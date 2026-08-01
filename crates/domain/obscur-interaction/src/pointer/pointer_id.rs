@@ -1,53 +1,29 @@
-//! The [`PointerId`] identity for a single pointer or contact (spec §4.7).
+#![doc = include_str!("pointer_id.doc/_module.md")]
 
-/// Stable identity for one pointer or contact point (spec §4.7).
-///
-/// A single interaction session may involve several concurrent pointers: a
-/// mouse plus multiple simultaneous touch contacts. Each pointer carries a
-/// `PointerId` so multi-pointer (touch) input can be tracked and routed
-/// independently. By convention the mouse is [`PointerId::MOUSE`] (raw `0`) and
-/// every touch contact is minted a distinct id. This is a *local* newtype:
-/// the interaction crate mints and compares these handles itself. The numeric
-/// value carries no meaning outside the subsystem that mints it.
+#[doc = include_str!("pointer_id.doc/PointerId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PointerId(u64);
 
-/// The bit that marks a touch contact's id, keeping the platform's contact
-/// numbering clear of [`PointerId::MOUSE`] and of any host-minted handle.
+#[doc = include_str!("pointer_id.doc/TOUCH_NAMESPACE.md")]
 const TOUCH_NAMESPACE: u64 = 1 << 63;
 
 impl PointerId {
-    /// The conventional identity for the system mouse pointer (raw `0`).
+    #[doc = include_str!("pointer_id.doc/MOUSE.md")]
     pub const MOUSE: Self = Self::from_raw(0);
 
-    /// Wraps a raw handle value into a `PointerId`.
+    #[doc = include_str!("pointer_id.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// The identity of touchscreen `contact`, minted in a namespace disjoint from
-    /// [`MOUSE`](Self::MOUSE).
-    ///
-    /// A platform numbers its contacts from zero, so passing a raw contact id
-    /// through [`from_raw`](Self::from_raw) would make **the first finger down**
-    /// indistinguishable from the mouse — the one collision that is guaranteed to
-    /// happen rather than merely possible. Lifting the contact into the high
-    /// namespace keeps the two apart for the whole u64 range a platform can
-    /// realistically number contacts in, and it does so without the adapter
-    /// having to keep a mapping table (which would make an otherwise pure
-    /// converter stateful).
-    ///
-    /// The namespace is a *convention*, not an enforced type: a host that mints
-    /// its own ids through `from_raw` with the top bit set can still collide, and
-    /// nothing here detects that. The device a contact came from is answered by
-    /// [`PointerDevice`](super::PointerDevice) on the event, not by this id.
+    #[doc = include_str!("pointer_id.doc/touch.md")]
     #[must_use]
     pub const fn touch(contact: u64) -> Self {
         Self(contact | TOUCH_NAMESPACE)
     }
 
-    /// Returns the raw handle value backing this identifier.
+    #[doc = include_str!("pointer_id.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

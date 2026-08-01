@@ -1,59 +1,45 @@
-//! The presentation policy an application owns: fullscreen and its optional
-//! controls (spec §6.5).
+#![doc = include_str!("presentation_mode.doc/_module.md")]
 
 use crate::display::DisplayId;
 use crate::presentation::FullscreenMode;
 
-/// How the user may leave a kiosk or presentation session (spec §6.5).
-///
-/// `SafeEscapePolicy` is a tightly-coupled part of [`PresentationMode`]: it only
-/// has meaning as the escape rule of a presentation policy, so it is colocated
-/// here rather than given its own module. The default is
-/// [`SafeEscapePolicy::Allow`], the safe choice that never traps the user.
+#[doc = include_str!("presentation_mode.doc/SafeEscapePolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SafeEscapePolicy {
-    /// The user may leave at any time with the conventional gesture.
+    #[doc = include_str!("presentation_mode.doc/Allow.md")]
     Allow,
-    /// The user must hold the escape gesture to leave, guarding against
-    /// accidental exits.
+    #[doc = include_str!("presentation_mode.doc/RequireHold.md")]
     RequireHold,
-    /// The application-provided exit is the only way out.
+    #[doc = include_str!("presentation_mode.doc/Disabled.md")]
     Disabled,
 }
 
 impl Default for SafeEscapePolicy {
-    /// The default policy is [`SafeEscapePolicy::Allow`], the safe default.
+    #[doc = include_str!("presentation_mode.doc/default.md")]
     fn default() -> Self {
         Self::Allow
     }
 }
 
-/// The presentation policy an application owns (spec §6.5).
-///
-/// This bundles the fullscreen form with its optional controls: hiding the
-/// cursor, inhibiting sleep, choosing the target monitor, restoring the previous
-/// window state on exit, and the safe-escape policy. The application owns
-/// policy; a backend applies these choices without adding any of its own.
+#[doc = include_str!("presentation_mode.doc/PresentationMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PresentationMode {
-    /// The fullscreen form to present in.
+    #[doc = include_str!("presentation_mode.doc/fullscreen.md")]
     pub fullscreen: FullscreenMode,
-    /// Whether to hide the cursor while presenting.
+    #[doc = include_str!("presentation_mode.doc/hide_cursor.md")]
     pub hide_cursor: bool,
-    /// Whether to inhibit system/display sleep while presenting.
+    #[doc = include_str!("presentation_mode.doc/inhibit_sleep.md")]
     pub inhibit_sleep: bool,
-    /// The display to present on, or `None` to use the current display.
+    #[doc = include_str!("presentation_mode.doc/target_display.md")]
     pub target_display: Option<DisplayId>,
-    /// Whether to restore the previous window state when presentation ends.
+    #[doc = include_str!("presentation_mode.doc/restore_previous_state.md")]
     pub restore_previous_state: bool,
-    /// How the user may leave the presentation.
+    #[doc = include_str!("presentation_mode.doc/safe_escape.md")]
     pub safe_escape: SafeEscapePolicy,
 }
 
 impl PresentationMode {
-    /// Creates a windowed, non-fullscreen policy: cursor shown, sleep not
-    /// inhibited, current display, previous state restored on exit, and escape
-    /// allowed.
+    #[doc = include_str!("presentation_mode.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -66,80 +52,79 @@ impl PresentationMode {
         }
     }
 
-    /// Sets the fullscreen form, returning the updated policy.
+    #[doc = include_str!("presentation_mode.doc/with_fullscreen.md")]
     #[must_use]
     pub const fn with_fullscreen(mut self, fullscreen: FullscreenMode) -> Self {
         self.fullscreen = fullscreen;
         self
     }
 
-    /// Sets whether to hide the cursor, returning the updated policy.
+    #[doc = include_str!("presentation_mode.doc/hide_cursor_2.md")]
     #[must_use]
     pub const fn hide_cursor(mut self, hide_cursor: bool) -> Self {
         self.hide_cursor = hide_cursor;
         self
     }
 
-    /// Sets whether to inhibit sleep, returning the updated policy.
+    #[doc = include_str!("presentation_mode.doc/inhibit_sleep_2.md")]
     #[must_use]
     pub const fn inhibit_sleep(mut self, inhibit_sleep: bool) -> Self {
         self.inhibit_sleep = inhibit_sleep;
         self
     }
 
-    /// Sets the target display, returning the updated policy.
+    #[doc = include_str!("presentation_mode.doc/on_display.md")]
     #[must_use]
     pub const fn on_display(mut self, display: DisplayId) -> Self {
         self.target_display = Some(display);
         self
     }
 
-    /// Sets whether to restore the previous window state on exit, returning the
-    /// updated policy.
+    #[doc = include_str!("presentation_mode.doc/restore_previous_state_2.md")]
     #[must_use]
     pub const fn restore_previous_state(mut self, restore: bool) -> Self {
         self.restore_previous_state = restore;
         self
     }
 
-    /// Sets the safe-escape policy, returning the updated policy.
+    #[doc = include_str!("presentation_mode.doc/with_safe_escape.md")]
     #[must_use]
     pub const fn with_safe_escape(mut self, safe_escape: SafeEscapePolicy) -> Self {
         self.safe_escape = safe_escape;
         self
     }
 
-    /// Returns the fullscreen form to present in.
+    #[doc = include_str!("presentation_mode.doc/fullscreen_2.md")]
     #[must_use]
     pub const fn fullscreen(&self) -> FullscreenMode {
         self.fullscreen
     }
 
-    /// Returns whether the cursor is hidden while presenting.
+    #[doc = include_str!("presentation_mode.doc/hides_cursor.md")]
     #[must_use]
     pub const fn hides_cursor(&self) -> bool {
         self.hide_cursor
     }
 
-    /// Returns whether sleep is inhibited while presenting.
+    #[doc = include_str!("presentation_mode.doc/inhibits_sleep.md")]
     #[must_use]
     pub const fn inhibits_sleep(&self) -> bool {
         self.inhibit_sleep
     }
 
-    /// Returns the target display, or `None` for the current display.
+    #[doc = include_str!("presentation_mode.doc/target_display_2.md")]
     #[must_use]
     pub const fn target_display(&self) -> Option<DisplayId> {
         self.target_display
     }
 
-    /// Returns whether the previous window state is restored on exit.
+    #[doc = include_str!("presentation_mode.doc/restores_previous_state.md")]
     #[must_use]
     pub const fn restores_previous_state(&self) -> bool {
         self.restore_previous_state
     }
 
-    /// Returns how the user may leave the presentation.
+    #[doc = include_str!("presentation_mode.doc/safe_escape_2.md")]
     #[must_use]
     pub const fn safe_escape(&self) -> SafeEscapePolicy {
         self.safe_escape
@@ -147,7 +132,7 @@ impl PresentationMode {
 }
 
 impl Default for PresentationMode {
-    /// The default policy is the windowed baseline from [`PresentationMode::new`].
+    #[doc = include_str!("presentation_mode.doc/default_2.md")]
     fn default() -> Self {
         Self::new()
     }

@@ -1,28 +1,27 @@
-//! Owner side of a cancellation signal.
+#![doc = include_str!("cancellation_source.doc/_module.md")]
 
 use super::CancellationToken;
 
-/// The owning side of a cancellation signal. Dropping or cancelling it flips
-/// every derived [`CancellationToken`].
+#[doc = include_str!("cancellation_source.doc/CancellationSource.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CancellationSource {
     token: CancellationToken,
 }
 
 impl CancellationSource {
-    /// Creates a fresh, un-cancelled source.
+    #[doc = include_str!("cancellation_source.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns a token observing this source.
+    #[doc = include_str!("cancellation_source.doc/token.md")]
     #[must_use]
     pub fn token(&self) -> CancellationToken {
         self.token.clone()
     }
 
-    /// Requests cancellation of all derived tokens.
+    #[doc = include_str!("cancellation_source.doc/cancel.md")]
     pub fn cancel(&self) {
         self.token.request();
     }

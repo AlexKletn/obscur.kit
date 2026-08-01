@@ -1,35 +1,24 @@
-//! A single cached measure/arrange result for a node.
+#![doc = include_str!("cache_entry.doc/_module.md")]
 
 use crate::model::{LayoutBox, LayoutResult};
 use obscur_geometry::BoxConstraints;
 use obscur_identity::VersionStamp;
 
-/// One node's cached layout, stored by [`LayoutCache`](super::LayoutCache)
-/// (spec §4.3).
-///
-/// It records the [`BoxConstraints`] the node was measured under together with
-/// the resulting [`LayoutResult`], an optional arranged [`LayoutBox`], and the
-/// [`VersionStamp`] at which it was produced. The stored constraints are the
-/// cache key for the **early-exit on stable geometry**: a later measure request
-/// hits only when its constraints equal the ones recorded here.
-///
-/// Because [`BoxConstraints`], [`LayoutResult`], and [`LayoutBox`] hold `f32`,
-/// this type is `PartialEq` but not `Eq`.
+#[doc = include_str!("cache_entry.doc/CacheEntry.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CacheEntry {
-    /// The constraints the node was measured under.
+    #[doc = include_str!("cache_entry.doc/constraints.md")]
     constraints: BoxConstraints,
-    /// The measured result under those constraints.
+    #[doc = include_str!("cache_entry.doc/result.md")]
     result: LayoutResult,
-    /// The arranged box, if the node has been arranged since it was measured.
+    #[doc = include_str!("cache_entry.doc/arranged.md")]
     arranged: Option<LayoutBox>,
-    /// The version at which this entry was produced.
+    #[doc = include_str!("cache_entry.doc/version.md")]
     version: VersionStamp,
 }
 
 impl CacheEntry {
-    /// Creates an entry for a measure produced under `constraints` at `version`,
-    /// with no arranged box yet.
+    #[doc = include_str!("cache_entry.doc/new.md")]
     #[must_use]
     pub const fn new(
         constraints: BoxConstraints,
@@ -44,40 +33,36 @@ impl CacheEntry {
         }
     }
 
-    /// The constraints this entry was measured under (the cache key).
+    #[doc = include_str!("cache_entry.doc/constraints_2.md")]
     #[must_use]
     pub const fn constraints(&self) -> BoxConstraints {
         self.constraints
     }
 
-    /// The measured result.
+    #[doc = include_str!("cache_entry.doc/result_2.md")]
     #[must_use]
     pub const fn result(&self) -> LayoutResult {
         self.result
     }
 
-    /// The arranged box, if one has been recorded.
+    #[doc = include_str!("cache_entry.doc/arranged_2.md")]
     #[must_use]
     pub const fn arranged(&self) -> Option<LayoutBox> {
         self.arranged
     }
 
-    /// The version at which this entry was produced.
+    #[doc = include_str!("cache_entry.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> VersionStamp {
         self.version
     }
 
-    /// Records the arranged box for this entry.
+    #[doc = include_str!("cache_entry.doc/set_arranged.md")]
     pub fn set_arranged(&mut self, arranged: LayoutBox) {
         self.arranged = Some(arranged);
     }
 
-    /// Whether this entry's stored constraints exactly equal `constraints`.
-    ///
-    /// Equality is the exact `f32` `PartialEq` comparison: a cache hit requires
-    /// identical constraints, so a measure under any different constraints
-    /// misses.
+    #[doc = include_str!("cache_entry.doc/matches_constraints.md")]
     #[must_use]
     pub fn matches_constraints(&self, constraints: BoxConstraints) -> bool {
         self.constraints == constraints

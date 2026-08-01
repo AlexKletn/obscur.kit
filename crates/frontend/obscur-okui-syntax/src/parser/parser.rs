@@ -1,84 +1,23 @@
-//! `Parser`: an error-tolerant recursive-descent parser for `.okui` source
-//! (spec §2.9) that always yields a lossless [`SyntaxTree`].
+#![doc = include_str!("parser.doc/_module.md")]
 
 use crate::lexer::{Lexer, Token, TokenKind};
 use crate::parser::{ParseError, ParseErrorKind, ParseEvent, ParseResult};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken, SyntaxTree};
 
-/// A recursive-descent parser for the `.okui` markup language (spec §2.9).
-///
-/// The parser turns source text into a lossless [`SyntaxTree`] paired with any
-/// recoverable diagnostics ([`ParseResult`]). It is *total*: it never panics,
-/// never hangs, and never drops a byte — `result.tree().text()` always equals
-/// the input, malformed or not.
-///
-/// # Algorithm
-///
-/// [`Parser::parse`] runs in three phases:
-///
-/// 1. **Lex.** [`Lexer::tokenize`] produces a lossless [`Token`] stream ending
-///    in an [`Eof`](TokenKind::Eof) marker.
-/// 2. **Walk.** A recursive-descent walk over the token slice (with a `usize`
-///    cursor) emits a flat [`ParseEvent`] stream —
-///    [`StartNode`](ParseEvent::StartNode) / [`Token`](ParseEvent::Token) /
-///    [`FinishNode`](ParseEvent::FinishNode) / [`Error`](ParseEvent::Error).
-///    *Every* token, including whitespace trivia and stray/erroneous tokens, is
-///    emitted into the currently open node, which is what keeps the tree
-///    lossless.
-/// 3. **Materialize.** [`build_tree`] folds the balanced event stream into a
-///    [`SyntaxNode`] tree using an explicit node stack, collecting the
-///    [`Error`](ParseEvent::Error) events into the diagnostics vector.
-///
-/// # Grammar
-///
-/// ```text
-/// document  := (element | expression | text)*                 -> Document
-/// element   := '<' Ident attribute* ('/>' | '>' child* close) -> Element
-/// close     := '<' '/' Ident '>'                              -> CloseTag
-/// attribute := Ident (':' Ident)? ('=' value)?                -> Attribute
-/// value     := String | Number | Ident | '{' expr '}'        -> AttributeValue
-/// expression:= '{' expr_tokens '}'                            -> Expression
-/// text      := (any run of non-`<`, non-`{` tokens)          -> TextNode
-/// ```
-///
-/// The open tag `<Name …>` becomes an [`OpenTag`](SyntaxKind::OpenTag) child
-/// node and the close `</Name>` a [`CloseTag`](SyntaxKind::CloseTag) child
-/// node; both live directly inside the element node alongside its children.
-///
-/// ## Control-flow classification
-///
-/// The element node is labelled [`Conditional`](SyntaxKind::Conditional) when
-/// its tag name is `If`, `ElseIf` or `Else`, and [`ForLoop`](SyntaxKind::ForLoop)
-/// when it is `For` or `VirtualFor`; every other tag yields a plain
-/// [`Element`](SyntaxKind::Element). This is only a hint — the compiler performs
-/// the authoritative classification later.
-///
-/// ## Error recovery
-///
-/// The parser never aborts. On an unexpected token it records a [`ParseError`],
-/// wraps the offending token(s) in an [`ErrorNode`](SyntaxKind::ErrorNode) and
-/// advances so the cursor always makes progress. A missing or mismatched close
-/// tag yields an [`ExpectedClose`](ParseErrorKind::ExpectedClose) /
-/// [`MismatchedCloseTag`](ParseErrorKind::MismatchedCloseTag) diagnostic but the
-/// element node is still finished. Because every token is emitted regardless,
-/// losslessness holds even for malformed input.
+#[doc = include_str!("parser.doc/Parser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct Parser {
     _private: (),
 }
 
 impl Parser {
-    /// Creates a new parser.
+    #[doc = include_str!("parser.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self { _private: () }
     }
 
-    /// Parses `source` into a lossless [`ParseResult`].
-    ///
-    /// The returned tree always round-trips the input
-    /// (`result.tree().text() == source`); any problems are reported in
-    /// `result.errors()`.
+    #[doc = include_str!("parser.doc/parse.md")]
     #[must_use]
     pub fn parse(&self, source: &str) -> ParseResult {
         let tokens = Lexer::new().tokenize(source);
@@ -89,8 +28,7 @@ impl Parser {
     }
 }
 
-/// The mutable state of a single parse: the token slice, a cursor and the
-/// growing event stream.
+#[doc = include_str!("parser.doc/Walker.md")]
 struct Walker<'t> {
     tokens: &'t [Token],
     pos: usize,
@@ -108,29 +46,29 @@ impl<'t> Walker<'t> {
 
     // ---- cursor primitives -------------------------------------------------
 
-    /// Kind of the token `n` positions ahead, or [`Eof`](TokenKind::Eof).
+    #[doc = include_str!("parser.doc/nth_kind.md")]
     fn nth_kind(&self, n: usize) -> TokenKind {
         self.tokens
             .get(self.pos + n)
             .map_or(TokenKind::Eof, Token::kind)
     }
 
-    /// Kind of the current token.
+    #[doc = include_str!("parser.doc/peek.md")]
     fn peek(&self) -> TokenKind {
         self.nth_kind(0)
     }
 
-    /// Text of the token `n` positions ahead, or `""`.
+    #[doc = include_str!("parser.doc/nth_text.md")]
     fn nth_text(&self, n: usize) -> &'t str {
         self.tokens.get(self.pos + n).map_or("", Token::text)
     }
 
-    /// Byte offset of the current token (the `Eof` marker sits at `source.len()`).
+    #[doc = include_str!("parser.doc/offset.md")]
     fn offset(&self) -> u32 {
         self.tokens.get(self.pos).map_or(0, Token::offset)
     }
 
-    /// `true` once the cursor reached the `Eof` marker.
+    #[doc = include_str!("parser.doc/at_end.md")]
     fn at_end(&self) -> bool {
         self.peek().is_eof()
     }
@@ -150,7 +88,7 @@ impl<'t> Walker<'t> {
             .push(ParseEvent::Error(ParseError::new(kind, message, offset)));
     }
 
-    /// Emits the current token as a leaf and advances. No-op at `Eof`.
+    #[doc = include_str!("parser.doc/bump.md")]
     fn bump(&mut self) {
         if let Some(tok) = self.tokens.get(self.pos)
             && !tok.kind().is_eof()
@@ -161,7 +99,7 @@ impl<'t> Walker<'t> {
         }
     }
 
-    /// Emits any run of whitespace trivia into the currently open node.
+    #[doc = include_str!("parser.doc/bump_trivia.md")]
     fn bump_trivia(&mut self) {
         while self.peek() == TokenKind::Whitespace {
             self.bump();
@@ -170,7 +108,7 @@ impl<'t> Walker<'t> {
 
     // ---- grammar -----------------------------------------------------------
 
-    /// `document := (element | expression | text)*`
+    #[doc = include_str!("parser.doc/parse_document.md")]
     fn parse_document(&mut self) {
         self.start(SyntaxKind::Document);
         while !self.at_end() {
@@ -183,8 +121,7 @@ impl<'t> Walker<'t> {
         self.finish();
     }
 
-    /// Dispatches a leading `<`: a real element (`<Ident …>`) or a stray `<`
-    /// that is wrapped in an [`ErrorNode`](SyntaxKind::ErrorNode).
+    #[doc = include_str!("parser.doc/parse_element_or_stray.md")]
     fn parse_element_or_stray(&mut self) {
         if self.nth_kind(1) == TokenKind::Ident {
             self.parse_element();
@@ -201,9 +138,7 @@ impl<'t> Walker<'t> {
         }
     }
 
-    /// `element := '<' Ident attribute* ('/>' | '>' child* close)`
-    ///
-    /// Precondition: `peek() == LAngle` and the next token is an `Ident`.
+    #[doc = include_str!("parser.doc/parse_element.md")]
     fn parse_element(&mut self) {
         let name = self.nth_text(1).to_owned();
         let kind = classify_element_kind(&name);
@@ -218,8 +153,7 @@ impl<'t> Walker<'t> {
         self.finish();
     }
 
-    /// `'<' Ident attribute* ('/>' | '>')` → an [`OpenTag`](SyntaxKind::OpenTag)
-    /// node. Returns `true` when the tag is self-closing (`/>`).
+    #[doc = include_str!("parser.doc/parse_open_tag.md")]
     fn parse_open_tag(&mut self) -> bool {
         self.start(SyntaxKind::OpenTag);
         self.bump(); // `<`
@@ -275,9 +209,7 @@ impl<'t> Walker<'t> {
         self_closing
     }
 
-    /// `attribute := Ident (':' Ident)? ('=' value)?`
-    ///
-    /// Precondition: `peek() == Ident`.
+    #[doc = include_str!("parser.doc/parse_attribute.md")]
     fn parse_attribute(&mut self) {
         self.start(SyntaxKind::Attribute);
         self.bump(); // name Ident
@@ -300,8 +232,7 @@ impl<'t> Walker<'t> {
         self.finish();
     }
 
-    /// `value := String | Number | Ident | '{' expr '}'` →
-    /// an [`AttributeValue`](SyntaxKind::AttributeValue) node.
+    #[doc = include_str!("parser.doc/parse_attribute_value.md")]
     fn parse_attribute_value(&mut self) {
         match self.peek() {
             TokenKind::LBrace => {
@@ -326,10 +257,7 @@ impl<'t> Walker<'t> {
         }
     }
 
-    /// `expression := '{' expr_tokens '}'` → an [`Expression`](SyntaxKind::Expression)
-    /// node. Captures every token up to the matching `}`, tracking brace depth.
-    ///
-    /// Precondition: `peek() == LBrace`.
+    #[doc = include_str!("parser.doc/parse_expression.md")]
     fn parse_expression(&mut self) {
         let brace_off = self.offset();
         self.start(SyntaxKind::Expression);
@@ -361,8 +289,7 @@ impl<'t> Walker<'t> {
         self.finish();
     }
 
-    /// A run of children between an element's open and close tags. Stops at the
-    /// element's close tag (`</`) or end of input.
+    #[doc = include_str!("parser.doc/parse_children.md")]
     fn parse_children(&mut self) {
         while !self.at_end() {
             match self.peek() {
@@ -378,9 +305,7 @@ impl<'t> Walker<'t> {
         }
     }
 
-    /// `close := '<' '/' Ident '>'` → a [`CloseTag`](SyntaxKind::CloseTag) node.
-    /// Reports a diagnostic (but still recovers) when the close tag is absent or
-    /// its name does not match `expected`.
+    #[doc = include_str!("parser.doc/parse_close_tag.md")]
     fn parse_close_tag(&mut self, expected: &str) {
         if self.at_end() {
             self.error(
@@ -430,11 +355,7 @@ impl<'t> Walker<'t> {
         self.finish();
     }
 
-    /// `text := (run of non-`<`, non-`{` tokens)` → a [`TextNode`](SyntaxKind::TextNode).
-    ///
-    /// Absorbs raw text, whitespace and any stray non-markup tokens so nothing
-    /// is lost. Always consumes at least one token when called on a non-markup
-    /// token, guaranteeing forward progress.
+    #[doc = include_str!("parser.doc/parse_text_node.md")]
     fn parse_text_node(&mut self) {
         self.start(SyntaxKind::TextNode);
         while !self.at_end() && self.peek() != TokenKind::LAngle && self.peek() != TokenKind::LBrace
@@ -445,9 +366,7 @@ impl<'t> Walker<'t> {
     }
 }
 
-/// Classifies an element by its tag name (see [`Parser`] docs). `If`/`ElseIf`/
-/// `Else` → [`Conditional`](SyntaxKind::Conditional); `For`/`VirtualFor` →
-/// [`ForLoop`](SyntaxKind::ForLoop); everything else → [`Element`](SyntaxKind::Element).
+#[doc = include_str!("parser.doc/classify_element_kind.md")]
 fn classify_element_kind(name: &str) -> SyntaxKind {
     match name {
         "If" | "ElseIf" | "Else" => SyntaxKind::Conditional,
@@ -456,16 +375,7 @@ fn classify_element_kind(name: &str) -> SyntaxKind {
     }
 }
 
-/// Materializes a balanced [`ParseEvent`] stream into a [`SyntaxNode`] tree and
-/// its collected [`ParseError`]s.
-///
-/// An explicit stack of in-progress nodes is maintained:
-/// [`StartNode`](ParseEvent::StartNode) pushes a node,
-/// [`Token`](ParseEvent::Token) attaches to the top node,
-/// [`FinishNode`](ParseEvent::FinishNode) pops the top and attaches it to the
-/// new top (or, for the outermost node, becomes the root), and
-/// [`Error`](ParseEvent::Error) is collected. Any unbalanced remainder is folded
-/// defensively so a root is always produced.
+#[doc = include_str!("parser.doc/build_tree.md")]
 fn build_tree(events: Vec<ParseEvent>) -> (SyntaxNode, Vec<ParseError>) {
     let mut stack: Vec<SyntaxNode> = Vec::new();
     let mut root: Option<SyntaxNode> = None;
@@ -493,8 +403,7 @@ fn build_tree(events: Vec<ParseEvent>) -> (SyntaxNode, Vec<ParseError>) {
     (root, errors)
 }
 
-/// Pops the top node and attaches it to its parent, or records it as the root
-/// when the stack becomes empty.
+#[doc = include_str!("parser.doc/attach_or_root.md")]
 fn attach_or_root(stack: &mut Vec<SyntaxNode>, root: &mut Option<SyntaxNode>) {
     if let Some(node) = stack.pop() {
         match stack.last_mut() {

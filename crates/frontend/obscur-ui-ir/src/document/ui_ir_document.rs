@@ -1,4 +1,4 @@
-//! `UiIrDocument`: the complete compiled UI document (spec §2.5).
+#![doc = include_str!("ui_ir_document.doc/_module.md")]
 
 use obscur_capability::CapabilityId;
 
@@ -6,15 +6,7 @@ use crate::document::UiIrNode;
 use crate::source::SourceMap;
 use crate::version::UiIrVersion;
 
-/// A complete compiled UI document: a versioned IR tree with its source map and
-/// declared capability requirements (spec §2.5).
-///
-/// A document bundles everything needed to interpret a compiled UI: the
-/// [`version`](UiIrDocument::version) it was written against, the
-/// [`root`](UiIrDocument::root) IR node, a [`source_map`](UiIrDocument::source_map)
-/// resolving node ids back to source spans for diagnostics, and the set of
-/// [`required_capabilities`](UiIrDocument::required_capabilities) the host must
-/// grant for the document to run.
+#[doc = include_str!("ui_ir_document.doc/UiIrDocument.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiIrDocument {
     version: UiIrVersion,
@@ -24,8 +16,7 @@ pub struct UiIrDocument {
 }
 
 impl UiIrDocument {
-    /// Creates a document over `root` at the current IR version, with an empty
-    /// source map and no capability requirements.
+    #[doc = include_str!("ui_ir_document.doc/new.md")]
     #[must_use]
     pub fn new(root: UiIrNode) -> Self {
         Self {
@@ -36,71 +27,70 @@ impl UiIrDocument {
         }
     }
 
-    /// Sets the IR format version, returning the updated document.
+    #[doc = include_str!("ui_ir_document.doc/with_version.md")]
     #[must_use]
     pub const fn with_version(mut self, version: UiIrVersion) -> Self {
         self.version = version;
         self
     }
 
-    /// Sets the source map, returning the updated document.
+    #[doc = include_str!("ui_ir_document.doc/with_source_map.md")]
     #[must_use]
     pub fn with_source_map(mut self, source_map: SourceMap) -> Self {
         self.source_map = source_map;
         self
     }
 
-    /// Adds `capability` to the document's requirements, returning the updated
-    /// document.
+    #[doc = include_str!("ui_ir_document.doc/requiring.md")]
     #[must_use]
     pub fn requiring(mut self, capability: CapabilityId) -> Self {
         self.required_capabilities.push(capability);
         self
     }
 
-    /// Returns the IR format version the document was written against.
+    #[doc = include_str!("ui_ir_document.doc/version.md")]
     #[must_use]
     pub const fn version(&self) -> UiIrVersion {
         self.version
     }
 
-    /// Returns the root IR node.
+    #[doc = include_str!("ui_ir_document.doc/root.md")]
     #[must_use]
     pub const fn root(&self) -> &UiIrNode {
         &self.root
     }
 
-    /// Returns a mutable reference to the root IR node.
+    #[doc = include_str!("ui_ir_document.doc/root_mut.md")]
     #[must_use]
     pub fn root_mut(&mut self) -> &mut UiIrNode {
         &mut self.root
     }
 
-    /// Returns the source map linking node ids back to source spans.
+    #[doc = include_str!("ui_ir_document.doc/source_map.md")]
     #[must_use]
     pub const fn source_map(&self) -> &SourceMap {
         &self.source_map
     }
 
-    /// Returns the capabilities this document requires from the host.
+    #[doc = include_str!("ui_ir_document.doc/required_capabilities.md")]
     #[must_use]
     pub fn required_capabilities(&self) -> &[CapabilityId] {
         &self.required_capabilities
     }
 
-    /// Returns the total number of nodes in the document tree.
+    #[doc = include_str!("ui_ir_document.doc/node_count.md")]
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.root.node_count()
     }
 
-    /// Finds the node with stable `id` anywhere in the document tree.
+    #[doc = include_str!("ui_ir_document.doc/find.md")]
     #[must_use]
     pub fn find(&self, id: u64) -> Option<&UiIrNode> {
         self.root.find(id)
     }
 
-    /// Returns whether the document requires `cap`.
+    #[doc = include_str!("ui_ir_document.doc/requires.md")]
     #[must_use]
     pub fn requires(&self, cap: &CapabilityId) -> bool {
         self.required_capabilities.contains(cap)

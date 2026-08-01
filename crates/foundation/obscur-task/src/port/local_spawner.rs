@@ -1,13 +1,13 @@
-//! Spawner port for thread-local (`!Send`) futures.
+#![doc = include_str!("local_spawner.doc/_module.md")]
 
 use std::future::Future;
 use std::pin::Pin;
 
-/// A boxed, non-`Send` future pinned to the UI thread.
+#[doc = include_str!("local_spawner.doc/LocalBoxFuture.md")]
 pub type LocalBoxFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
-/// Schedules non-`Send` work on the owning UI thread.
+#[doc = include_str!("local_spawner.doc/LocalSpawner.md")]
 pub trait LocalSpawner {
-    /// Spawns a thread-local future for execution.
+    #[doc = include_str!("local_spawner.doc/spawn_local.md")]
     fn spawn_local(&self, future: LocalBoxFuture);
 }

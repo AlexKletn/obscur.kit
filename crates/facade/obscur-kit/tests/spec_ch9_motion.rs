@@ -1,10 +1,4 @@
-//! **SPECIFICATION-DERIVED** cases for §4.17 "Motion is a separate subsystem,
-//! not part of the CSS style engine" — the invariant behind the §9.6 guardrail
-//! "make CSS and motion inseparable".
-//!
-//! Every expected value was produced by an agent reading the specification with
-//! **no access to this repository's source**. A failure here is a defect report
-//! about the engine, and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch9_motion.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch9_support/mod.rs"]
@@ -20,11 +14,7 @@ use support::{approx, at, compile, el, runtime, view};
 
 const VW: f32 = 1000.0;
 
-/// §4.17 Motion engine — "Motion is a separate subsystem, not part of the CSS
-/// style engine." / "Pipeline: 1. style engine resolves base/computed values;
-/// 2. motion engine produces presentation values;"
-///
-/// NG-MOTION-01.
+#[doc = include_str!("spec_ch9_motion.doc/an_animated_opacity_never_reaches_computed_style.md")]
 #[test]
 fn an_animated_opacity_never_reaches_computed_style() {
     let sheet = compile(".a{width:100px;height:100px;opacity:1;background-color:rgb(255,0,0)}");
@@ -73,9 +63,7 @@ fn an_animated_opacity_never_reaches_computed_style() {
     approx(painted, 0.5, "the scene's painted opacity at t=500ms");
 }
 
-/// §4.17 — "Motion is a separate subsystem, not part of the CSS style engine."
-///
-/// NG-MOTION-02: motion must run with no stylesheet loaded at all.
+#[doc = include_str!("spec_ch9_motion.doc/motion_runs_without_any_stylesheet.md")]
 #[test]
 fn motion_runs_without_any_stylesheet() {
     let v = view(vec![el(1, "a", vec![])]);

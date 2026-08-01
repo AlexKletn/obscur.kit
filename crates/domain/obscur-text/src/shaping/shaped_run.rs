@@ -1,53 +1,25 @@
-//! A shaped run tagged with the font its glyphs belong to (spec §5.10).
+#![doc = include_str!("shaped_run.doc/_module.md")]
 
 use crate::font::FontId;
 use crate::shaping::GlyphRun;
 
-/// A [`GlyphRun`] tagged with the [`FontId`] its glyph indices belong to
-/// (spec §5.10).
-///
-/// A [`GlyphRun`]'s glyph ids are indices *into a specific font face*, but the
-/// run itself does not record which face. Font fallback shapes one string with
-/// several faces, so the result is a `Vec<ShapedRun>`: each element pairs a run
-/// with the [`FontId`] its glyphs must be looked up and rasterized against. This
-/// keeps the multi-font result expressible without changing [`GlyphRun`] itself.
-///
-/// The run also carries its source item's bidi embedding `level` (spec §5.10,
-/// UAX#9): even levels are left-to-right, odd right-to-left. Line layout uses it
-/// to reorder a line's segments into visual order (the L2 rule); `new` defaults
-/// it to `0` (LTR) so callers that don't yet know the level keep compiling.
-///
-/// Because [`GlyphRun`] embeds `f32` metrics this type derives `PartialEq` but
-/// not `Eq`.
-/// The run also carries two per-run synthesis hints
-/// ([`synth_oblique`](Self::synth_oblique), [`synth_bold`](Self::synth_bold)):
-/// when the font resolver matched the run to an upright/lighter face because no
-/// true italic/bold cut was registered, the renderer must shear/thicken the
-/// glyphs to fake the requested style (spec §5.18). Both default to `false`;
-/// clusters and glyphs are unchanged — synthesis is purely a render-time effect.
-///
+#[doc = include_str!("shaped_run.doc/ShapedRun.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapedRun {
-    /// The font the run's glyph indices belong to.
+    #[doc = include_str!("shaped_run.doc/font.md")]
     font: FontId,
-    /// The shaped glyphs and their run metrics.
+    #[doc = include_str!("shaped_run.doc/run.md")]
     run: GlyphRun,
-    /// The bidi embedding level of the source run (even = LTR, odd = RTL).
+    #[doc = include_str!("shaped_run.doc/level.md")]
     level: u8,
-    /// Whether the glyphs should be sheared to synthesize a slant the matched
-    /// face lacks (spec §5.18).
+    #[doc = include_str!("shaped_run.doc/synth_oblique.md")]
     synth_oblique: bool,
-    /// Whether the glyphs should be thickened to synthesize a bold weight the
-    /// matched face lacks (spec §5.18).
+    #[doc = include_str!("shaped_run.doc/synth_bold.md")]
     synth_bold: bool,
 }
 
 impl ShapedRun {
-    /// Creates a run tagged with the `font` its glyph indices belong to, at the
-    /// default bidi embedding level `0` (LTR) and with no synthesis.
-    ///
-    /// Set the level with [`with_level`](Self::with_level) when it is known, and
-    /// the synthesis hints with [`with_synthesis`](Self::with_synthesis).
+    #[doc = include_str!("shaped_run.doc/new.md")]
     #[must_use]
     pub const fn new(font: FontId, run: GlyphRun) -> Self {
         Self {
@@ -59,16 +31,14 @@ impl ShapedRun {
         }
     }
 
-    /// Returns this run tagged with the bidi embedding `level` of its source item
-    /// (even = LTR, odd = RTL).
+    #[doc = include_str!("shaped_run.doc/with_level.md")]
     #[must_use]
     pub const fn with_level(mut self, level: u8) -> Self {
         self.level = level;
         self
     }
 
-    /// Returns this run flagged for synthetic styling: `oblique` shears the glyphs
-    /// to fake a slant, `bold` thickens them to fake weight (spec §5.18).
+    #[doc = include_str!("shaped_run.doc/with_synthesis.md")]
     #[must_use]
     pub const fn with_synthesis(mut self, oblique: bool, bold: bool) -> Self {
         self.synth_oblique = oblique;
@@ -76,39 +46,37 @@ impl ShapedRun {
         self
     }
 
-    /// Returns the font the run's glyph indices belong to.
+    #[doc = include_str!("shaped_run.doc/font_2.md")]
     #[must_use]
     pub const fn font(&self) -> FontId {
         self.font
     }
 
-    /// Returns whether the glyphs should be sheared to synthesize a slant the
-    /// matched face lacks (spec §5.18).
+    #[doc = include_str!("shaped_run.doc/synth_oblique_2.md")]
     #[must_use]
     pub const fn synth_oblique(&self) -> bool {
         self.synth_oblique
     }
 
-    /// Returns whether the glyphs should be thickened to synthesize a bold weight
-    /// the matched face lacks (spec §5.18).
+    #[doc = include_str!("shaped_run.doc/synth_bold_2.md")]
     #[must_use]
     pub const fn synth_bold(&self) -> bool {
         self.synth_bold
     }
 
-    /// Returns the bidi embedding level of the source run (even = LTR, odd = RTL).
+    #[doc = include_str!("shaped_run.doc/level_2.md")]
     #[must_use]
     pub const fn level(&self) -> u8 {
         self.level
     }
 
-    /// Returns the shaped glyph run.
+    #[doc = include_str!("shaped_run.doc/run_2.md")]
     #[must_use]
     pub const fn run(&self) -> &GlyphRun {
         &self.run
     }
 
-    /// Consumes the tag, returning the owned [`GlyphRun`].
+    #[doc = include_str!("shaped_run.doc/into_run.md")]
     #[must_use]
     pub fn into_run(self) -> GlyphRun {
         self.run

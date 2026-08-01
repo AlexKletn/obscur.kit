@@ -1,76 +1,50 @@
-//! A typed, ranged, versioned language-service diagnostic (spec §5.13).
+#![doc = include_str!("text_diagnostic.doc/_module.md")]
 
 use crate::span::TextRange;
 
-/// The category of a [`TextDiagnostic`] — which language service produced it
-/// (spec §5.13 optional language services).
+#[doc = include_str!("text_diagnostic.doc/DiagnosticKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiagnosticKind {
-    /// A misspelled word flagged by spellcheck.
+    #[doc = include_str!("text_diagnostic.doc/Spelling.md")]
     Spelling,
-    /// A grammatical issue flagged by the grammar checker.
+    #[doc = include_str!("text_diagnostic.doc/Grammar.md")]
     Grammar,
-    /// An autocorrect suggestion (a likely typo with a replacement).
+    #[doc = include_str!("text_diagnostic.doc/Autocorrect.md")]
     Autocorrect,
-    /// A stylistic remark (wordiness, tone, etc.).
+    #[doc = include_str!("text_diagnostic.doc/Style.md")]
     Style,
 }
 
-/// The severity of a [`TextDiagnostic`], ordered least-to-most severe
-/// (spec §5.13).
-///
-/// The [`PartialOrd`]/[`Ord`] derivation follows declaration order, so
-/// [`Info`](Self::Info) `<` [`Warning`](Self::Warning) `<` [`Error`](Self::Error);
-/// a consumer can filter by a minimum severity threshold.
+#[doc = include_str!("text_diagnostic.doc/DiagnosticSeverity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DiagnosticSeverity {
-    /// An informational note; no action implied.
+    #[doc = include_str!("text_diagnostic.doc/Info.md")]
     Info,
-    /// A warning the user may wish to address.
+    #[doc = include_str!("text_diagnostic.doc/Warning.md")]
     Warning,
-    /// An error the user is likely expected to fix.
+    #[doc = include_str!("text_diagnostic.doc/Error.md")]
     Error,
 }
 
-/// A typed, ranged, versioned diagnostic emitted by a language service
-/// (spec §5.13 optional language services).
-///
-/// Diagnostics are **typed** ([`kind`](Self::kind)/[`severity`](Self::severity)),
-/// **ranged** ([`range`](Self::range) names the flagged bytes of the document),
-/// and **versioned** ([`version`](Self::version) records the document/text
-/// version the diagnostic was computed against). Because analysis is asynchronous
-/// and incremental (§5.13), a diagnostic can arrive after the document has moved
-/// on; a consumer discards a diagnostic whose version is stale relative to the
-/// current document version (see [`is_stale`](Self::is_stale)).
-///
-/// Each diagnostic may carry replacement [`suggestions`](Self::suggestions)
-/// (e.g. spelling candidates), most-preferred first. This type is pure data: it
-/// performs no analysis and holds no engine state — a [`TextServiceProvider`]
-/// produces it.
-///
-/// [`TextServiceProvider`]: super::TextServiceProvider
+#[doc = include_str!("text_diagnostic.doc/TextDiagnostic.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextDiagnostic {
-    /// The byte range in the document that this diagnostic flags.
+    #[doc = include_str!("text_diagnostic.doc/range.md")]
     range: TextRange,
-    /// The category of the diagnostic.
+    #[doc = include_str!("text_diagnostic.doc/kind.md")]
     kind: DiagnosticKind,
-    /// The severity of the diagnostic.
+    #[doc = include_str!("text_diagnostic.doc/severity.md")]
     severity: DiagnosticSeverity,
-    /// A human-readable description of the issue.
+    #[doc = include_str!("text_diagnostic.doc/message.md")]
     message: Box<str>,
-    /// Replacement candidates, most-preferred first; may be empty.
+    #[doc = include_str!("text_diagnostic.doc/suggestions.md")]
     suggestions: Vec<Box<str>>,
-    /// The document/text version this diagnostic was computed against.
+    #[doc = include_str!("text_diagnostic.doc/version.md")]
     version: u64,
 }
 
 impl TextDiagnostic {
-    /// Creates a diagnostic flagging `range`, stamped with `version` (spec §5.13).
-    ///
-    /// The diagnostic starts with no [`suggestions`](Self::suggestions); attach
-    /// them with [`with_suggestions`](Self::with_suggestions) or
-    /// [`with_suggestion`](Self::with_suggestion).
+    #[doc = include_str!("text_diagnostic.doc/new.md")]
     #[must_use]
     pub fn new(
         range: TextRange,
@@ -89,68 +63,63 @@ impl TextDiagnostic {
         }
     }
 
-    /// Replaces the replacement suggestions, returning the updated diagnostic.
+    #[doc = include_str!("text_diagnostic.doc/with_suggestions.md")]
     #[must_use]
     pub fn with_suggestions(mut self, suggestions: Vec<Box<str>>) -> Self {
         self.suggestions = suggestions;
         self
     }
 
-    /// Appends a single replacement suggestion, returning the updated diagnostic.
+    #[doc = include_str!("text_diagnostic.doc/with_suggestion.md")]
     #[must_use]
     pub fn with_suggestion(mut self, suggestion: impl Into<Box<str>>) -> Self {
         self.suggestions.push(suggestion.into());
         self
     }
 
-    /// Returns the byte range in the document this diagnostic flags.
+    #[doc = include_str!("text_diagnostic.doc/range_2.md")]
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    /// Returns the category of the diagnostic.
+    #[doc = include_str!("text_diagnostic.doc/kind_2.md")]
     #[must_use]
     pub const fn kind(&self) -> DiagnosticKind {
         self.kind
     }
 
-    /// Returns the severity of the diagnostic.
+    #[doc = include_str!("text_diagnostic.doc/severity_2.md")]
     #[must_use]
     pub const fn severity(&self) -> DiagnosticSeverity {
         self.severity
     }
 
-    /// Returns the human-readable description of the issue.
+    #[doc = include_str!("text_diagnostic.doc/message_2.md")]
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
 
-    /// Returns the replacement candidates, most-preferred first.
+    #[doc = include_str!("text_diagnostic.doc/suggestions_2.md")]
     #[must_use]
     pub fn suggestions(&self) -> &[Box<str>] {
         &self.suggestions
     }
 
-    /// Returns the document/text version this diagnostic was computed against.
+    #[doc = include_str!("text_diagnostic.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> u64 {
         self.version
     }
 
-    /// Returns whether this diagnostic carries any replacement suggestions.
+    #[doc = include_str!("text_diagnostic.doc/has_suggestions.md")]
     #[must_use]
     pub fn has_suggestions(&self) -> bool {
         !self.suggestions.is_empty()
     }
 
-    /// Returns whether this diagnostic is stale relative to `current_version`
-    /// (spec §5.13 versioned diagnostics).
-    ///
-    /// A diagnostic is stale when it was computed against an older document
-    /// version (`self.version < current_version`); a consumer discards stale
-    /// diagnostics because the flagged bytes may have since moved or changed.
+    #[doc = include_str!("text_diagnostic.doc/is_stale.md")]
     #[must_use]
     pub const fn is_stale(&self, current_version: u64) -> bool {
         self.version < current_version

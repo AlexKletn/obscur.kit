@@ -1,57 +1,11 @@
-//! The **capabilities** scene, authored once and rendered by three drivers:
-//! the headless CPU→PNG example (`capabilities_png.rs`), the headless Vello→PNG
-//! example (`capabilities_vello_png.rs`), and the live windowed Vello example
-//! (`capabilities_window.rs`).
-//!
-//! It showcases the CSS features ported in the "math campaign", authored purely
-//! through the toolkit's **CSS string + `View` tree** surfaces (`obscur_kit::*`)
-//! and driven through the real `obscur-css` frontend + runtime coordinator +
-//! renderer — no hand-built paint commands, no backend types. The same view +
-//! stylesheet therefore feed the software rasterizer and the GPU surface
-//! unchanged.
-//!
-//! # The fourteen section cards
-//!
-//! 1. **Color spaces** — swatches filled with `oklch()`, `lab()`, `hsl()`,
-//!    `oklab()` (CSS Color 4 parsing → sRGB). CPU-visible.
-//! 2. **Oklab gradient** — a `linear-gradient(90deg, #f00, #0f0)` bar,
-//!    interpolated in Oklab (Vello only; the CPU backend flattens it to the first
-//!    stop, so the CPU card is captioned "GPU / Vello").
-//! 3. **linearRGB blur** — a bright box under `filter: blur()`, convolved in
-//!    linear light (Vello only; the CPU card is captioned "GPU / Vello").
-//! 4. **border-radius overlap clamp** — a wide-short box whose `border-radius`
-//!    would overflow, uniformly scaled down so it never does.
-//! 5. **box-shadow spread** — a rounded box whose shadow radii grow with spread.
-//! 6. **Stacking order** — a `position: relative` box earlier in the tree paints
-//!    ON TOP of a later non-positioned sibling (§9.9 paint layers).
-//! 7. **Flex grow/shrink** — a `display: flex` row distributing free space.
-//! 8. **Grid two-value tracks** — `grid-template-columns: minmax(...) 1fr 1fr`.
-//! 9. **Margin collapsing** — adjacent block margins collapse to the max.
-//! 10. **Text spacing + transform** — `letter-spacing` / `word-spacing` /
-//!     `text-transform: uppercase`.
-//! 11. **white-space** — the same source text under `normal` / `pre` / `nowrap`.
-//! 12. **Ellipsis** — `text-overflow: ellipsis` on overflowing `nowrap` text.
-//! 13. **Transform interpolation** — a square at the interpolated `rotate(45°)`,
-//!     full size (the window driver animates it via `MotionValue::Transform`).
-//! 14. **CPU vs GPU** — an honesty legend: which cards are GPU-only.
-//!
-//! The gradient (§2) and blur (§3) are GPU-class: on the CPU backend they degrade
-//! to a documented approximation (a gradient paints its first stop; a blur is a
-//! coarse approximation) per the project's CPU/GPU effect-split policy — so their
-//! CPU cards carry a visible "GPU / Vello" caption rather than a misleading fake.
-//! Everything else (layout, color parsing, radius/spread geometry, stacking,
-//! flex/grid, margin collapsing, text, and the transform) renders faithfully on
-//! both backends.
+#![doc = include_str!("scene.doc/_module.md")]
 // All three drivers share this module via `#[path]`; each uses the full surface.
 #![allow(dead_code, unreachable_pub)]
 
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{CLASS, ID, View, ViewNode, ViewProperty, ViewValue};
 
-/// The authored stylesheet exercising every ported CSS feature. Returned as a
-/// `&'static str` so all three examples compile it through the real `obscur-css`
-/// frontend. The window driver additionally layers a per-frame `.xform-box`
-/// override on top (see [`crate`] and `capabilities_window.rs`).
+#[doc = include_str!("scene.doc/stylesheet.md")]
 #[must_use]
 pub fn stylesheet() -> &'static str {
     "\
@@ -180,10 +134,7 @@ pub fn stylesheet() -> &'static str {
 "
 }
 
-/// Builds the full capabilities view tree. Pure view/primitive construction — no
-/// backend types, no state — so every driver calls it identically. The `cpu`
-/// flag only swaps two captions (the gradient/blur cards) so the CPU PNG stays
-/// honest about the GPU-only effects; the geometry is identical.
+#[doc = include_str!("scene.doc/view.md")]
 #[must_use]
 pub fn view(cpu: bool) -> View {
     let header = el(
@@ -225,7 +176,7 @@ pub fn view(cpu: bool) -> View {
     View::single(app)
 }
 
-/// 1 — four swatches, each filled through a different CSS Color 4 function.
+#[doc = include_str!("scene.doc/color_spaces_card.md")]
 fn color_spaces_card() -> ViewNode {
     let swatch = |class: &str, cap: &str| {
         el(
@@ -248,7 +199,7 @@ fn color_spaces_card() -> ViewNode {
     )
 }
 
-/// 2 — a wide gradient bar; the caption tells the truth per backend.
+#[doc = include_str!("scene.doc/gradient_card.md")]
 fn gradient_card(cpu: bool) -> ViewNode {
     let note = if cpu {
         "GPU / Vello — Oklab midpoint (CPU: first stop)"
@@ -262,7 +213,7 @@ fn gradient_card(cpu: bool) -> ViewNode {
     )
 }
 
-/// 3 — a bright box under a real blur; GPU-only, captioned honestly on CPU.
+#[doc = include_str!("scene.doc/blur_card.md")]
 fn blur_card(cpu: bool) -> ViewNode {
     let note = if cpu {
         "GPU / Vello — convolved in linearRGB (CPU: approx)"
@@ -282,7 +233,7 @@ fn blur_card(cpu: bool) -> ViewNode {
     )
 }
 
-/// 4 — a wide-short box whose 30px radius is uniform-scale clamped.
+#[doc = include_str!("scene.doc/radius_card.md")]
 fn radius_card() -> ViewNode {
     card(
         "border-radius clamp",
@@ -291,7 +242,7 @@ fn radius_card() -> ViewNode {
     )
 }
 
-/// 5 — a rounded box with a concentric spread shadow.
+#[doc = include_str!("scene.doc/shadow_card.md")]
 fn shadow_card() -> ViewNode {
     card(
         "box-shadow spread",
@@ -300,7 +251,7 @@ fn shadow_card() -> ViewNode {
     )
 }
 
-/// 6 — a positioned box earlier in the tree painting on top of a later sibling.
+#[doc = include_str!("scene.doc/stacking_card.md")]
 fn stacking_card() -> ViewNode {
     card(
         "Stacking order",
@@ -315,7 +266,7 @@ fn stacking_card() -> ViewNode {
     )
 }
 
-/// 7 — a flex row distributing free space by grow/shrink/basis.
+#[doc = include_str!("scene.doc/flex_card.md")]
 fn flex_card() -> ViewNode {
     card(
         "Flex grow/shrink",
@@ -330,7 +281,7 @@ fn flex_card() -> ViewNode {
     )
 }
 
-/// 8 — a grid with a two-value first track.
+#[doc = include_str!("scene.doc/grid_card.md")]
 fn grid_card() -> ViewNode {
     card(
         "Grid two-value tracks",
@@ -349,7 +300,7 @@ fn grid_card() -> ViewNode {
     )
 }
 
-/// 9 — two stacked blocks whose adjacent margins collapse to the max.
+#[doc = include_str!("scene.doc/margin_card.md")]
 fn margin_card() -> ViewNode {
     card(
         "Margin collapsing",
@@ -361,7 +312,7 @@ fn margin_card() -> ViewNode {
     )
 }
 
-/// 10 — a phrase with letter/word spacing and uppercasing.
+#[doc = include_str!("scene.doc/spacing_card.md")]
 fn spacing_card() -> ViewNode {
     card(
         "Text spacing + case",
@@ -370,7 +321,7 @@ fn spacing_card() -> ViewNode {
     )
 }
 
-/// 11 — three narrow columns of the SAME source text under three modes.
+#[doc = include_str!("scene.doc/white_space_card.md")]
 fn white_space_card() -> ViewNode {
     // Double spaces + a newline so `normal` collapses, `pre` preserves both, and
     // `nowrap` keeps it on one (overflowing) line.
@@ -395,7 +346,7 @@ fn white_space_card() -> ViewNode {
     )
 }
 
-/// 12 — a narrow box whose long text overflows to a trailing ellipsis.
+#[doc = include_str!("scene.doc/ellipsis_card.md")]
 fn ellipsis_card() -> ViewNode {
     card(
         "Ellipsis",
@@ -407,7 +358,7 @@ fn ellipsis_card() -> ViewNode {
     )
 }
 
-/// 13 — a square at the interpolated rotate(45°), full size.
+#[doc = include_str!("scene.doc/transform_card.md")]
 fn transform_card() -> ViewNode {
     card(
         "Transform interp",
@@ -416,7 +367,7 @@ fn transform_card() -> ViewNode {
     )
 }
 
-/// 14 — the CPU-vs-GPU honesty legend.
+#[doc = include_str!("scene.doc/legend_card.md")]
 fn legend_card() -> ViewNode {
     card(
         "CPU vs GPU",
@@ -432,15 +383,14 @@ fn legend_card() -> ViewNode {
     )
 }
 
-/// A section card: a classed container with a bold label, a small note, and the
-/// live demo element(s).
+#[doc = include_str!("scene.doc/card.md")]
 fn card(label: &str, note: &str, demo: Vec<ViewNode>) -> ViewNode {
     let mut children = vec![text("card-label", label), text("card-note", note)];
     children.extend(demo);
     el("card", children)
 }
 
-/// Wraps `children` in a classed [`Container`] element node.
+#[doc = include_str!("scene.doc/el.md")]
 fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
@@ -448,12 +398,7 @@ fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A classed text run: a classed [`Container`] **element** wrapping a bare text
-/// node. The class carries `color` / `font-size` / spacing / `white-space` /
-/// `text-overflow` on the element (all inherited or box-level properties), and the
-/// text node inherits them — the engine matches class selectors against elements,
-/// not against text nodes, and resolves a run's color/size/white-space from the
-/// containing element, so styling the wrapper is what actually paints.
+#[doc = include_str!("scene.doc/text.md")]
 fn text(class: &str, content: &str) -> ViewNode {
     el(class, vec![Text::new(content.to_owned()).into_view_node()])
 }

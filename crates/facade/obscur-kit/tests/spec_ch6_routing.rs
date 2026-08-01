@@ -1,11 +1,4 @@
-//! **SPECIFICATION-DERIVED** router cases for obscur.kit §6.13.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §6
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the toolkit, not about the test; expected values must not be
-//! edited to match current behaviour.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch6_routing.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::routing::route::{Route, RoutePattern};
@@ -15,12 +8,7 @@ use obscur_kit::routing::router::{RouteRegistry, Router};
 // P6-18
 // -------------------------------------------------------------------------
 
-/// §6.13 Router: "Basic URL-like router:" / "- path;" / "- query;" /
-/// "- fragment;"
-///
-/// Path, query and fragment are split from one another before any of them is
-/// interpreted: no `?` residue in the path, no `#` residue in the last query
-/// value, and the fragment carries no leading `#`.
+#[doc = include_str!("spec_ch6_routing.doc/path_query_and_fragment_are_split_from_one_another.md")]
 #[test]
 fn path_query_and_fragment_are_split_from_one_another() {
     let route = Route::parse("/users/42?tab=posts&page=2#comments");
@@ -66,27 +54,7 @@ fn path_query_and_fragment_are_split_from_one_another() {
 // P6-19
 // -------------------------------------------------------------------------
 
-/// §6.13: "- path;" (URL-like) with "- typed params;"
-///
-/// An encoded slash stays inside one segment: it does not become a segment
-/// break, and it does not shift the following segments.
-///
-/// WEAKENED 2026-07-19: this originally asserted that `%2F` is DECODED —
-/// `params.get("name") == Some("a/b")`, and that `%252F` decodes exactly once to
-/// `a%2F`. §6.13's complete text is "Basic URL-like router:" followed by
-/// the eleven bullets "path", "query", "fragment", "route patterns", "typed
-/// params", "nested routes", "history", "back/forward", "deep-link mapping",
-/// "typed route state" and "route-to-screen/component mapping". It never
-/// mentions percent-encoding,
-/// decoding, or encoding, so both the decode and the exactly-once ordering were
-/// derived from URL conventions rather than from this spec. What is kept is the
-/// half that a router must get right whatever its decoding policy, and that
-/// still discriminates: an implementation that decodes BEFORE segmenting splits
-/// `a%2Fb` into two segments, the pattern stops matching, and `:action` binds
-/// `b` instead of `edit`. Candidate spec amendment: state whether the router
-/// percent-decodes path segments and query values at all, and if so that it
-/// decodes after segmentation and exactly once — the two failure modes are a
-/// silently truncated param and a double-decode injection.
+#[doc = include_str!("spec_ch6_routing.doc/percent_encoding_is_decoded_after_segmentation_and_only_once.md")]
 #[test]
 fn percent_encoding_is_decoded_after_segmentation_and_only_once() {
     let route = Route::parse("/files/a%2Fb/edit");
@@ -113,10 +81,7 @@ fn percent_encoding_is_decoded_after_segmentation_and_only_once() {
 // P6-21
 // -------------------------------------------------------------------------
 
-/// §6.13: "- history;" / "- back/forward;"
-///
-/// Pushing after a back discards the forward future, and backing past the first
-/// entry is a typed no-op rather than an underflow.
+#[doc = include_str!("spec_ch6_routing.doc/pushing_after_a_back_truncates_the_forward_stack.md")]
 #[test]
 fn pushing_after_a_back_truncates_the_forward_stack() {
     let registry = RouteRegistry::new()

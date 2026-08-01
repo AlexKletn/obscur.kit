@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** document, shell and capture cases for obscur.kit
-//! §6.10, §6.11 and §6.17.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §6
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the toolkit, not about the test; expected values must not be
-//! edited to match current behaviour.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch6_services.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::geometry::{Point, Rect, Size};
@@ -23,11 +15,7 @@ use obscur_kit::system::shell::{NullShellProvider, ShellProvider, ShellResult, S
 // P6-13
 // -------------------------------------------------------------------------
 
-/// §6.10 Document access: "File pickers return `FileAccess`/`DocumentHandle`,
-/// not necessarily filesystem paths." and "- optional path hint."
-///
-/// A cloud/virtual document has **no** path hint yet is fully usable — metadata
-/// and bytes both read — while a local file's hint is present and exact.
+#[doc = include_str!("spec_ch6_services.doc/a_virtual_document_handle_is_usable_with_no_path.md")]
 #[test]
 fn a_virtual_document_handle_is_usable_with_no_path() {
     let mut service = MemoryDocumentService::new();
@@ -83,25 +71,7 @@ fn a_virtual_document_handle_is_usable_with_no_path() {
 // P6-15
 // -------------------------------------------------------------------------
 
-/// §6.11 Shell integration: "`ShellProvider` may open:" / "- file;" /
-/// "- URI;" / "- document handle." with "Results:" / "- opened;" / "- denied;"
-/// / "- unsupported;" / "- failed."
-///
-/// A build with no shell integration reports exactly `unsupported` — a value of
-/// the result type, not a bare `Ok(())`.
-///
-/// WEAKENED 2026-07-19: this originally opened with a half asserting that
-/// `RecordingShellProvider` answers `failed`/`unsupported` for
-/// `obscur-nonexistent-scheme://x`. That subject is a TEST DOUBLE, documented at
-/// shell_provider.rs:63-90 as a recorder whose whole contract is to accept every
-/// target, push it onto a list and answer `Opened` so a caller can assert what a
-/// component asked to open. The half therefore tested the mock, not the kit, and
-/// making it pass would have meant teaching a recorder to adjudicate schemes.
-/// §6.11 lists the four result values and says nothing about which provider
-/// returns which for an unregistered scheme. Candidate spec amendment: state
-/// whether a `ShellProvider` is obliged to pre-check handler availability
-/// (`can_open`) before reporting `opened`, or whether `opened` means only
-/// "handed to the platform".
+#[doc = include_str!("spec_ch6_services.doc/opening_an_unhandleable_uri_is_never_reported_as_opened.md")]
 #[test]
 fn opening_an_unhandleable_uri_is_never_reported_as_opened() {
     let mut absent = NullShellProvider;
@@ -116,25 +86,7 @@ fn opening_an_unhandleable_uri_is_never_reported_as_opened() {
 // P6-30
 // -------------------------------------------------------------------------
 
-/// §6.17 Capture and privacy: "Results:" / "- captured;" / "- denied;" /
-/// "- unsupported;" / "- failed."
-///
-/// Headlessly, a window capture is `unsupported` (there is no window), and every
-/// capture kind answers with a value of the one result type.
-///
-/// WEAKENED 2026-07-19: this originally asserted that a NODE capture succeeds on
-/// `NullCaptureProvider` — "node capture needs no compositor and reports
-/// `captured`". That sentence is not in §6.17. The section lists the capability
-/// kinds ("capture window", "capture surface", "capture node", "capture image",
-/// …) and the four results ("captured", "denied", "unsupported", "failed"),
-/// and says nothing about which kinds a compositor-less provider
-/// must be able to service; a null provider answering `unsupported` uniformly is
-/// a conforming reading. What is kept is what §6.17 does state: each request is
-/// answered with a typed result, an unsupported one carries no image, and the
-/// four results are distinguishable from one another. Candidate spec amendment:
-/// say whether node/image capture is required to work without a window or
-/// compositor — it is the difference between a headless golden-image pipeline
-/// being possible and not.
+#[doc = include_str!("spec_ch6_services.doc/headless_window_capture_is_unsupported_but_node_capture_still_captures.md")]
 #[test]
 fn headless_window_capture_is_unsupported_but_node_capture_still_captures() {
     let mut provider = NullCaptureProvider;

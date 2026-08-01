@@ -1,59 +1,42 @@
-//! Identity of a cached artifact (spec §5.19 caches, §5.20 content-addressing).
+#![doc = include_str!("cache_key.doc/_module.md")]
 
 use obscur_identity::ResourceId;
 
-/// Identifies one cached artifact derived from a resource (spec §5.19 runtime
-/// caches, §5.20 persistent derived cache).
-///
-/// A single resource can back several cached derivatives — a display list at one
-/// scale, a rasterised mask at another size, a compiled shader for a given format
-/// — so a key pairs the owning [`ResourceId`] with a `variant` discriminator. The
-/// `variant` is an opaque `u64` the caller derives by hashing the derivation
-/// parameters (target size, scale, pixel format, …) or the artifact's content
-/// (spec §5.20 *content-addressed where useful*). Variant `0` denotes the
-/// canonical, unparameterised artifact.
-///
-/// This is pure bookkeeping data: it stores no bytes and performs no hashing
-/// itself, so the caller controls how a `variant` is computed. The full derive
-/// set (including `Hash`, `Eq`, and `Ord`) lets a key serve directly as a
-/// `HashMap` or `BTreeMap` index.
+#[doc = include_str!("cache_key.doc/CacheKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CacheKey {
-    /// The resource this artifact was derived from.
+    #[doc = include_str!("cache_key.doc/resource.md")]
     resource: ResourceId,
-    /// A discriminator over the derivation parameters or content (spec §5.20).
+    #[doc = include_str!("cache_key.doc/variant.md")]
     variant: u64,
 }
 
 impl CacheKey {
-    /// Creates a key for a specific derivative of `resource`, discriminated by
-    /// `variant` (spec §5.19).
+    #[doc = include_str!("cache_key.doc/new.md")]
     #[must_use]
     pub const fn new(resource: ResourceId, variant: u64) -> Self {
         Self { resource, variant }
     }
 
-    /// Creates a key for the canonical, unparameterised artifact of `resource`
-    /// (variant `0`).
+    #[doc = include_str!("cache_key.doc/for_resource.md")]
     #[must_use]
     pub const fn for_resource(resource: ResourceId) -> Self {
         Self::new(resource, 0)
     }
 
-    /// Creates a content-addressed key, using a hash of the artifact's content as
-    /// the discriminator (spec §5.20 *content-addressed where useful*).
+    #[doc = include_str!("cache_key.doc/content_addressed.md")]
     #[must_use]
     pub const fn content_addressed(resource: ResourceId, content_hash: u64) -> Self {
         Self::new(resource, content_hash)
     }
 
-    /// Returns the resource this artifact was derived from.
+    #[doc = include_str!("cache_key.doc/resource_2.md")]
     #[must_use]
     pub const fn resource(self) -> ResourceId {
         self.resource
     }
 
-    /// Returns the variant discriminator (spec §5.20).
+    #[doc = include_str!("cache_key.doc/variant_2.md")]
     #[must_use]
     pub const fn variant(self) -> u64 {
         self.variant

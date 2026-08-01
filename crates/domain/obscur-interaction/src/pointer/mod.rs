@@ -1,4 +1,4 @@
-//! Pointer module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod pointer_buttons;
 pub use pointer_buttons::{PointerButton, PointerButtons};
 mod pointer_capture;

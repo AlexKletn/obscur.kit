@@ -1,13 +1,4 @@
-//! A font [`ResourceDecoder`] backed by `ttf-parser` (spec §5.18).
-//!
-//! [`FontDecoder`] validates encoded TTF/OTF bytes by parsing them into a
-//! `ttf_parser::Face` — proving the sfnt tables (`head`, `hhea`, `maxp`, ...)
-//! are well-formed and the metrics readable — and then keeps the original,
-//! validated face bytes as the shared CPU representation. That is the natural
-//! representation for a font: `ttf-parser` (and the text/shaping stack above it)
-//! reads a `Face` zero-copy directly from these bytes, so re-wrapping them costs
-//! nothing while the parse guarantees the downstream face will not fail (spec
-//! §5.18 shaping/glyph caching).
+#![doc = include_str!("font_decoder.doc/_module.md")]
 
 use std::sync::Arc;
 
@@ -15,19 +6,12 @@ use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-/// A [`ResourceDecoder`] that validates and admits font faces via `ttf-parser`
-/// (spec §5.18).
-///
-/// This decoder supports only [`ResourceKind::Font`]. It parses the first face
-/// (index 0) of the given bytes to confirm they form a usable face — malformed
-/// bytes become [`ResourceError::DecodeFailed`] — then returns the validated
-/// bytes unchanged as the [`DecodedResource`] CPU payload. Font collections are
-/// admitted through their first face.
+#[doc = include_str!("font_decoder.doc/FontDecoder.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FontDecoder;
 
 impl FontDecoder {
-    /// Creates a font decoder.
+    #[doc = include_str!("font_decoder.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self

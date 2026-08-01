@@ -1,43 +1,26 @@
-//! A style-local `box-shadow` layer (spec §5.2).
+#![doc = include_str!("box_shadow.doc/_module.md")]
 
 use crate::property::{Length, StyleColor};
 
-/// A single CSS `box-shadow` layer, as authored in a stylesheet.
-///
-/// A shadow is two required offsets (`offset_x` / `offset_y`) plus an optional
-/// `blur` radius, `spread` distance, `color`, and an `inset` flag. The lengths
-/// are kept symbolic ([`Length`]) so relative units resolve at the layout/compute
-/// step, exactly like every other length-typed property; the scene coordinator
-/// turns them plus the painted box's border box into the concrete
-/// `obscur_scene::command::PaintCommand::DrawShadow` a renderer consumes.
-///
-/// `color` is [`None`] when the author omitted it: CSS resolves an unset shadow
-/// color to `currentColor`, which has no computed value, so the coordinator
-/// substitutes the element's computed `color` at paint time (mirroring the
-/// `border-*-color` fallback).
-///
-/// Because [`Length`] and [`StyleColor`] carry `f32` data, this type derives
-/// [`PartialEq`] but not [`Eq`]/[`Hash`].
+#[doc = include_str!("box_shadow.doc/BoxShadow.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoxShadow {
-    /// The horizontal offset: positive moves the shadow right.
+    #[doc = include_str!("box_shadow.doc/offset_x.md")]
     pub offset_x: Length,
-    /// The vertical offset: positive moves the shadow down.
+    #[doc = include_str!("box_shadow.doc/offset_y.md")]
     pub offset_y: Length,
-    /// The blur radius (`0` = a hard edge).
+    #[doc = include_str!("box_shadow.doc/blur.md")]
     pub blur: Length,
-    /// The spread distance: a drop shadow grows by this, an inset one shrinks.
+    #[doc = include_str!("box_shadow.doc/spread.md")]
     pub spread: Length,
-    /// The shadow color, or [`None`] for the `currentColor` default.
+    #[doc = include_str!("box_shadow.doc/color.md")]
     pub color: Option<StyleColor>,
-    /// Whether this is an `inset` shadow (painted inside the box) rather than a
-    /// drop shadow (painted behind it).
+    #[doc = include_str!("box_shadow.doc/inset.md")]
     pub inset: bool,
 }
 
 impl BoxShadow {
-    /// Creates a shadow with the given offsets, blur, spread, optional color, and
-    /// `inset` flag.
+    #[doc = include_str!("box_shadow.doc/new.md")]
     #[must_use]
     pub const fn new(
         offset_x: Length,
@@ -57,42 +40,37 @@ impl BoxShadow {
         }
     }
 
-    /// Returns the horizontal offset.
+    #[doc = include_str!("box_shadow.doc/offset_x_2.md")]
     #[must_use]
     pub const fn offset_x(&self) -> Length {
         self.offset_x
     }
 
-    /// Returns the vertical offset.
+    #[doc = include_str!("box_shadow.doc/offset_y_2.md")]
     #[must_use]
     pub const fn offset_y(&self) -> Length {
         self.offset_y
     }
 
-    /// Returns the blur radius.
+    #[doc = include_str!("box_shadow.doc/blur_2.md")]
     #[must_use]
     pub const fn blur(&self) -> Length {
         self.blur
     }
 
-    /// Returns the spread distance.
+    #[doc = include_str!("box_shadow.doc/spread_2.md")]
     #[must_use]
     pub const fn spread(&self) -> Length {
         self.spread
     }
 
-    /// Returns the shadow color, or [`None`] for the `currentColor` default.
+    #[doc = include_str!("box_shadow.doc/color_2.md")]
     #[must_use]
     pub const fn color(&self) -> Option<StyleColor> {
         self.color
     }
 
-    /// Whether any of the four lengths is a `ch` term — the question
-    /// [`PropertyValue::uses_ch`](crate::property::PropertyValue::uses_ch) asks
-    /// before paying for a `0`-glyph measurement.
-    ///
-    /// Covers exactly the lengths `absolutize_shadow` folds, which is what makes
-    /// the predicate and the fold agree.
+    #[doc = include_str!("box_shadow.doc/uses_ch.md")]
     #[must_use]
     pub const fn uses_ch(&self) -> bool {
         self.offset_x().is_ch()
@@ -101,7 +79,7 @@ impl BoxShadow {
             || self.spread().is_ch()
     }
 
-    /// Returns whether this is an `inset` shadow.
+    #[doc = include_str!("box_shadow.doc/is_inset.md")]
     #[must_use]
     pub const fn is_inset(&self) -> bool {
         self.inset

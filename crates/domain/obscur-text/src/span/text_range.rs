@@ -1,31 +1,16 @@
-//! A half-open byte range into a UTF-8 text buffer (spec §5.10).
+#![doc = include_str!("text_range.doc/_module.md")]
 
-/// A half-open byte range `[start, end)` into a UTF-8 text buffer (spec §5.10).
-///
-/// Rich text is addressed by byte offsets, not char or grapheme indices: a
-/// `TextRange` names the bytes `start..end` of some text buffer. Callers are
-/// responsible for keeping `start` and `end` on UTF-8 character boundaries; this
-/// type performs no boundary validation and treats offsets as opaque `usize`
-/// positions.
-///
-/// The range is always normalized so that `start <= end`. Constructors that
-/// receive an inverted range clamp `end` up to `start` (see [`TextRange::new`]),
-/// so `len` never underflows.
+#[doc = include_str!("text_range.doc/TextRange.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextRange {
-    /// The inclusive start byte offset.
+    #[doc = include_str!("text_range.doc/start.md")]
     pub start: usize,
-    /// The exclusive end byte offset; always `>= start`.
+    #[doc = include_str!("text_range.doc/end.md")]
     pub end: usize,
 }
 
 impl TextRange {
-    /// Creates a range spanning `start..end`.
-    ///
-    /// The range is normalized: if `end < start` the end is clamped up to
-    /// `start` (`end.max(start)`), yielding an empty range at `start` rather
-    /// than an inverted one. A `debug_assert` flags inverted input in debug
-    /// builds.
+    #[doc = include_str!("text_range.doc/new.md")]
     #[must_use]
     pub const fn new(start: usize, end: usize) -> Self {
         debug_assert!(start <= end, "TextRange::new called with end < start");
@@ -35,46 +20,37 @@ impl TextRange {
         }
     }
 
-    /// Creates an empty (collapsed) range positioned at `at`, where
-    /// `start == end == at`.
+    #[doc = include_str!("text_range.doc/empty.md")]
     #[must_use]
     pub const fn empty(at: usize) -> Self {
         Self { start: at, end: at }
     }
 
-    /// Returns the length of the range in bytes (`end - start`).
+    #[doc = include_str!("text_range.doc/len.md")]
     #[must_use]
     pub const fn len(&self) -> usize {
         self.end - self.start
     }
 
-    /// Returns whether the range is empty (`start == end`).
+    #[doc = include_str!("text_range.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.start == self.end
     }
 
-    /// Returns whether `offset` lies within the range (`start <= offset < end`).
-    ///
-    /// An empty range contains no offset.
+    #[doc = include_str!("text_range.doc/contains.md")]
     #[must_use]
     pub const fn contains(&self, offset: usize) -> bool {
         self.start <= offset && offset < self.end
     }
 
-    /// Returns whether this range fully contains `other`.
-    ///
-    /// An empty `other` is contained when its position lies within
-    /// `start..=end`.
+    #[doc = include_str!("text_range.doc/contains_range.md")]
     #[must_use]
     pub const fn contains_range(&self, other: TextRange) -> bool {
         self.start <= other.start && other.end <= self.end
     }
 
-    /// Returns whether this range and `other` share at least one byte.
-    ///
-    /// Ranges that merely touch at an endpoint (for example `0..2` and `2..4`)
-    /// do not intersect, and empty ranges never intersect.
+    #[doc = include_str!("text_range.doc/intersects.md")]
     #[must_use]
     pub const fn intersects(&self, other: TextRange) -> bool {
         let start = if self.start > other.start {
@@ -90,8 +66,7 @@ impl TextRange {
         start < end
     }
 
-    /// Returns the overlapping range shared with `other`, or `None` when they do
-    /// not intersect (spec §5.10).
+    #[doc = include_str!("text_range.doc/intersection.md")]
     #[must_use]
     pub const fn intersection(&self, other: TextRange) -> Option<TextRange> {
         let start = if self.start > other.start {
@@ -111,8 +86,7 @@ impl TextRange {
         }
     }
 
-    /// Returns the smallest range covering both this range and `other`: the
-    /// minimum start and maximum end (spec §5.10).
+    #[doc = include_str!("text_range.doc/union.md")]
     #[must_use]
     pub const fn union(&self, other: TextRange) -> TextRange {
         let start = if self.start < other.start {
@@ -128,8 +102,7 @@ impl TextRange {
         TextRange { start, end }
     }
 
-    /// Returns this range translated by `delta` bytes, saturating at the bounds
-    /// of `usize` so neither endpoint overflows or underflows.
+    #[doc = include_str!("text_range.doc/shifted.md")]
     #[must_use]
     pub const fn shifted(&self, delta: isize) -> TextRange {
         TextRange {

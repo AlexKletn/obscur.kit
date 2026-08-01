@@ -1,57 +1,32 @@
-//! The replaceable port platform accessibility adapters implement (§7.1).
+#![doc = include_str!("accessibility_bridge.doc/_module.md")]
 
 use crate::event::{AccessibilityAction, AccessibilityFocus};
 use crate::tree::{SemanticSnapshot, SemanticUpdate};
 
-/// The replaceable port platform accessibility adapters implement (spec §7.1).
-///
-/// A single trait through which the pure accessibility domain drives the outside
-/// platform accessibility API — UI Automation, AX, AT-SPI, or web a11y. An
-/// adapter implements it once per platform and the domain stores it as
-/// `Box<dyn AccessibilityBridge>`, so the trait is deliberately **object-safe**:
-/// no generic methods and no `Self`-returning methods.
-///
-/// The bridge pushes tree state downward — a full [`SemanticSnapshot`] or an
-/// incremental [`SemanticUpdate`] — reflects [`AccessibilityFocus`] and live
-/// announcements, and drains inbound [`AccessibilityAction`] requests upward so
-/// they can be dispatched through the same command/event model as ordinary
-/// input.
+#[doc = include_str!("accessibility_bridge.doc/AccessibilityBridge.md")]
 pub trait AccessibilityBridge {
-    /// Pushes a full [`SemanticSnapshot`] to the platform accessibility tree.
+    #[doc = include_str!("accessibility_bridge.doc/update_tree.md")]
     fn update_tree(&mut self, snapshot: &SemanticSnapshot);
 
-    /// Applies a single incremental [`SemanticUpdate`] to the platform tree.
+    #[doc = include_str!("accessibility_bridge.doc/apply_update.md")]
     fn apply_update(&mut self, update: &SemanticUpdate);
 
-    /// Reflects an [`AccessibilityFocus`] change to the platform.
+    #[doc = include_str!("accessibility_bridge.doc/set_focus.md")]
     fn set_focus(&mut self, focus: &AccessibilityFocus);
 
-    /// Emits a live-region announcement. `assertive` requests an interrupting
-    /// (assertive) announcement rather than a polite one.
+    #[doc = include_str!("accessibility_bridge.doc/announce.md")]
     fn announce(&mut self, message: &str, assertive: bool);
 
-    /// Drains and returns the inbound assistive-technology action requests
-    /// queued since the last poll. Returns an empty [`Vec`] when none are
-    /// pending.
+    #[doc = include_str!("accessibility_bridge.doc/poll_actions.md")]
     fn poll_actions(&mut self) -> Vec<AccessibilityAction>;
 }
 
-/// A reference, no-op [`AccessibilityBridge`] for headless or unsupported
-/// platforms (spec §7.1).
-///
-/// `NullAccessibilityBridge` owns nothing platform-specific: every downward push
-/// ([`update_tree`](AccessibilityBridge::update_tree),
-/// [`apply_update`](AccessibilityBridge::apply_update),
-/// [`set_focus`](AccessibilityBridge::set_focus),
-/// [`announce`](AccessibilityBridge::announce)) is a no-op, and
-/// [`poll_actions`](AccessibilityBridge::poll_actions) returns nothing because
-/// no assistive technology is attached. Its silence is correct behavior for a
-/// platform without an accessibility API, not a stub awaiting implementation.
+#[doc = include_str!("accessibility_bridge.doc/NullAccessibilityBridge.md")]
 #[derive(Debug, Default, Clone)]
 pub struct NullAccessibilityBridge;
 
 impl NullAccessibilityBridge {
-    /// Creates the no-op bridge.
+    #[doc = include_str!("accessibility_bridge.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
@@ -72,38 +47,29 @@ impl AccessibilityBridge for NullAccessibilityBridge {
     }
 }
 
-/// A deterministic recording [`AccessibilityBridge`] for tests (spec §7.1).
-///
-/// `RecordingAccessibilityBridge` observes what the domain pushes — counting
-/// [`tree_updates`](Self::tree_updates) and [`updates_applied`](Self::updates_applied),
-/// retaining the [`last_announcement`](Self::last_announcement) and
-/// [`last_focus`](Self::last_focus) — and lets a test seed inbound requests with
-/// [`queue_action`](Self::queue_action) so
-/// [`poll_actions`](AccessibilityBridge::poll_actions) drains them in order. It
-/// makes the accessibility command loop testable without any real platform.
+#[doc = include_str!("accessibility_bridge.doc/RecordingAccessibilityBridge.md")]
 #[derive(Debug, Default, Clone)]
 pub struct RecordingAccessibilityBridge {
-    /// The number of full-snapshot pushes received.
+    #[doc = include_str!("accessibility_bridge.doc/tree_updates.md")]
     pub tree_updates: u64,
-    /// The number of incremental updates applied.
+    #[doc = include_str!("accessibility_bridge.doc/updates_applied.md")]
     pub updates_applied: u64,
-    /// The most recent announcement message, if any.
+    #[doc = include_str!("accessibility_bridge.doc/last_announcement.md")]
     pub last_announcement: Option<Box<str>>,
-    /// The most recent focus change reflected, if any.
+    #[doc = include_str!("accessibility_bridge.doc/last_focus.md")]
     pub last_focus: Option<AccessibilityFocus>,
-    /// The queued inbound action requests, drained by `poll_actions`.
+    #[doc = include_str!("accessibility_bridge.doc/queued.md")]
     queued: Vec<AccessibilityAction>,
 }
 
 impl RecordingAccessibilityBridge {
-    /// Creates an empty recording bridge with zeroed counters.
+    #[doc = include_str!("accessibility_bridge.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Queues an inbound `action` for a later
-    /// [`poll_actions`](AccessibilityBridge::poll_actions) to drain.
+    #[doc = include_str!("accessibility_bridge.doc/queue_action.md")]
     pub fn queue_action(&mut self, action: AccessibilityAction) {
         self.queued.push(action);
     }

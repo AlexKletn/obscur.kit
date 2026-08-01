@@ -1,20 +1,4 @@
-//! The **declarative** windowed counter — the `windowed_counter.rs` capstone
-//! rewritten on the one-call [`obscur_kit::App`] entry point (spec §1.4).
-//!
-//! `windowed_counter.rs` spells out ~890 lines to open one window: a winit
-//! `ApplicationHandler`, the wgpu `Instance → Surface → Adapter → Device → Queue`
-//! chain, the multi-font fallback stack + renderer font hand-off, the CSS compile,
-//! swapchain resize/lost recovery, the present quad, and the pointer/key/IME arms.
-//! [`App`] composes all of that from the kit's own facilities, so the app code
-//! below is just the counter's state, view builder, CSS, and command handlers —
-//! the *same behaviour*, an order of magnitude less boilerplate.
-//!
-//! Run it on a real machine (a display + a GPU adapter are required):
-//! `cargo run -p obscur-kit --example hello_app --features full`
-//!
-//! Clicking the green bar increments the on-screen count and the red bar
-//! decrements it; hovering a bar lights its `:hover` style. It cannot run in the
-//! headless dev/CI environment (no display, no GPU), so there it is only compiled.
+#![doc = include_str!("hello_app.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::Cell;
@@ -26,14 +10,11 @@ use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{View, ViewNode};
 use obscur_kit::widgets::button::Button;
 
-/// The two button commands, named rather than hand-numbered: `named` derives a
-/// stable symbol from the string, so there is no unique integer to invent or keep
-/// distinct (the old `from_raw(0x1001)` / `0x1002`).
+#[doc = include_str!("hello_app.doc/CMD_DECREMENT.md")]
 const CMD_DECREMENT: InternedSymbol = InternedSymbol::named("decrement");
 const CMD_INCREMENT: InternedSymbol = InternedSymbol::named("increment");
 
-/// The authored stylesheet — byte-identical to `windowed_counter.rs`, so the look
-/// and the `:hover` behaviour are the same.
+#[doc = include_str!("hello_app.doc/COUNTER_CSS.md")]
 const COUNTER_CSS: &str = "\
 .counter         { background-color: #1e2636; width: 100%; height: 100%; }\n\
 .bar             { width: 100%; }\n\
@@ -66,8 +47,7 @@ fn main() -> Result<(), obscur_kit::AppError> {
         .run()
 }
 
-/// Builds the counter UI from `count` (unchanged from `windowed_counter.rs`): a
-/// dark `.counter` panel stacking a label bar and the two real [`Button`] bars.
+#[doc = include_str!("hello_app.doc/build_counter_view.md")]
 fn build_counter_view(count: i32) -> View {
     let label = tagged(
         "bar label",
@@ -84,7 +64,7 @@ fn build_counter_view(count: i32) -> View {
     View::single(container)
 }
 
-/// Wraps `children` in a container tagged with the space-separated `class`.
+#[doc = include_str!("hello_app.doc/tagged.md")]
 fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
@@ -92,9 +72,7 @@ fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .class(class)
 }
 
-/// A real [`Button`] bound to `command`, rendered as a sizing bar (the sizing
-/// class is on the button's own node so the click resolves to it — see the
-/// original example's note on ancestor-chain resolution).
+#[doc = include_str!("hello_app.doc/button_bar.md")]
 fn button_bar(class: &str, label: &str, command: InternedSymbol) -> ViewNode {
     Button::new(label, command).into_view_node().class(class)
 }

@@ -1,277 +1,102 @@
-//! The frontend name-binding registry: the single policy that maps authored
-//! `.okui`/DSL **names** onto the engine's real handles.
-//!
-//! A `.okui` document (or the TSX-like DSL) names things with strings — a tag
-//! like `Button` or `div`, an attribute like `class` or `src`, an event like
-//! `click`. Both frontend lowering paths must agree on what those names bind to:
-//!
-//! - the **runtime bridge** ([`crate::document`] → `obscur-view` `View`), which
-//!   interprets the IR into a desired tree at runtime, and
-//! - the **code generator**, which emits ordinary Rust that builds the same
-//!   `View` at *compile* time.
-//!
-//! Centralising the policy here keeps the two paths byte-for-byte consistent and
-//! removes the duplicated ad-hoc hashing they used to carry.
-//!
-//! # Mapping
-//!
-//! - **Tags → [`ComponentId`]**: the built-in widgets and non-container
-//!   primitives map to their stable `COMPONENT_ID`. What an unrecognised tag maps
-//!   to depends on the [`TagPosition`] it was written in — an *element* tag
-//!   (`div`, `span`, `header`) maps to the generic [`Container`](CONTAINER)
-//!   primitive, so it is a real, styleable box; a *component* tag (`Card`) maps
-//!   to [`user_component_id`], the id `#[derive(Contract)]` computes for the very
-//!   same name.
-//! - **Tags → a local name (CSS *type*)**: an *element* tag is also the node's
-//!   own **local name**, the string a §4.13 type selector matches — `<button>`
-//!   is what `button { … }` styles, exactly as in HTML. [`local_name_for`] is
-//!   that policy, and it is the reason both lowering paths emit a [`TYPE`]
-//!   property nobody authored.
-//! - **Attribute names → [`InternedSymbol`]**: the CSS/reserved attributes
-//!   (`class`, `id`, `type`, `src`, `disabled`, `checked`) map to the reserved
-//!   `obscur-view` symbols the reconciler and matcher read; any other name is
-//!   deterministically hashed into a high symbol namespace (top bit set) that
-//!   never collides with the reserved low range. Exactly one binding depends on
-//!   the tag the attribute sits on — `name` on a [`OUTLET_TAG`] — which is why
-//!   [`attr_symbol_on`] exists alongside [`attr_symbol`].
-//! - **Event names → [`InternedSymbol`]**: `click`/`input`/`change` map to the
-//!   reserved `EVENT_*` symbols the runtime's dispatcher resolves; any other name
-//!   is hashed like an attribute.
-//!
-//! # Why a component tag is not a box
-//!
-//! It used to be. [`component_id_for`] took a tag and nothing else, and resolved
-//! **every** unrecognised name to [`CONTAINER`] — so `<Card/>` was not a
-//! mis-checked component and not a rejected one, it was a generic div, silently.
-//! §2.13's contract validation "skips any tag with no registered contract" was
-//! checking nothing, because the tag was never going to *be* a component.
-//!
-//! The position is now an argument rather than a guess, and it is the
-//! distinction both front ends already make and then threw away (the `.okui`
-//! lowering's `starts_uppercase`, the macro's `is_component`, both of which
-//! produce a `UiIrNodeKind::Component`). A caller must now *state* which
-//! fallback it wants, so the wrong one can no longer be picked by omission —
-//! though it remains perfectly spellable, and only the call sites' agreement
-//! with their node's kind keeps it right.
-//!
-//! # Why an element tag is also a name
-//!
-//! It was not. A tag resolved to a [`ComponentId`] and to nothing else, and a
-//! `ComponentId` is not a selector input — no part of matching reads one. So
-//! every authored element reached the tree **anonymous**: `<button>`, `<div>` and
-//! `<td>` were three nodes with no local name, and `button { … }`, `div { … }`,
-//! `td { … }` — including the rules the facade's own UA stylesheet is written
-//! entirely in — matched none of them. Only the hand-written widgets styled
-//! themselves, by setting the reserved [`TYPE`] property in Rust
-//! (`obscur_widgets::Button::view`). Authored markup could be styled by class and
-//! by id, and by type never.
-//!
-//! [`local_name_for`] is the missing half: an element tag is the node's local
-//! name as well as its id, so a `.okui`/`okui!` `<button>` is a real base element
-//! in the HTML sense — the UA sheet's `button { … }` reaches it, and so does an
-//! author's. Both lowering paths call it, and neither may open-code the rule: the
-//! bytes they emit have to stay identical, which is what this module is for.
-//!
-//! # The id of a component nobody here can see
-//!
-//! §2.14's `ComponentRegistry` is a **runtime** value holding
-//! `Box<dyn ComponentFactory>` trait objects. A code generator cannot consult it:
-//! `CardProps::contract()` is a function that runs when the built crate runs, and
-//! codegen runs while that crate is still being compiled. So the binding does not
-//! ask a registry what `Card` is — it computes the id from the **name**, exactly
-//! as `#[derive(Contract)]` does at expansion time (the derive calls straight into
-//! [`component_id_for`], so there is one definition rather than two that agree by
-//! luck). A host that registers the derived contract's id and an author who writes
-//! the tag therefore meet on the same handle without either knowing about the
-//! other.
-//!
-//! What this does **not** do is make an unregistered tag loud. `<Crad/>` (a typo)
-//! binds to `user_component_id("Crad")`, nothing is registered under it, and it
-//! mounts nothing — no diagnostic. Nor is it even visibly different: no part of
-//! matching, cascade, layout or paint reads a `ComponentId` (only
-//! `ComponentStore::mount` does), so a typo'd component tag still renders as the
-//! same box it silently rendered as before. What it can no longer do is collide
-//! with [`CONTAINER`] and mount whatever a host registered there.
-//!
-//! Making it loud is the half this does not close. The file front end could
-//! (its `Compiler` already takes a `ContractRegistry`); the `okui!` macro cannot,
-//! for the reason above — so the rule cannot be stated once for both front ends,
-//! and stating it for one is the drift the `<VirtualFor>`-was-`<For>` finding was
-//! written against. `okui_user_component.rs`'s
-//! `an_unregistered_component_tag_mounts_nothing` pins the residue.
-//!
-//! # Drift
-//!
-//! The raw handle values below are duplicated from their canonical definitions
-//! (`obscur-view` reserved symbols; the widget/primitive `COMPONENT_ID`
-//! constants) because this frontend crate must not depend on the component tier.
-//! A drift-guard test in the facade (`obscur-kit`) asserts every constant here
-//! still equals its canonical source.
+#![doc = include_str!("name_binding.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
 // --- Reserved attribute symbols (mirror `obscur_view::view::style_attribute`). ---
 
-/// Reserved `class` attribute symbol (`obscur_view::view::CLASS`).
+#[doc = include_str!("name_binding.doc/CLASS.md")]
 pub const CLASS: InternedSymbol = InternedSymbol::from_raw(0x0000_0001);
-/// Reserved `id` attribute symbol (`obscur_view::view::ID`).
+#[doc = include_str!("name_binding.doc/ID.md")]
 pub const ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0002);
-/// Reserved `type` attribute symbol (`obscur_view::view::TYPE`).
+#[doc = include_str!("name_binding.doc/TYPE.md")]
 pub const TYPE: InternedSymbol = InternedSymbol::from_raw(0x0000_0003);
-/// Reserved `src` attribute symbol (`obscur_view::view::SRC`).
+#[doc = include_str!("name_binding.doc/SRC.md")]
 pub const SRC: InternedSymbol = InternedSymbol::from_raw(0x0000_0004);
-/// Reserved `disabled` attribute symbol (`obscur_view::view::DISABLED`).
+#[doc = include_str!("name_binding.doc/DISABLED.md")]
 pub const DISABLED: InternedSymbol = InternedSymbol::from_raw(0x0000_0005);
-/// Reserved `checked` attribute symbol (`obscur_view::view::CHECKED`).
+#[doc = include_str!("name_binding.doc/CHECKED.md")]
 pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
 
-/// Mirror of `obscur_view::view::TEST_ID` — a node's stable testing identifier
-/// (spec §7.5).
-///
-/// Deliberately NOT a style attribute: it must not affect matching, specificity,
-/// layout or visuals, so it is carried as an ordinary property and read only by a
-/// selector resolver. It sits in its own `0x0000_02xx` namespace.
+#[doc = include_str!("name_binding.doc/TEST_ID.md")]
 pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
 
-/// Mirror of `obscur_view::view::AUTOMATION_ID` — a node's stable identifier for
-/// external automation and assistive tooling (spec §7.5).
-///
-/// Separate from [`TEST_ID`] because the two answer to different owners: a test-id
-/// is the app's own and renames freely, an automation-id is a contract with
-/// software that cannot be updated in the same commit.
+#[doc = include_str!("name_binding.doc/AUTOMATION_ID.md")]
 pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
 
-/// Mirror of `obscur_view::view::SLOT` — a child's `slot="…"` assignment, naming
-/// the slot of the enclosing component it is projected into (spec §2.12).
-///
-/// Reserved rather than hashed because the runtime reads it: the reconciler keeps
-/// the authored children of a node that carries one, and `project_slots` matches
-/// them against the outlets the component's own render declares. A hashed symbol
-/// would have made this a name only the front ends agreed on, and the tier that
-/// has to act on it lives below them and cannot call this function.
-///
-/// Not a style attribute: a slot assignment is structure, so it must not affect
-/// matching or specificity. It has a namespace of its own (`0x0000_03xx`).
+#[doc = include_str!("name_binding.doc/SLOT.md")]
 pub const SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0301);
 
-/// Mirror of `obscur_view::view::SLOT_OUTLET` — the [`ComponentId`] of a §2.12
-/// **slot outlet**, the position a component's render names for its authored
-/// children to be projected into.
-///
-/// This is what [`OUTLET_TAG`] binds to, and it is the reason the outlet needed no
-/// new syntax on either front end: `<slot name="header"/>` is an ordinary element
-/// tag with an ordinary attribute, and the two [`name_binding`](self) rules
-/// (`slot` → this id, and `name` → [`SLOT`] *on this tag*) are the whole feature.
-///
-/// It sits in a reserved range of its own (`0x00B0_xxxx`), below the primitive
-/// (`0x00C0_xxxx`) and widget (`0x00D0_xxxx`) ranges and clear of the top-bit
-/// namespace [`user_component_id`] hashes into.
+#[doc = include_str!("name_binding.doc/SLOT_OUTLET.md")]
 pub const SLOT_OUTLET: ComponentId = ComponentId::from_raw(0x00B0_0001);
 
-/// The tag that spells a §2.12 slot outlet: `<slot name="header"/>`.
-///
-/// A `&str` constant rather than a bare literal because three places must agree on
-/// it and cannot be allowed to drift: [`builtin_component_id`] binds the tag,
-/// [`attr_symbol_on`] rebinds `name` on it, and the frontend's `check_outlet`
-/// rule decides what is legal to write on it.
-///
-/// Lowercase only, and deliberately: an outlet is a *position marker*, not a
-/// component, and both front ends classify a lowercase tag as an element (see
-/// [`TagPosition`]). A `<Slot/>` in component position stays what any unrecognised
-/// component tag is — [`user_component_id("Slot")`](user_component_id), mounting
-/// nothing — because giving the outlet two spellings would mean the front ends'
-/// element/component classification no longer decided anything about it.
+#[doc = include_str!("name_binding.doc/OUTLET_TAG.md")]
 pub const OUTLET_TAG: &str = "slot";
 
 // --- Reserved event symbols (mirror `obscur_view::view::event_name`). ---
 
-/// Reserved `click` event symbol (`obscur_view::view::EVENT_CLICK`).
+#[doc = include_str!("name_binding.doc/EVENT_CLICK.md")]
 pub const EVENT_CLICK: InternedSymbol = InternedSymbol::from_raw(0x0000_0101);
-/// Reserved `input` event symbol (`obscur_view::view::EVENT_INPUT`).
+#[doc = include_str!("name_binding.doc/EVENT_INPUT.md")]
 pub const EVENT_INPUT: InternedSymbol = InternedSymbol::from_raw(0x0000_0102);
-/// Reserved `change` event symbol (`obscur_view::view::EVENT_CHANGE`).
+#[doc = include_str!("name_binding.doc/EVENT_CHANGE.md")]
 pub const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x0000_0103);
-/// Reserved `longpress` event symbol (`obscur_view::view::EVENT_LONG_PRESS`).
+#[doc = include_str!("name_binding.doc/EVENT_LONG_PRESS.md")]
 pub const EVENT_LONG_PRESS: InternedSymbol = InternedSymbol::from_raw(0x0000_0104);
 
 // --- Primitive component ids (mirror `obscur_primitives::*::COMPONENT_ID`). ---
 
-/// The generic box primitive (`obscur_primitives::Container`) — the default
-/// binding for any tag without a more specific mapping.
+#[doc = include_str!("name_binding.doc/CONTAINER.md")]
 pub const CONTAINER: ComponentId = ComponentId::from_raw(0x00C0_0001);
-/// The image primitive (`obscur_primitives::Image`).
+#[doc = include_str!("name_binding.doc/IMAGE.md")]
 pub const IMAGE: ComponentId = ComponentId::from_raw(0x00C0_0003);
-/// The scroll primitive (`obscur_primitives::Scroll`).
+#[doc = include_str!("name_binding.doc/SCROLL.md")]
 pub const SCROLL: ComponentId = ComponentId::from_raw(0x00C0_0004);
-/// The canvas primitive (`obscur_primitives::Canvas`).
+#[doc = include_str!("name_binding.doc/CANVAS.md")]
 pub const CANVAS: ComponentId = ComponentId::from_raw(0x00C0_0005);
-/// The portal primitive (`obscur_primitives::Portal`).
+#[doc = include_str!("name_binding.doc/PORTAL.md")]
 pub const PORTAL: ComponentId = ComponentId::from_raw(0x00C0_0006);
-/// The layer primitive (`obscur_primitives::Layer`).
+#[doc = include_str!("name_binding.doc/LAYER.md")]
 pub const LAYER: ComponentId = ComponentId::from_raw(0x00C0_0007);
-/// The foreign-surface primitive (`obscur_primitives::ForeignSurface`).
+#[doc = include_str!("name_binding.doc/FOREIGN_SURFACE.md")]
 pub const FOREIGN_SURFACE: ComponentId = ComponentId::from_raw(0x00C0_0008);
 
 // --- Widget component ids (mirror `obscur_widgets::*::COMPONENT_ID`). ---
 
-/// The button widget (`obscur_widgets::Button`).
+#[doc = include_str!("name_binding.doc/BUTTON.md")]
 pub const BUTTON: ComponentId = ComponentId::from_raw(0x00D0_0001);
-/// The input widget (`obscur_widgets::Input`).
+#[doc = include_str!("name_binding.doc/INPUT.md")]
 pub const INPUT: ComponentId = ComponentId::from_raw(0x00D0_0002);
-/// The checkbox widget (`obscur_widgets::Checkbox`).
+#[doc = include_str!("name_binding.doc/CHECKBOX.md")]
 pub const CHECKBOX: ComponentId = ComponentId::from_raw(0x00D0_0003);
-/// The select widget (`obscur_widgets::Select`).
+#[doc = include_str!("name_binding.doc/SELECT.md")]
 pub const SELECT: ComponentId = ComponentId::from_raw(0x00D0_0004);
-/// The menu widget (`obscur_widgets::Menu`).
+#[doc = include_str!("name_binding.doc/MENU.md")]
 pub const MENU: ComponentId = ComponentId::from_raw(0x00D0_0005);
-/// The dialog widget (`obscur_widgets::Dialog`).
+#[doc = include_str!("name_binding.doc/DIALOG.md")]
 pub const DIALOG: ComponentId = ComponentId::from_raw(0x00D0_0006);
-/// The tabs widget (`obscur_widgets::Tabs`).
+#[doc = include_str!("name_binding.doc/TABS.md")]
 pub const TABS: ComponentId = ComponentId::from_raw(0x00D0_0007);
-/// The list widget (`obscur_widgets::List`).
+#[doc = include_str!("name_binding.doc/LIST.md")]
 pub const LIST: ComponentId = ComponentId::from_raw(0x00D0_0008);
-/// The tree widget (`obscur_widgets::Tree`).
+#[doc = include_str!("name_binding.doc/TREE.md")]
 pub const TREE: ComponentId = ComponentId::from_raw(0x00D0_0009);
-/// The table widget (`obscur_widgets::Table`).
+#[doc = include_str!("name_binding.doc/TABLE.md")]
 pub const TABLE: ComponentId = ComponentId::from_raw(0x00D0_000A);
-/// The docking widget (`obscur_widgets::Docking`).
+#[doc = include_str!("name_binding.doc/DOCKING.md")]
 pub const DOCKING: ComponentId = ComponentId::from_raw(0x00D0_000B);
-/// The radio widget (`obscur_widgets::Radio`).
+#[doc = include_str!("name_binding.doc/RADIO.md")]
 pub const RADIO: ComponentId = ComponentId::from_raw(0x00D0_000C);
 
-/// Which authoring position a tag was written in — the component-vs-element
-/// distinction both front ends already make.
-///
-/// This is an argument rather than something [`component_id_for`] infers,
-/// because the two positions have genuinely different fallbacks and the resolver
-/// used to pick one of them for everything. It is not re-derived from the tag's
-/// spelling here: the front ends own that rule (`.okui` lowering's
-/// `starts_uppercase`, the macro's `is_component`), they record their verdict on
-/// the IR node's [`UiIrNodeKind`](crate::document::UiIrNodeKind), and a second
-/// copy of the rule in this crate could only ever drift from it.
+#[doc = include_str!("name_binding.doc/TagPosition.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TagPosition {
-    /// An element tag — `div`, `span`, `header`, `img`. Falls back to the
-    /// generic [`CONTAINER`] box.
+    #[doc = include_str!("name_binding.doc/Element.md")]
     Element,
-    /// A component tag — `Button`, `Card`. Falls back to [`user_component_id`].
+    #[doc = include_str!("name_binding.doc/Component.md")]
     Component,
 }
 
-/// The [`ComponentId`] of the built-in this tag names, or [`None`] when it names
-/// no built-in.
-///
-/// Built-in widgets and non-container primitives resolve to their stable
-/// `COMPONENT_ID`; the lowercase `button`/`img`/`canvas`/… element spellings
-/// resolve to the same widget or primitive as their PascalCase component
-/// spelling.
-///
-/// [`OUTLET_TAG`] is the one entry here that is not a component at all: nothing is
-/// ever registered under [`SLOT_OUTLET`], and no node ever retains it — projection
-/// substitutes it away inside a component's render, and the reconciler refuses it
-/// anywhere else. It is a built-in because it is a *reserved tag*: `<slot>` must
-/// mean the outlet rather than a `div` named `slot`, and this function is where
-/// every reserved tag is stated.
+#[doc = include_str!("name_binding.doc/builtin_component_id.md")]
 #[must_use]
 pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
     let id = match tag {
@@ -310,18 +135,7 @@ pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
     Some(id)
 }
 
-/// Resolves a tag name, written in `position`, to the [`ComponentId`] it binds
-/// to.
-///
-/// A built-in's **id** always wins: `<Button/>` resolves to the shipped widget's
-/// `COMPONENT_ID` rather than to a hash of the string, and `img`/`Image`,
-/// `button`/`Button` are one handle each. That is a claim about the handle, not
-/// about what renders — a host that registers its own factory under
-/// `Button::COMPONENT_ID` (which is what `#[contract(name = "Button")]` derives)
-/// takes the tag over, and this function neither knows nor prevents it.
-///
-/// Otherwise the fallback follows the position — an element tag is the generic
-/// [`CONTAINER`] box, a component tag is its own [`user_component_id`].
+#[doc = include_str!("name_binding.doc/component_id_for.md")]
 #[must_use]
 pub fn component_id_for(tag: &str, position: TagPosition) -> ComponentId {
     if let Some(builtin) = builtin_component_id(tag) {
@@ -333,57 +147,7 @@ pub fn component_id_for(tag: &str, position: TagPosition) -> ComponentId {
     }
 }
 
-/// The **local name** (CSS *type*) the tag contributes to the node it lowers to,
-/// or [`None`] when it contributes none.
-///
-/// This is the whole of "a base element, as in HTML": a `<button>` an author
-/// wrote must be what a `button { … }` type selector matches (spec §4.13, "type,
-/// class, id, attribute, descendant/child/sibling combinators"), and the matcher
-/// reads an element's local name from the reserved [`TYPE`] property — nothing
-/// else. So both lowering paths append a `TYPE` property nobody authored, and
-/// this function is the single definition of when and to what, because the two
-/// paths must emit the same bytes.
-///
-/// # `type` is two channels, and the author owns it
-///
-/// [`TYPE`] is overloaded, and honestly so: it is *both* the element's local name
-/// (this function's implicit value) *and* the reserved symbol an authored
-/// `type="…"` attribute binds to — and HTML really does write
-/// `<button type="submit">`, so the collision is not hypothetical. There is one
-/// slot and two writers, so the rule is that the **author wins**: given any
-/// authored attribute that binds to `TYPE`, this returns [`None`] and the node
-/// carries the authored value alone. `<button type="submit">` is therefore an
-/// element whose CSS type is `submit`, which is the price of the overload and not
-/// a thing to paper over: an author who wants both spellings out of one node has
-/// to say so with a class. (`authored_attributes` is asked for by *name*, not by
-/// resolved symbol, so the caller cannot forget to route it through
-/// [`attr_symbol_on`] — this function does that itself, on the same tag.)
-///
-/// # A component tag gets none
-///
-/// `<Card/>` is not an element; it names a component, whose own render produces
-/// the elements — and each of *those* carries its own local name (that is exactly
-/// what `obscur_widgets::Button::view` sets `TYPE` for). Naming the *host* node
-/// `Card` would invent a CSS type no vocabulary has, and a costly one: a type
-/// selector is matched ASCII-case-**insensitively**
-/// (`SelectorMatcher::matches_simple`), so a `<Card/>` and a hypothetical `<card>`
-/// element would be indistinguishable to the cascade. A component's node
-/// therefore stays anonymous to type selectors and is styled by class, by id, or
-/// by whatever its render emits — the same rule §2.12 slot projection already
-/// implies, where the host node is a seam rather than a box the author styles.
-///
-/// # And so does the outlet
-///
-/// [`OUTLET_TAG`] is written in element position but is not an element either: it
-/// is a *position marker*, substituted away by `project_slots` before the tree is
-/// reconciled (and reported as stray if it is not), so no retained node ever
-/// carries `slot` as its type and no type selector could ever match one. Naming it
-/// would be dead weight — and worse than dead: an authored `<slot name="header"/>`
-/// must be **the same node** a component's own `ViewNode::slot("header")` builds,
-/// "one outlet, two spellings, not two outlets"
-/// (`okui_slot_projection.rs::an_authored_slot_tag_is_the_outlet_on_the_macro_front_end`
-/// asserts that equality outright). An extra property on one of the two spellings
-/// would split them.
+#[doc = include_str!("name_binding.doc/local_name_for.md")]
 #[must_use]
 pub fn local_name_for<'tag, 'attr>(
     tag: &'tag str,
@@ -399,53 +163,13 @@ pub fn local_name_for<'tag, 'attr>(
     (!authored_type).then_some(tag)
 }
 
-/// The [`ComponentId`] a **user** component tag binds to: FNV-1a 64 of the name,
-/// lifted into a high namespace (top bit set).
-///
-/// This is the id `#[derive(Contract)]` puts on `ComponentContract::id` for the
-/// same name, and the whole reason an author's `<Card/>` and a host's
-/// `register_component(…)` meet without either consulting the other: the name is
-/// the shared secret. The derive does not re-implement it — it calls
-/// [`component_id_for`] — so the two cannot drift.
-///
-/// The top bit is set for the same reason [`fallback_symbol`] sets it: every
-/// built-in `COMPONENT_ID` is a small low-range constant, so a hashed name can
-/// never *alias* one. That makes the two namespaces disjoint by construction
-/// rather than by the odds on a 64-bit hash.
+#[doc = include_str!("name_binding.doc/user_component_id.md")]
 #[must_use]
 pub fn user_component_id(tag: &str) -> ComponentId {
     ComponentId::from_raw(hash_name_64(tag) | 0x8000_0000_0000_0000)
 }
 
-/// Resolves an attribute name written **on `tag`** to the [`InternedSymbol`] it
-/// binds to.
-///
-/// This is [`attr_symbol`] plus the one binding that depends on the tag the
-/// attribute sits on: on [`OUTLET_TAG`], `name` is the *slot the outlet stands
-/// for*, so it binds to the reserved [`SLOT`] symbol that `project_slots` reads —
-/// exactly as a child's `slot="…"` does, because the two are the two halves of one
-/// join and must be the same symbol or they never meet. On every other tag `name`
-/// is an ordinary hashed prop, and `<slot class="x">` is an ordinary hashed prop
-/// too: only the pair (`slot`, `name`) is special.
-///
-/// # The obstacle that was not one
-///
-/// The audit recorded that an outlet "cannot cheaply become" a tag because
-/// "`attr_symbol` binds an attribute by its own spelling with no idea which tag it
-/// sits on, so `name` cannot mean the slot's name on one tag and a hashed prop
-/// elsewhere". The first clause is true of the *function*; the conclusion does not
-/// follow. Of [`attr_symbol`]'s three production callers, the two that lower a
-/// **document** — `UiIrViewBridge::lower_element` and `ViewCodegen::emit_element` —
-/// hold `node.tag()` in the same scope in which they call it, and each is already
-/// threading `TagPosition` out of that same node. The tag was not absent; it was
-/// one argument away. That is a much cheaper finding than the one the audit wrote,
-/// and the difference between the two is the whole cost of this feature.
-///
-/// The third caller is the one the audit's claim is true of, and it is why
-/// [`attr_symbol`] is still here rather than replaced: `#[derive(Contract)]` hashes
-/// a prop name out of a struct field, where there is no tag by construction. It
-/// keeps the tagless function, which is exactly this one's non-outlet branch, so
-/// the two cannot disagree.
+#[doc = include_str!("name_binding.doc/attr_symbol_on.md")]
 #[must_use]
 pub fn attr_symbol_on(tag: &str, name: &str) -> InternedSymbol {
     if tag == OUTLET_TAG && name == "name" {
@@ -454,15 +178,7 @@ pub fn attr_symbol_on(tag: &str, name: &str) -> InternedSymbol {
     attr_symbol(name)
 }
 
-/// Resolves an attribute name to the [`InternedSymbol`] it binds to, with no tag
-/// context.
-///
-/// The reserved CSS/state attributes map to the `obscur-view` symbols the
-/// reconciler and matcher read; any other name is hashed into the high symbol
-/// namespace (see [`fallback_symbol`]).
-///
-/// Prefer [`attr_symbol_on`] when the tag is known: one binding (`name` on a
-/// `<slot>`) depends on it, and this function cannot see it.
+#[doc = include_str!("name_binding.doc/attr_symbol.md")]
 #[must_use]
 pub fn attr_symbol(name: &str) -> InternedSymbol {
     match name {
@@ -482,10 +198,7 @@ pub fn attr_symbol(name: &str) -> InternedSymbol {
     }
 }
 
-/// Resolves an event name to the [`InternedSymbol`] it binds to.
-///
-/// `click`/`input`/`change` map to the reserved `EVENT_*` symbols the runtime
-/// dispatcher resolves; any other name is hashed like an attribute.
+#[doc = include_str!("name_binding.doc/event_symbol.md")]
 #[must_use]
 pub fn event_symbol(name: &str) -> InternedSymbol {
     match name {
@@ -500,32 +213,13 @@ pub fn event_symbol(name: &str) -> InternedSymbol {
     }
 }
 
-/// Hashes an unreserved name into a high symbol namespace (top bit set) that
-/// never collides with the reserved low range.
-///
-/// This is the deterministic placeholder both frontend paths share for names
-/// that have no reserved symbol; a name interner threaded through the whole
-/// pipeline would replace it.
-///
-/// # A handler name is one of these, and being *claimed* is a separate question
-///
-/// For an `on:<event>` binding this function computes the **command symbol** a
-/// runtime registration is matched against, and it is equal to
-/// `InternedSymbol::named` by construction (pinned by
-/// `okui_name_binding_drift.rs`). What it cannot say is whether anybody registered
-/// that command: hashing `incrment` succeeds exactly as hashing `increment` does,
-/// so a misspelled handler used to be a silent no-op. That check is
-/// `obscur_okui_compiler::validation::CommandValidator`, against a set of command
-/// names the caller declares — because the registrations are runtime values and no
-/// compiler can discover them. The file front end can be handed that set; the
-/// `okui!` macro cannot, for exactly the reason the module docs give for an
-/// unregistered component tag.
+#[doc = include_str!("name_binding.doc/fallback_symbol.md")]
 #[must_use]
 pub fn fallback_symbol(name: &str) -> InternedSymbol {
     InternedSymbol::from_raw(hash_name_32(name) | 0x8000_0000)
 }
 
-/// Deterministic FNV-1a 32-bit hash of a name.
+#[doc = include_str!("name_binding.doc/hash_name_32.md")]
 #[must_use]
 fn hash_name_32(name: &str) -> u32 {
     let mut hash: u32 = 0x811c_9dc5;
@@ -536,8 +230,7 @@ fn hash_name_32(name: &str) -> u32 {
     hash
 }
 
-/// Deterministic FNV-1a 64-bit hash of a name — the [`ComponentId`]-width
-/// counterpart of [`hash_name_32`].
+#[doc = include_str!("name_binding.doc/hash_name_64.md")]
 #[must_use]
 fn hash_name_64(name: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;

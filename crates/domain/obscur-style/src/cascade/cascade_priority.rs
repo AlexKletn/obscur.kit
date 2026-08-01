@@ -1,64 +1,33 @@
-//! The total-order sort key that resolves a cascade conflict:
-//! [`CascadePriority`] (§4.14).
+#![doc = include_str!("cascade_priority.doc/_module.md")]
 
 use crate::cascade::{CascadeOrigin, ImportantFlag};
 use crate::selector::SelectorSpecificity;
 use core::cmp::Ordering;
 
-/// The total-order sort key used to pick the winning declaration for a property
-/// (§4.14).
-///
-/// The greater priority wins. Priority is derived from a declaration's
-/// `(origin, important, specificity, source_order)` and imposes the §4.14
-/// ordering as three bands, from lowest to highest precedence:
-///
-/// 1. **authored normal** declarations, ordered among themselves by origin
-///    (`SystemDefault < Theme < GlobalApp < ComponentModule < Inline`);
-/// 2. **authored `!important`** declarations, in the same origin order — this
-///    whole band sits above *every* authored normal declaration, so an
-///    important Theme declaration beats a normal Inline one;
-/// 3. **runtime-override** declarations, which sit above all authored CSS,
-///    normal or important; within this top band an `!important` runtime
-///    override outranks a normal one.
-///
-/// These three regions are captured by a single [`band`](Self::band) integer.
-/// The complete ordering key is the tuple `(band, specificity, source_order)`:
-/// within one band (which pins down a single `(origin, important)` pairing) a
-/// higher [`SelectorSpecificity`] wins, and on equal specificity a later
-/// `source_order` wins.
-///
-/// Because [`band`](Self::band) is a bijection over the valid
-/// `(origin, important)` inputs, ordering by that tuple is consistent with
-/// equality: two priorities compare equal exactly when their band, specificity
-/// and source order all match.
+#[doc = include_str!("cascade_priority.doc/CascadePriority.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CascadePriority {
-    /// The precedence band computed from `(origin, important)` — see
-    /// [`CascadePriority::band`].
+    #[doc = include_str!("cascade_priority.doc/band.md")]
     band: u8,
-    /// The selector specificity, compared within a band.
+    #[doc = include_str!("cascade_priority.doc/specificity.md")]
     specificity: SelectorSpecificity,
-    /// The declaration's position within its origin stream; later wins.
+    #[doc = include_str!("cascade_priority.doc/source_order.md")]
     source_order: u32,
-    /// The origin the priority was built from (retained for inspection).
+    #[doc = include_str!("cascade_priority.doc/origin.md")]
     origin: CascadeOrigin,
-    /// The importance flag the priority was built from (retained for
-    /// inspection).
+    #[doc = include_str!("cascade_priority.doc/important.md")]
     important: ImportantFlag,
 }
 
-/// Band value for authored `!important` declarations, added to the origin rank.
+#[doc = include_str!("cascade_priority.doc/AUTHORED_IMPORTANT_BASE.md")]
 const AUTHORED_IMPORTANT_BASE: u8 = 10;
-/// Band value for the runtime-override layer when the declaration is normal.
+#[doc = include_str!("cascade_priority.doc/RUNTIME_NORMAL_BAND.md")]
 const RUNTIME_NORMAL_BAND: u8 = 20;
-/// Band value for the runtime-override layer when the declaration is important.
+#[doc = include_str!("cascade_priority.doc/RUNTIME_IMPORTANT_BAND.md")]
 const RUNTIME_IMPORTANT_BAND: u8 = 21;
 
 impl CascadePriority {
-    /// Builds a priority from a declaration's cascade inputs.
-    ///
-    /// `source_order` is the declaration's position within its origin stream;
-    /// larger means later, and later wins ties within a band.
+    #[doc = include_str!("cascade_priority.doc/new.md")]
     #[must_use]
     pub const fn new(
         origin: CascadeOrigin,
@@ -75,13 +44,7 @@ impl CascadePriority {
         }
     }
 
-    /// Computes the precedence band from `(origin, important)` (§4.14).
-    ///
-    /// * The runtime-override layer is the top band regardless of importance;
-    ///   within it, `!important` ranks above normal.
-    /// * Otherwise an authored `!important` declaration lands in a band above
-    ///   all authored normal declarations.
-    /// * Otherwise an authored normal declaration's band is its origin rank.
+    #[doc = include_str!("cascade_priority.doc/compute_band.md")]
     const fn compute_band(origin: CascadeOrigin, important: ImportantFlag) -> u8 {
         if origin.is_runtime_override() {
             match important {
@@ -99,41 +62,37 @@ impl CascadePriority {
         }
     }
 
-    /// Returns the precedence band this priority falls in.
-    ///
-    /// Higher bands always win over lower bands, irrespective of specificity or
-    /// source order.
+    #[doc = include_str!("cascade_priority.doc/band_2.md")]
     #[must_use]
     pub const fn band(self) -> u8 {
         self.band
     }
 
-    /// Returns the origin this priority was built from.
+    #[doc = include_str!("cascade_priority.doc/origin_2.md")]
     #[must_use]
     pub const fn origin(self) -> CascadeOrigin {
         self.origin
     }
 
-    /// Returns the importance flag this priority was built from.
+    #[doc = include_str!("cascade_priority.doc/important_2.md")]
     #[must_use]
     pub const fn important(self) -> ImportantFlag {
         self.important
     }
 
-    /// Returns the selector specificity this priority was built from.
+    #[doc = include_str!("cascade_priority.doc/specificity_2.md")]
     #[must_use]
     pub const fn specificity(self) -> SelectorSpecificity {
         self.specificity
     }
 
-    /// Returns the source order this priority was built from.
+    #[doc = include_str!("cascade_priority.doc/source_order_2.md")]
     #[must_use]
     pub const fn source_order(self) -> u32 {
         self.source_order
     }
 
-    /// The ordering key: `(band, specificity, source_order)`, most significant
-    /// first.
+    #[doc = include_str!("cascade_priority.doc/key.md")]
     const fn key(self) -> (u8, SelectorSpecificity, u32) {
         (self.band, self.specificity, self.source_order)
     }

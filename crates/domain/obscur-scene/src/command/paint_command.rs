@@ -1,4 +1,4 @@
-//! A single entry in a [`DisplayList`](crate::command::DisplayList).
+#![doc = include_str!("paint_command.doc/_module.md")]
 
 use obscur_geometry::{AffineTransform, CornerRadii, Rect};
 
@@ -8,171 +8,80 @@ use crate::layer::SceneLayer;
 use crate::paint::{Paint, SceneImage};
 use crate::path::Path;
 
-/// One drawing operation in a display list (spec §5.1).
-///
-/// A [`DisplayList`](crate::command::DisplayList) is a flat, ordered stream of
-/// these commands. Each command is either a **leaf** ([`PaintCommand::DrawPath`])
-/// or one half of a **push/pop pair** that brackets a nested region of the
-/// stream:
-///
-/// - [`PaintCommand::PushClip`] / [`PaintCommand::PopClip`] bracket a region
-///   confined to a clip.
-/// - [`PaintCommand::PushLayer`] / [`PaintCommand::PopLayer`] bracket a region
-///   composited into a layer.
-///
-/// Push/pop pairs must **balance**: every push has a matching pop, they nest
-/// (last pushed is first popped), and the running nesting depth never goes
-/// negative. A well-formed list is balanced; [`nesting_delta`] lets callers
-/// check this by folding over the stream. [`PaintCommand::DrawPath`] is a leaf
-/// and contributes no nesting.
-///
-/// [`nesting_delta`]: PaintCommand::nesting_delta
+#[doc = include_str!("paint_command.doc/PaintCommand.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PaintCommand {
-    /// Fill or stroke `path`. The [`Paint`] decides which: a fill paint fills
-    /// the path's interior, a stroke paint draws its outline. This is a leaf
-    /// command and never affects nesting.
+    #[doc = include_str!("paint_command.doc/DrawPath.md")]
     DrawPath {
-        /// The vector outline to paint.
+        #[doc = include_str!("paint_command.doc/path.md")]
         path: Path,
-        /// How the outline is painted (fill or stroke).
+        #[doc = include_str!("paint_command.doc/paint.md")]
         paint: Paint,
     },
-    /// Draw a run of pre-shaped text. A LEAF command (no nesting effect). The
-    /// `origin` is the run's top-left in absolute scene coordinates; `run` carries
-    /// the positioned glyphs produced **once** by the `obscur-text` domain, so
-    /// every renderer consumes an identical run and only rasterization differs
-    /// (spec §5.10, §5.2). Renderers map each glyph to an outline and draw it at
-    /// its run-relative position — they never re-shape.
+    #[doc = include_str!("paint_command.doc/DrawText.md")]
     DrawText {
-        /// Top-left origin of the run, in absolute scene coordinates.
+        #[doc = include_str!("paint_command.doc/origin.md")]
         origin: obscur_geometry::Point,
-        /// The shaped, positioned glyphs (with the font size and source text).
+        #[doc = include_str!("paint_command.doc/run.md")]
         run: crate::text::GlyphRun,
-        /// The brush the glyphs are painted with.
+        #[doc = include_str!("paint_command.doc/brush.md")]
         brush: crate::paint::Brush,
     },
-    /// Paint a CSS `box-shadow` (spec §5.2). A LEAF command (no nesting effect).
-    ///
-    /// The shadow is a gaussian-blurred rounded rectangle derived from the box's
-    /// border box `rect` and corner `radii`: it is translated by `offset`,
-    /// inflated (a **drop** shadow, `inset = false`) or deflated (an **inset**
-    /// shadow, `inset = true`) by `spread`, and blurred by `blur` (the CSS blur
-    /// *radius*, which each renderer maps to a gaussian standard deviation).
-    ///
-    /// The coordinator emits a drop shadow **before** (behind) the box's
-    /// background and an inset shadow **after** it; the renderer decides the
-    /// geometry from these fields so both backends consume identical parameters
-    /// and only rasterization differs. `color` is already resolved (the CSS
-    /// `currentColor` default having been substituted by the coordinator).
+    #[doc = include_str!("paint_command.doc/DrawShadow.md")]
     DrawShadow {
-        /// The box's border-box rectangle, before offset / spread are applied.
+        #[doc = include_str!("paint_command.doc/rect.md")]
         rect: Rect,
-        /// The border box's per-corner radii (all zero for a square box).
+        #[doc = include_str!("paint_command.doc/radii.md")]
         radii: CornerRadii,
-        /// The (already resolved) shadow color.
+        #[doc = include_str!("paint_command.doc/color.md")]
         color: Color,
-        /// The CSS blur *radius* in logical pixels (`0` = a hard edge).
+        #[doc = include_str!("paint_command.doc/blur.md")]
         blur: f32,
-        /// The spread distance in logical pixels: a drop shadow grows by this,
-        /// an inset shadow shrinks by it.
+        #[doc = include_str!("paint_command.doc/spread.md")]
         spread: f32,
-        /// The shadow's `(x, y)` offset from the box, in logical pixels.
+        #[doc = include_str!("paint_command.doc/offset.md")]
         offset: (f32, f32),
-        /// Whether this is an **inset** shadow (painted inside the box) rather
-        /// than a drop shadow (painted behind it).
+        #[doc = include_str!("paint_command.doc/inset.md")]
         inset: bool,
     },
-    /// Draw a decoded raster [`SceneImage`], placed and (optionally) tiled within
-    /// `region`. A LEAF command (no nesting effect).
-    ///
-    /// This is the CSS background placement model (`background-position` /
-    /// `background-size` / `background-repeat`):
-    ///
-    /// * `tile` is the rectangle of **one** copy of the image, in absolute scene
-    ///   coordinates — its position (`background-position`) *and* size
-    ///   (`background-size`) already resolved by the coordinator. The image's
-    ///   intrinsic `width × height` is scaled to `tile`'s size and drawn at
-    ///   `tile`'s origin.
-    /// * `region` is the background paint area (the node's border box). It acts as
-    ///   a **clip**: no image pixel paints outside it.
-    /// * `repeat_x` / `repeat_y` tile the image along that axis, stepping by
-    ///   `tile`'s width / height from `tile`'s origin (both directions) until
-    ///   `region` is covered.
-    ///
-    /// A plain full-box stretch is `tile == region` with `repeat_x == repeat_y ==
-    /// false` — visually identical to a stretch-to-`region` draw. A renderer
-    /// composes this with any active transform / clip / layer exactly like every
-    /// other leaf paint. The image carries its own [`AlphaMode`](crate::color::AlphaMode),
-    /// so each backend converts to its native premultiplied form honestly and both
-    /// show the same picture (spec §5.16).
+    #[doc = include_str!("paint_command.doc/DrawImage.md")]
     DrawImage {
-        /// The decoded RGBA8 image to draw.
+        #[doc = include_str!("paint_command.doc/image.md")]
         image: SceneImage,
-        /// The rectangle of one image copy (position + size), in absolute scene
-        /// coordinates. The image is scaled from its intrinsic size to this rect.
+        #[doc = include_str!("paint_command.doc/tile.md")]
         tile: Rect,
-        /// The background paint area (border box) the image(s) are clipped to.
+        #[doc = include_str!("paint_command.doc/region.md")]
         region: Rect,
-        /// Whether to tile the image horizontally to fill `region`.
+        #[doc = include_str!("paint_command.doc/repeat_x.md")]
         repeat_x: bool,
-        /// Whether to tile the image vertically to fill `region`.
+        #[doc = include_str!("paint_command.doc/repeat_y.md")]
         repeat_y: bool,
     },
-    /// Blur the **backdrop** — everything already painted behind this point —
-    /// within `bounds`, clipped to the rounded `radii`, in place (CSS
-    /// `backdrop-filter: blur(<len>)`, the frosted-glass / acrylic effect, spec
-    /// §5.2). A LEAF command (no nesting effect).
-    ///
-    /// Unlike [`PaintCommand::DrawShadow`] or a `filter: blur` layer (which blur
-    /// the element's OWN content), this command blurs the accumulated frame as
-    /// painted so far — the content BEHIND the element — so it is inherently
-    /// **order-dependent**: a renderer must have already composited every prior
-    /// command before applying it. The coordinator emits it at the element's paint
-    /// position, **before** the element's own background / border / content, so the
-    /// element's (usually translucent) background then draws OVER the frosted
-    /// backdrop → acrylic.
-    ///
-    /// `bounds` is the element's border box and `blur` the CSS blur *radius* in
-    /// logical pixels (`0` = no effect). Only the rounded-`radii` area is frosted;
-    /// pixels outside the rounded shape are left sharp. Backends without a real
-    /// backdrop pass (e.g. the CPU rasterizer) may skip it (honest no-op).
+    #[doc = include_str!("paint_command.doc/BackdropFilter.md")]
     BackdropFilter {
-        /// The element's border-box rectangle: the backdrop region to frost.
+        #[doc = include_str!("paint_command.doc/bounds.md")]
         bounds: Rect,
-        /// The border box's per-corner radii (all zero for a square panel); the
-        /// frosted region is clipped to this rounded shape.
+        #[doc = include_str!("paint_command.doc/radii_2.md")]
         radii: CornerRadii,
-        /// The CSS blur *radius* in logical pixels (`> 0`; `0` = no effect).
+        #[doc = include_str!("paint_command.doc/blur_2.md")]
         blur: f32,
     },
-    /// Push an affine transform onto the transform stack (CSS 2D `transform`,
-    /// spec §5.2). Subsequent drawing — up to the matching
-    /// [`PaintCommand::PopTransform`] — is mapped by the composition of every
-    /// transform on the stack, applied to absolute scene coordinates. The affine
-    /// is already resolved **about its transform origin** by the coordinator
-    /// (`translate(origin) · matrix · translate(-origin)`), so a renderer just
-    /// multiplies it into its current transform. This half of the pair opens the
-    /// nested region; a well-formed list balances it with a `PopTransform`.
+    #[doc = include_str!("paint_command.doc/PushTransform.md")]
     PushTransform(AffineTransform),
-    /// Pop the most recently pushed transform, ending its region.
+    #[doc = include_str!("paint_command.doc/PopTransform.md")]
     PopTransform,
-    /// Push a clip onto the clip stack. Subsequent drawing is confined to the
-    /// clip until the matching [`PaintCommand::PopClip`].
+    #[doc = include_str!("paint_command.doc/PushClip.md")]
     PushClip(Clip),
-    /// Pop the most recently pushed clip, ending its region.
+    #[doc = include_str!("paint_command.doc/PopClip.md")]
     PopClip,
-    /// Begin a composited layer described by the given [`SceneLayer`].
-    /// Subsequent drawing composites into the layer until the matching
-    /// [`PaintCommand::PopLayer`].
+    #[doc = include_str!("paint_command.doc/PushLayer.md")]
     PushLayer(SceneLayer),
-    /// End the most recently pushed layer, compositing it into its parent.
+    #[doc = include_str!("paint_command.doc/PopLayer.md")]
     PopLayer,
 }
 
 impl PaintCommand {
-    /// Returns whether this command opens a nested region, i.e. it is a
-    /// [`PaintCommand::PushClip`] or [`PaintCommand::PushLayer`].
+    #[doc = include_str!("paint_command.doc/is_push.md")]
     #[must_use]
     pub const fn is_push(&self) -> bool {
         matches!(
@@ -181,19 +90,13 @@ impl PaintCommand {
         )
     }
 
-    /// Returns whether this command closes a nested region, i.e. it is a
-    /// [`PaintCommand::PopClip`] or [`PaintCommand::PopLayer`].
+    #[doc = include_str!("paint_command.doc/is_pop.md")]
     #[must_use]
     pub const fn is_pop(&self) -> bool {
         matches!(self, Self::PopClip | Self::PopLayer | Self::PopTransform)
     }
 
-    /// The command's effect on nesting depth: `+1` for a push, `-1` for a pop,
-    /// and `0` for the leaf [`PaintCommand::DrawPath`].
-    ///
-    /// Folding this over a stream and requiring the running total to stay
-    /// non-negative and end at zero is exactly the balance check a renderer
-    /// relies on.
+    #[doc = include_str!("paint_command.doc/nesting_delta.md")]
     #[must_use]
     pub const fn nesting_delta(&self) -> i32 {
         match self {

@@ -1,72 +1,36 @@
-//! The replaceable port for resolving font families to concrete faces (spec
-//! §5.18).
-//!
-//! This module defines [`FontProvider`], the hexagonal port through which the
-//! pure text domain turns a requested [`FontFamily`] plus [`FontAttributes`]
-//! into a concrete [`FontFace`], and supplies a fallback chain when a family
-//! cannot be resolved (spec §5.18). Interface adapters implement it over real
-//! font backends — system fonts on native platforms, a bundled fallback set for
-//! WASM and isolated environments — while the provider stays fully
-//! **replaceable**. The colocated [`MockFontProvider`] is a deterministic
-//! reference implementation over an in-memory face registry, so the port is
-//! testable without any real font files.
+#![doc = include_str!("font_provider.doc/_module.md")]
 
 use crate::font::{FontAttributes, FontFace, FontFallback, FontFamily, GenericFamily};
 
-/// The replaceable port for resolving fonts (spec §5.18).
-///
-/// The domain holds a provider as `Box<dyn FontProvider>`, so the trait is
-/// deliberately **object-safe** — no generic methods and no `Self`-returning
-/// methods. An adapter implements it once per backend; the default provider
-/// uses system fonts on native platforms and a bundled fallback set elsewhere,
-/// and any adapter can replace it.
+#[doc = include_str!("font_provider.doc/FontProvider.md")]
 pub trait FontProvider {
-    /// Resolves `family` and `attributes` to the best available concrete face,
-    /// or `None` when the family is unknown to this provider (spec §5.18).
-    ///
-    /// "Best" means the available face for the family whose attributes are
-    /// nearest the request by [`FontAttributes::distance`].
+    #[doc = include_str!("font_provider.doc/resolve.md")]
     #[must_use]
     fn resolve(&self, family: &FontFamily, attributes: &FontAttributes) -> Option<FontFace>;
 
-    /// Returns the fallback chain to consult when `family` cannot be resolved
-    /// (spec §5.18 fallback resolution, §5.10 font fallback).
+    #[doc = include_str!("font_provider.doc/fallback.md")]
     #[must_use]
     fn fallback(&self, family: &FontFamily) -> FontFallback;
 
-    /// Returns whether this provider can supply any face for `family`
-    /// (spec §5.18).
+    #[doc = include_str!("font_provider.doc/is_available.md")]
     #[must_use]
     fn is_available(&self, family: &FontFamily) -> bool;
 }
 
-/// A deterministic reference [`FontProvider`] backed by an in-memory registry of
-/// faces (spec §5.18).
-///
-/// `MockFontProvider` holds the faces registered via [`register`](Self::register)
-/// and resolves against them with no real font files, which makes the port
-/// exercisable in tests. Its [`resolve`](FontProvider::resolve) picks the
-/// registered face whose family matches by [`FontFamily::name`] with the
-/// smallest [`FontAttributes::distance`]; ties are broken deterministically in
-/// favour of the **first** registered face. Its
-/// [`fallback`](FontProvider::fallback) returns the requested family followed by
-/// the generic `sans-serif`.
+#[doc = include_str!("font_provider.doc/MockFontProvider.md")]
 #[derive(Debug, Default, Clone)]
 pub struct MockFontProvider {
     faces: Vec<(FontFamily, FontFace)>,
 }
 
 impl MockFontProvider {
-    /// Creates an empty provider with no registered faces.
+    #[doc = include_str!("font_provider.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers `face`, keyed by its own family, as an available face.
-    ///
-    /// Registration order is significant: on an exact tie in resolution
-    /// distance, the earliest-registered matching face wins.
+    #[doc = include_str!("font_provider.doc/register.md")]
     pub fn register(&mut self, face: FontFace) {
         self.faces.push((face.family().clone(), face));
     }

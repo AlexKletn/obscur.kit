@@ -1,4 +1,4 @@
-//! Port module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod intrinsic_measure;
 pub use intrinsic_measure::IntrinsicMeasure;
 mod layout_environment;

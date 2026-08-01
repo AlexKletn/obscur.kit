@@ -1,6 +1,5 @@
-//! `ExtensionPoint` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("extension_point.doc/_module.md")]
 
-/// Placeholder for the `ExtensionPoint` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("extension_point.doc/ExtensionPoint.md")]
 #[derive(Debug)]
 pub struct ExtensionPoint;

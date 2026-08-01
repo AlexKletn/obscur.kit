@@ -1,4 +1,4 @@
-//! Spatial module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod hit_chain;
 pub use hit_chain::HitChain;
 mod hit_test;

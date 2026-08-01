@@ -1,43 +1,4 @@
-//! **`.okui` DSL → View bridge → headless CPU → PNG.**
-//!
-//! This example drives the *real* `.okui` frontend pipeline end-to-end and
-//! rasterizes the result with the software backend — no display, no GPU:
-//!
-//! 1. **Parse** an authored [`showcase.okui`](./showcase.okui) document with the
-//!    lossless [`Parser`](obscur_kit::okui_syntax::parser::Parser).
-//! 2. **Compile** it through the [`Compiler`](obscur_kit::okui_compiler::compile::Compiler)
-//!    (name resolution → validation against the built-in contracts → lowering to
-//!    UI IR). Diagnostics are printed; the produced IR is still rendered.
-//! 3. **Bridge** the compiled `UiIrDocument` into a runtime desired
-//!    [`View`](obscur_kit::view::view::View) with
-//!    [`UiIrViewBridge::document_to_view`](obscur_kit::okui_compiler::bridge::UiIrViewBridge).
-//! 4. **Render** that `View` + an authored stylesheet + a staged image asset
-//!    through the [`UiRuntime`] and the [`CpuRenderer`], writing
-//!    `target/showcase_okui.png`.
-//!
-//! # What renders *from `.okui`* today
-//!
-//! The bridge maps each element's `class` / `id` / `type` attributes onto the
-//! reserved CSS selector symbols, so **every CSS-driven visual matches on the
-//! `.okui`-authored classes/types**: solid + gradient (linear / radial / conic)
-//! backgrounds, border + radius, box-shadow, `filter: drop-shadow`, `opacity`,
-//! `transform`, and `background-image: url(...)`. Structure/nesting (grid + flex
-//! layout) and shaped **text** flow through too. GPU-class effects degrade to the
-//! documented CPU approximation (a gradient paints its first stop; a shadow a flat
-//! offset rect), exactly as in `showcase_png.rs`.
-//!
-//! # The honest bridge gaps (NOT rendered from `.okui` yet)
-//!
-//! - **Real widgets.** `<Button>` / `<Input>` / `<Checkbox>` lower to a
-//!   placeholder `ComponentId` (a hash of the tag), not the real widget
-//!   `COMPONENT_ID`, so they render as bare classed boxes, not the widgets.
-//! - **`<img src>`.** The bridge hashes arbitrary attributes, so an image
-//!   element's `src` never reaches the reserved `SRC` symbol the runtime resolves
-//!   to pixels. A `background-image: url(...)` card (pure CSS) IS shown instead.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example showcase_okui_png \
-//!   --features "render-cpu resource-fs resource-decode text-harfrust text-unicode"`
+#![doc = include_str!("showcase_okui_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -69,10 +30,10 @@ use obscur_kit::view::view::View;
 #[path = "showcase/scene.rs"]
 mod showcase;
 
-/// The authored `.okui` document — the real DSL input, compiled at runtime.
+#[doc = include_str!("showcase_okui_png.doc/SOURCE.md")]
 const SOURCE: &str = include_str!("showcase.okui");
 
-/// The fixed viewport the showcase is laid out and rasterized under.
+#[doc = include_str!("showcase_okui_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1000.0, 620.0);
 
 fn main() {
@@ -163,10 +124,7 @@ fn main() {
     );
 }
 
-/// The authored stylesheet, keyed to the classes/types the `.okui` declares.
-/// `#app` is an id selector, `card` is a **type** selector (matching every
-/// `type="card"` element), and the rest are class selectors — all three selector
-/// kinds are driven by attributes the `.okui` bridge carries through.
+#[doc = include_str!("showcase_okui_png.doc/stylesheet.md")]
 fn stylesheet() -> &'static str {
     "\
 #app { display: flex; flex-direction: column; gap: 14px; padding: 20px; \
@@ -207,15 +165,14 @@ card { border-radius: 10px; padding: 12px; background-color: #1c2130; }\n\
 "
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("showcase_okui_png.doc/compile_css.md")]
 fn compile_css(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Writes the embedded showcase PNG into a fresh temp dir (the loader's sandbox
-/// root) so `url("gallery.png")` resolves; returns that directory.
+#[doc = include_str!("showcase_okui_png.doc/stage_image_asset.md")]
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-okui-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
@@ -227,7 +184,7 @@ fn stage_image_asset() -> PathBuf {
     dir
 }
 
-/// The workspace-relative output path `target/showcase_okui.png`.
+#[doc = include_str!("showcase_okui_png.doc/output_path.md")]
 fn output_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -235,8 +192,7 @@ fn output_path() -> PathBuf {
         .join("showcase_okui.png")
 }
 
-/// Wires the full text stack and registers the SAME font bytes on the runtime's
-/// resolver and the CPU renderer so shaped run handles select rasterized outlines.
+#[doc = include_str!("showcase_okui_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -254,13 +210,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("showcase_okui_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes for the text path (best effort), or `None`
-/// (text then renders as box marks — still no panic).
+#[doc = include_str!("showcase_okui_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

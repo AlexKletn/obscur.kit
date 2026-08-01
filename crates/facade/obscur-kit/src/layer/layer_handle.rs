@@ -1,4 +1,4 @@
-//! [`LayerHandle`]: the running surface, as the application sees it.
+#![doc = include_str!("layer_handle.doc/_module.md")]
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -6,54 +6,29 @@ use std::rc::Rc;
 use crate::geometry::Size;
 use crate::windowing::layer::{LayerSurfaceConfig, LayerSurfaceState};
 
-/// A live handle to the surface a [`LayerApp`](super::LayerApp) is running.
-///
-/// # Why a handle and not `&mut` anything
-///
-/// The event loop owns the surface, and an application's command handlers run
-/// *inside* it — so they cannot be given a reference to it without borrowing the
-/// loop from itself. A handle sidesteps that entirely: a handler leaves a
-/// request, and the loop picks it up at the top of the next turn. That also
-/// means every change lands at a defined point in the frame rather than halfway
-/// through one.
-///
-/// Clone it freely; every clone names the same surface.
-///
-/// # What it is for
-///
-/// Reconfiguring a live surface is how an application changes *how it is
-/// presented* without restarting: a bar that grows, a panel that stops
-/// reserving space and floats, a surface that moves from `Top` to `Overlay`.
-/// None of layer-shell's placement properties need a new surface — band, anchor,
-/// exclusive zone, margins and size are all live requests — so this is the whole
-/// mechanism, and there is deliberately no "recreate" to reach for.
+#[doc = include_str!("layer_handle.doc/LayerHandle.md")]
 #[derive(Clone, Default)]
 pub struct LayerHandle {
     inner: Rc<RefCell<HandleState>>,
 }
 
-/// What the loop publishes and the application requests.
+#[doc = include_str!("layer_handle.doc/HandleState.md")]
 #[derive(Default)]
 struct HandleState {
-    /// A configuration waiting to be applied.
+    #[doc = include_str!("layer_handle.doc/pending.md")]
     pending: Option<LayerSurfaceConfig>,
-    /// Set when the application asks the loop to finish.
+    #[doc = include_str!("layer_handle.doc/close_requested.md")]
     close_requested: bool,
-    /// The surface's logical size, as last configured.
+    #[doc = include_str!("layer_handle.doc/size.md")]
     size: Size,
-    /// The surface's scale, integral or fractional.
+    #[doc = include_str!("layer_handle.doc/scale.md")]
     scale: f32,
-    /// Where the surface is in its life.
+    #[doc = include_str!("layer_handle.doc/state.md")]
     state: LayerSurfaceState,
 }
 
 impl LayerHandle {
-    /// A handle not yet attached to a surface.
-    ///
-    /// Build one before [`LayerApp::run`](super::LayerApp::run), hand clones to
-    /// the handlers that need it, and give one to
-    /// [`LayerApp::handle`](super::LayerApp::handle). Until the loop starts it
-    /// reports [`LayerSurfaceState::Configuring`] and a zero size.
+    #[doc = include_str!("layer_handle.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -64,53 +39,45 @@ impl LayerHandle {
         }
     }
 
-    /// Asks for the surface to be reconfigured.
-    ///
-    /// Applied at the top of the next loop turn, not immediately. The compositor
-    /// answers with a fresh configure, so the resulting size is whatever it
-    /// decides — read it back from [`size`](Self::size) rather than assuming the
-    /// request was honoured verbatim.
-    ///
-    /// A second request before the first is applied replaces it: only the latest
-    /// intent matters.
+    #[doc = include_str!("layer_handle.doc/reconfigure.md")]
     pub fn reconfigure(&self, config: LayerSurfaceConfig) {
         self.inner.borrow_mut().pending = Some(config);
     }
 
-    /// Asks the loop to finish and the surface to be torn down.
+    #[doc = include_str!("layer_handle.doc/close.md")]
     pub fn close(&self) {
         self.inner.borrow_mut().close_requested = true;
     }
 
-    /// The surface's logical size, as last configured.
+    #[doc = include_str!("layer_handle.doc/size_2.md")]
     #[must_use]
     pub fn size(&self) -> Size {
         self.inner.borrow().size
     }
 
-    /// The surface's scale — fractional where the compositor offers it.
+    #[doc = include_str!("layer_handle.doc/scale_2.md")]
     #[must_use]
     pub fn scale(&self) -> f32 {
         self.inner.borrow().scale
     }
 
-    /// Where the surface is in its life.
+    #[doc = include_str!("layer_handle.doc/state_2.md")]
     #[must_use]
     pub fn state(&self) -> LayerSurfaceState {
         self.inner.borrow().state
     }
 
-    /// Takes the pending configuration, if one was requested.
+    #[doc = include_str!("layer_handle.doc/take_pending.md")]
     pub(super) fn take_pending(&self) -> Option<LayerSurfaceConfig> {
         self.inner.borrow_mut().pending.take()
     }
 
-    /// Whether the application asked to stop.
+    #[doc = include_str!("layer_handle.doc/close_requested_2.md")]
     pub(super) fn close_requested(&self) -> bool {
         self.inner.borrow().close_requested
     }
 
-    /// Publishes what the loop knows about the surface.
+    #[doc = include_str!("layer_handle.doc/publish.md")]
     pub(super) fn publish(&self, size: Size, scale: f32, state: LayerSurfaceState) {
         let mut inner = self.inner.borrow_mut();
         inner.size = size;

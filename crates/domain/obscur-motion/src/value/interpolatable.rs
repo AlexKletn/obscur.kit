@@ -1,38 +1,16 @@
-//! The `Interpolatable` trait: arbitrary typed interpolation (spec §4.17).
+#![doc = include_str!("interpolatable.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
-/// Linearly interpolates between two `f32` endpoints.
-///
-/// Returns `a + (b - a) * t`, the scalar lerp used by every
-/// [`Interpolatable`] impl in this module. `t` is the normalized progress in
-/// `[0, 1]` (see [`Interpolatable::interpolate`]) but is deliberately **not**
-/// clamped: easing curves, springs and overshoot legitimately pass `t` outside
-/// `[0, 1]`, and this helper extrapolates linearly past the endpoints.
+#[doc = include_str!("interpolatable.doc/lerp_f32.md")]
 #[must_use]
 pub const fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-/// A value that can be blended toward another value of the same type (spec
-/// §4.17).
-///
-/// This is the foundation for the motion engine's *arbitrary typed
-/// interpolation*: any presentation value that implements `Interpolatable` can
-/// be animated by feeding a normalized progress `t` to [`interpolate`]. The
-/// engine layers timelines, tracks and drivers on top, but at the bottom every
-/// animated quantity reduces to this one pure operation.
-///
-/// [`interpolate`]: Interpolatable::interpolate
+#[doc = include_str!("interpolatable.doc/Interpolatable.md")]
 pub trait Interpolatable {
-    /// Blends `self` toward `other` by the normalized progress `t`.
-    ///
-    /// `t` is the progress in `[0, 1]`: `t == 0.0` yields `self`, `t == 1.0`
-    /// yields `other`, and intermediate values interpolate component-wise.
-    /// Implementations MUST NOT clamp `t` — easing curves, springs and
-    /// overshoot legitimately pass values outside `[0, 1]`, and the result is
-    /// expected to extrapolate linearly past the endpoints rather than
-    /// saturate.
+    #[doc = include_str!("interpolatable.doc/interpolate.md")]
     #[must_use]
     fn interpolate(&self, other: &Self, t: f32) -> Self;
 }

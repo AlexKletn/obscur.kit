@@ -1,12 +1,4 @@
-//! Replacing a virtual list's content returns it to the top.
-//!
-//! A scroll offset belongs to the content it was scrolled through. When an app swaps
-//! a list's items — a file manager entering another directory — the runtime cannot
-//! see that the model changed: the marker looks the same and the container is
-//! reconciled in place, so its scroll survives and the new list opens scrolled into
-//! nowhere. The app states a scroll-reset token on the marker; a change in it resets
-//! the scroll. These tests pin that a changed token returns the window to the top and
-//! an unchanged one leaves the scroll where the user left it.
+#![doc = include_str!("virtual_scroll_reset.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -18,11 +10,11 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The list's registered name.
+#[doc = include_str!("virtual_scroll_reset.doc/LIST.md")]
 const LIST: InternedSymbol = InternedSymbol::from_raw(0x9201);
-/// Row height, matching the sheet.
+#[doc = include_str!("virtual_scroll_reset.doc/ROW.md")]
 const ROW: f32 = 20.0;
-/// A large model — its size is not the point here.
+#[doc = include_str!("virtual_scroll_reset.doc/ITEMS.md")]
 const ITEMS: usize = 10_000;
 
 fn compile(css: &str) -> Stylesheet {
@@ -31,7 +23,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The scroller holding the virtual list, tagged with scroll-reset `token`.
+#[doc = include_str!("virtual_scroll_reset.doc/view.md")]
 fn view(token: u64) -> View {
     View::single(
         ViewNode::element(ComponentId::from_raw(0x9200))
@@ -57,7 +49,7 @@ fn runtime() -> UiRuntime {
 const SHEET: &str = ".scroller { width: 300px; height: 200px; overflow: scroll }\
                      .row { width: 300px; height: 20px }";
 
-/// The scroller node — the first child of the root.
+#[doc = include_str!("virtual_scroll_reset.doc/scroller.md")]
 fn scroller(rt: &UiRuntime) -> obscur_kit::identity::NodeId {
     let root = rt.tree().root().expect("a root");
     rt.tree().get(root).expect("live").children()[0]

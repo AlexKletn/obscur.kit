@@ -1,19 +1,9 @@
-//! A scene snapshot ready to render at a viewport (spec §5.2).
+#![doc = include_str!("render_frame.doc/_module.md")]
 
 use obscur_geometry::Size;
 use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// A [`SceneSnapshot`] paired with the viewport it is to be rendered at
-/// (spec §5.2).
-///
-/// The frame carries the backend-agnostic [`SceneSnapshot`] — the
-/// determinism-boundary artifact of spec §5.2. Its display list fixes the
-/// geometry, paint order, and clipping that every backend must reproduce
-/// identically; only rasterization may differ. The [`Self::viewport`] is the
-/// target area in physical pixels the snapshot renders into.
-///
-/// This type is not `Copy`: it owns a [`SceneSnapshot`], which holds a display
-/// list.
+#[doc = include_str!("render_frame.doc/RenderFrame.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderFrame {
     scene: SceneSnapshot,
@@ -21,29 +11,25 @@ pub struct RenderFrame {
 }
 
 impl RenderFrame {
-    /// Pairs a [`SceneSnapshot`] with the physical-pixel `viewport` it renders
-    /// into.
+    #[doc = include_str!("render_frame.doc/new.md")]
     #[must_use]
     pub fn new(scene: SceneSnapshot, viewport: Size) -> Self {
         Self { scene, viewport }
     }
 
-    /// The backend-agnostic scene snapshot this frame renders (spec §5.2).
+    #[doc = include_str!("render_frame.doc/scene.md")]
     #[must_use]
     pub const fn scene(&self) -> &SceneSnapshot {
         &self.scene
     }
 
-    /// The target area this frame renders into, in physical pixels.
+    #[doc = include_str!("render_frame.doc/viewport.md")]
     #[must_use]
     pub const fn viewport(&self) -> Size {
         self.viewport
     }
 
-    /// The generation of the scene snapshot this frame carries.
-    ///
-    /// Equal to [`SceneSnapshot::generation`]; used to check whether the frame
-    /// that reached the screen is still current (spec §5.2, §3.5).
+    #[doc = include_str!("render_frame.doc/generation.md")]
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.scene.generation()

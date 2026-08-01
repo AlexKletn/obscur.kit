@@ -1,35 +1,20 @@
-//! Maps a domain [`SemanticRole`] onto the closest AccessKit [`Role`] (§7.1).
+#![doc = include_str!("role_converter.doc/_module.md")]
 
 use accesskit::Role;
 use obscur_accessibility::semantic::SemanticRole;
 
-/// Converts a domain [`SemanticRole`] into the closest AccessKit [`Role`]
-/// (spec §7.1, §2.7).
-///
-/// The converter is stateless: it holds no configuration and every mapping is a
-/// pure function of its input, so a single shared instance suffices. The domain
-/// role set is deliberately smaller than AccessKit's, so each mapping picks the
-/// nearest AccessKit control type; a handful are approximations, documented on
-/// [`convert`](Self::convert).
+#[doc = include_str!("role_converter.doc/RoleConverter.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RoleConverter;
 
 impl RoleConverter {
-    /// Creates the stateless converter.
+    #[doc = include_str!("role_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Maps `role` to the closest AccessKit [`Role`].
-    ///
-    /// Most roles map one-to-one. The approximations are:
-    /// - [`SemanticRole::Text`] → [`Role::Label`] (AccessKit's static-text
-    ///   role);
-    /// - [`SemanticRole::ProgressBar`] → [`Role::ProgressIndicator`];
-    /// - [`SemanticRole::Separator`] → [`Role::Splitter`] (AccessKit has no
-    ///   distinct separator role);
-    /// - [`SemanticRole::Unknown`] → [`Role::Unknown`].
+    #[doc = include_str!("role_converter.doc/convert.md")]
     #[must_use]
     pub const fn convert(&self, role: SemanticRole) -> Role {
         match role {

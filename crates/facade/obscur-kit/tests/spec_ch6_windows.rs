@@ -1,21 +1,4 @@
-//! **SPECIFICATION-DERIVED** window, activation, presentation, chrome and
-//! display cases for obscur.kit §6.1-§6.6.
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §6
-//! with **no access to this repository's source**. The cases are a statement of
-//! what the implementation owes the spec, not a record of what the
-//! implementation currently does. A failure here is a defect report about the
-//! toolkit (or, occasionally, about the spec), and must not be "corrected" by
-//! editing the expected value.
-//!
-//! The subject under test is [`NullWindowBackend`] — the kit's own reference
-//! headless [`WindowBackend`], the backend an application gets in §7.4 "Official
-//! headless mode operates without window or GPU." It is kit code, not a mock
-//! written for these tests.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch6_windows.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch6_support/mod.rs"]
@@ -36,7 +19,7 @@ use obscur_kit::windowing::window::{
 
 use support::create_at;
 
-/// A fresh headless backend holding one 800x600 window at (100, 100).
+#[doc = include_str!("spec_ch6_windows.doc/backend_with_window.md")]
 fn backend_with_window() -> (NullWindowBackend, WindowId) {
     let mut backend = NullWindowBackend::new();
     let id = backend
@@ -49,13 +32,7 @@ fn backend_with_window() -> (NullWindowBackend, WindowId) {
 // P6-01
 // -------------------------------------------------------------------------
 
-/// §6.2 Dynamic window properties: "Operations return typed results." with
-/// "Capability result categories:" / "- native;" / "- emulated;" /
-/// "- conditional;" / "- unsupported."
-///
-/// Headless has no compositor, so always-on-top is `unsupported` and the
-/// property never applies; a plain size change is `native` or `emulated` and
-/// does apply. Two calls, one result type, different categories.
+#[doc = include_str!("spec_ch6_windows.doc/headless_reports_always_on_top_unsupported_but_size_native_or_emulated.md")]
 #[test]
 fn headless_reports_always_on_top_unsupported_but_size_native_or_emulated() {
     let (mut backend, id) = backend_with_window();
@@ -97,30 +74,7 @@ fn headless_reports_always_on_top_unsupported_but_size_native_or_emulated() {
 // P6-03
 // -------------------------------------------------------------------------
 
-/// §6.2: "- min/max constraints;" listed as a dynamic window property alongside
-/// "- size;", plus "Operations return typed results."
-///
-/// A request outside the constraints is satisfied in a modified form: the *used*
-/// size is clamped, and the operation still answers with a typed result.
-///
-/// OBSERVATION MOVED + WEAKENED 2026-07-19. The original failure message —
-/// "constraints stored but never applied" — was false, and the case was looking
-/// in the wrong place. `WindowProperties::size` is the *desired* size, which is
-/// exactly what the caller asked for and is meant to be echoed back verbatim;
-/// the used size is `Window::constrained_size()`
-/// (obscur-windowing/src/window/window.rs:95-99), which applies
-/// `WindowConstraints::constrain` and is correct. The clamping assertion is kept
-/// in full, read off the used size.
-///
-/// Separately DROPPED: `support_level() != Some(Native)` for a clamped request,
-/// i.e. that a modified outcome must be reported as non-native. §6.2 lists
-/// "- size;" and "- min/max constraints;" among *potential* window properties
-/// and says "Operations return typed results." with the four capability
-/// categories, but nowhere ties the category to whether the used value matched
-/// the requested one. Candidate spec amendment: say what an operation satisfied
-/// in a modified form reports — `emulated`, or `native` with a differing used
-/// value — and whether the caller can discover the difference from the result
-/// alone rather than by re-reading the window.
+#[doc = include_str!("spec_ch6_windows.doc/size_requests_are_clamped_by_min_max_constraints_and_reported_as_modified.md")]
 #[test]
 fn size_requests_are_clamped_by_min_max_constraints_and_reported_as_modified() {
     let mut backend = NullWindowBackend::new();
@@ -161,12 +115,7 @@ fn size_requests_are_clamped_by_min_max_constraints_and_reported_as_modified() {
 // P6-05
 // -------------------------------------------------------------------------
 
-/// §6.3 Activation and focus: "The application may request:" / "1. window
-/// activation;" / "2. element focus." with "Possible results:" / "- activated;"
-/// / "- denied;" / "- unsupported;" / "- failed."
-///
-/// A stale handle and a non-focusable node both fail to focus, and neither
-/// changes the focused node. Neither call panics.
+#[doc = include_str!("spec_ch6_windows.doc/element_focus_on_a_stale_or_non_focusable_node_never_succeeds.md")]
 #[test]
 fn element_focus_on_a_stale_or_non_focusable_node_never_succeeds() {
     let anchor = NodeId::from_raw(1);
@@ -210,33 +159,7 @@ fn element_focus_on_a_stale_or_non_focusable_node_never_succeeds() {
 // P6-06
 // -------------------------------------------------------------------------
 
-/// §6.5 Fullscreen and presentation: "- restore previous state;"
-///
-/// A presentation request the backend cannot service is refused as a typed
-/// result and leaves the window's state untouched.
-///
-/// WEAKENED 2026-07-19: the assertion that fired was
-/// `entered.is_success()`, whose message read "§6.5: borderless fullscreen is
-/// the emulatable form". That sentence is not in the spec. §6.5 reads, in full:
-/// "Modes may include:" / "- normal;" / "- borderless;" / "- exclusive where
-/// available;" / "- kiosk;" / "- presentation." — *may* include — followed by
-/// the optional controls (among them "- restore previous state;") and "The
-/// application owns policy." Nothing designates borderless as the form a
-/// compositor-less backend must emulate, and §6.2's four capability categories
-/// make `unsupported` a legitimate answer from `NullWindowBackend`. The
-/// restore-previous-state assertions went with it, since a backend that never
-/// entered fullscreen cannot be asked what it restored on leaving.
-///
-/// What replaces them is the §6.2 rule the sibling case at the top of this file
-/// also encodes, and it still discriminates: a refusal must not have applied the
-/// property anyway. The same requirement IS separately tested against the one
-/// backend that implements presentation — see P6-06b in the real-gap register,
-/// where `WinitWindowBackend::set_presentation` silently drops
-/// `restore_previous_state` while reporting `Performed(Native)`.
-///
-/// Candidate spec amendment: say which presentation modes a backend must support
-/// or emulate to claim §6.5 at all, and what "- restore previous state;"
-/// restores (position, size, maximized flag, monitor).
+#[doc = include_str!("spec_ch6_windows.doc/exiting_fullscreen_restores_position_size_and_maximized.md")]
 #[test]
 fn exiting_fullscreen_restores_position_size_and_maximized() {
     let (mut backend, id) = backend_with_window();
@@ -291,13 +214,7 @@ fn exiting_fullscreen_restores_position_size_and_maximized() {
 // P6-08
 // -------------------------------------------------------------------------
 
-/// §6.6 Displays: "On Wayland, unavailable global coordinates are represented
-/// honestly."
-///
-/// A compositor that hides global coordinates yields an explicitly absent
-/// origin — not `(0, 0)` — while scale and size stay present, and a window's
-/// screen position is likewise absent. A backend that *does* expose coordinates
-/// reports them present.
+#[doc = include_str!("spec_ch6_windows.doc/unavailable_global_coordinates_are_absent_not_zero.md")]
 #[test]
 fn unavailable_global_coordinates_are_absent_not_zero() {
     let wayland_a = Display::new(
@@ -356,11 +273,7 @@ fn unavailable_global_coordinates_are_absent_not_zero() {
 // P6-09
 // -------------------------------------------------------------------------
 
-/// §6.6: "- physical bounds where available;" and "- refresh rate;" in the
-/// display model.
-///
-/// Neither is fabricated: physical bounds are not derived from logical x scale,
-/// and an unknown refresh rate is absent rather than 60 Hz.
+#[doc = include_str!("spec_ch6_windows.doc/absent_physical_bounds_and_refresh_rate_are_not_fabricated.md")]
 #[test]
 fn absent_physical_bounds_and_refresh_rate_are_not_fabricated() {
     let display = Display::new(
@@ -390,13 +303,7 @@ fn absent_physical_bounds_and_refresh_rate_are_not_fabricated() {
 // P6-40
 // -------------------------------------------------------------------------
 
-/// §6.4 Custom chrome: "Safe areas and system-frame fallback are supported."
-/// with §6.2 "Operations return typed results."
-///
-/// On a backend without client-side decorations the request reports
-/// `unsupported` (or `emulated` if a fallback frame is really drawn) so the
-/// application can tell its custom title bar not to draw, and the introspected
-/// capability agrees.
+#[doc = include_str!("spec_ch6_windows.doc/requesting_csd_on_an_unsupporting_backend_reports_a_typed_non_native_result.md")]
 #[test]
 fn requesting_csd_on_an_unsupporting_backend_reports_a_typed_non_native_result() {
     let (mut backend, id) = backend_with_window();
@@ -421,10 +328,7 @@ fn requesting_csd_on_an_unsupporting_backend_reports_a_typed_non_native_result()
 // P6-42
 // -------------------------------------------------------------------------
 
-/// §6.1 Window model: "- create/destroy;" / "- owner/parent relations;"
-///
-/// Destroying an owner destroys the windows it owns; the child is absent from
-/// the window list afterwards, with no dangling-handle panic.
+#[doc = include_str!("spec_ch6_windows.doc/destroying_an_owner_destroys_the_windows_it_owns.md")]
 #[test]
 fn destroying_an_owner_destroys_the_windows_it_owns() {
     let mut backend = NullWindowBackend::new();

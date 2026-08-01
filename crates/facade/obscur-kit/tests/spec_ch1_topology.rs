@@ -1,15 +1,4 @@
-//! **SPECIFICATION-DERIVED** runtime-topology cases for obscur.kit §1.4.
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §1
-//! (Architecture & boundaries) with **no access to this repository's source**.
-//! The cases are a statement of what the implementation owes the spec, not a
-//! record of what it currently does. A failure here is a defect report about the
-//! toolkit (or, occasionally, about the spec), and must not be "corrected" by
-//! editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch1_topology.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch1_support/mod.rs"]
@@ -27,10 +16,10 @@ use support::{
     Collected, approx, at, compile, el, geom, install_missing_resources, runtime_with_id, view,
 };
 
-/// The viewport every case in this file renders under.
+#[doc = include_str!("spec_ch1_topology.doc/VP.md")]
 const VP: f32 = 1000.0;
 
-/// §1.4: "Multiple runtimes may coexist in one process."
+#[doc = include_str!("spec_ch1_topology.doc/arch_04_two_runtimes_hold_independent_trees.md")]
 #[test]
 fn arch_04_two_runtimes_hold_independent_trees() {
     let mut a = runtime_with_id(1, VP, VP);
@@ -50,8 +39,7 @@ fn arch_04_two_runtimes_hold_independent_trees() {
     approx(geom(&b, at(&b, &[0])).2, 300.0, "runtime B's box width");
 }
 
-/// §1.4: "Global singletons are avoided except where the platform makes them
-/// unavoidable."
+#[doc = include_str!("spec_ch1_topology.doc/arch_05_dropping_one_runtime_leaves_the_other_usable.md")]
 #[test]
 fn arch_05_dropping_one_runtime_leaves_the_other_usable() {
     let mut a = runtime_with_id(1, VP, VP);
@@ -91,7 +79,7 @@ fn arch_05_dropping_one_runtime_leaves_the_other_usable() {
     );
 }
 
-/// §1.4: "A `ResourceHub` may be shared, but sharing is optional and explicit."
+#[doc = include_str!("spec_ch1_topology.doc/arch_06_resource_hub_is_not_shared_by_default.md")]
 #[test]
 fn arch_06_resource_hub_is_not_shared_by_default() {
     let mut a = runtime_with_id(1, VP, VP);
@@ -116,7 +104,7 @@ fn arch_06_resource_hub_is_not_shared_by_default() {
     );
 }
 
-/// §1.4: "headless mode without windows or GPU."
+#[doc = include_str!("spec_ch1_topology.doc/arch_08_headless_produces_layout_scene_and_a_rendered_image.md")]
 #[test]
 fn arch_08_headless_produces_layout_scene_and_a_rendered_image() {
     // No GPU adapter and no window system: the runtime is constructed with
@@ -179,9 +167,7 @@ fn arch_08_headless_produces_layout_scene_and_a_rendered_image() {
     }
 }
 
-/// §1.4: "Multiple runtimes may coexist in one process." — the id a runtime was
-/// constructed with is the id it keeps, so neither construction returned the
-/// other's runtime.
+#[doc = include_str!("spec_ch1_topology.doc/arch_04b_construction_never_returns_the_other_runtime.md")]
 #[test]
 fn arch_04b_construction_never_returns_the_other_runtime() {
     let a = obscur_kit::runtime::UiRuntime::new(RuntimeId::from_raw(7), Size::new(VP, VP));

@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** reactivity and async-model cases for obscur.kit
-//! §3.1 ("Dependency tracking invalidates only consumers of changed values";
-//! "Scoped subscriptions are automatically cleaned up"; "No magic two-way
-//! binding is provided") and §3.3 ("The core is not tied to Tokio").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §3
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the toolkit, and must not be "corrected" by editing the expected
-//! value.
+#![doc = include_str!("spec_ch3_state.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch3_support/mod.rs"]
@@ -32,13 +24,12 @@ static X_RENDERS: AtomicUsize = AtomicUsize::new(0);
 static Y_RENDERS: AtomicUsize = AtomicUsize::new(0);
 static CHILD_LOCAL: AtomicUsize = AtomicUsize::new(0);
 
-/// The render counters above are process-global, so the two cases that read them
-/// must not interleave.
+#[doc = include_str!("spec_ch3_state.doc/COUNTERS.md")]
 static COUNTERS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // --- Component X: reads signal A only. -----------------------------------
 
-/// Props for `X`, which reads signal A and nothing else.
+#[doc = include_str!("spec_ch3_state.doc/XProps.md")]
 #[derive(Contract)]
 #[contract(name = "SpecX")]
 struct XProps {}
@@ -75,7 +66,7 @@ impl ComponentFactory for XFactory {
 
 // --- Component Y: reads signal B only. -----------------------------------
 
-/// Props for `Y`, which reads signal B and nothing else.
+#[doc = include_str!("spec_ch3_state.doc/YProps.md")]
 #[derive(Contract)]
 #[contract(name = "SpecY")]
 struct YProps {}
@@ -112,11 +103,11 @@ impl ComponentFactory for YFactory {
 
 // --- Component Child: receives one typed prop from its parent. ------------
 
-/// Props for `Child`: one typed value handed **down** from the parent.
+#[doc = include_str!("spec_ch3_state.doc/ChildProps.md")]
 #[derive(Contract)]
 #[contract(name = "SpecChild")]
 struct ChildProps {
-    /// The value the parent passes down. Values flow down; nothing flows back.
+    #[doc = include_str!("spec_ch3_state.doc/value.md")]
     value: i64,
 }
 
@@ -192,10 +183,7 @@ fn node_ids(rt: &UiRuntime) -> Vec<u64> {
     ids
 }
 
-/// §3.1 — "Dependency tracking invalidates only consumers of changed values."
-///
-/// Writing signal A re-runs X's view function exactly once and Y's not at all;
-/// Y's retained nodes keep their identity.
+#[doc = include_str!("spec_ch3_state.doc/a_signal_write_re_runs_only_its_own_consumer.md")]
 #[test]
 fn a_signal_write_re_runs_only_its_own_consumer() {
     let _guard = COUNTERS
@@ -233,10 +221,7 @@ fn a_signal_write_re_runs_only_its_own_consumer() {
     );
 }
 
-/// §3.1 — "Scoped subscriptions are automatically cleaned up."
-///
-/// After a consumer's subtree is removed, 100 writes to its signal invalidate
-/// nothing, present no frames, and re-run nothing.
+#[doc = include_str!("spec_ch3_state.doc/removing_a_consumer_prunes_its_subscription.md")]
 #[test]
 fn removing_a_consumer_prunes_its_subscription() {
     let _guard = COUNTERS
@@ -275,10 +260,7 @@ fn removing_a_consumer_prunes_its_subscription() {
     );
 }
 
-/// §3.1 — "No magic two-way binding is provided" / "values flow down; typed
-/// actions/commands flow up."
-///
-/// A child writing its own local state must not reach the parent's value.
+#[doc = include_str!("spec_ch3_state.doc/a_child_writing_local_state_does_not_reach_the_parents_value.md")]
 #[test]
 fn a_child_writing_local_state_does_not_reach_the_parents_value() {
     let mut rt = host();
@@ -310,11 +292,7 @@ fn a_child_writing_local_state_does_not_reach_the_parents_value() {
     );
 }
 
-/// §3.3 Rules — "The core is not tied to Tokio."
-///
-/// Tokio must appear zero times in the default-feature dependency graph of every
-/// foundation / domain / application crate; any Tokio integration lives in a
-/// separately named runtime-adapter crate that the core does not depend on.
+#[doc = include_str!("spec_ch3_state.doc/no_core_crate_depends_on_tokio.md")]
 #[test]
 fn no_core_crate_depends_on_tokio() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

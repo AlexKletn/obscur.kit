@@ -1,21 +1,21 @@
-//! A single architecture-rule violation and file-walking helpers.
+#![doc = include_str!("violation.doc/_module.md")]
 
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// One violation of an architecture rule, anchored to a file.
+#[doc = include_str!("violation.doc/Violation.md")]
 pub(crate) struct Violation {
-    /// Rule that was violated.
+    #[doc = include_str!("violation.doc/rule.md")]
     pub(crate) rule: &'static str,
-    /// Offending file.
+    #[doc = include_str!("violation.doc/file.md")]
     pub(crate) file: PathBuf,
-    /// Explanation.
+    #[doc = include_str!("violation.doc/detail.md")]
     pub(crate) detail: String,
 }
 
 impl Violation {
-    /// Builds a violation.
+    #[doc = include_str!("violation.doc/new.md")]
     pub(crate) fn new(rule: &'static str, file: &Path, detail: impl Into<String>) -> Self {
         Self {
             rule,
@@ -37,8 +37,7 @@ impl fmt::Display for Violation {
     }
 }
 
-/// Recursively collects files under `dir` whose name matches `wanted`, skipping
-/// any `target` directories.
+#[doc = include_str!("violation.doc/collect.md")]
 pub(crate) fn collect(dir: &Path, wanted: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -56,7 +55,7 @@ pub(crate) fn collect(dir: &Path, wanted: &str, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Recursively collects all `.rs` files under `dir`, skipping `target`.
+#[doc = include_str!("violation.doc/collect_rs.md")]
 pub(crate) fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;

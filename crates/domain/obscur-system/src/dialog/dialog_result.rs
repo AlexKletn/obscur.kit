@@ -1,50 +1,40 @@
-//! The outcome of presenting a dialog (spec §6.9 — dialog providers).
+#![doc = include_str!("dialog_result.doc/_module.md")]
 
 use crate::document::{DirectoryHandle, DocumentHandle};
 
-/// The outcome a [`DialogProvider`](crate::dialog::DialogProvider) returns for a
-/// [`DialogRequest`](crate::dialog::DialogRequest) (spec §6.9).
-///
-/// The result is a pure value: each variant reports what the user chose, or that
-/// the interaction ended without a choice. Successful file dialogs yield opaque
-/// [`DocumentHandle`]s / [`DirectoryHandle`]s rather than paths (spec §6.10), so
-/// the outcome carries no filesystem access of its own. [`Denied`](Self::Denied)
-/// and [`Unsupported`](Self::Unsupported) let a caller fall back to another
-/// provider in a chain.
+#[doc = include_str!("dialog_result.doc/DialogResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DialogResult {
-    /// The user selected zero or more files (an open result; possibly empty).
+    #[doc = include_str!("dialog_result.doc/Files.md")]
     Files(Vec<DocumentHandle>),
-    /// The user chose a destination for a save request.
+    #[doc = include_str!("dialog_result.doc/Saved.md")]
     Saved(DocumentHandle),
-    /// The user selected a folder.
+    #[doc = include_str!("dialog_result.doc/Folder.md")]
     Folder(DirectoryHandle),
-    /// The user answered a message/confirmation — the button they chose.
+    #[doc = include_str!("dialog_result.doc/Confirmed.md")]
     Confirmed(bool),
-    /// The user closed the dialog without making a choice.
+    #[doc = include_str!("dialog_result.doc/Dismissed.md")]
     Dismissed,
-    /// The request was denied by permission policy.
+    #[doc = include_str!("dialog_result.doc/Denied.md")]
     Denied,
-    /// The provider does not support this kind of dialog.
+    #[doc = include_str!("dialog_result.doc/Unsupported.md")]
     Unsupported,
 }
 
 impl DialogResult {
-    /// Returns whether the user dismissed the dialog without choosing
-    /// (spec §6.9).
+    #[doc = include_str!("dialog_result.doc/is_dismissed.md")]
     #[must_use]
     pub const fn is_dismissed(&self) -> bool {
         matches!(self, Self::Dismissed)
     }
 
-    /// Returns whether the request was denied by permission policy (spec §6.9).
+    #[doc = include_str!("dialog_result.doc/is_denied.md")]
     #[must_use]
     pub const fn is_denied(&self) -> bool {
         matches!(self, Self::Denied)
     }
 
-    /// Returns the selected files, or `None` when the result is not a
-    /// [`Files`](Self::Files) outcome (spec §6.9).
+    #[doc = include_str!("dialog_result.doc/files.md")]
     #[must_use]
     pub fn files(&self) -> Option<&[DocumentHandle]> {
         match self {
@@ -53,8 +43,7 @@ impl DialogResult {
         }
     }
 
-    /// Returns the confirmation answer, or `None` when the result is not a
-    /// [`Confirmed`](Self::Confirmed) outcome (spec §6.9).
+    #[doc = include_str!("dialog_result.doc/confirmed.md")]
     #[must_use]
     pub const fn confirmed(&self) -> Option<bool> {
         match self {

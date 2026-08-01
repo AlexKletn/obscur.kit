@@ -1,20 +1,9 @@
-//! The immutable, versioned snapshot handed off to a renderer.
+#![doc = include_str!("scene_snapshot.doc/_module.md")]
 
 use crate::command::DisplayList;
 use crate::scene::{Scene, SceneGeneration, SceneStatistics};
 
-/// An **immutable, versioned** snapshot of a [`Scene`], the hand-off a renderer
-/// backend consumes (spec §1.6, §5.2).
-///
-/// A snapshot is **immutable after publication**: it exposes only read-only
-/// accessors and no mutators. The runtime may retain it and later discard it as
-/// stale once the live scene's generation advances past it — see
-/// [`SceneSnapshot::is_stale_against`] (spec §1.6).
-///
-/// The snapshot is the exact contract a renderer honours: its
-/// [`DisplayList`] fixes the geometry, paint order, and clipping that every
-/// backend must reproduce. Rasterization may differ between backends, but the
-/// scene geometry and command order must not (spec §5.2).
+#[doc = include_str!("scene_snapshot.doc/SceneSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneSnapshot {
     display_list: DisplayList,
@@ -23,8 +12,7 @@ pub struct SceneSnapshot {
 }
 
 impl SceneSnapshot {
-    /// Builds a snapshot directly from a display list at a given generation,
-    /// computing the [`SceneStatistics`] from the list.
+    #[doc = include_str!("scene_snapshot.doc/new.md")]
     #[must_use]
     pub fn new(display_list: DisplayList, generation: SceneGeneration) -> Self {
         let statistics = SceneStatistics::from_display_list(&display_list);
@@ -35,10 +23,7 @@ impl SceneSnapshot {
         }
     }
 
-    /// Captures an immutable snapshot of `scene`'s current state.
-    ///
-    /// Clones the scene's root display list and captures its generation and
-    /// statistics. This is what [`Scene::snapshot`] calls.
+    #[doc = include_str!("scene_snapshot.doc/from_scene.md")]
     #[must_use]
     pub fn from_scene(scene: &Scene) -> Self {
         Self {
@@ -48,39 +33,31 @@ impl SceneSnapshot {
         }
     }
 
-    /// The display list a renderer consumes: the frozen geometry, paint order,
-    /// and clipping contract (spec §5.2).
+    #[doc = include_str!("scene_snapshot.doc/display_list.md")]
     #[must_use]
     pub fn display_list(&self) -> &DisplayList {
         &self.display_list
     }
 
-    /// The generation of the scene at the moment this snapshot was captured.
+    #[doc = include_str!("scene_snapshot.doc/generation.md")]
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.generation
     }
 
-    /// The diagnostic statistics captured with this snapshot.
+    #[doc = include_str!("scene_snapshot.doc/statistics.md")]
     #[must_use]
     pub fn statistics(&self) -> SceneStatistics {
         self.statistics
     }
 
-    /// Whether this snapshot is stale relative to a `current` scene generation.
-    ///
-    /// Returns `true` when `current` is strictly newer than this snapshot's
-    /// generation, i.e. the live scene advanced its content after the snapshot
-    /// was taken, so the snapshot may be discarded (spec §1.6).
+    #[doc = include_str!("scene_snapshot.doc/is_stale_against.md")]
     #[must_use]
     pub fn is_stale_against(&self, current: SceneGeneration) -> bool {
         current > self.generation
     }
 
-    /// Whether the snapshot's display list is balanced, i.e. it is a well-formed
-    /// stream a renderer can consume.
-    ///
-    /// Delegates to [`DisplayList::is_balanced`].
+    #[doc = include_str!("scene_snapshot.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
         self.display_list.is_balanced()

@@ -1,30 +1,20 @@
-//! `ForeignSurfaceLimits`: explicit restrictions a foreign surface may impose (§5.5).
+#![doc = include_str!("foreign_surface_limits.doc/_module.md")]
 
-/// The explicit restrictions a foreign surface imposes on scene operations
-/// (Obscur Kit 2 specs §5.5).
-///
-/// Each field records whether a given operation is **allowed** for the surface.
-/// Per §5.5 these capabilities are explicit — they are never silently assumed:
-/// a texture-backed surface is typically [`unrestricted`](Self::unrestricted)
-/// (all operations allowed), while a native child surface/window restricts some
-/// of them (see [`native_child`](Self::native_child)).
+#[doc = include_str!("foreign_surface_limits.doc/ForeignSurfaceLimits.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ForeignSurfaceLimits {
-    /// Whether the surface may be transformed (translate/scale/rotate/etc.).
+    #[doc = include_str!("foreign_surface_limits.doc/allows_transform.md")]
     allows_transform: bool,
-    /// Whether the surface may be clipped by ancestor clips.
+    #[doc = include_str!("foreign_surface_limits.doc/allows_clip.md")]
     allows_clip: bool,
-    /// Whether the surface may be composited with reduced opacity.
+    #[doc = include_str!("foreign_surface_limits.doc/allows_opacity.md")]
     allows_opacity: bool,
-    /// Whether a blur effect may be applied to the surface.
+    #[doc = include_str!("foreign_surface_limits.doc/allows_blur.md")]
     allows_blur: bool,
 }
 
 impl ForeignSurfaceLimits {
-    /// Returns limits that allow every operation (nothing is restricted).
-    ///
-    /// This is the typical case for a texture-backed foreign surface, which
-    /// composites like any other scene content.
+    #[doc = include_str!("foreign_surface_limits.doc/unrestricted.md")]
     #[must_use]
     pub const fn unrestricted() -> Self {
         Self {
@@ -35,13 +25,7 @@ impl ForeignSurfaceLimits {
         }
     }
 
-    /// Returns limits typical of a native child surface/window.
-    ///
-    /// A native child surface is positioned and clipped by the platform, so
-    /// geometric operations remain available (`allows_transform` and
-    /// `allows_clip` are `true`), but per-surface compositing effects that the
-    /// platform cannot honour are restricted (`allows_opacity` and
-    /// `allows_blur` are `false`).
+    #[doc = include_str!("foreign_surface_limits.doc/native_child.md")]
     #[must_use]
     pub const fn native_child() -> Self {
         Self {
@@ -52,25 +36,25 @@ impl ForeignSurfaceLimits {
         }
     }
 
-    /// Returns whether the surface may be transformed.
+    #[doc = include_str!("foreign_surface_limits.doc/allows_transform_2.md")]
     #[must_use]
     pub const fn allows_transform(self) -> bool {
         self.allows_transform
     }
 
-    /// Returns whether the surface may be clipped.
+    #[doc = include_str!("foreign_surface_limits.doc/allows_clip_2.md")]
     #[must_use]
     pub const fn allows_clip(self) -> bool {
         self.allows_clip
     }
 
-    /// Returns whether the surface may be composited with reduced opacity.
+    #[doc = include_str!("foreign_surface_limits.doc/allows_opacity_2.md")]
     #[must_use]
     pub const fn allows_opacity(self) -> bool {
         self.allows_opacity
     }
 
-    /// Returns whether a blur effect may be applied to the surface.
+    #[doc = include_str!("foreign_surface_limits.doc/allows_blur_2.md")]
     #[must_use]
     pub const fn allows_blur(self) -> bool {
         self.allows_blur
@@ -78,7 +62,7 @@ impl ForeignSurfaceLimits {
 }
 
 impl Default for ForeignSurfaceLimits {
-    /// Defaults to [`unrestricted`](Self::unrestricted).
+    #[doc = include_str!("foreign_surface_limits.doc/default.md")]
     fn default() -> Self {
         Self::unrestricted()
     }

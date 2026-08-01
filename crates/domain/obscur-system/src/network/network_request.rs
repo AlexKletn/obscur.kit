@@ -1,58 +1,39 @@
-//! An HTTP-like network request a host loader fulfils (spec §5.15).
-//!
-//! The toolkit performs no network I/O of its own: a [`NetworkRequest`] is a
-//! pure, backend-agnostic *description* of a fetch that the host resolves
-//! through its own loader (spec §5.15). It carries an HTTP-shaped method, a URL,
-//! ordered headers, and an optional body — never a live connection.
+#![doc = include_str!("network_request.doc/_module.md")]
 
 use std::sync::Arc;
 
-/// The HTTP method of a [`NetworkRequest`] (spec §5.15).
-///
-/// Only the common methods a host loader is expected to honor are modeled; the
-/// predicates classify a method without the host having to match on it.
+#[doc = include_str!("network_request.doc/HttpMethod.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
-    /// Retrieve a resource without side effects.
+    #[doc = include_str!("network_request.doc/Get.md")]
     Get,
-    /// Retrieve only the headers of a resource.
+    #[doc = include_str!("network_request.doc/Head.md")]
     Head,
-    /// Submit an entity to a resource.
+    #[doc = include_str!("network_request.doc/Post.md")]
     Post,
-    /// Replace the target resource with the request body.
+    #[doc = include_str!("network_request.doc/Put.md")]
     Put,
-    /// Delete the target resource.
+    #[doc = include_str!("network_request.doc/Delete.md")]
     Delete,
-    /// Apply a partial modification to the target resource.
+    #[doc = include_str!("network_request.doc/Patch.md")]
     Patch,
 }
 
 impl HttpMethod {
-    /// Returns whether this method is *safe* — read-only with no side effects,
-    /// i.e. [`Get`](Self::Get) or [`Head`](Self::Head) (spec §5.15).
+    #[doc = include_str!("network_request.doc/is_safe.md")]
     #[must_use]
     pub const fn is_safe(&self) -> bool {
         matches!(self, Self::Get | Self::Head)
     }
 
-    /// Returns whether this method conventionally carries a request body, i.e.
-    /// [`Post`](Self::Post), [`Put`](Self::Put), or [`Patch`](Self::Patch)
-    /// (spec §5.15).
+    #[doc = include_str!("network_request.doc/has_body.md")]
     #[must_use]
     pub const fn has_body(&self) -> bool {
         matches!(self, Self::Post | Self::Put | Self::Patch)
     }
 }
 
-/// An HTTP-like request the host loader fulfils on the kit's behalf
-/// (spec §5.15).
-///
-/// The kit itself opens no sockets: it hands this description to a
-/// host-provided [`NetworkService`](crate::network::NetworkService), which
-/// resolves the URL through its own loader. Headers are kept in insertion order
-/// (a [`Vec`] of name/value pairs) because HTTP permits repeated header names
-/// and preserves their order; the body is an [`Arc<[u8]>`] so clones are cheap
-/// and the bytes can be shared without copying.
+#[doc = include_str!("network_request.doc/NetworkRequest.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkRequest {
     method: HttpMethod,
@@ -62,7 +43,7 @@ pub struct NetworkRequest {
 }
 
 impl NetworkRequest {
-    /// Creates a bodyless request with `method` targeting `url` (spec §5.15).
+    #[doc = include_str!("network_request.doc/new.md")]
     #[must_use]
     pub fn new(method: HttpMethod, url: impl Into<Box<str>>) -> Self {
         Self {
@@ -73,68 +54,57 @@ impl NetworkRequest {
         }
     }
 
-    /// Creates a [`HttpMethod::Get`] request for `url` (spec §5.15).
+    #[doc = include_str!("network_request.doc/get.md")]
     #[must_use]
     pub fn get(url: impl Into<Box<str>>) -> Self {
         Self::new(HttpMethod::Get, url)
     }
 
-    /// Creates a [`HttpMethod::Post`] request for `url` carrying `body`
-    /// (spec §5.15).
+    #[doc = include_str!("network_request.doc/post.md")]
     #[must_use]
     pub fn post(url: impl Into<Box<str>>, body: impl Into<Arc<[u8]>>) -> Self {
         Self::new(HttpMethod::Post, url).with_body(body)
     }
 
-    /// Appends a `name: value` header, preserving order (fluent; spec §5.15).
-    ///
-    /// Existing headers are never replaced, so repeated names accumulate in the
-    /// order they were added — matching HTTP's multi-valued header semantics.
+    #[doc = include_str!("network_request.doc/header.md")]
     #[must_use]
     pub fn header(mut self, name: impl Into<Box<str>>, value: impl Into<Box<str>>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
     }
 
-    /// Attaches `body` to the request, replacing any existing body (fluent;
-    /// spec §5.15).
+    #[doc = include_str!("network_request.doc/with_body.md")]
     #[must_use]
     pub fn with_body(mut self, body: impl Into<Arc<[u8]>>) -> Self {
         self.body = Some(body.into());
         self
     }
 
-    /// Returns the request method (spec §5.15).
+    #[doc = include_str!("network_request.doc/method.md")]
     #[must_use]
     pub const fn method(&self) -> HttpMethod {
         self.method
     }
 
-    /// Returns the target URL (spec §5.15).
+    #[doc = include_str!("network_request.doc/url.md")]
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
     }
 
-    /// Returns the ordered header name/value pairs (spec §5.15).
+    #[doc = include_str!("network_request.doc/headers.md")]
     #[must_use]
     pub fn headers(&self) -> &[(Box<str>, Box<str>)] {
         &self.headers
     }
 
-    /// Returns the request body bytes, or `None` when the request has no body
-    /// (spec §5.15).
+    #[doc = include_str!("network_request.doc/body.md")]
     #[must_use]
     pub fn body(&self) -> Option<&[u8]> {
         self.body.as_deref()
     }
 
-    /// Returns the value of the first header whose name matches `name`
-    /// case-insensitively, or `None` (spec §5.15).
-    ///
-    /// The match is ASCII-case-insensitive because HTTP header names are
-    /// case-insensitive; the *first* matching header wins, mirroring how a
-    /// well-behaved client reads a single-valued header.
+    #[doc = include_str!("network_request.doc/header_value.md")]
     #[must_use]
     pub fn header_value(&self, name: &str) -> Option<&str> {
         self.headers

@@ -1,28 +1,21 @@
-//! The [`KeyframeTrack`] ordered-keyframe track and its [`Keyframe`] (spec §4.17).
+#![doc = include_str!("keyframe_track.doc/_module.md")]
 
 use crate::track::{Easing, MotionTrack};
 use crate::value::MotionValue;
 
-/// One stop in a [`KeyframeTrack`]: a value pinned at a normalized offset
-/// (spec §4.17).
-///
-/// `offset` is the position within the track's `[0, 1]` progress range at which
-/// `value` is reached. Following CSS `@keyframes` semantics, `easing` is the
-/// timing function used to interpolate *from this keyframe to the next one*, not
-/// into this one.
+#[doc = include_str!("keyframe_track.doc/Keyframe.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Keyframe {
-    /// Normalized position of this stop within the track, in `[0, 1]`.
+    #[doc = include_str!("keyframe_track.doc/offset.md")]
     offset: f32,
-    /// The presentation value reached at `offset`.
+    #[doc = include_str!("keyframe_track.doc/value.md")]
     value: MotionValue,
-    /// The easing applied on the segment leaving this keyframe toward the next.
+    #[doc = include_str!("keyframe_track.doc/easing.md")]
     easing: Easing,
 }
 
 impl Keyframe {
-    /// Creates a keyframe placing `value` at `offset`, with [`Easing::Linear`]
-    /// on the outgoing segment.
+    #[doc = include_str!("keyframe_track.doc/new.md")]
     #[must_use]
     pub const fn new(offset: f32, value: MotionValue) -> Self {
         Self {
@@ -32,50 +25,41 @@ impl Keyframe {
         }
     }
 
-    /// Returns this keyframe with `easing` on its outgoing segment (fluent
-    /// setter).
+    #[doc = include_str!("keyframe_track.doc/with_easing.md")]
     #[must_use]
     pub const fn with_easing(mut self, easing: Easing) -> Self {
         self.easing = easing;
         self
     }
 
-    /// Returns the normalized offset of this keyframe.
+    #[doc = include_str!("keyframe_track.doc/offset_2.md")]
     #[must_use]
     pub const fn offset(&self) -> f32 {
         self.offset
     }
 
-    /// Returns the value reached at this keyframe.
+    #[doc = include_str!("keyframe_track.doc/value_2.md")]
     #[must_use]
     pub const fn value(&self) -> MotionValue {
         self.value
     }
 
-    /// Returns the easing applied on the outgoing segment.
+    #[doc = include_str!("keyframe_track.doc/easing_2.md")]
     #[must_use]
     pub const fn easing(&self) -> Easing {
         self.easing
     }
 }
 
-/// An ordered list of [`Keyframe`]s sampled by normalized progress (spec §4.17).
-///
-/// This is the native compile target of CSS `@keyframes`: a set of value stops
-/// at normalized offsets, with per-segment easing. The keyframes are kept sorted
-/// by offset so sampling can walk them directly. Sampling clamps progress to the
-/// first/last stop, then linearly locates the bracketing pair and blends the
-/// lower value toward the upper one using the lower keyframe's easing. A blend
-/// between mismatched [`MotionValue`] variants is impossible and falls back to
-/// the upper keyframe's value.
+#[doc = include_str!("keyframe_track.doc/KeyframeTrack.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyframeTrack {
-    /// The keyframes, kept sorted ascending by [`Keyframe::offset`].
+    #[doc = include_str!("keyframe_track.doc/keyframes.md")]
     keyframes: Vec<Keyframe>,
 }
 
 impl KeyframeTrack {
-    /// Creates an empty track with no keyframes.
+    #[doc = include_str!("keyframe_track.doc/new_2.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -83,7 +67,7 @@ impl KeyframeTrack {
         }
     }
 
-    /// Creates a track from `keyframes`, sorting them (stably) by offset.
+    #[doc = include_str!("keyframe_track.doc/from_keyframes.md")]
     #[must_use]
     pub fn from_keyframes(mut keyframes: Vec<Keyframe>) -> Self {
         keyframes.sort_by(|a, b| {
@@ -94,13 +78,7 @@ impl KeyframeTrack {
         Self { keyframes }
     }
 
-    /// Creates a two-stop linear track running `start` (offset `0`) to `end`
-    /// (offset `1`) — the minimal track between two endpoint values (spec §4.17).
-    ///
-    /// Used to build interruption redirects, e.g. a
-    /// [`Reverse`](crate::transition::TransitionInterruption::Reverse) that plays
-    /// the element's current value back toward the interrupted transition's
-    /// origin.
+    #[doc = include_str!("keyframe_track.doc/from_endpoints.md")]
     #[must_use]
     pub fn from_endpoints(start: MotionValue, end: MotionValue) -> Self {
         Self {
@@ -108,16 +86,7 @@ impl KeyframeTrack {
         }
     }
 
-    /// Returns a copy of this track whose first (lowest-offset) keyframe holds
-    /// `start`, leaving every other keyframe — offsets, easings and later values
-    /// — untouched (spec §4.17 "interruption / blend").
-    ///
-    /// This is the primitive a
-    /// [`Blend`](crate::transition::TransitionInterruption::Blend) interruption
-    /// uses: an incoming transition is re-based so it *begins* at the element's
-    /// current mid-animation value instead of the track's authored start,
-    /// producing a seamless redirect with no visible jump. An empty track is
-    /// returned unchanged.
+    #[doc = include_str!("keyframe_track.doc/with_start_value.md")]
     #[must_use]
     pub fn with_start_value(&self, start: MotionValue) -> Self {
         let mut keyframes = self.keyframes.clone();
@@ -127,10 +96,7 @@ impl KeyframeTrack {
         Self { keyframes }
     }
 
-    /// Inserts `keyframe`, keeping the list sorted by offset.
-    ///
-    /// A keyframe with an offset equal to existing ones is inserted after them,
-    /// preserving insertion order among equal offsets.
+    #[doc = include_str!("keyframe_track.doc/push.md")]
     pub fn push(&mut self, keyframe: Keyframe) {
         let index = self
             .keyframes
@@ -138,19 +104,19 @@ impl KeyframeTrack {
         self.keyframes.insert(index, keyframe);
     }
 
-    /// Returns the keyframes in ascending offset order.
+    #[doc = include_str!("keyframe_track.doc/keyframes_2.md")]
     #[must_use]
     pub fn keyframes(&self) -> &[Keyframe] {
         &self.keyframes
     }
 
-    /// Returns the number of keyframes.
+    #[doc = include_str!("keyframe_track.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.keyframes.len()
     }
 
-    /// Returns whether the track holds no keyframes.
+    #[doc = include_str!("keyframe_track.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.keyframes.is_empty()
@@ -164,14 +130,7 @@ impl Default for KeyframeTrack {
 }
 
 impl MotionTrack for KeyframeTrack {
-    /// Samples the track at normalized progress `t` (spec §4.17).
-    ///
-    /// `t` is clamped to `[0, 1]`. An empty track is a degenerate case and
-    /// yields `MotionValue::scalar(0.0)`. Progress at or before the first
-    /// keyframe yields the first value; at or after the last yields the last.
-    /// Between two keyframes the local progress is eased by the lower
-    /// keyframe's easing and used to blend the two values, falling back to the
-    /// upper value on a variant mismatch.
+    #[doc = include_str!("keyframe_track.doc/sample.md")]
     fn sample(&self, t: f32) -> MotionValue {
         let t = t.clamp(0.0, 1.0);
         let frames = &self.keyframes;

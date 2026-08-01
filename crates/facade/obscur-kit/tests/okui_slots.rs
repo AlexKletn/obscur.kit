@@ -1,28 +1,4 @@
-//! End-to-end: a §2.12 slot contract is **enforced**, on both front ends
-//! (spec §2.12, §2.13).
-//!
-//! Slots existed only as types. `SlotContract`/`SlotCardinality` had no
-//! production consumer, nothing parsed a `slot="…"`, and no document could break
-//! a rule that nothing checked. This file drives the whole chain that now exists:
-//! a component declares its slots with `#[derive(Contract)]`, the declaration
-//! crosses into the compiler's string contract, and a document assigning children
-//! to those slots is checked against it — through the **real** `Compiler` for the
-//! `.okui` file path, and through the **real** `okui!` macro for the inline one.
-//!
-//! # What is checked here, and what is checked elsewhere
-//!
-//! What is checked *here* is the **assignment**: a `slot="…"` must name a
-//! declared slot, satisfy that slot's own child rule, and the slot's cardinality
-//! must hold. All of it is a compile-time verdict, reached before a runtime
-//! exists.
-//!
-//! **Projection** — the content actually reaching the outlet — is real, and is
-//! tested in `okui_slot_projection.rs` rather than here, because it needs a
-//! runtime and a registered component. The two halves meet at the reserved
-//! `slot` symbol these front ends lower to: this file pins that the assignment
-//! reaches the tree (`a_slot_assignment_is_the_reserved_property_the_tree_carries`),
-//! and that file pins that the runtime routes on it.
-
+#![doc = include_str!("okui_slots.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::okui_compiler::compile::{CompileDiagnostic, Compiler, ContractRegistry};
@@ -32,25 +8,19 @@ use obscur_kit::okui_syntax::parser::Parser;
 use obscur_kit::ui_macros::{Contract, okui};
 use obscur_kit::view::view::{View, ViewNode};
 
-/// A component declaring three §2.12 slots: one mandatory, one unbounded, one
-/// optional and restricted to `Button`s.
+#[doc = include_str!("okui_slots.doc/CardProps.md")]
 #[derive(Contract)]
 #[contract(name = "Card")]
 #[contract(slot(name = "header", cardinality = one))]
 #[contract(slot(name = "body", cardinality = many))]
 #[contract(slot(name = "actions", cardinality = optional, child = "Button"))]
 struct CardProps {
-    /// A prop, so the surface is not slots-only. Read by the derived
-    /// `FromProps`, not by this file.
+    #[doc = include_str!("okui_slots.doc/title.md")]
     #[allow(dead_code)]
     title: String,
 }
 
-/// Compiles `source` through the real pipeline with `Card`'s derived surface
-/// registered, returning every diagnostic's message.
-///
-/// `ready` and `rows` are defined so a document may condition and iterate; the
-/// name resolver is a different pass and its verdict is not what is under test.
+#[doc = include_str!("okui_slots.doc/diagnostics.md")]
 fn diagnostics(source: &str) -> Vec<String> {
     let document =
         Document::cast(Parser::new().parse(source).tree().root().clone()).expect("a document");
@@ -67,7 +37,7 @@ fn diagnostics(source: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether compiling `source` reports a diagnostic containing `needle`.
+#[doc = include_str!("okui_slots.doc/reports.md")]
 fn reports(source: &str, needle: &str) -> bool {
     diagnostics(source).iter().any(|d| d.contains(needle))
 }

@@ -1,63 +1,44 @@
-//! `TaskResult`: what a finished task hands back to the runtime.
+#![doc = include_str!("task_result.doc/_module.md")]
 
 use crate::task::{TaskId, TaskScope};
 
-/// The typed message a finished task delivers (spec §3.3: "results return as
-/// typed messages").
-///
-/// # Typed, not erased
-///
-/// `T` is the caller's own payload type — a decoded resource, a parsed document,
-/// whatever the task produced. The envelope adds only what the *runtime* needs to
-/// route it: which task it came from, and what that task was scoped to. Nothing
-/// here is `Any`-erased or stringly-typed, so a receiver matches on a real Rust
-/// value rather than re-parsing a message.
-///
-/// # It carries no generation
-///
-/// Deliberately. §3.3 also requires that "stale work is discarded using
-/// generation/version IDs", but the ID that decides staleness belongs to the
-/// *domain the work targets* — a resource load is stale against its
-/// `ResourceVersion`, which the resource hub already checks on completion.
-/// Putting a second, generic generation here would create a competing answer to
-/// "is this stale", and the two could disagree. The payload carries its own.
+#[doc = include_str!("task_result.doc/TaskResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskResult<T> {
-    /// The task that produced this result.
+    #[doc = include_str!("task_result.doc/id.md")]
     id: TaskId,
-    /// What the task was scoped to — a caller drops a result whose scope has since
-    /// been torn down (spec §3.3 "scoped tasks are cancelled automatically").
+    #[doc = include_str!("task_result.doc/scope.md")]
     scope: TaskScope,
-    /// The task's own typed output.
+    #[doc = include_str!("task_result.doc/payload.md")]
     payload: T,
 }
 
 impl<T> TaskResult<T> {
-    /// Wraps `payload` as the result of task `id`, scoped to `scope`.
+    #[doc = include_str!("task_result.doc/new.md")]
     #[must_use]
     pub const fn new(id: TaskId, scope: TaskScope, payload: T) -> Self {
         Self { id, scope, payload }
     }
 
-    /// The task that produced this result.
+    #[doc = include_str!("task_result.doc/id_2.md")]
     #[must_use]
     pub const fn id(&self) -> TaskId {
         self.id
     }
 
-    /// What the task was scoped to.
+    #[doc = include_str!("task_result.doc/scope_2.md")]
     #[must_use]
     pub const fn scope(&self) -> TaskScope {
         self.scope
     }
 
-    /// The typed output.
+    #[doc = include_str!("task_result.doc/payload_2.md")]
     #[must_use]
     pub const fn payload(&self) -> &T {
         &self.payload
     }
 
-    /// Takes the typed output, consuming the envelope.
+    #[doc = include_str!("task_result.doc/into_payload.md")]
     #[must_use]
     pub fn into_payload(self) -> T {
         self.payload

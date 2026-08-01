@@ -1,4 +1,4 @@
-//! Shell module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod shell_provider;
 pub use shell_provider::{NullShellProvider, RecordingShellProvider, ShellProvider};
 mod shell_result;

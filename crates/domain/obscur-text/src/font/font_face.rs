@@ -1,28 +1,22 @@
-//! A concrete, resolvable font face (spec §5.18).
+#![doc = include_str!("font_face.doc/_module.md")]
 
 use crate::font::{FontAttributes, FontFamily, FontSource};
 
-/// A concrete, resolvable font face: a family and attributes paired with the
-/// source of its bytes and its design metrics (spec §5.18).
-///
-/// A [`FontProvider`](crate::font::FontProvider) produces a `FontFace` when it
-/// resolves a [`FontFamily`] and [`FontAttributes`] request. Because it embeds
-/// `f32` [`FontMetrics`] it derives only `Debug`, `Clone`, and `PartialEq`
-/// (floats preclude `Eq`).
+#[doc = include_str!("font_face.doc/FontFace.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FontFace {
-    /// The family this face belongs to.
+    #[doc = include_str!("font_face.doc/family.md")]
     family: FontFamily,
-    /// The attributes (weight/slant/width) this face provides.
+    #[doc = include_str!("font_face.doc/attributes.md")]
     attributes: FontAttributes,
-    /// Where this face's bytes come from.
+    #[doc = include_str!("font_face.doc/source.md")]
     source: FontSource,
-    /// This face's design metrics.
+    #[doc = include_str!("font_face.doc/metrics.md")]
     metrics: FontMetrics,
 }
 
 impl FontFace {
-    /// Creates a face from its `family`, `attributes`, `source`, and `metrics`.
+    #[doc = include_str!("font_face.doc/new.md")]
     #[must_use]
     pub const fn new(
         family: FontFamily,
@@ -38,57 +32,50 @@ impl FontFace {
         }
     }
 
-    /// Returns the family this face belongs to.
+    #[doc = include_str!("font_face.doc/family_2.md")]
     #[must_use]
     pub const fn family(&self) -> &FontFamily {
         &self.family
     }
 
-    /// Returns the attributes this face provides.
+    #[doc = include_str!("font_face.doc/attributes_2.md")]
     #[must_use]
     pub const fn attributes(&self) -> &FontAttributes {
         &self.attributes
     }
 
-    /// Returns the source of this face's bytes.
+    #[doc = include_str!("font_face.doc/source_2.md")]
     #[must_use]
     pub const fn source(&self) -> &FontSource {
         &self.source
     }
 
-    /// Returns this face's design metrics.
+    #[doc = include_str!("font_face.doc/metrics_2.md")]
     #[must_use]
     pub const fn metrics(&self) -> &FontMetrics {
         &self.metrics
     }
 }
 
-/// A font's design metrics, in font design units (spec §5.18).
-///
-/// Distances are expressed in the font's own coordinate space, whose scale is
-/// [`units_per_em`](FontMetrics::units_per_em); divide by it and multiply by a
-/// pixel size to obtain pixels. Following font conventions, `descent` is
-/// typically **negative** (below the baseline); it is stored exactly as given,
-/// and [`line_height`](FontMetrics::line_height) takes its magnitude.
+#[doc = include_str!("font_face.doc/FontMetrics.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FontMetrics {
-    /// The number of design units per em; the scale for every other field.
+    #[doc = include_str!("font_face.doc/units_per_em.md")]
     pub units_per_em: u16,
-    /// The ascent above the baseline, in font units (typically positive).
+    #[doc = include_str!("font_face.doc/ascent.md")]
     pub ascent: f32,
-    /// The descent below the baseline, in font units (typically negative).
+    #[doc = include_str!("font_face.doc/descent.md")]
     pub descent: f32,
-    /// Extra leading between lines, in font units.
+    #[doc = include_str!("font_face.doc/line_gap.md")]
     pub line_gap: f32,
-    /// The height of a flat capital, in font units, if the font reports it.
+    #[doc = include_str!("font_face.doc/cap_height.md")]
     pub cap_height: Option<f32>,
-    /// The height of a lowercase `x`, in font units, if the font reports it.
+    #[doc = include_str!("font_face.doc/x_height.md")]
     pub x_height: Option<f32>,
 }
 
 impl FontMetrics {
-    /// Creates metrics from the required fields, leaving
-    /// [`cap_height`](Self::cap_height) and [`x_height`](Self::x_height) unset.
+    #[doc = include_str!("font_face.doc/new_2.md")]
     #[must_use]
     pub const fn new(units_per_em: u16, ascent: f32, descent: f32, line_gap: f32) -> Self {
         Self {
@@ -101,25 +88,21 @@ impl FontMetrics {
         }
     }
 
-    /// Returns these metrics with [`cap_height`](Self::cap_height) set.
+    #[doc = include_str!("font_face.doc/with_cap_height.md")]
     #[must_use]
     pub const fn with_cap_height(mut self, cap_height: f32) -> Self {
         self.cap_height = Some(cap_height);
         self
     }
 
-    /// Returns these metrics with [`x_height`](Self::x_height) set.
+    #[doc = include_str!("font_face.doc/with_x_height.md")]
     #[must_use]
     pub const fn with_x_height(mut self, x_height: f32) -> Self {
         self.x_height = Some(x_height);
         self
     }
 
-    /// Returns the natural line height in font units:
-    /// `ascent + |descent| + line_gap` (spec §5.18).
-    ///
-    /// The descent's magnitude is used so a font's conventional negative descent
-    /// still adds to the line height rather than subtracting from it.
+    #[doc = include_str!("font_face.doc/line_height.md")]
     #[must_use]
     pub fn line_height(&self) -> f32 {
         self.ascent + self.descent.abs() + self.line_gap

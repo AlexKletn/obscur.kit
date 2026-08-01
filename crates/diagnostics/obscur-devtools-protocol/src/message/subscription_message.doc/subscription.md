@@ -1,0 +1,1 @@
+The resulting subscription record.

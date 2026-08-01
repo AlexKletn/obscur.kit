@@ -1,133 +1,68 @@
-//! The [`PointerEvent`] payload carried by a hit-tested pointer event and its
-//! [`PointerEventKind`] discriminant (spec §4.7).
+#![doc = include_str!("pointer_event.doc/_module.md")]
 
 use obscur_geometry::Point;
 
 use super::{PointerButtons, PointerDelta, PointerDevice, PointerId, PointerTilt};
 use crate::event::EventTrust;
 
-/// The lifecycle kind of a [`PointerEvent`] (spec §4.7).
+#[doc = include_str!("pointer_event.doc/PointerEventKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerEventKind {
-    /// A button was pressed or a contact began.
+    #[doc = include_str!("pointer_event.doc/Down.md")]
     Down,
-    /// A button was released or a contact ended.
+    #[doc = include_str!("pointer_event.doc/Up.md")]
     Up,
-    /// The pointer moved within the target.
+    #[doc = include_str!("pointer_event.doc/Move.md")]
     Move,
-    /// The pointer entered the target.
+    #[doc = include_str!("pointer_event.doc/Enter.md")]
     Enter,
-    /// The pointer left the target.
+    #[doc = include_str!("pointer_event.doc/Leave.md")]
     Leave,
-    /// The interaction was cancelled by the system (for example, capture lost).
+    #[doc = include_str!("pointer_event.doc/Cancel.md")]
     Cancel,
 }
 
 impl PointerEventKind {
-    /// Returns whether this kind terminates the pointer's interaction with the
-    /// target ([`Up`](Self::Up), [`Cancel`](Self::Cancel), or
-    /// [`Leave`](Self::Leave)).
+    #[doc = include_str!("pointer_event.doc/is_terminal.md")]
     #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Up | Self::Cancel | Self::Leave)
     }
 }
 
-/// A single pointer event delivered to a hit-tested target (spec §2.4, §4.7).
-///
-/// Each event describes one pointer's state at one instant. §2.4 enumerates what
-/// that state is, and this struct is that list:
-///
-/// > The pointer model supports mouse, touch, pen and trackpad-like sources:
-/// >
-/// > - pointer ID;
-/// > - device type;
-/// > - buttons;
-/// > - logical position and delta;
-/// > - pressure;
-/// > - tilt;
-/// > - rotation;
-/// > - primary-pointer status;
-/// > - hover capability.
-///
-/// So: which [`pointer`](Self::pointer) and [`device`](Self::device) produced it,
-/// the [`kind`](Self::kind) of change, the [`position`](Self::position) in the
-/// target's coordinate space and the [`delta`](Self::delta) that brought it there,
-/// the [`buttons`](Self::buttons) held *after* this event, the contact
-/// [`pressure`](Self::pressure) (`0.0` for hover or a device without pressure),
-/// the stylus [`tilt`](Self::tilt) and [`rotation`](Self::rotation), whether this
-/// is the [`primary`](Self::is_primary) pointer, whether the device
-/// [`hovers`](Self::hover_capable), and a logical [`timestamp`](Self::timestamp)
-/// supplied by the caller — this crate never reads a clock.
-///
-/// **Four of those were absent** until the §2.3/§2.4 delivery pass: delta, tilt,
-/// rotation and primary-pointer status were listed by the spec and modeled
-/// nowhere, so no handler could have read them however the event reached it. They
-/// default to "nothing to report" ([`PointerDelta::ZERO`],
-/// [`PointerTilt::UPRIGHT`], no twist, primary) so a producer that knows nothing
-/// about them keeps working unchanged and one that does opts in field by field.
-///
-/// It also carries §2.3's trusted/untrusted origin ([`trust`](Self::trust)).
-/// [`new`](Self::new) produces an [`Untrusted`](EventTrust::Untrusted) event:
-/// trust is conferred at the platform boundary by [`as_trusted`](Self::as_trusted)
-/// and is never assumed. See [`EventTrust`] for why that direction.
+#[doc = include_str!("pointer_event.doc/PointerEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PointerEvent {
-    /// The pointer that produced this event.
+    #[doc = include_str!("pointer_event.doc/pointer.md")]
     pub pointer: PointerId,
-    /// The device that produced this event.
+    #[doc = include_str!("pointer_event.doc/device.md")]
     pub device: PointerDevice,
-    /// The lifecycle kind of this event.
+    #[doc = include_str!("pointer_event.doc/kind.md")]
     pub kind: PointerEventKind,
-    /// The pointer position in the hit target's coordinate space.
+    #[doc = include_str!("pointer_event.doc/position.md")]
     pub position: Point,
-    /// §2.4's delta: how far this pointer moved since its own previous event.
+    #[doc = include_str!("pointer_event.doc/delta.md")]
     pub delta: PointerDelta,
-    /// The buttons held down after this event.
+    #[doc = include_str!("pointer_event.doc/buttons.md")]
     pub buttons: PointerButtons,
-    /// The contact pressure in `0.0..=1.0` (`0.0` for hover / no contact).
+    #[doc = include_str!("pointer_event.doc/pressure.md")]
     pub pressure: f32,
-    /// §2.4's tilt: the angle the device is held at, per axis.
+    #[doc = include_str!("pointer_event.doc/tilt.md")]
     pub tilt: PointerTilt,
-    /// §2.4's rotation: the stylus barrel's twist about its own axis, in
-    /// `0..360` degrees.
+    #[doc = include_str!("pointer_event.doc/rotation.md")]
     pub rotation: f32,
-    /// §2.4's primary-pointer status: whether this pointer is the primary one of
-    /// its kind (the mouse always is; of several simultaneous contacts, only the
-    /// first).
+    #[doc = include_str!("pointer_event.doc/primary.md")]
     pub primary: bool,
-    /// §2.4's hover capability: whether this device can be *over* a target
-    /// without touching it. False for a touchscreen contact, which is why touch
-    /// leaves no persistent hover.
+    #[doc = include_str!("pointer_event.doc/hover_capable.md")]
     pub hover_capable: bool,
-    /// A logical timestamp in microseconds, supplied by the caller.
+    #[doc = include_str!("pointer_event.doc/timestamp_micros.md")]
     pub timestamp_micros: u64,
-    /// Whether this came from a real user gesture (§2.3 trusted/untrusted
-    /// origin). Untrusted unless a platform adapter vouched for it.
+    #[doc = include_str!("pointer_event.doc/trust.md")]
     pub trust: EventTrust,
 }
 
 impl PointerEvent {
-    /// Creates a pointer event with no buttons held, zero pressure, no movement,
-    /// no tilt or twist, a zero timestamp, and an
-    /// [`Untrusted`](EventTrust::Untrusted) origin.
-    ///
-    /// Untrusted is deliberate, not a placeholder: a synthetic event that forgets
-    /// to say what it is must not pass for a real gesture. The one producer of
-    /// real input — the platform adapter holding the OS event — opts in with
-    /// [`as_trusted`](Self::as_trusted).
-    ///
-    /// Two of §2.4's fields are defaulted from the *device* rather than from
-    /// nothing, because the device already answers them for the common case:
-    /// [`hover_capable`](Self::hover_capable) follows
-    /// [`PointerDevice::hovers_by_default`] (§2.4: *"Touch does not synthesize
-    /// persistent hover. Pen hover depends on device capability."* — so a pen
-    /// starts non-hovering and a platform that knows better opts in with
-    /// [`with_hover_capability`](Self::with_hover_capability)), and
-    /// [`primary`](Self::primary) starts `true`, which is correct for every
-    /// single-pointer host and for the *first* contact of a multi-touch one. A
-    /// producer that tracks several simultaneous contacts marks the others with
-    /// [`with_primary`](Self::with_primary)`(false)`.
+    #[doc = include_str!("pointer_event.doc/new.md")]
     #[must_use]
     pub const fn new(
         pointer: PointerId,
@@ -152,171 +87,154 @@ impl PointerEvent {
         }
     }
 
-    /// Returns this event marked as a real user gesture (fluent).
-    ///
-    /// **Only a platform adapter converting an actual OS input event may call
-    /// this.** It is the single point at which trust enters the runtime; every
-    /// other producer (DevTools `Inject` per §7.6, the §7.4 headless harness)
-    /// must leave the event untrusted.
+    #[doc = include_str!("pointer_event.doc/as_trusted.md")]
     #[must_use]
     pub const fn as_trusted(mut self) -> Self {
         self.trust = EventTrust::Trusted;
         self
     }
 
-    /// Returns this event's trusted/untrusted origin (§2.3).
+    #[doc = include_str!("pointer_event.doc/trust_2.md")]
     #[must_use]
     pub const fn trust(&self) -> EventTrust {
         self.trust
     }
 
-    /// Returns whether this event came from a real user gesture (§2.3).
+    #[doc = include_str!("pointer_event.doc/is_trusted.md")]
     #[must_use]
     pub const fn is_trusted(&self) -> bool {
         self.trust.is_trusted()
     }
 
-    /// Returns this event with its held buttons set (fluent).
+    #[doc = include_str!("pointer_event.doc/with_buttons.md")]
     #[must_use]
     pub const fn with_buttons(mut self, buttons: PointerButtons) -> Self {
         self.buttons = buttons;
         self
     }
 
-    /// Returns this event with its contact pressure set, clamped to
-    /// `0.0..=1.0` (fluent).
+    #[doc = include_str!("pointer_event.doc/with_pressure.md")]
     #[must_use]
     pub fn with_pressure(mut self, pressure: f32) -> Self {
         self.pressure = pressure.clamp(0.0, 1.0);
         self
     }
 
-    /// Returns this event with its §2.4 movement delta set (fluent).
+    #[doc = include_str!("pointer_event.doc/with_delta.md")]
     #[must_use]
     pub const fn with_delta(mut self, delta: PointerDelta) -> Self {
         self.delta = delta;
         self
     }
 
-    /// Returns this event with its §2.4 stylus tilt set (fluent).
+    #[doc = include_str!("pointer_event.doc/with_tilt.md")]
     #[must_use]
     pub const fn with_tilt(mut self, tilt: PointerTilt) -> Self {
         self.tilt = tilt;
         self
     }
 
-    /// Returns this event with its §2.4 barrel rotation set, normalized into
-    /// `0..360` degrees (fluent).
+    #[doc = include_str!("pointer_event.doc/with_rotation.md")]
     #[must_use]
     pub fn with_rotation(mut self, degrees: f32) -> Self {
         self.rotation = degrees.rem_euclid(360.0);
         self
     }
 
-    /// Returns this event with its §2.4 primary-pointer status set (fluent).
-    ///
-    /// A multi-touch producer marks every contact but the first as non-primary; a
-    /// single-pointer host never calls this, because [`new`](Self::new) already
-    /// says `true`.
+    #[doc = include_str!("pointer_event.doc/with_primary.md")]
     #[must_use]
     pub const fn with_primary(mut self, primary: bool) -> Self {
         self.primary = primary;
         self
     }
 
-    /// Returns this event with its §2.4 hover capability set (fluent).
-    ///
-    /// This is the opt-in §2.4's *"Pen hover depends on device capability"* asks
-    /// for: only the platform knows whether the tablet in front of the user
-    /// reports a hovering stylus, so only the platform may say so.
+    #[doc = include_str!("pointer_event.doc/with_hover_capability.md")]
     #[must_use]
     pub const fn with_hover_capability(mut self, hover_capable: bool) -> Self {
         self.hover_capable = hover_capable;
         self
     }
 
-    /// Returns this event with its logical timestamp set (fluent).
+    #[doc = include_str!("pointer_event.doc/with_timestamp.md")]
     #[must_use]
     pub const fn with_timestamp(mut self, timestamp_micros: u64) -> Self {
         self.timestamp_micros = timestamp_micros;
         self
     }
 
-    /// Returns the pointer that produced this event.
+    #[doc = include_str!("pointer_event.doc/pointer_2.md")]
     #[must_use]
     pub const fn pointer(&self) -> PointerId {
         self.pointer
     }
 
-    /// Returns the device that produced this event.
+    #[doc = include_str!("pointer_event.doc/device_2.md")]
     #[must_use]
     pub const fn device(&self) -> PointerDevice {
         self.device
     }
 
-    /// Returns the lifecycle kind of this event.
+    #[doc = include_str!("pointer_event.doc/kind_2.md")]
     #[must_use]
     pub const fn kind(&self) -> PointerEventKind {
         self.kind
     }
 
-    /// Returns the pointer position in the hit target's coordinate space.
+    #[doc = include_str!("pointer_event.doc/position_2.md")]
     #[must_use]
     pub const fn position(&self) -> Point {
         self.position
     }
 
-    /// Returns the buttons held down after this event.
+    #[doc = include_str!("pointer_event.doc/buttons_2.md")]
     #[must_use]
     pub const fn buttons(&self) -> PointerButtons {
         self.buttons
     }
 
-    /// Returns the contact pressure in `0.0..=1.0`.
+    #[doc = include_str!("pointer_event.doc/pressure_2.md")]
     #[must_use]
     pub const fn pressure(&self) -> f32 {
         self.pressure
     }
 
-    /// Returns §2.4's delta: how far this pointer moved since its own previous
-    /// event.
+    #[doc = include_str!("pointer_event.doc/delta_2.md")]
     #[must_use]
     pub const fn delta(&self) -> PointerDelta {
         self.delta
     }
 
-    /// Returns §2.4's tilt: the angle the device is held at, per axis.
+    #[doc = include_str!("pointer_event.doc/tilt_2.md")]
     #[must_use]
     pub const fn tilt(&self) -> PointerTilt {
         self.tilt
     }
 
-    /// Returns §2.4's rotation: the barrel's twist in `0..360` degrees.
+    #[doc = include_str!("pointer_event.doc/rotation_2.md")]
     #[must_use]
     pub const fn rotation(&self) -> f32 {
         self.rotation
     }
 
-    /// Returns §2.4's primary-pointer status.
+    #[doc = include_str!("pointer_event.doc/is_primary.md")]
     #[must_use]
     pub const fn is_primary(&self) -> bool {
         self.primary
     }
 
-    /// Returns §2.4's hover capability: whether this device can be over a target
-    /// without touching it.
+    #[doc = include_str!("pointer_event.doc/hover_capable_2.md")]
     #[must_use]
     pub const fn hover_capable(&self) -> bool {
         self.hover_capable
     }
 
-    /// Returns the logical timestamp, in microseconds, supplied by the caller.
+    #[doc = include_str!("pointer_event.doc/timestamp.md")]
     #[must_use]
     pub const fn timestamp(&self) -> u64 {
         self.timestamp_micros
     }
 
-    /// Returns whether any button is pressed after this event.
+    #[doc = include_str!("pointer_event.doc/is_pressed.md")]
     #[must_use]
     pub const fn is_pressed(&self) -> bool {
         !self.buttons.is_empty()

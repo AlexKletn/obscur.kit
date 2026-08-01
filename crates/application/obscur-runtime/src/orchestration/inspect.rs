@@ -1,14 +1,4 @@
-//! In-window inspect overlay: highlight the hovered node's box and describe its
-//! identity, so a developer can debug the running UI directly in the window
-//! rather than from a separate tool (spec §7.6 — inspect mode uses the same
-//! hit-testing engine as the runtime and can highlight bounds).
-//!
-//! [`overlay_commands`] turns a node's absolute border-box rectangle into the
-//! two leaf paint commands the runtime appends over the composed scene when
-//! inspect mode is on: a translucent fill and a solid outline. [`InspectInfo`]
-//! is the host-facing readout the runtime builds from the hovered node — its
-//! [`Display`](std::fmt::Display) line names the element (CSS-style
-//! `type#id.class`), its geometry, and its component id.
+#![doc = include_str!("inspect.doc/_module.md")]
 
 use std::fmt;
 
@@ -19,16 +9,14 @@ use obscur_scene::command::PaintCommand;
 use obscur_scene::paint::{Brush, Paint, Stroke};
 use obscur_scene::path::Path;
 
-/// The translucent fill painted over the highlighted node's border box.
+#[doc = include_str!("inspect.doc/HIGHLIGHT_FILL.md")]
 const HIGHLIGHT_FILL: Color = Color::rgba(0.25, 0.55, 0.95, 0.22);
-/// The solid outline drawn around the highlighted node's border box.
+#[doc = include_str!("inspect.doc/HIGHLIGHT_LINE.md")]
 const HIGHLIGHT_LINE: Color = Color::rgba(0.30, 0.62, 1.0, 0.95);
-/// The outline width, in logical pixels.
+#[doc = include_str!("inspect.doc/OUTLINE_WIDTH.md")]
 const OUTLINE_WIDTH: f32 = 1.0;
 
-/// Builds the overlay for a node's absolute border-box `bounds`: a translucent
-/// fill under a solid outline. Both are leaf [`PaintCommand::DrawPath`]s, so
-/// appending them to a balanced display list keeps it balanced.
+#[doc = include_str!("inspect.doc/overlay_commands.md")]
 #[must_use]
 pub fn overlay_commands(bounds: Rect) -> Vec<PaintCommand> {
     vec![
@@ -43,24 +31,20 @@ pub fn overlay_commands(bounds: Rect) -> Vec<PaintCommand> {
     ]
 }
 
-/// A host-facing readout of the node currently under the pointer (spec §7.6).
-///
-/// Built by the runtime from the hovered node's retained record and its absolute
-/// layout box; its [`Display`](fmt::Display) renders a one-line CSS-style summary
-/// a host can print next to the in-window highlight.
+#[doc = include_str!("inspect.doc/InspectInfo.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct InspectInfo {
-    /// The hovered node's stable id.
+    #[doc = include_str!("inspect.doc/node.md")]
     pub node: NodeId,
-    /// The backing component id, for an element node (`None` for group/text).
+    #[doc = include_str!("inspect.doc/component.md")]
     pub component: Option<ComponentId>,
-    /// The element's local name (CSS type), if any.
+    #[doc = include_str!("inspect.doc/local_name.md")]
     pub local_name: Option<String>,
-    /// The element's `id` attribute, if any.
+    #[doc = include_str!("inspect.doc/id.md")]
     pub id: Option<String>,
-    /// The element's classes, in order.
+    #[doc = include_str!("inspect.doc/classes.md")]
     pub classes: Vec<String>,
-    /// The absolute border-box rectangle, in logical pixels.
+    #[doc = include_str!("inspect.doc/bounds.md")]
     pub bounds: Rect,
 }
 
@@ -101,32 +85,30 @@ impl fmt::Display for InspectInfo {
     }
 }
 
-/// One node in a [`TreeInspection`]: its identity, geometry and a few key
-/// computed styles, as a structure an agent can read and assert on directly
-/// (spec §7.6 inspectable tree/styles/layout).
+#[doc = include_str!("inspect.doc/NodeInspection.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeInspection {
-    /// The node's stable id.
+    #[doc = include_str!("inspect.doc/node_2.md")]
     pub node: NodeId,
-    /// The node's logical parent, if any (`None` for the root).
+    #[doc = include_str!("inspect.doc/parent.md")]
     pub parent: Option<NodeId>,
-    /// Depth from the root (root is `0`), for indented rendering.
+    #[doc = include_str!("inspect.doc/depth.md")]
     pub depth: u32,
-    /// The node classification: `"element"`, `"text"`, or `"group"`.
+    #[doc = include_str!("inspect.doc/kind.md")]
     pub kind: &'static str,
-    /// The backing component id, for an element node.
+    #[doc = include_str!("inspect.doc/component_2.md")]
     pub component: Option<ComponentId>,
-    /// The element's local name (CSS type), if any.
+    #[doc = include_str!("inspect.doc/local_name_2.md")]
     pub local_name: Option<String>,
-    /// The element's `id` attribute, if any.
+    #[doc = include_str!("inspect.doc/id_2.md")]
     pub id: Option<String>,
-    /// The element's classes, in order.
+    #[doc = include_str!("inspect.doc/classes_2.md")]
     pub classes: Vec<String>,
-    /// The literal content, for a text node.
+    #[doc = include_str!("inspect.doc/text.md")]
     pub text: Option<String>,
-    /// The absolute border-box rectangle, if the node was laid out this frame.
+    #[doc = include_str!("inspect.doc/bounds_2.md")]
     pub bounds: Option<Rect>,
-    /// A few key computed styles as `(name, value)` pairs (only those present).
+    #[doc = include_str!("inspect.doc/styles.md")]
     pub styles: Vec<(String, String)>,
 }
 
@@ -172,23 +154,21 @@ impl fmt::Display for NodeInspection {
     }
 }
 
-/// A full structured snapshot of the live tree — one [`NodeInspection`] per node
-/// in pre-order — for an agent to observe and assert on in a headless run
-/// (spec §7.6). Its [`Display`](fmt::Display) renders the indented tree.
+#[doc = include_str!("inspect.doc/TreeInspection.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TreeInspection {
-    /// Every node, in pre-order (root first).
+    #[doc = include_str!("inspect.doc/nodes.md")]
     pub nodes: Vec<NodeInspection>,
 }
 
 impl TreeInspection {
-    /// The number of nodes in the snapshot.
+    #[doc = include_str!("inspect.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Whether the snapshot is empty.
+    #[doc = include_str!("inspect.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()

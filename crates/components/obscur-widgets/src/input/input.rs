@@ -1,4 +1,4 @@
-//! `Input`: a headless single-line text-input control (spec §2.6, §5.11).
+#![doc = include_str!("input.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -9,69 +9,35 @@ use obscur_view::view::{
     ViewNode, ViewProperty, ViewValue,
 };
 
-/// A headless text-input control (spec §2.6).
-///
-/// `Input` owns a [`TextBuffer`] — the pure editing engine of spec §5.11 — as
-/// its text state, plus a `placeholder`, the `command` fired on change, and a
-/// disabled flag. Text edits flow in as [`EditCommand`]s through
-/// [`apply`](Self::apply), which delegates to the buffer; this keeps the input
-/// layout-free and lets a platform keymap / IME drive it with the same command
-/// vocabulary the engine already understands.
-///
-/// It bakes in **no** visual theme: [`view`](Self::view) derives a
-/// [`SemanticRole::TextInput`] element carrying the current value and
-/// placeholder as text properties and a change event bound to `command`,
-/// rendered by the style layer keyed on [`COMPONENT_ID`](Self::COMPONENT_ID).
-///
-/// Because [`TextBuffer`] holds a `String` and undo history it is neither
-/// `Copy` nor `Eq`, so `Input` derives only `Debug`, `Clone`, and `PartialEq`.
+#[doc = include_str!("input.doc/Input.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Input {
     buffer: TextBuffer,
     placeholder: Box<str>,
     command: InternedSymbol,
     disabled: bool,
-    /// Whether this field is **readonly** (the HTML `readonly` attribute, WHATWG
-    /// HTML §attr-input-readonly). **Distinct from — and independent of —
-    /// [`disabled`](Self::disabled):** a readonly field can still receive focus, a
-    /// caret, and a selection (it is selectable / copyable), but its text cannot be
-    /// *edited* (no insert/delete, no IME commit, no paste — [`apply`](Self::apply)
-    /// drops mutating edits, and the runtime gates only the mutation path on the
-    /// reserved `READONLY` attribute this emits). A field may be neither, one, or
-    /// both flags; the default (`false`) is a normal editable field —
-    /// byte-identical to before.
+    #[doc = include_str!("input.doc/readonly.md")]
     readonly: bool,
-    /// Whether this is a **multi-line** field (a `<textarea>`, spec §2.6). A
-    /// multi-line field emits the reserved CSS type `textarea` (so the UA
-    /// `textarea { … }` rules bind and it wraps + preserves segment breaks, CSS
-    /// Text 3 §4.1.1) and marks its editable MULTILINE for the runtime, so `Enter`
-    /// inserts a newline and `ArrowUp`/`ArrowDown` move between laid-out lines. The
-    /// default (`false`) is a single-line `input` — byte-identical to before.
+    #[doc = include_str!("input.doc/multiline.md")]
     multiline: bool,
 }
 
 impl Input {
-    /// Stable component id for the input widget (see [`Button::COMPONENT_ID`]
-    /// for the shared `0x00D0_00NN` scheme).
-    ///
-    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    #[doc = include_str!("input.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0002);
 
-    /// Interned name of the semantic-role property (`role`); shares the
-    /// `0x00D1_NNXX` scheme with `NN = 02` (input): role=`00`, disabled=`01`,
-    /// value=`02`, placeholder=`03`.
+    #[doc = include_str!("input.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0200);
-    /// Interned name of the `disabled` state property.
+    #[doc = include_str!("input.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0201);
-    /// Interned name of the current `value` property.
+    #[doc = include_str!("input.doc/PROP_VALUE.md")]
     const PROP_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0202);
-    /// Interned name of the `placeholder` property.
+    #[doc = include_str!("input.doc/PROP_PLACEHOLDER.md")]
     const PROP_PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x00D1_0203);
-    /// Interned name of the `readonly` state property (`NN = 02`, suffix `04`).
+    #[doc = include_str!("input.doc/PROP_READONLY.md")]
     const PROP_READONLY: InternedSymbol = InternedSymbol::from_raw(0x00D1_0204);
 
-    /// Creates an empty, enabled input with no placeholder that fires `command`
-    /// on change.
+    #[doc = include_str!("input.doc/new.md")]
     #[must_use]
     pub fn new(command: InternedSymbol) -> Self {
         Self {
@@ -84,7 +50,7 @@ impl Input {
         }
     }
 
-    /// Creates an input seeded with `value` that fires `command` on change.
+    #[doc = include_str!("input.doc/with_value.md")]
     #[must_use]
     pub fn with_value(command: InternedSymbol, value: impl Into<String>) -> Self {
         Self {
@@ -97,71 +63,53 @@ impl Input {
         }
     }
 
-    /// Makes this field **multi-line** (a `<textarea>`), returning the updated
-    /// input (fluent builder). A multi-line field emits the reserved CSS type
-    /// `textarea` and marks its editable MULTILINE (see [`multiline`](Self::multiline)
-    /// field): `Enter` inserts a newline and `ArrowUp`/`ArrowDown` move between
-    /// wrapped lines. The default is a single-line `input`.
+    #[doc = include_str!("input.doc/multiline_2.md")]
     #[must_use]
     pub const fn multiline(mut self, multiline: bool) -> Self {
         self.multiline = multiline;
         self
     }
 
-    /// Returns whether this is a multi-line (`<textarea>`) field.
+    #[doc = include_str!("input.doc/is_multiline.md")]
     #[must_use]
     pub const fn is_multiline(&self) -> bool {
         self.multiline
     }
 
-    /// Sets the placeholder text, returning the updated input (fluent builder).
+    #[doc = include_str!("input.doc/placeholder.md")]
     #[must_use]
     pub fn placeholder(mut self, placeholder: impl Into<Box<str>>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
-    /// Sets the disabled state, returning the updated input (fluent builder).
+    #[doc = include_str!("input.doc/disabled.md")]
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Sets the **readonly** state, returning the updated input (fluent builder).
-    ///
-    /// A readonly field (the HTML `readonly` attribute, WHATWG HTML
-    /// §attr-input-readonly) is still focusable and its text still selectable /
-    /// copyable, but it cannot be edited (no insert/delete, no IME commit, no
-    /// paste). It is **independent of** [`disabled`](Self::disabled): a field can be
-    /// neither, one, or both.
+    #[doc = include_str!("input.doc/readonly_2.md")]
     #[must_use]
     pub const fn readonly(mut self, readonly: bool) -> Self {
         self.readonly = readonly;
         self
     }
 
-    /// Returns the current text value.
+    #[doc = include_str!("input.doc/value.md")]
     #[must_use]
     pub fn value(&self) -> &str {
         self.buffer.text()
     }
 
-    /// Returns the placeholder text.
+    #[doc = include_str!("input.doc/placeholder_text.md")]
     #[must_use]
     pub fn placeholder_text(&self) -> &str {
         &self.placeholder
     }
 
-    /// Applies an [`EditCommand`] to the underlying buffer — the way all text
-    /// edits (typing, deletion, navigation, IME/programmatic edits) flow in.
-    ///
-    /// A no-op while [`disabled`](Self::is_disabled) (the field is fully inert).
-    /// While [`readonly`](Self::is_readonly) (but not disabled) only the
-    /// **text-mutating** commands (insert / delete / replace) are dropped — caret
-    /// and selection navigation still apply, matching the HTML `readonly` model
-    /// (WHATWG HTML §attr-input-readonly: focusable + selectable, not editable). A
-    /// normal field applies every command (byte-identical to before).
+    #[doc = include_str!("input.doc/apply.md")]
     pub fn apply(&mut self, command: EditCommand) {
         if self.disabled {
             return;
@@ -172,79 +120,47 @@ impl Input {
         self.buffer.apply(command);
     }
 
-    /// Returns a shared reference to the underlying editing buffer.
+    #[doc = include_str!("input.doc/buffer.md")]
     #[must_use]
     pub const fn buffer(&self) -> &TextBuffer {
         &self.buffer
     }
 
-    /// Returns the command fired when the value changes.
+    #[doc = include_str!("input.doc/command.md")]
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    /// Returns whether the input is disabled.
+    #[doc = include_str!("input.doc/is_disabled.md")]
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    /// Sets the disabled state in place.
+    #[doc = include_str!("input.doc/set_disabled.md")]
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    /// Returns whether the input is readonly (HTML `readonly`).
+    #[doc = include_str!("input.doc/is_readonly.md")]
     #[must_use]
     pub const fn is_readonly(&self) -> bool {
         self.readonly
     }
 
-    /// Sets the readonly state in place.
+    #[doc = include_str!("input.doc/set_readonly.md")]
     pub const fn set_readonly(&mut self, readonly: bool) {
         self.readonly = readonly;
     }
 
-    /// Returns the accessible role of this control.
+    #[doc = include_str!("input.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::TextInput
     }
 
-    /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
-    /// disabled state, current value, and placeholder as properties, plus two
-    /// event bindings to `command` — the HTML `input`/`change` event model
-    /// (WHATWG HTML §4.10.5.5 *Common input element APIs*): a per-keystroke
-    /// [`EVENT_INPUT`] (each typed character / `Backspace` drives the runtime's
-    /// editing session, which delivers the resulting field text to the app) and a
-    /// commit-only [`EVENT_CHANGE`]. The widget only *declares* both bindings; the
-    /// runtime does the routing — for this editable it fires `change` on **commit**
-    /// (blur, or `Enter` for a single-line field) carrying the committed value, and
-    /// deliberately *not* on a focus click (unlike a checkbox/radio/select, whose
-    /// toggling click **is** the change).
-    ///
-    /// The current text is carried *both* as the [`PROP_VALUE`] property (the
-    /// semantic / accessibility surface) *and*, when non-empty, as a single
-    /// [`Text`] child node, so the field renders visibly and the runtime's
-    /// editing-session auto-seeding — which reads the focused editable's
-    /// descendant [`ViewNode::Text`] content — picks up the value.
-    ///
-    /// **Placeholder as a §4.16 synthetic part.** The `placeholder` hint is carried
-    /// as the reserved [`PLACEHOLDER`](obscur_view::view::PLACEHOLDER) structural
-    /// attribute — *not* materialised into the tree as a child element. The runtime
-    /// paints it as a synthetic part (paint-only, DevTools-visible, hit-transparent,
-    /// and **not** a component-tree child) while the field is empty — the toolkit's
-    /// analogue of the CSS **`::placeholder`** pseudo-element, shown only while
-    /// **`:placeholder-shown`** holds (an empty value): CSS Pseudo-Elements Level 4
-    /// §4.5 (`::placeholder`) and CSS Selectors Level 4 §11.2 (`:placeholder-shown`).
-    /// Per that model the placeholder is a separate, non-editable rendering layer —
-    /// never seeded into the editing buffer and never a hit target. An author can
-    /// restyle it through the exported-part selector `Input::part(placeholder)`.
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
-    /// [`PROP_VALUE`]: Self::PROP_VALUE
-    /// [`Text`]: obscur_view::view::ViewNode::text
+    #[doc = include_str!("input.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let value = self.buffer.text();

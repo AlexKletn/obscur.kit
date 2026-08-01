@@ -1,4 +1,4 @@
-//! Per-node cascade inputs fed to the style resolver: [`StyleInputs`].
+#![doc = include_str!("style_inputs.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -6,75 +6,48 @@ use obscur_identity::{InternedSymbol, NodeId};
 use obscur_style::cascade::ResolvedDeclarations;
 use obscur_style::property::PropertyValue;
 
-/// The already-cascaded style inputs the [`StyleCoordinator`] threads into the
-/// resolver, keyed by [`NodeId`].
-///
-/// # Phase-1 stand-in
-///
-/// Matching a stylesheet against the tree and running the cascade is the job of
-/// the `obscur-css` crate, which does not exist yet. Until it does, Phase 1
-/// supplies the **already-cascaded** per-node values directly: a
-/// [`ResolvedDeclarations`] (the winning cascaded value per property) plus the
-/// node's cascaded custom properties. The [`StyleCoordinator`] never runs a
-/// cascade itself — it only walks the tree and hands these inputs to
-/// `obscur-style` (spec §3.10).
-///
-/// An unset node resolves to its default/inherited computed style: the getters
-/// return shared empty inputs by reference when a node has no entry, so every
-/// node in the tree can be resolved whether or not it was given inputs.
-///
-/// [`StyleCoordinator`]: super::StyleCoordinator
+#[doc = include_str!("style_inputs.doc/StyleInputs.md")]
 #[derive(Debug, Clone, Default)]
 pub struct StyleInputs {
-    /// The cascaded declarations for each node that has any.
+    #[doc = include_str!("style_inputs.doc/cascaded.md")]
     cascaded: HashMap<NodeId, ResolvedDeclarations>,
-    /// The cascaded custom properties for each node that has any.
+    #[doc = include_str!("style_inputs.doc/custom.md")]
     custom: HashMap<NodeId, HashMap<InternedSymbol, PropertyValue>>,
-    /// Shared empty declarations returned by reference for absent nodes.
+    #[doc = include_str!("style_inputs.doc/empty_cascaded.md")]
     empty_cascaded: ResolvedDeclarations,
-    /// Shared empty custom-property map returned by reference for absent nodes.
+    #[doc = include_str!("style_inputs.doc/empty_custom.md")]
     empty_custom: HashMap<InternedSymbol, PropertyValue>,
 }
 
 impl StyleInputs {
-    /// Creates an empty set of inputs; every node then resolves to its
-    /// default/inherited computed style.
+    #[doc = include_str!("style_inputs.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the cascaded declarations for `node`, replacing any previous entry.
+    #[doc = include_str!("style_inputs.doc/set_cascaded.md")]
     pub fn set_cascaded(&mut self, node: NodeId, decls: ResolvedDeclarations) {
         self.cascaded.insert(node, decls);
     }
 
-    /// Drops `node`'s cascaded declarations, so it resolves to its
-    /// default/inherited computed style again.
-    ///
-    /// This is the counterpart [`set_cascaded`](Self::set_cascaded) needs once
-    /// inputs are rebuilt for *some* nodes rather than from scratch: a node that
-    /// matched a rule last frame and matches none this frame must lose its entry,
-    /// not keep the stale one.
+    #[doc = include_str!("style_inputs.doc/clear_cascaded.md")]
     pub fn clear_cascaded(&mut self, node: NodeId) {
         self.cascaded.remove(&node);
     }
 
-    /// Sets the cascaded custom properties for `node`, replacing any previous
-    /// entry.
+    #[doc = include_str!("style_inputs.doc/set_custom.md")]
     pub fn set_custom(&mut self, node: NodeId, custom: HashMap<InternedSymbol, PropertyValue>) {
         self.custom.insert(node, custom);
     }
 
-    /// Returns the cascaded declarations for `node`, or a shared empty set when
-    /// the node has no inputs.
+    #[doc = include_str!("style_inputs.doc/cascaded_for.md")]
     #[must_use]
     pub(crate) fn cascaded_for(&self, node: NodeId) -> &ResolvedDeclarations {
         self.cascaded.get(&node).unwrap_or(&self.empty_cascaded)
     }
 
-    /// Returns the cascaded custom properties for `node`, or a shared empty map
-    /// when the node has no inputs.
+    #[doc = include_str!("style_inputs.doc/custom_for.md")]
     #[must_use]
     pub(crate) fn custom_for(&self, node: NodeId) -> &HashMap<InternedSymbol, PropertyValue> {
         self.custom.get(&node).unwrap_or(&self.empty_custom)

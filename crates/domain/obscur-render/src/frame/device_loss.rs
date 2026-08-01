@@ -1,42 +1,33 @@
-//! A GPU device-loss event and its recoverability (spec §5.2).
+#![doc = include_str!("device_loss.doc/_module.md")]
 
-/// Why a GPU device was lost (spec §5.2).
-///
-/// Backends must handle device loss explicitly; this enumerates the causes a
-/// backend may report so the runtime can decide whether to rebuild and retry.
+#[doc = include_str!("device_loss.doc/DeviceLossReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceLossReason {
-    /// The device was reset, for example by a driver-level TDR recovery.
+    #[doc = include_str!("device_loss.doc/Reset.md")]
     Reset,
-    /// The device ran out of memory.
+    #[doc = include_str!("device_loss.doc/OutOfMemory.md")]
     OutOfMemory,
-    /// The physical device was removed (an external GPU was unplugged, say).
+    #[doc = include_str!("device_loss.doc/Removed.md")]
     Removed,
-    /// A device operation timed out.
+    #[doc = include_str!("device_loss.doc/Timeout.md")]
     Timeout,
-    /// The cause could not be determined.
+    #[doc = include_str!("device_loss.doc/Unknown.md")]
     Unknown,
 }
 
-/// A description of a GPU device-loss event and whether it is recoverable
-/// (spec §5.2).
-///
-/// Backends must handle device loss explicitly (spec §5.2). This value records
-/// the [`DeviceLossReason`], whether the runtime may rebuild the device and
-/// continue, and an optional human-readable detail.
+#[doc = include_str!("device_loss.doc/DeviceLoss.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceLoss {
-    /// Why the device was lost.
+    #[doc = include_str!("device_loss.doc/reason.md")]
     pub reason: DeviceLossReason,
-    /// Whether the runtime may rebuild the device and continue.
+    #[doc = include_str!("device_loss.doc/recoverable.md")]
     pub recoverable: bool,
-    /// An optional human-readable detail describing the event.
+    #[doc = include_str!("device_loss.doc/detail.md")]
     pub detail: Option<Box<str>>,
 }
 
 impl DeviceLoss {
-    /// Creates a device-loss event with the given `reason` and `recoverable`
-    /// flag, and no detail.
+    #[doc = include_str!("device_loss.doc/new.md")]
     #[must_use]
     pub const fn new(reason: DeviceLossReason, recoverable: bool) -> Self {
         Self {
@@ -46,39 +37,38 @@ impl DeviceLoss {
         }
     }
 
-    /// Creates a recoverable device-loss event with the given `reason`.
+    #[doc = include_str!("device_loss.doc/recoverable_2.md")]
     #[must_use]
     pub const fn recoverable(reason: DeviceLossReason) -> Self {
         Self::new(reason, true)
     }
 
-    /// Creates a fatal (non-recoverable) device-loss event with the given
-    /// `reason`.
+    #[doc = include_str!("device_loss.doc/fatal.md")]
     #[must_use]
     pub const fn fatal(reason: DeviceLossReason) -> Self {
         Self::new(reason, false)
     }
 
-    /// Attaches a human-readable detail, returning the updated event.
+    #[doc = include_str!("device_loss.doc/with_detail.md")]
     #[must_use]
     pub fn with_detail(mut self, detail: impl Into<Box<str>>) -> Self {
         self.detail = Some(detail.into());
         self
     }
 
-    /// Why the device was lost.
+    #[doc = include_str!("device_loss.doc/reason_2.md")]
     #[must_use]
     pub const fn reason(&self) -> DeviceLossReason {
         self.reason
     }
 
-    /// The human-readable detail, or `None` if none was attached.
+    #[doc = include_str!("device_loss.doc/detail_2.md")]
     #[must_use]
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()
     }
 
-    /// Whether the runtime may rebuild the device and continue.
+    #[doc = include_str!("device_loss.doc/is_recoverable.md")]
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         self.recoverable

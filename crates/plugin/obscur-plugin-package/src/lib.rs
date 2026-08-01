@@ -1,14 +1,14 @@
-//! Security-sensitive plugin package reading and validation.
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-/// The package file format.
+#[doc = include_str!("lib.doc/archive.md")]
 pub mod archive;
-/// Unpacking a package onto disk.
+#[doc = include_str!("lib.doc/extraction.md")]
 pub mod extraction;
-/// The package itself.
+#[doc = include_str!("lib.doc/package.md")]
 pub mod package;
-/// Paths inside and around a package.
+#[doc = include_str!("lib.doc/path.md")]
 pub mod path;
-/// Checking a package before trusting it.
+#[doc = include_str!("lib.doc/validation.md")]
 pub mod validation;

@@ -1,14 +1,8 @@
-//! An inclusive range of supported IR versions [`UiIrVersionRange`] (spec §2.5
-//! migrations).
+#![doc = include_str!("ui_ir_version_range.doc/_module.md")]
 
 use crate::version::UiIrVersion;
 
-/// An inclusive range of [`UiIrVersion`]s a component supports (spec §2.5).
-///
-/// Migrations and readers advertise the span of IR versions they accept as a
-/// `[min, max]` inclusive range. The range invariant is `min <= max`; a
-/// constructor given an inverted `min > max` clamps `max` up to `min`, yielding
-/// the single-version range `[min, min]` rather than an empty or reversed one.
+#[doc = include_str!("ui_ir_version_range.doc/UiIrVersionRange.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiIrVersionRange {
     min: UiIrVersion,
@@ -16,10 +10,7 @@ pub struct UiIrVersionRange {
 }
 
 impl UiIrVersionRange {
-    /// Creates a range spanning `[min, max]` inclusive.
-    ///
-    /// If `min > max` the input is inverted; `max` is clamped up to `min`, so
-    /// the result is the single-version range `[min, min]`.
+    #[doc = include_str!("ui_ir_version_range.doc/new.md")]
     #[must_use]
     pub const fn new(min: UiIrVersion, max: UiIrVersion) -> Self {
         // `UiIrVersion` derives `Ord`, but trait methods are not usable in
@@ -31,14 +22,13 @@ impl UiIrVersionRange {
         Self { min, max }
     }
 
-    /// Creates a range matching exactly one version: `[v, v]`.
+    #[doc = include_str!("ui_ir_version_range.doc/exact.md")]
     #[must_use]
     pub const fn exact(v: UiIrVersion) -> Self {
         Self { min: v, max: v }
     }
 
-    /// Creates an open-ended range from `v` up to the maximum representable
-    /// version (`[v, (u16::MAX, u16::MAX)]`).
+    #[doc = include_str!("ui_ir_version_range.doc/at_least.md")]
     #[must_use]
     pub const fn at_least(v: UiIrVersion) -> Self {
         Self {
@@ -47,28 +37,25 @@ impl UiIrVersionRange {
         }
     }
 
-    /// Returns the inclusive lower bound.
+    #[doc = include_str!("ui_ir_version_range.doc/min.md")]
     #[must_use]
     pub const fn min(self) -> UiIrVersion {
         self.min
     }
 
-    /// Returns the inclusive upper bound.
+    #[doc = include_str!("ui_ir_version_range.doc/max.md")]
     #[must_use]
     pub const fn max(self) -> UiIrVersion {
         self.max
     }
 
-    /// Returns whether `v` lies within the range: `min <= v <= max`.
+    #[doc = include_str!("ui_ir_version_range.doc/contains.md")]
     #[must_use]
     pub fn contains(self, v: UiIrVersion) -> bool {
         self.min <= v && v <= self.max
     }
 
-    /// Returns whether this range shares at least one version with `other`.
-    ///
-    /// Two inclusive ranges overlap when each starts no later than the other
-    /// ends: `self.min <= other.max && other.min <= self.max`.
+    #[doc = include_str!("ui_ir_version_range.doc/overlaps.md")]
     #[must_use]
     pub fn overlaps(&self, other: &UiIrVersionRange) -> bool {
         self.min <= other.max && other.min <= self.max

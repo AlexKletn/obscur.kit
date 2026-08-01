@@ -1,4 +1,4 @@
-//! Document module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod directory_handle;
 pub use directory_handle::DirectoryHandle;
 mod document_handle;

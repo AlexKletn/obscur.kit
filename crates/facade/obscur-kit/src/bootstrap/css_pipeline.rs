@@ -1,22 +1,4 @@
-//! [`CssPipeline`]: the host-side CSS path — parse (cached) → compile → install
-//! onto a [`UiRuntime`](crate::runtime::UiRuntime).
-//!
-//! The CSS frontend and the runtime are deliberately unaware of each other: the
-//! frontend emits `obscur-css` types, the runtime accepts only domain types
-//! (`obscur-style`'s [`Stylesheet`] and `obscur-runtime`'s [`CssMotionRules`]).
-//! Joining them is a fixed piece of plumbing that every CSS-rendering host needs
-//! and none should hand-write — so it lives here, next to
-//! [`install_vector_resources`](super::KitBootstrap::install_vector_resources),
-//! rather than in each application.
-//!
-//! Two things are easy to get wrong by hand and are why this type exists:
-//!
-//! - **Motion is dropped.** A host that installs only `compiled.matchable` gets
-//!   a runtime that never sees the sheet's `transition`/`@keyframes`, so CSS
-//!   authored motion silently does nothing (§4.17).
-//! - **Sources are re-parsed.** A reload recompiles the whole sheet set, but only
-//!   the edited source's *text* changed; re-parsing the rest is exactly the work
-//!   §4.12's [`StylesheetCache`] exists to skip.
+#![doc = include_str!("css_pipeline.doc/_module.md")]
 
 use obscur_css::cache::StylesheetCache;
 use obscur_css::compiler::{CompiledStylesheet, StylesheetCompiler};
@@ -31,72 +13,29 @@ use obscur_runtime::UiRuntime;
 use obscur_runtime::orchestration::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
 use obscur_style::matching::Stylesheet;
 
-/// The host's CSS path: owns the §4.12 parse cache across reloads, compiles each
-/// source, and installs both halves of the result — the matchable rules **and**
-/// the CSS-authored motion — on a runtime.
-///
-/// # Lifetime
-///
-/// One pipeline per runtime, kept alive for the app's lifetime: the cache it owns
-/// is what makes a reload cheap, and dropping it between reloads throws that away.
-///
-/// # When to install
-///
-/// On a (re)compile — startup, and each time a source's text changes — not per
-/// frame. [`install`](Self::install) replaces the runtime's motion rules, which
-/// resets the per-node change-detection baselines transitions observe, so calling
-/// it every frame would leave every transition permanently at its first frame.
+#[doc = include_str!("css_pipeline.doc/CssPipeline.md")]
 #[derive(Debug, Default)]
 pub struct CssPipeline {
-    /// The §4.12 parse cache, keyed by `(SourceId, SourceVersion)`. Retained
-    /// across installs: on a reload of N sources where one changed, only that
-    /// one is re-parsed.
+    #[doc = include_str!("css_pipeline.doc/cache.md")]
     cache: StylesheetCache,
-    /// The matchable sheets from the last [`install`](Self::install), in source
-    /// order — the same slice handed to the runtime.
+    #[doc = include_str!("css_pipeline.doc/sheets.md")]
     sheets: Vec<Stylesheet>,
-    /// The motion rules from the last [`install`](Self::install).
+    #[doc = include_str!("css_pipeline.doc/motion.md")]
     motion: CssMotionRules,
-    /// Syntax errors from the last [`install`](Self::install), across all sources.
+    #[doc = include_str!("css_pipeline.doc/errors.md")]
     errors: Vec<CssParseError>,
-    /// Recognised-but-unsupported features from the last
-    /// [`install`](Self::install), across all sources.
+    #[doc = include_str!("css_pipeline.doc/unsupported.md")]
     unsupported: Vec<UnsupportedCssFeature>,
 }
 
 impl CssPipeline {
-    /// Creates an empty pipeline with a cold cache.
+    #[doc = include_str!("css_pipeline.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Compiles `sources` in order and installs the result on `runtime`: the
-    /// matchable rules via
-    /// [`set_stylesheets`](crate::runtime::UiRuntime::set_stylesheets), and the
-    /// sheet's `transition`/`@keyframes` via
-    /// [`set_css_motion`](crate::runtime::UiRuntime::set_css_motion) so the
-    /// runtime actually drives them (§4.17).
-    ///
-    /// Each source is parsed only if the cache has no entry at its
-    /// [`version`](CssSource::version); an
-    /// [`ANONYMOUS`](obscur_css::source::SourceId::ANONYMOUS) source has no stable
-    /// identity and is therefore always re-parsed. Everything downstream of the
-    /// parse (compile, lower, install) runs every call — this caches parsing, which
-    /// is what §4.12 specifies.
-    ///
-    /// A malformed sheet compiles to whatever it recovered — the rejected parts
-    /// never reach the runtime, and the surviving rules do (spec §1.6 "failures
-    /// should be localized to the smallest safe scope"). Each rejected part is
-    /// **also** raised as a `Style`-subsystem [`Diagnostic`] on the runtime's
-    /// §1.6 channel via
-    /// [`report_diagnostic`](crate::runtime::UiRuntime::report_diagnostic): a
-    /// syntactic error (`color: ;`) and a recognised-but-unsupported construct
-    /// (`width: 10qq`, `float: left`) each report one diagnostic. The runtime
-    /// receives only compiled rules and never a sheet's source, so this — the one
-    /// place holding both the errors and the runtime — is where they reach the
-    /// channel. The same lists remain readable on [`errors`](Self::errors) and
-    /// [`unsupported`](Self::unsupported).
+    #[doc = include_str!("css_pipeline.doc/install.md")]
     pub fn install(&mut self, runtime: &mut UiRuntime, sources: &[CssSource]) {
         self.sheets.clear();
         self.errors.clear();
@@ -124,57 +63,43 @@ impl CssPipeline {
         runtime.set_css_motion(self.motion.clone());
     }
 
-    /// The matchable sheets from the last [`install`](Self::install), for the
-    /// render paths that take an explicit `&[Stylesheet]`
-    /// ([`render_now`](crate::runtime::UiRuntime::render_now) and friends). The
-    /// reactive path reads the copy `install` left on the runtime instead.
+    #[doc = include_str!("css_pipeline.doc/sheets_2.md")]
     #[must_use]
     pub fn sheets(&self) -> &[Stylesheet] {
         &self.sheets
     }
 
-    /// The CSS-authored motion from the last [`install`](Self::install) — the
-    /// same rules the runtime holds.
+    #[doc = include_str!("css_pipeline.doc/motion_2.md")]
     #[must_use]
     pub fn motion(&self) -> &CssMotionRules {
         &self.motion
     }
 
-    /// The syntax errors from the last [`install`](Self::install), across all
-    /// sources.
+    #[doc = include_str!("css_pipeline.doc/errors_2.md")]
     #[must_use]
     pub fn errors(&self) -> &[CssParseError] {
         &self.errors
     }
 
-    /// The recognised-but-unsupported features from the last
-    /// [`install`](Self::install), across all sources.
+    #[doc = include_str!("css_pipeline.doc/unsupported_2.md")]
     #[must_use]
     pub fn unsupported(&self) -> &[UnsupportedCssFeature] {
         &self.unsupported
     }
 
-    /// How many identified sources are held in the parse cache. Anonymous sources
-    /// are never cached, so they never count here.
+    #[doc = include_str!("css_pipeline.doc/cached_sources.md")]
     #[must_use]
     pub fn cached_sources(&self) -> usize {
         self.cache.len()
     }
 
-    /// Drops every cached parse, forcing the next [`install`](Self::install) to
-    /// re-parse from source text.
-    ///
-    /// The escape hatch for an owner that edited a sheet without stamping a new
-    /// [`version`](CssSource::version) — §4.12's explicit invalidation.
+    #[doc = include_str!("css_pipeline.doc/invalidate_cache.md")]
     pub fn invalidate_cache(&mut self) {
         self.cache.clear();
     }
 }
 
-/// Builds the `Style`-subsystem diagnostic for a CSS syntactic error. The
-/// [`stable code`](DiagnosticCode) is derived from the error's *kind*, not its
-/// (localizable) message or its source span, so it is identical across locales
-/// and call sites (spec §1.6). The human-readable message carries the detail.
+#[doc = include_str!("css_pipeline.doc/diagnostic_for_error.md")]
 fn diagnostic_for_error(error: &CssParseError) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::new(code_for_parse_error(error.kind())),
@@ -187,9 +112,7 @@ fn diagnostic_for_error(error: &CssParseError) -> Diagnostic {
     .with_recovery(RecoveryAction::Fallback)
 }
 
-/// Builds the `Style`-subsystem diagnostic for a recognised-but-unsupported CSS
-/// construct. Unsupported features degrade gracefully (§4.13), so this is a
-/// warning, not an error; its stable code is derived from the feature's kind.
+#[doc = include_str!("css_pipeline.doc/diagnostic_for_unsupported.md")]
 fn diagnostic_for_unsupported(feature: &UnsupportedCssFeature) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::new(code_for_unsupported(feature.kind())),
@@ -200,8 +123,7 @@ fn diagnostic_for_unsupported(feature: &UnsupportedCssFeature) -> Diagnostic {
     .with_recovery(RecoveryAction::Fallback)
 }
 
-/// The stable code for a [`CssParseErrorKind`]. One code per kind, never derived
-/// from message text, so it survives localization (spec §1.6).
+#[doc = include_str!("css_pipeline.doc/code_for_parse_error.md")]
 const fn code_for_parse_error(kind: CssParseErrorKind) -> &'static str {
     match kind {
         CssParseErrorKind::UnexpectedToken => "css.unexpected_token",
@@ -216,7 +138,7 @@ const fn code_for_parse_error(kind: CssParseErrorKind) -> &'static str {
     }
 }
 
-/// The stable code for an [`UnsupportedFeatureKind`].
+#[doc = include_str!("css_pipeline.doc/code_for_unsupported.md")]
 const fn code_for_unsupported(kind: UnsupportedFeatureKind) -> &'static str {
     match kind {
         UnsupportedFeatureKind::AtRule => "css.unsupported_at_rule",
@@ -228,9 +150,7 @@ const fn code_for_unsupported(kind: UnsupportedFeatureKind) -> &'static str {
     }
 }
 
-/// Maps a compiled sheet's selector-associated motion into the runtime's
-/// domain-only rule types. The CSS→track lowering already happened in the
-/// frontend; this only carries the fields across the crate boundary.
+#[doc = include_str!("css_pipeline.doc/collect_motion.md")]
 fn collect_motion(
     compiled: &CompiledStylesheet,
     transitions: &mut Vec<CssTransitionRule>,

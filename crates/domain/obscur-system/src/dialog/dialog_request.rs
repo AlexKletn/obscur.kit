@@ -1,25 +1,17 @@
-//! A request to present a dialog (spec §6.9 — dialog providers).
+#![doc = include_str!("dialog_request.doc/_module.md")]
 
-/// The severity/intent of a [`DialogRequest::Message`] (spec §6.9).
-///
-/// A provider maps the level to the platform's native styling — an icon, a
-/// sound, or an accent — so an informational notice reads differently from an
-/// error. The domain stays presentation-agnostic and only names the intent.
+#[doc = include_str!("dialog_request.doc/MessageLevel.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageLevel {
-    /// A neutral, informational message.
+    #[doc = include_str!("dialog_request.doc/Info.md")]
     Info,
-    /// A cautionary message the user should notice but that is not an error.
+    #[doc = include_str!("dialog_request.doc/Warning.md")]
     Warning,
-    /// An error message reporting that something went wrong.
+    #[doc = include_str!("dialog_request.doc/Error.md")]
     Error,
 }
 
-/// A named set of file extensions constraining a file dialog (spec §6.9).
-///
-/// A filter pairs a human-readable `name` (for example `"Images"`) with the
-/// extensions it matches (for example `["png", "jpg"]`). Extensions are stored
-/// verbatim without a leading dot; interpretation is the provider's concern.
+#[doc = include_str!("dialog_request.doc/FileFilter.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileFilter {
     name: Box<str>,
@@ -27,8 +19,7 @@ pub struct FileFilter {
 }
 
 impl FileFilter {
-    /// Creates a filter from its display `name` and the `extensions` it matches
-    /// (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/new.md")]
     #[must_use]
     pub fn new(
         name: impl Into<Box<str>>,
@@ -40,65 +31,58 @@ impl FileFilter {
         }
     }
 
-    /// Returns the filter's human-readable name (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the extensions this filter matches (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/extensions.md")]
     #[must_use]
     pub fn extensions(&self) -> &[Box<str>] {
         &self.extensions
     }
 }
 
-/// A request to present a dialog to the user (spec §6.9).
-///
-/// A [`DialogProvider`](crate::dialog::DialogProvider) consumes a request and
-/// answers with a [`DialogResult`](crate::dialog::DialogResult). The request is a
-/// pure value describing *what* to ask — file pickers, a save target, a folder
-/// picker, an informational message, or a confirmation — never *how* the platform
-/// renders it. A provider may back the same request with a native dialog, an
-/// external portal, or a kit-rendered surface.
+#[doc = include_str!("dialog_request.doc/DialogRequest.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DialogRequest {
-    /// Pick one or more existing files, optionally constrained by `filters`.
+    #[doc = include_str!("dialog_request.doc/OpenFile.md")]
     OpenFile {
-        /// The file-type filters offered to the user; empty means unfiltered.
+        #[doc = include_str!("dialog_request.doc/filters.md")]
         filters: Vec<FileFilter>,
-        /// Whether the user may select more than one file.
+        #[doc = include_str!("dialog_request.doc/allow_multiple.md")]
         allow_multiple: bool,
     },
-    /// Choose a destination to save a file to.
+    #[doc = include_str!("dialog_request.doc/SaveFile.md")]
     SaveFile {
-        /// The default file name proposed to the user.
+        #[doc = include_str!("dialog_request.doc/suggested_name.md")]
         suggested_name: Box<str>,
-        /// The file-type filters offered to the user; empty means unfiltered.
+        #[doc = include_str!("dialog_request.doc/filters_2.md")]
         filters: Vec<FileFilter>,
     },
-    /// Pick a single folder / directory.
+    #[doc = include_str!("dialog_request.doc/PickFolder.md")]
     PickFolder,
-    /// Show an informational message the user acknowledges.
+    #[doc = include_str!("dialog_request.doc/Message.md")]
     Message {
-        /// The dialog's title line.
+        #[doc = include_str!("dialog_request.doc/title.md")]
         title: Box<str>,
-        /// The dialog's body text.
+        #[doc = include_str!("dialog_request.doc/body.md")]
         body: Box<str>,
-        /// The severity/intent of the message.
+        #[doc = include_str!("dialog_request.doc/level.md")]
         level: MessageLevel,
     },
-    /// Ask the user to confirm or cancel an action.
+    #[doc = include_str!("dialog_request.doc/Confirm.md")]
     Confirm {
-        /// The dialog's title line.
+        #[doc = include_str!("dialog_request.doc/title_2.md")]
         title: Box<str>,
-        /// The dialog's body text describing what is being confirmed.
+        #[doc = include_str!("dialog_request.doc/body_2.md")]
         body: Box<str>,
     },
 }
 
 impl DialogRequest {
-    /// Creates a single-file open request with no filters (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/open_file.md")]
     #[must_use]
     pub const fn open_file() -> Self {
         Self::OpenFile {
@@ -107,7 +91,7 @@ impl DialogRequest {
         }
     }
 
-    /// Creates a multi-file open request with no filters (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/open_files.md")]
     #[must_use]
     pub const fn open_files() -> Self {
         Self::OpenFile {
@@ -116,8 +100,7 @@ impl DialogRequest {
         }
     }
 
-    /// Creates a save request proposing `suggested_name`, with no filters
-    /// (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/save_file.md")]
     #[must_use]
     pub fn save_file(suggested_name: impl Into<Box<str>>) -> Self {
         Self::SaveFile {
@@ -126,14 +109,13 @@ impl DialogRequest {
         }
     }
 
-    /// Creates a folder-picker request (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/pick_folder.md")]
     #[must_use]
     pub const fn pick_folder() -> Self {
         Self::PickFolder
     }
 
-    /// Creates a message request with the given `title`, `body`, and `level`
-    /// (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/message.md")]
     #[must_use]
     pub fn message(
         title: impl Into<Box<str>>,
@@ -147,8 +129,7 @@ impl DialogRequest {
         }
     }
 
-    /// Creates a confirmation request with the given `title` and `body`
-    /// (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/confirm.md")]
     #[must_use]
     pub fn confirm(title: impl Into<Box<str>>, body: impl Into<Box<str>>) -> Self {
         Self::Confirm {
@@ -157,8 +138,7 @@ impl DialogRequest {
         }
     }
 
-    /// Returns whether this request is a file/folder dialog rather than a
-    /// message or confirmation (spec §6.9).
+    #[doc = include_str!("dialog_request.doc/is_file_dialog.md")]
     #[must_use]
     pub const fn is_file_dialog(&self) -> bool {
         matches!(

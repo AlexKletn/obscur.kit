@@ -1,97 +1,63 @@
-//! Structural and state pseudo-classes: [`PseudoClassSelector`] and [`AnB`].
+#![doc = include_str!("pseudo_class_selector.doc/_module.md")]
 
 use super::complex_selector::ComplexSelector;
 use super::pseudo_state::PseudoState;
 use super::selector_list::SelectorList;
 use super::selector_specificity::SelectorSpecificity;
 
-/// A single pseudo-class in a compound selector (`:hover`, `:nth-child(2n+1)`).
-///
-/// Pseudo-classes fall into two families:
-///
-/// - **State** pseudo-classes (`:hover`, `:focus`, …) match against the
-///   interaction [`PseudoState`] bitset the element exposes. Each maps to the
-///   bit it requires via [`required_state`](Self::required_state).
-/// - **Structural** pseudo-classes (`:first-child`, `:nth-child(…)`, `:root`,
-///   …) match against the element's position in the tree; they require no
-///   interaction state and so return [`None`] from
-///   [`required_state`](Self::required_state).
-///
-/// Any pseudo-class this crate does not model is preserved as
-/// [`Other`](Self::Other) and matches nothing (a conservative, forward-safe
-/// default), while still contributing class-level specificity.
+#[doc = include_str!("pseudo_class_selector.doc/PseudoClassSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PseudoClassSelector {
-    /// `:hover` — the pointer is over the element.
+    #[doc = include_str!("pseudo_class_selector.doc/Hover.md")]
     Hover,
-    /// `:focus` — the element holds keyboard focus.
+    #[doc = include_str!("pseudo_class_selector.doc/Focus.md")]
     Focus,
-    /// `:focus-visible` — focus that the UA deems should be indicated.
+    #[doc = include_str!("pseudo_class_selector.doc/FocusVisible.md")]
     FocusVisible,
-    /// `:focus-within` — the element or a descendant holds focus.
+    #[doc = include_str!("pseudo_class_selector.doc/FocusWithin.md")]
     FocusWithin,
-    /// `:active` — the element is being activated (pressed).
+    #[doc = include_str!("pseudo_class_selector.doc/Active.md")]
     Active,
-    /// `:disabled` — the element is disabled.
+    #[doc = include_str!("pseudo_class_selector.doc/Disabled.md")]
     Disabled,
-    /// `:enabled` — the element is not disabled.
+    #[doc = include_str!("pseudo_class_selector.doc/Enabled.md")]
     Enabled,
-    /// `:checked` — the element is a checked control.
+    #[doc = include_str!("pseudo_class_selector.doc/Checked.md")]
     Checked,
-    /// `:first-child` — the element is the first element among its siblings.
+    #[doc = include_str!("pseudo_class_selector.doc/FirstChild.md")]
     FirstChild,
-    /// `:last-child` — the element is the last element among its siblings.
+    #[doc = include_str!("pseudo_class_selector.doc/LastChild.md")]
     LastChild,
-    /// `:only-child` — the element is the sole element among its siblings.
+    #[doc = include_str!("pseudo_class_selector.doc/OnlyChild.md")]
     OnlyChild,
-    /// `:root` — the element is the root of the document tree.
+    #[doc = include_str!("pseudo_class_selector.doc/Root.md")]
     Root,
-    /// `:empty` — the element has no element children.
+    #[doc = include_str!("pseudo_class_selector.doc/Empty.md")]
     Empty,
-    /// `:nth-child(An+B)` — position among siblings, counting from the front.
+    #[doc = include_str!("pseudo_class_selector.doc/NthChild.md")]
     NthChild(AnB),
-    /// `:nth-last-child(An+B)` — position among siblings, counting from the back.
+    #[doc = include_str!("pseudo_class_selector.doc/NthLastChild.md")]
     NthLastChild(AnB),
-    /// `:nth-of-type(An+B)` — position among same-type siblings, from the front.
+    #[doc = include_str!("pseudo_class_selector.doc/NthOfType.md")]
     NthOfType(AnB),
-    /// `:nth-last-of-type(An+B)` — position among same-type siblings, from the back.
+    #[doc = include_str!("pseudo_class_selector.doc/NthLastOfType.md")]
     NthLastOfType(AnB),
-    /// `:nth-child(An+B of S)` — position among the *inclusive siblings that
-    /// match `S`*, counting from the front (selectors-4 §13.3.1).
-    ///
-    /// The element must itself match `S`; its index is then its position in the
-    /// `S`-filtered sibling list, not in the full one. The plain
-    /// [`NthChild`](Self::NthChild) form is kept separate rather than carrying an
-    /// `Option`, so the (common) no-`of` case allocates nothing.
+    #[doc = include_str!("pseudo_class_selector.doc/NthChildOf.md")]
     NthChildOf(AnB, SelectorList),
-    /// `:is(S)` — matches any element that matches any selector in `S`
-    /// (selectors-4 §4.2).
+    #[doc = include_str!("pseudo_class_selector.doc/Is.md")]
     Is(SelectorList),
-    /// `:where(S)` — matches exactly as [`Is`](Self::Is) does, but contributes
-    /// **zero** specificity (selectors-4 §4.4).
+    #[doc = include_str!("pseudo_class_selector.doc/Where.md")]
     Where(SelectorList),
-    /// `:not(S)` — matches any element that matches *no* selector in `S`
-    /// (selectors-4 §4.3).
+    #[doc = include_str!("pseudo_class_selector.doc/Not.md")]
     Not(SelectorList),
-    /// `:has(S)` — the relational pseudo-class (selectors-4 §4.5).
-    ///
-    /// Modelled for **specificity only**; the matcher answers `false` for it
-    /// unconditionally. Deciding it requires navigating *downward/forward* from
-    /// the subject, which [`MatchElement`](super::match_element::MatchElement)
-    /// deliberately cannot do — see the matcher's note and
-    /// `obscur-runtime`'s `RestyleScope`, whose invalidation bound is a proof
-    /// resting on that navigation surface. `obscur-css` reports the selector as
-    /// an unsupported feature so the rule is not a silent drop.
+    #[doc = include_str!("pseudo_class_selector.doc/Has.md")]
     Has(SelectorList),
-    /// An unmodeled pseudo-class, preserved by name. Matches nothing.
+    #[doc = include_str!("pseudo_class_selector.doc/Other.md")]
     Other(Box<str>),
 }
 
 impl PseudoClassSelector {
-    /// Returns the interaction [`PseudoState`] bit this pseudo-class requires,
-    /// or [`None`] for structural pseudo-classes (and for the negation-based
-    /// [`Enabled`](Self::Enabled), which is evaluated as "not disabled" by the
-    /// matcher rather than by a single required bit).
+    #[doc = include_str!("pseudo_class_selector.doc/required_state.md")]
     #[must_use]
     pub const fn required_state(&self) -> Option<PseudoState> {
         match self {
@@ -121,32 +87,10 @@ impl PseudoClassSelector {
         }
     }
 
-    /// Returns the specificity this pseudo-class contributes (selectors-4 §15).
-    ///
-    /// Most pseudo-classes count as one class-level selector, `(0, 1, 0)`. The
-    /// four that "provide evaluation contexts for other selectors" are defined
-    /// specially, and they genuinely differ:
-    ///
-    /// - `:is()`, `:not()` and `:has()` — "The specificity of an `:is()`,
-    ///   `:not()`, or `:has()` pseudo-class is replaced by the specificity of the
-    ///   most specific complex selector in its selector list argument." The
-    ///   pseudo-class's own `(0, 1, 0)` is **replaced**, not added to, so
-    ///   `:is(em, #foo)` is `(1,0,0)` and `:not(em, strong#foo)` is `(1,0,1)`.
-    /// - `:where()` — "The specificity of a `:where()` pseudo-class is replaced
-    ///   by zero"; neither it nor its arguments contribute.
-    /// - `:nth-child(An+B of S)` — "Analogously, the specificity of an
-    ///   `:nth-child()` or `:nth-last-child()` selector is the specificity of the
-    ///   pseudo-class itself (counting as one pseudo-class selector) **plus** the
-    ///   specificity of the most specific complex selector in its selector list
-    ///   argument (if any)." Here the base *is* added, which is why
-    ///   `S:nth-child(An+B)` and `:nth-child(An+B of S)` tie.
-    ///
-    /// An empty argument list has no most-specific member and so contributes
-    /// nothing, leaving `:is()`/`:not()`/`:has()` at zero and
-    /// `:nth-child(… of )` at the bare `(0, 1, 0)`.
+    #[doc = include_str!("pseudo_class_selector.doc/specificity_contribution.md")]
     #[must_use]
     pub fn specificity_contribution(&self) -> SelectorSpecificity {
-        /// One class-level selector: what an ordinary pseudo-class contributes.
+        #[doc = include_str!("pseudo_class_selector.doc/BASE.md")]
         const BASE: SelectorSpecificity = SelectorSpecificity::new(0, 1, 0);
         match self {
             Self::Is(list) | Self::Not(list) | Self::Has(list) => most_specific(list),
@@ -157,8 +101,7 @@ impl PseudoClassSelector {
     }
 }
 
-/// Returns the specificity of the most specific complex selector in `list`, or
-/// [`SelectorSpecificity::ZERO`] when the list is empty.
+#[doc = include_str!("pseudo_class_selector.doc/most_specific.md")]
 fn most_specific(list: &SelectorList) -> SelectorSpecificity {
     list.selectors()
         .iter()
@@ -167,31 +110,23 @@ fn most_specific(list: &SelectorList) -> SelectorSpecificity {
         .unwrap_or(SelectorSpecificity::ZERO)
 }
 
-/// The `An+B` argument of a `:nth-*` pseudo-class.
-///
-/// It represents the arithmetic sequence `a*n + b` for all integers `n >= 0`.
-/// A one-based index matches when it equals one term of that sequence — see
-/// [`matches_index`](Self::matches_index).
+#[doc = include_str!("pseudo_class_selector.doc/AnB.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnB {
-    /// The step (`a` in `An+B`).
+    #[doc = include_str!("pseudo_class_selector.doc/a.md")]
     pub a: i32,
-    /// The offset (`b` in `An+B`).
+    #[doc = include_str!("pseudo_class_selector.doc/b.md")]
     pub b: i32,
 }
 
 impl AnB {
-    /// Creates an `An+B` value from its step `a` and offset `b`.
+    #[doc = include_str!("pseudo_class_selector.doc/new.md")]
     #[must_use]
     pub const fn new(a: i32, b: i32) -> Self {
         Self { a, b }
     }
 
-    /// Returns `true` if `one_based_index` is a term of `a*n + b` for some
-    /// integer `n >= 0`.
-    ///
-    /// Examples: `2n+1` matches `1, 3, 5, …`; `0n+3` (i.e. `a == 0`) matches
-    /// only `3`; `-n+3` matches `1, 2, 3`.
+    #[doc = include_str!("pseudo_class_selector.doc/matches_index.md")]
     #[must_use]
     pub const fn matches_index(&self, one_based_index: i32) -> bool {
         let diff = one_based_index - self.b;

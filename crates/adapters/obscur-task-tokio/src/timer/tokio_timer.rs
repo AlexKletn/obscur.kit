@@ -1,11 +1,4 @@
-//! A Tokio-backed [`Timer`] adapter (spec §2.7 optional task ports —
-//! "Опциональные реализации task ports. Ни одна не является core dependency.";
-//! §3.5 timer facility).
-//!
-//! [`Timer::schedule`] carries only a delay, no callback, so the wake action is
-//! supplied once at construction. [`TokioTimer`] schedules a detached Tokio task
-//! that sleeps for the requested delay and then invokes that wake action; the
-//! domain wires the action to request a frame (spec §3.5).
+#![doc = include_str!("tokio_timer.doc/_module.md")]
 
 use std::fmt;
 use std::sync::Arc;
@@ -14,26 +7,17 @@ use std::time::Duration;
 use obscur_task::Timer;
 use tokio::runtime::Handle;
 
-/// A fire-and-forget wake [`Timer`] backed by Tokio (spec §2.7 optional task
-/// ports, §3.5 timer facility).
-///
-/// Each [`TokioTimer::schedule`] spawns a detached task on the Tokio [`Handle`]
-/// that sleeps for the delay and then calls the stored wake action. Because the
-/// port has no callback parameter, the action is fixed at construction. The timer
-/// performs no coalescing or de-duplication: every `schedule` arms an independent
-/// wake, and collapsing redundant wakes is the scheduler's responsibility.
+#[doc = include_str!("tokio_timer.doc/TokioTimer.md")]
 #[derive(Clone)]
 pub struct TokioTimer {
-    /// The Tokio runtime handle wake tasks are spawned onto.
+    #[doc = include_str!("tokio_timer.doc/handle.md")]
     handle: Handle,
-    /// The action invoked after each scheduled delay elapses. Shared so the
-    /// timer stays [`Clone`] and each spawned task can hold its own reference.
+    #[doc = include_str!("tokio_timer.doc/wake.md")]
     wake: Arc<dyn Fn() + Send + Sync + 'static>,
 }
 
 impl TokioTimer {
-    /// Creates a timer that, for each scheduled delay, wakes by calling `wake` on
-    /// the Tokio runtime behind `handle`.
+    #[doc = include_str!("tokio_timer.doc/new.md")]
     #[must_use]
     pub fn new(handle: Handle, wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
@@ -42,7 +26,7 @@ impl TokioTimer {
         }
     }
 
-    /// Returns the Tokio [`Handle`] wake tasks are spawned onto.
+    #[doc = include_str!("tokio_timer.doc/handle_2.md")]
     #[must_use]
     pub fn handle(&self) -> &Handle {
         &self.handle
@@ -50,19 +34,14 @@ impl TokioTimer {
 }
 
 impl fmt::Debug for TokioTimer {
-    /// Formats without the wake closure, which is not itself `Debug`.
+    #[doc = include_str!("tokio_timer.doc/fmt.md")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TokioTimer").finish_non_exhaustive()
     }
 }
 
 impl Timer for TokioTimer {
-    /// Schedules a wake-up after `delay`.
-    ///
-    /// This spawns a detached Tokio task that sleeps for `delay` and then invokes
-    /// the wake action. It is fire-and-forget: the task is not tracked, nothing is
-    /// awaited, and coalescing or de-duplicating overlapping wakes is the
-    /// scheduler's job, not this adapter's.
+    #[doc = include_str!("tokio_timer.doc/schedule.md")]
     fn schedule(&self, delay: Duration) {
         let wake = Arc::clone(&self.wake);
         self.handle.spawn(async move {

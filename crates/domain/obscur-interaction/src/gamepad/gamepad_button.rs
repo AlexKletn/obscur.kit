@@ -1,53 +1,46 @@
-//! The [`GamepadButton`] enumeration of layout-neutral gamepad buttons
-//! (spec §6.16 gamepad input).
+#![doc = include_str!("gamepad_button.doc/_module.md")]
 
-/// A physical button on a gamepad, named by position rather than by vendor
-/// label (spec §6.16).
-///
-/// The four face buttons use compass-style names — [`South`](Self::South),
-/// [`East`](Self::East), [`West`](Self::West), [`North`](Self::North) — which
-/// map to A/B/X/Y (Xbox) or Cross/Circle/Square/Triangle (`PlayStation`) without
-/// baking a vendor layout into the domain model.
+#[doc = include_str!("gamepad_button.doc/GamepadButton.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GamepadButton {
-    /// The bottom face button (A / Cross).
+    #[doc = include_str!("gamepad_button.doc/South.md")]
     South,
-    /// The right face button (B / Circle).
+    #[doc = include_str!("gamepad_button.doc/East.md")]
     East,
-    /// The left face button (X / Square).
+    #[doc = include_str!("gamepad_button.doc/West.md")]
     West,
-    /// The top face button (Y / Triangle).
+    #[doc = include_str!("gamepad_button.doc/North.md")]
     North,
-    /// The up direction on the directional pad.
+    #[doc = include_str!("gamepad_button.doc/DpadUp.md")]
     DpadUp,
-    /// The down direction on the directional pad.
+    #[doc = include_str!("gamepad_button.doc/DpadDown.md")]
     DpadDown,
-    /// The left direction on the directional pad.
+    #[doc = include_str!("gamepad_button.doc/DpadLeft.md")]
     DpadLeft,
-    /// The right direction on the directional pad.
+    #[doc = include_str!("gamepad_button.doc/DpadRight.md")]
     DpadRight,
-    /// The left shoulder bumper.
+    #[doc = include_str!("gamepad_button.doc/LeftShoulder.md")]
     LeftShoulder,
-    /// The right shoulder bumper.
+    #[doc = include_str!("gamepad_button.doc/RightShoulder.md")]
     RightShoulder,
-    /// The left trigger, treated as a button (fully pressed).
+    #[doc = include_str!("gamepad_button.doc/LeftTrigger.md")]
     LeftTrigger,
-    /// The right trigger, treated as a button (fully pressed).
+    #[doc = include_str!("gamepad_button.doc/RightTrigger.md")]
     RightTrigger,
-    /// The left analog stick pressed in.
+    #[doc = include_str!("gamepad_button.doc/LeftStick.md")]
     LeftStick,
-    /// The right analog stick pressed in.
+    #[doc = include_str!("gamepad_button.doc/RightStick.md")]
     RightStick,
-    /// The Start / Menu button.
+    #[doc = include_str!("gamepad_button.doc/Start.md")]
     Start,
-    /// The Select / View / Back button.
+    #[doc = include_str!("gamepad_button.doc/Select.md")]
     Select,
-    /// The central Guide / Home button.
+    #[doc = include_str!("gamepad_button.doc/Guide.md")]
     Guide,
 }
 
 impl GamepadButton {
-    /// Returns whether this is a directional-pad button.
+    #[doc = include_str!("gamepad_button.doc/is_dpad.md")]
     #[must_use]
     pub const fn is_dpad(&self) -> bool {
         matches!(
@@ -56,9 +49,7 @@ impl GamepadButton {
         )
     }
 
-    /// Returns whether this is one of the four face buttons
-    /// ([`South`](Self::South), [`East`](Self::East), [`West`](Self::West),
-    /// [`North`](Self::North)).
+    #[doc = include_str!("gamepad_button.doc/is_face.md")]
     #[must_use]
     pub const fn is_face(&self) -> bool {
         matches!(self, Self::South | Self::East | Self::West | Self::North)

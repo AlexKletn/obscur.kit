@@ -1,15 +1,4 @@
-//! **SPECIFICATION-DERIVED** power-awareness cases for obscur.kit §7.11.
-//!
-//! Written by an agent reading obscur.kit §7.11 ("Power awareness") and the
-//! README's core principle 7 ("Recoverable capability gaps"), not this
-//! repository's source. Every expectation below is the spec's, not the code's.
-//! A failure here is a claim about the implementation.
-//!
-//! §7.11 in full:
-//!
-//! > Optional `PowerProfile` may influence:
-//! > background work; visual effects; telemetry; polling.
-//! > It is off by default and must not compromise critical responsiveness.
+#![doc = include_str!("spec_ch7b_power.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7b_support/mod.rs"]
@@ -25,20 +14,7 @@ use support::{
     run_keystroke, runtime,
 };
 
-/// §7.11, verbatim: "Optional `PowerProfile` may influence: background work;
-/// visual effects; telemetry; polling."
-///
-/// The absent-surface probe. An author reading §7.11 writes the identifier the
-/// spec spells in code font and hands the value to the system-provider layer at
-/// startup.
-///
-/// Scope note: the second half of the case — "there is a public way to
-/// install/supply it to a running app" — is **not expressible** here. No
-/// runtime, host or bootstrap entry point in the public API accepts a
-/// `PowerProfile` or a `PowerProvider`, so there is no call to write. That
-/// absence is reported as a finding rather than as a non-compiling test; what
-/// this case can still establish is that the *name* exists and that a profile
-/// can be supplied to a provider.
+#[doc = include_str!("spec_ch7b_power.doc/a_power_profile_is_a_public_named_type_an_author_can_supply.md")]
 #[test]
 fn a_power_profile_is_a_public_named_type_an_author_can_supply() {
     // The author spells the name exactly as §7.11 spells it.
@@ -61,16 +37,7 @@ fn a_power_profile_is_a_public_named_type_an_author_can_supply() {
     );
 }
 
-/// §7.11, verbatim: "It is off by default and must not compromise critical
-/// responsiveness."
-///
-/// "Off by default" is only meaningful as an equivalence: the behaviour of a run
-/// with no power configuration must equal the behaviour of a run that
-/// explicitly asks for no power saving. Run D constructs the runtime with
-/// defaults only; run F constructs the `PowerProfile` denoting full performance
-/// and supplies it. Both drive the same effect-bearing app — shadowed card,
-/// blurred backdrop, long list, running transition — for a fixed number of
-/// frames against a deterministic clock.
+#[doc = include_str!("spec_ch7b_power.doc/b_default_run_is_byte_identical_to_an_explicit_no_saving_run.md")]
 #[test]
 fn b_default_run_is_byte_identical_to_an_explicit_no_saving_run() {
     const FRAMES: usize = 12;
@@ -153,15 +120,7 @@ fn b_default_run_is_byte_identical_to_an_explicit_no_saving_run() {
     );
 }
 
-/// §7.11, verbatim: "It is off by default and must not compromise critical
-/// responsiveness."
-///
-/// The narrowest reading "responsiveness" bears on its own: latency from an
-/// input event to the frame that reflects it. Run R supplies the most
-/// restrictive `PowerProfile` the API offers; run F supplies the no-saving
-/// profile. Both feed the identical event script — a key press of `a` delivered
-/// at tick 10, then nothing — and the clock is advanced tick by tick.
-/// Measured in ticks from delivery, not milliseconds.
+#[doc = include_str!("spec_ch7b_power.doc/c_the_most_restrictive_profile_does_not_delay_the_keystroke.md")]
 #[test]
 fn c_the_most_restrictive_profile_does_not_delay_the_keystroke() {
     const DELIVER_AT: usize = 10;
@@ -214,14 +173,7 @@ fn c_the_most_restrictive_profile_does_not_delay_the_keystroke() {
     );
 }
 
-/// §7.11: "Optional `PowerProfile` may influence:" read with README core
-/// principle 7: "**Recoverable capability gaps.** Unsupported platform
-/// operations return typed results instead of panicking."
-///
-/// §7.11 marks the whole feature optional, so the requirement that survives on a
-/// platform without it is exactly how absence is reported. The query must return
-/// a typed absence — not a panic, and not a fabricated reading indistinguishable
-/// from a real one.
+#[doc = include_str!("spec_ch7b_power.doc/d_an_absent_power_provider_reports_typed_absence_without_fabricating.md")]
 #[test]
 fn d_an_absent_power_provider_reports_typed_absence_without_fabricating() {
     // A backend with no power provider installed.

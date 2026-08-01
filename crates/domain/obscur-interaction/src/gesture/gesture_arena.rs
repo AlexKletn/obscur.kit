@@ -1,35 +1,15 @@
-//! The [`GestureArena`] resolving competing recognizers for a pointer sequence
-//! (spec §6.16 mobile gestures).
+#![doc = include_str!("gesture_arena.doc/_module.md")]
 
 use super::{GestureContender, GestureResolution, RecognizerId, RecognizerState};
 
-/// Resolves competing recognizers contending for a single pointer sequence
-/// (spec §6.16).
-///
-/// Multiple [`GestureContender`]s may claim the same pointer sequence. The
-/// arena tracks each contender alongside its current [`RecognizerState`] and
-/// applies the arena rule to award the sequence to a single winner:
-///
-/// - If any contender is [`Recognized`](RecognizerState::Recognized), the
-///   winner is the recognized contender with the **highest priority**. A tie in
-///   priority is broken toward the **most recently entered** contender: a
-///   system gesture is entered into the arena after the application's own
-///   recognizers, so "System gestures have priority by default" (§6.16) holds
-///   with no explicit priority granted to either side. System gestures may also
-///   carry a high priority to win outright.
-/// - Otherwise, if there is at least one contender and every contender is
-///   terminal but not recognized ([`Failed`](RecognizerState::Failed) /
-///   [`Cancelled`](RecognizerState::Cancelled)), the result is
-///   [`NoWinner`](GestureResolution::NoWinner).
-/// - Otherwise the arena is still
-///   [`Pending`](GestureResolution::Pending).
+#[doc = include_str!("gesture_arena.doc/GestureArena.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GestureArena {
     contenders: Vec<(GestureContender, RecognizerState)>,
 }
 
 impl GestureArena {
-    /// Creates an empty arena.
+    #[doc = include_str!("gesture_arena.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -37,16 +17,12 @@ impl GestureArena {
         }
     }
 
-    /// Enters `contender` into the arena in the
-    /// [`Possible`](RecognizerState::Possible) state.
+    #[doc = include_str!("gesture_arena.doc/add.md")]
     pub fn add(&mut self, contender: GestureContender) {
         self.contenders.push((contender, RecognizerState::Possible));
     }
 
-    /// Updates the tracked state of the contender for `recognizer` to `state`.
-    ///
-    /// Returns `false` (and changes nothing) if no contender for `recognizer`
-    /// is present.
+    #[doc = include_str!("gesture_arena.doc/mark.md")]
     pub fn mark(&mut self, recognizer: RecognizerId, state: RecognizerState) -> bool {
         for (contender, slot) in &mut self.contenders {
             if contender.recognizer() == recognizer {
@@ -57,8 +33,7 @@ impl GestureArena {
         false
     }
 
-    /// Applies the arena rule and returns the resulting
-    /// [`GestureResolution`] without mutating the arena.
+    #[doc = include_str!("gesture_arena.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self) -> GestureResolution {
         // Iterate in insertion order. A candidate wins when its priority is
@@ -89,10 +64,7 @@ impl GestureArena {
         GestureResolution::Pending
     }
 
-    /// Resolves the arena and, if there is a
-    /// [`Winner`](GestureResolution::Winner), cancels every other non-terminal
-    /// contender (the arena awards the gesture to one recognizer). Returns the
-    /// resolution.
+    #[doc = include_str!("gesture_arena.doc/sweep.md")]
     pub fn sweep(&mut self) -> GestureResolution {
         let resolution = self.resolve();
         if let GestureResolution::Winner(winner) = resolution {
@@ -111,25 +83,25 @@ impl GestureArena {
         resolution
     }
 
-    /// Returns the contenders and their tracked states.
+    #[doc = include_str!("gesture_arena.doc/contenders.md")]
     #[must_use]
     pub fn contenders(&self) -> &[(GestureContender, RecognizerState)] {
         &self.contenders
     }
 
-    /// Returns the number of contenders.
+    #[doc = include_str!("gesture_arena.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.contenders.len()
     }
 
-    /// Returns whether the arena has no contenders.
+    #[doc = include_str!("gesture_arena.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.contenders.is_empty()
     }
 
-    /// Removes all contenders.
+    #[doc = include_str!("gesture_arena.doc/clear.md")]
     pub fn clear(&mut self) {
         self.contenders.clear();
     }

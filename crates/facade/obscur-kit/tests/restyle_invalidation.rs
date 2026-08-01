@@ -1,16 +1,4 @@
-//! Incremental-restyle invalidation must survive a **structural** change.
-//!
-//! A reconcile no longer forces a full restyle: the style phase derives its dirty
-//! set from the reconciliation ops. That is only correct if a structural edit
-//! invalidates the siblings whose match it moved — and the structural
-//! pseudo-classes count from **both** ends (`:last-child`, `:nth-last-child`,
-//! `:only-child`, `:nth-last-of-type`), so an insert at the end re-matches the
-//! sibling *before* it.
-//!
-//! This is a regression test for exactly that: the first version of the
-//! reconcile-derived scope expanded from the edited node, whose reach is its own
-//! subtree plus the siblings that FOLLOW it, and so left a stale `:last-child`
-//! behind. Nothing in the spec suite caught it.
+#![doc = include_str!("restyle_invalidation.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -22,20 +10,20 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// Compiles `css` to a matchable stylesheet.
+#[doc = include_str!("restyle_invalidation.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A `.row` element.
+#[doc = include_str!("restyle_invalidation.doc/row.md")]
 fn row(id: u64) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
 }
 
-/// A `.list` holding `count` rows.
+#[doc = include_str!("restyle_invalidation.doc/list.md")]
 fn list(count: u64) -> View {
     let rows: Vec<ViewNode> = (0..count).map(|i| row(0x5000 + i)).collect();
     View::single(
@@ -45,14 +33,14 @@ fn list(count: u64) -> View {
     )
 }
 
-/// The nth child of the root's first child.
+#[doc = include_str!("restyle_invalidation.doc/child.md")]
 fn child(rt: &UiRuntime, index: usize) -> NodeId {
     let root = rt.tree().root().expect("a root after a frame");
     let list = rt.tree().get(root).expect("live").children()[0];
     rt.tree().get(list).expect("live").children()[index]
 }
 
-/// The laid-out width of `node`.
+#[doc = include_str!("restyle_invalidation.doc/width.md")]
 fn width(rt: &UiRuntime, node: NodeId) -> f32 {
     rt.layout_boxes()
         .get(&node)

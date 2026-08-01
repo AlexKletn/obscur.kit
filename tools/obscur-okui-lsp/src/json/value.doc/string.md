@@ -1,0 +1,1 @@
+Builds a string value.

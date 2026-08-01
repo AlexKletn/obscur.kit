@@ -1,34 +1,9 @@
-//! The DPI-variant candidate ladder for an authored image path (spec §5.16).
+#![doc = include_str!("dpi_variant.doc/_module.md")]
 
-/// The highest asset density the ladder will ask for.
-///
-/// `@2x` and `@3x` are the densities assets are authored at in practice; a
-/// display denser than `3.0` reuses the `@3x` asset rather than asking for an
-/// `@4x` that essentially never exists.
+#[doc = include_str!("dpi_variant.doc/MAX_DENSITY.md")]
 const MAX_DENSITY: u32 = 3;
 
-/// Returns the DPI-variant candidates for `path` at a device `scale`, ordered
-/// **densest first** and always ending at the authored path itself (spec §5.16
-/// DPI variants).
-///
-/// The naming rule is the conventional `@Nx` suffix inserted before the
-/// extension: `logo.png` at scale `2.0` yields `logo@2x.png`, then `logo.png`.
-/// A caller tries each candidate in order and takes the first that loads, so a
-/// project that ships no `@2x` asset transparently gets the base one — the
-/// ladder is a *preference*, not a requirement. The returned `f32` is the
-/// density of that candidate, which is the value a loaded representation records
-/// as its [`ResourceMetadata::scale`](crate::state::ResourceMetadata::scale).
-///
-/// The requested density is `ceil(scale)` capped at `@3x`, so a fractional
-/// display scale rounds **up** and never under-resolves: `1.5` asks for `@2x`
-/// before the base. A scale at or below `1.0` (and any non-finite scale) asks
-/// only for the authored path, so the common case allocates a single candidate
-/// and behaves exactly as it did before variants existed.
-///
-/// The suffix is inserted in the final path segment only, so a directory
-/// containing a dot (`assets/v1.2/logo.png` → `assets/v1.2/logo@2x.png`) is not
-/// mistaken for an extension. A path with no extension takes the suffix at the
-/// end (`logo` → `logo@2x`).
+#[doc = include_str!("dpi_variant.doc/dpi_variants.md")]
 #[must_use]
 pub fn dpi_variants(path: &str, scale: f32) -> Vec<(Box<str>, f32)> {
     let base: (Box<str>, f32) = (path.into(), 1.0);
@@ -45,14 +20,7 @@ pub fn dpi_variants(path: &str, scale: f32) -> Vec<(Box<str>, f32)> {
     candidates
 }
 
-/// Returns the asset density [`dpi_variants`] asks for at a device `scale`: the
-/// top rung of the ladder (spec §5.16).
-///
-/// This is `ceil(scale)` capped at `@3x`, and `1` for any scale at or below `1.0`
-/// as well as for a non-finite one. Two scales with the same density select the
-/// same asset files, which is what lets a caller tell an *asset-relevant* scale
-/// change (`1.0` → `2.0`: different files) from one that selects exactly the same
-/// files (`2.5` → `3.0`: both `@3x`) and so needs no reload.
+#[doc = include_str!("dpi_variant.doc/requested_density.md")]
 #[must_use]
 pub fn requested_density(scale: f32) -> u32 {
     if !scale.is_finite() || scale <= 1.0 {
@@ -66,7 +34,7 @@ pub fn requested_density(scale: f32) -> u32 {
     ceiled.min(MAX_DENSITY)
 }
 
-/// Inserts the `@{density}x` suffix into `path` before its extension.
+#[doc = include_str!("dpi_variant.doc/variant_path.md")]
 fn variant_path(path: &str, density: u32) -> Box<str> {
     let suffix = format!("@{density}x");
     match extension_dot(path) {
@@ -75,12 +43,7 @@ fn variant_path(path: &str, density: u32) -> Box<str> {
     }
 }
 
-/// Returns the byte index of the extension's dot in `path`'s final segment, or
-/// `None` when that segment has no extension.
-///
-/// A leading dot in the segment is a dotfile, not an extension (`.gitignore`),
-/// and a dot in a parent directory is not one either — hence the search is
-/// confined to the final segment.
+#[doc = include_str!("dpi_variant.doc/extension_dot.md")]
 fn extension_dot(path: &str) -> Option<usize> {
     let segment_start = path.rfind(['/', '\\']).map_or(0, |slash| slash + 1);
     let segment = &path[segment_start..];

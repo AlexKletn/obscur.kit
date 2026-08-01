@@ -1,12 +1,4 @@
-//! A click on a virtualized row resolves to the entry's **model index**.
-//!
-//! A virtual row cannot carry a per-row `on:click`: every row a builder emits lowers
-//! to the same command symbol, so a symbol can never say which row was hit. The
-//! runtime resolves it from geometry instead — the container box, its scroll offset,
-//! the row extent — which is the same "only the runtime holds both halves" argument
-//! the virtual list itself rests on. These tests pin that the resolved index is the
-//! row under the cursor, and that it tracks the scroll offset rather than the screen
-//! position.
+#![doc = include_str!("virtual_row_click.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -22,11 +14,11 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The list's registered name.
+#[doc = include_str!("virtual_row_click.doc/LIST.md")]
 const LIST: InternedSymbol = InternedSymbol::from_raw(0x9101);
-/// Row height, matching the sheet.
+#[doc = include_str!("virtual_row_click.doc/ROW.md")]
 const ROW: f32 = 20.0;
-/// A large model — the point is that its size costs nothing.
+#[doc = include_str!("virtual_row_click.doc/ITEMS.md")]
 const ITEMS: usize = 10_000;
 
 fn compile(css: &str) -> Stylesheet {
@@ -35,7 +27,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The scroller holding the virtual list.
+#[doc = include_str!("virtual_row_click.doc/view.md")]
 fn view() -> View {
     View::single(
         ViewNode::element(ComponentId::from_raw(0x9100))
@@ -46,8 +38,7 @@ fn view() -> View {
     )
 }
 
-/// A runtime with the list registered and a row-click handler recording what it was
-/// told; rows carry a background so a click lands on a real, hittable node.
+#[doc = include_str!("virtual_row_click.doc/runtime.md")]
 fn runtime(recorded: &Rc<RefCell<Vec<(usize, u32)>>>) -> UiRuntime {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 200.0));
     rt.register_virtual_list(
@@ -65,7 +56,7 @@ fn runtime(recorded: &Rc<RefCell<Vec<(usize, u32)>>>) -> UiRuntime {
     rt
 }
 
-/// A trusted press then release at `y` — a real single click at that height.
+#[doc = include_str!("virtual_row_click.doc/click_at.md")]
 fn click_at(rt: &mut UiRuntime, y: f32, count: usize) {
     for _ in 0..count {
         for kind in [PointerEventKind::Down, PointerEventKind::Up] {
@@ -154,7 +145,7 @@ fn the_resolved_index_follows_the_scroll_offset() {
     );
 }
 
-/// A finger held on a row at `y`, ticked past the long-press threshold.
+#[doc = include_str!("virtual_row_click.doc/hold_at.md")]
 fn hold_at(rt: &mut UiRuntime, y: f32) {
     rt.handle_pointer(
         PointerEvent::new(
@@ -168,12 +159,7 @@ fn hold_at(rt: &mut UiRuntime, y: f32) {
     rt.advance_motion(0.6);
 }
 
-/// A hold on a virtualized row resolves to the same model index a click does.
-///
-/// This is the gesture that reaches a context action on a tablet, and a
-/// virtualized row is exactly the node that cannot carry a binding to receive
-/// it — so without the geometry resolution, a file listing would be the one
-/// place in an application where holding a thing does nothing.
+#[doc = include_str!("virtual_row_click.doc/a_long_press_resolves_to_the_row_under_it.md")]
 #[test]
 fn a_long_press_resolves_to_the_row_under_it() {
     let sheet = compile(SHEET);
@@ -236,8 +222,7 @@ fn the_held_index_follows_the_scroll_offset() {
     );
 }
 
-/// A short tap on a row is still a click, not a hold. Without this pair, an
-/// implementation that fired the hold handler on every contact would pass.
+#[doc = include_str!("virtual_row_click.doc/a_tap_on_a_row_is_a_click_and_not_a_hold.md")]
 #[test]
 fn a_tap_on_a_row_is_a_click_and_not_a_hold() {
     let sheet = compile(SHEET);

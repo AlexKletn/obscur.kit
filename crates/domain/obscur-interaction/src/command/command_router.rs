@@ -1,27 +1,18 @@
-//! The [`CommandRouter`] shortcut-to-command binding table (spec §6.7).
+#![doc = include_str!("command_router.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
 use crate::command::{LogicalKey, Modifiers, Shortcut};
 
-/// Maps shortcuts to command symbols and resolves key input (spec §6.7).
-///
-/// A `CommandRouter` holds an ordered list of shortcut→command-symbol bindings.
-/// Registration order is priority: [`resolve`](CommandRouter::resolve) returns
-/// the command symbol of the *first* binding whose shortcut matches the key
-/// input, so earlier bindings shadow later ones. The router stores only the
-/// app-owned command [`InternedSymbol`]s — the *same* symbols the application
-/// registers handlers for and binds `on-click`/`on-change` events to — so
-/// keyboard input and pointer input dispatch through one command identity. It
-/// does not own the [`Command`](crate::command::Command)s themselves.
+#[doc = include_str!("command_router.doc/CommandRouter.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommandRouter {
-    /// Ordered shortcut→command-symbol bindings; index order is priority.
+    #[doc = include_str!("command_router.doc/bindings.md")]
     bindings: Vec<(Shortcut, InternedSymbol)>,
 }
 
 impl CommandRouter {
-    /// Creates an empty router with no bindings.
+    #[doc = include_str!("command_router.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -29,19 +20,12 @@ impl CommandRouter {
         }
     }
 
-    /// Binds `shortcut` to `command`, appending it at the lowest priority.
-    ///
-    /// Duplicate shortcuts are allowed; the earliest-registered one wins during
-    /// [`resolve`](CommandRouter::resolve).
+    #[doc = include_str!("command_router.doc/bind.md")]
     pub fn bind(&mut self, shortcut: Shortcut, command: InternedSymbol) {
         self.bindings.push((shortcut, command));
     }
 
-    /// Resolves key input to a command symbol.
-    ///
-    /// Returns the symbol of the first bound command whose shortcut matches
-    /// `key` with exactly `modifiers` held, in registration order (first match
-    /// wins), or `None` if nothing matches.
+    #[doc = include_str!("command_router.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, key: LogicalKey, modifiers: Modifiers) -> Option<InternedSymbol> {
         self.bindings
@@ -50,9 +34,7 @@ impl CommandRouter {
             .map(|(_, command)| *command)
     }
 
-    /// Removes the first binding with this exact `shortcut`.
-    ///
-    /// Returns whether a binding was removed.
+    #[doc = include_str!("command_router.doc/unbind.md")]
     pub fn unbind(&mut self, shortcut: &Shortcut) -> bool {
         if let Some(index) = self.bindings.iter().position(|(sc, _)| sc == shortcut) {
             self.bindings.remove(index);
@@ -62,7 +44,7 @@ impl CommandRouter {
         }
     }
 
-    /// Returns every shortcut bound to `command`, in registration order.
+    #[doc = include_str!("command_router.doc/bindings_for.md")]
     #[must_use]
     pub fn bindings_for(&self, command: InternedSymbol) -> Vec<Shortcut> {
         self.bindings
@@ -72,19 +54,19 @@ impl CommandRouter {
             .collect()
     }
 
-    /// Returns the number of bindings.
+    #[doc = include_str!("command_router.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
 
-    /// Returns whether the router has no bindings.
+    #[doc = include_str!("command_router.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()
     }
 
-    /// Removes every binding.
+    #[doc = include_str!("command_router.doc/clear.md")]
     pub fn clear(&mut self) {
         self.bindings.clear();
     }

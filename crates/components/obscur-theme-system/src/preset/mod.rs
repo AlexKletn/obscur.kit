@@ -1,4 +1,4 @@
-//! Theme presets: named token bundles per visual mode (spec §2.6).
+#![doc = include_str!("mod.doc/_module.md")]
 
 mod theme_preset;
 pub use theme_preset::{ThemeMode, ThemePreset};

@@ -1,109 +1,41 @@
-//! The replaceable text-shaping port and its deterministic mock (spec §5.10).
+#![doc = include_str!("text_shaper.doc/_module.md")]
 
 use crate::font::{FontFace, FontId};
 use crate::shaping::{GlyphRun, LineMetrics, ShapedGlyph, ShapingRequest};
 use crate::span::TextRange;
 
-/// The hexagonal port for turning styled text into positioned glyphs
-/// (spec §5.10).
-///
-/// A shaper takes a [`ShapingRequest`] (one uniformly-styled, already-itemized
-/// run) and returns a [`GlyphRun`]. Real implementations wrap a shaping engine
-/// (`HarfRust`) in an adapter; the domain stores whichever implementation it is
-/// given as `Box<dyn TextShaper>`, so the trait is deliberately **object-safe**
-/// — no generic or `Self`-returning methods.
-///
-/// Shaping is **infallible**: there is no error path. A character the font
-/// cannot render still produces a glyph — the font's `.notdef` / "tofu" glyph
-/// (glyph 0) — rather than a failure, so a run always yields glyphs for its
-/// input.
+#[doc = include_str!("text_shaper.doc/TextShaper.md")]
 pub trait TextShaper {
-    /// Shapes `request` into a [`GlyphRun`] (spec §5.10).
-    ///
-    /// Infallible: an unshapable character yields a `.notdef` (tofu) glyph, never
-    /// an error. The returned run's glyphs are in pen order.
+    #[doc = include_str!("text_shaper.doc/shape.md")]
     #[must_use]
     fn shape(&self, request: &ShapingRequest) -> GlyphRun;
 
-    /// Returns whether this shaper can handle `face`.
-    ///
-    /// Lets a composite pick a shaper per face; a general-purpose shaper answers
-    /// `true` for every face.
+    #[doc = include_str!("text_shaper.doc/can_shape.md")]
     #[must_use]
     fn can_shape(&self, face: &FontFace) -> bool;
 
-    /// Returns the vertical [`LineMetrics`] for a line at `font_size`, in logical
-    /// pixels (spec §5.10).
-    ///
-    /// The layout pass uses [`line_height`](LineMetrics::line_height) to size a
-    /// text box and the scene pass uses [`baseline`](LineMetrics::baseline) to
-    /// place the glyph baseline within it. The **default** returns the idealized
-    /// ratios ([`LineMetrics::idealized`]) — `ascent = 0.8·size`,
-    /// `descent = 0.2·size`, `line_gap = 0`, so `line_height == font_size` — which
-    /// keeps the deterministic [`MockTextShaper`] and any stub shaper working
-    /// without real font tables. A real adapter overrides this to read the loaded
-    /// font's own vertical metrics.
+    #[doc = include_str!("text_shaper.doc/line_metrics.md")]
     #[must_use]
     fn line_metrics(&self, font_size: f32) -> LineMetrics {
         LineMetrics::idealized(font_size)
     }
 
-    /// Returns the vertical [`LineMetrics`] for a specific `font` at `font_size`,
-    /// for the mixed-font line-box **strut** (CSS 2.1 §10.8.1).
-    ///
-    /// A line box's used height and baseline come from the *max* ascent and *max*
-    /// descent over the fonts actually on that line, so the wrapper must be able
-    /// to ask for each segment font's own metrics — not just the primary face's.
-    /// The **default** ignores `font` and delegates to
-    /// [`line_metrics`](Self::line_metrics), so a font-agnostic shaper (the
-    /// [`MockTextShaper`], or any stub) reports the *same* metrics for every font
-    /// and a line's strut therefore equals the primary strut — keeping headless
-    /// output byte-identical. A real adapter that can load more than one face
-    /// overrides this to return that face's own scaled vertical metrics, so a
-    /// taller fallback run grows its line box.
+    #[doc = include_str!("text_shaper.doc/line_metrics_for.md")]
     #[must_use]
     fn line_metrics_for(&self, _font: FontId, font_size: f32) -> LineMetrics {
         self.line_metrics(font_size)
     }
 }
 
-/// A deterministic, reference [`TextShaper`] modeling an idealized monospace
-/// font (spec §5.10).
-///
-/// `MockTextShaper` exists so headless tests have reproducible shaped output
-/// without a real font engine. It emits exactly one glyph per Unicode scalar
-/// value in the source text, with:
-///
-/// - `glyph_id` = the scalar's code point,
-/// - `cluster` = the scalar's **byte offset** in the source text,
-/// - `x_advance` = `font_size * ADVANCE_RATIO`, a fixed monospace em-ratio,
-/// - zero placement offsets.
-///
-/// The glyphs are emitted in **visual** (pen, left-to-right) order, matching a
-/// real shaper such as `HarfRust`: an [`TextDirection::LeftToRight`] request
-/// yields glyphs in logical order (`glyph_id`s `['a','b','c']`, clusters
-/// `[0,1,2]` for `"abc"`), while an [`TextDirection::RightToLeft`] request
-/// yields the **reversed** sequence (`['c','b','a']`, clusters `[2,1,0]`). Each
-/// glyph keeps its own source byte offset as its cluster — clusters stay the
-/// source offsets, they simply appear in reversed order. This keeps the mock
-/// visually honest so the bidi L2 line reordering (which trusts each run's
-/// glyphs to already be in visual order) is consistent for the mock.
-///
-/// It deliberately does **not** perform ligatures, font fallback, or real font
-/// metrics — every glyph is uniform width. Given identical requests it produces
-/// identical [`GlyphRun`]s (no pointer hashing, no order-dependent iteration),
-/// which is exactly the determinism headless golden tests rely on.
+#[doc = include_str!("text_shaper.doc/MockTextShaper.md")]
 #[derive(Debug, Default, Clone)]
 pub struct MockTextShaper;
 
 impl MockTextShaper {
-    /// The fraction of the font size used as every glyph's advance — a fixed
-    /// monospace em-ratio (`advance = font_size * ADVANCE_RATIO`). `0.6` is a
-    /// typical monospace character width and keeps the mock's metrics simple and
-    /// deterministic.
+    #[doc = include_str!("text_shaper.doc/ADVANCE_RATIO.md")]
     pub const ADVANCE_RATIO: f32 = 0.6;
 
-    /// Creates a new mock shaper.
+    #[doc = include_str!("text_shaper.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self

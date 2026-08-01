@@ -1,37 +1,23 @@
-//! Why a frame is being produced: [`FrameReason`].
+#![doc = include_str!("frame_reason.doc/_module.md")]
 
-/// The reason a frame is being produced (spec §3.5).
-///
-/// Every frame is produced for exactly one reason, which lets the scheduler
-/// coalesce and prioritise requests and lets diagnostics attribute work. The
-/// set is closed and enumerated here; there is no string dispatch.
-///
-/// The type is a plain value: `Copy`, equatable, and hashable, so it can be used
-/// as a map key or accumulated in a set of pending reasons.
+#[doc = include_str!("frame_reason.doc/FrameReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FrameReason {
-    /// User input was received and must be dispatched (pointer, key, etc.).
+    #[doc = include_str!("frame_reason.doc/Input.md")]
     Input,
-    /// A pure text edit into the focused editable that cannot change its box
-    /// size (a same-size single-line keystroke, or any caret/selection move):
-    /// only the field's glyphs + caret change, so the frame re-shapes and
-    /// re-composes the field WITHOUT a restyle or relayout — the compose-only
-    /// fast path (spec §3.4 phase 5). An edit that can resize the box (a
-    /// wrapping/multiline field growing a line, an auto-width field) uses
-    /// [`Input`](Self::Input) instead so its box relayouts.
+    #[doc = include_str!("frame_reason.doc/TextEdit.md")]
     TextEdit,
-    /// Application state committed, invalidating the tree and requiring a
-    /// re-render.
+    #[doc = include_str!("frame_reason.doc/UiCommit.md")]
     UiCommit,
-    /// An animation or motion timeline advanced and needs a new sample.
+    #[doc = include_str!("frame_reason.doc/Animation.md")]
     Animation,
-    /// An asynchronous resource (image, font, data) completed loading.
+    #[doc = include_str!("frame_reason.doc/ResourceCompletion.md")]
     ResourceCompletion,
-    /// The window or surface changed (resize, scale factor, visibility).
+    #[doc = include_str!("frame_reason.doc/WindowChange.md")]
     WindowChange,
-    /// An external driver requested a render (e.g. an embedding host).
+    #[doc = include_str!("frame_reason.doc/ExternalRender.md")]
     ExternalRender,
-    /// A diagnostics or debugging capture requested a frame.
+    #[doc = include_str!("frame_reason.doc/DiagnosticsCapture.md")]
     DiagnosticsCapture,
 }
 

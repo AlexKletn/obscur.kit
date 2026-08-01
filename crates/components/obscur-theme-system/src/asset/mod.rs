@@ -1,4 +1,4 @@
-//! Theme assets: bundled fonts, icons, images and stylesheets (spec §2.6).
+#![doc = include_str!("mod.doc/_module.md")]
 
 mod theme_asset;
 pub use theme_asset::{AssetKind, AssetSource, ThemeAsset};

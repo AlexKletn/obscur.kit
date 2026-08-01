@@ -1,20 +1,4 @@
-//! End-to-end: **relative units survive the layout↔paint seam** (spec §4.5,
-//! §4.14).
-//!
-//! CSS specifies that the computed value of a `<length>` is already absolute:
-//! `em` / `rem` / `vw` / `vh` are folded once, at the computed-value step, so
-//! every consumer downstream of it reads plain pixels. These tests hold the
-//! *whole pipeline* to that, because it is the one place the property could be
-//! resolved twice and get two answers: layout used to fold relative units itself
-//! while paint read the same computed property through `Length::as_px` (absolute
-//! `px` only), so the two phases disagreed about the same box — a `.1em` border
-//! reserved space and painted nothing.
-//!
-//! Each test authors real CSS, runs one real frame through [`UiRuntime`], and
-//! asserts against the *published* [`DisplayList`] — never a hand-built scene —
-//! so a regression anywhere from the CSS compiler through the resolver to the
-//! scene coordinator fails here.
-
+#![doc = include_str!("relative_units_paint.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -27,8 +11,7 @@ use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The viewport every test renders under. 400x200 is deliberately non-square so a
-/// `vw` assertion cannot pass by accidentally reading `vh`.
+#[doc = include_str!("relative_units_paint.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size {
     width: 400.0,
     height: 200.0,
@@ -40,18 +23,14 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A single `.box` element.
+#[doc = include_str!("relative_units_paint.doc/one_box_view.md")]
 fn one_box_view() -> View {
     let node = ViewNode::element(ComponentId::from_raw(70))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())));
     View::from_fragment(ViewFragment::from_nodes(vec![node]))
 }
 
-/// A `.page` **root** wrapping a `.box` that wraps a text node.
-///
-/// The nesting is load-bearing for the `font-size` tests: `.box` must have a real
-/// parent, or `em` (which means the parent's size) and `rem` (which means the
-/// root's) would collapse onto the same node and agree by accident.
+#[doc = include_str!("relative_units_paint.doc/text_view.md")]
 fn text_view(text: &str) -> View {
     let component = ComponentId::from_raw(70);
     let node = ViewNode::element(component)
@@ -63,7 +42,7 @@ fn text_view(text: &str) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![page]))
 }
 
-/// The font size of the one painted text run in `rt`'s last frame.
+#[doc = include_str!("relative_units_paint.doc/painted_font_size.md")]
 fn painted_font_size(commands: &[PaintCommand]) -> f32 {
     commands
         .iter()
@@ -79,13 +58,13 @@ fn box_node(rt: &UiRuntime) -> NodeId {
     rt.tree().get(root).expect("live").child_nodes()[0]
 }
 
-/// The `.box` under the `.page` root of [`text_view`].
+#[doc = include_str!("relative_units_paint.doc/nested_box_node.md")]
 fn nested_box_node(rt: &UiRuntime) -> NodeId {
     let page = box_node(rt);
     rt.tree().get(page).expect("live").child_nodes()[0]
 }
 
-/// The `.box`'s arranged border box after one frame under `css`.
+#[doc = include_str!("relative_units_paint.doc/layout_bounds.md")]
 fn layout_bounds(rt: &UiRuntime) -> Rect {
     rt.layout_boxes()
         .get(&box_node(rt))
@@ -176,12 +155,7 @@ fn an_em_on_a_node_resolves_against_that_nodes_resolved_rem_font_size() {
 
 // ---- border-width ---------------------------------------------------------
 
-/// The painted width of the box's **top** border edge, in logical pixels, or `0.0`
-/// when no edge was painted at all.
-///
-/// Reads the published fills rather than the computed style, so it measures what a
-/// renderer would actually put on screen — the half of the seam the audit found
-/// disagreeing with layout.
+#[doc = include_str!("relative_units_paint.doc/painted_edge_extent.md")]
 fn painted_edge_extent(commands: &[PaintCommand], bounds: Rect) -> f32 {
     // Each border side is a mitered quad. The top side's is the one whose bounds
     // start at the box's top edge and span its full width; its height is the

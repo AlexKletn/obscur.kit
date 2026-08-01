@@ -1,57 +1,48 @@
-//! A styled run of text: a byte range paired with a typography style (spec §5.10).
+#![doc = include_str!("text_span.doc/_module.md")]
 
 use crate::span::{TextRange, TextStyle};
 
-/// A styled run of text (spec §5.10): a [`TextRange`] paired with the
-/// [`TextStyle`] applied to those bytes.
-///
-/// Rich text is described by a sequence of non-overlapping spans; managing that
-/// sequence (ordering, coalescing, splitting) is the job of the buffer and
-/// layout modules built later. A single `TextSpan` models just one contiguous
-/// styled range.
-///
-/// Because [`TextStyle`] holds `f32` fields, `TextSpan` derives only `Debug`,
-/// `Clone`, and `PartialEq` (floats preclude `Eq`).
+#[doc = include_str!("text_span.doc/TextSpan.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSpan {
-    /// The byte range these bytes cover.
+    #[doc = include_str!("text_span.doc/range.md")]
     pub range: TextRange,
-    /// The typography applied to the range.
+    #[doc = include_str!("text_span.doc/style.md")]
     pub style: TextStyle,
 }
 
 impl TextSpan {
-    /// Creates a span applying `style` to `range`.
+    #[doc = include_str!("text_span.doc/new.md")]
     #[must_use]
     pub const fn new(range: TextRange, style: TextStyle) -> Self {
         Self { range, style }
     }
 
-    /// Returns the byte range this span covers.
+    #[doc = include_str!("text_span.doc/range_2.md")]
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    /// Returns the typography applied to the range.
+    #[doc = include_str!("text_span.doc/style_2.md")]
     #[must_use]
     pub const fn style(&self) -> &TextStyle {
         &self.style
     }
 
-    /// Returns the length of the span in bytes, delegating to the range.
+    #[doc = include_str!("text_span.doc/len.md")]
     #[must_use]
     pub const fn len(&self) -> usize {
         self.range.len()
     }
 
-    /// Returns whether the span covers no bytes, delegating to the range.
+    #[doc = include_str!("text_span.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.range.is_empty()
     }
 
-    /// Returns a copy of this span with a new style applied to the same range.
+    #[doc = include_str!("text_span.doc/restyled.md")]
     #[must_use]
     pub fn restyled(&self, style: TextStyle) -> TextSpan {
         TextSpan {
@@ -60,7 +51,7 @@ impl TextSpan {
         }
     }
 
-    /// Returns a copy of this span moved to a new range, keeping the style.
+    #[doc = include_str!("text_span.doc/with_range.md")]
     #[must_use]
     pub fn with_range(&self, range: TextRange) -> TextSpan {
         TextSpan {

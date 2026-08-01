@@ -1,49 +1,34 @@
-//! The registered pattern-to-target mapping for a router (spec §6.13).
+#![doc = include_str!("route_registry.doc/_module.md")]
 
 use crate::route::{Route, RouteMatch, RoutePattern};
 
-/// The ordered pattern-to-target mapping a router resolves against (spec §6.13
-/// route-to-screen/component mapping, deep-link mapping).
-///
-/// Each registered entry pairs a [`RoutePattern`] with an application-chosen
-/// **target id** — a screen or component name the toolkit stores verbatim and
-/// never interprets. Resolution walks the registrations in order and returns the
-/// first pattern that matches, so **registration order is priority**: register
-/// more specific patterns before broader (for example wildcard) ones.
+#[doc = include_str!("route_registry.doc/RouteRegistry.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RouteRegistry {
-    /// The registered pattern/target pairs, in priority (registration) order.
+    #[doc = include_str!("route_registry.doc/routes.md")]
     routes: Vec<(RoutePattern, Box<str>)>,
 }
 
 impl RouteRegistry {
-    /// Creates an empty registry with no registered routes.
+    #[doc = include_str!("route_registry.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers `pattern` mapped to the application-chosen `target` id.
-    ///
-    /// Registrations are appended, so earlier registrations take priority during
-    /// [`resolve`](RouteRegistry::resolve).
+    #[doc = include_str!("route_registry.doc/register.md")]
     pub fn register(&mut self, pattern: RoutePattern, target: impl Into<Box<str>>) {
         self.routes.push((pattern, target.into()));
     }
 
-    /// Registers `pattern` mapped to `target` and returns `self` (builder style).
+    #[doc = include_str!("route_registry.doc/with_route.md")]
     #[must_use]
     pub fn with_route(mut self, pattern: RoutePattern, target: impl Into<Box<str>>) -> Self {
         self.register(pattern, target);
         self
     }
 
-    /// Resolves `route` to the first matching registration (spec §6.13).
-    ///
-    /// Returns the [`RouteMatch`] (captured params and matched path) paired with
-    /// the target id of the first registered pattern that matches `route`, or
-    /// `None` when no pattern matches (a deep-link miss). Registration order is
-    /// priority: the first match wins.
+    #[doc = include_str!("route_registry.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, route: &Route) -> Option<(RouteMatch, &str)> {
         self.routes.iter().find_map(|(pattern, target)| {
@@ -51,13 +36,13 @@ impl RouteRegistry {
         })
     }
 
-    /// Returns the number of registered routes.
+    #[doc = include_str!("route_registry.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.routes.len()
     }
 
-    /// Returns whether no routes are registered.
+    #[doc = include_str!("route_registry.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.routes.is_empty()

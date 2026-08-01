@@ -1,16 +1,8 @@
-//! A node's intrinsic (content-driven) sizes.
+#![doc = include_str!("intrinsic_size.doc/_module.md")]
 
 use obscur_geometry::Size;
 
-/// The intrinsic sizes a node's content wants, independent of any external
-/// constraints (spec §4.1).
-///
-/// * `min_content` is the smallest size the content can take without overflowing
-///   (e.g. the longest unbreakable word).
-/// * `max_content` is the largest size the content wants when given unbounded
-///   space (e.g. a paragraph laid out on a single line).
-///
-/// Sizes are fractional logical pixels; no rounding is applied (spec §4.6).
+#[doc = include_str!("intrinsic_size.doc/IntrinsicSize.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IntrinsicSize {
     min_content: Size,
@@ -18,7 +10,7 @@ pub struct IntrinsicSize {
 }
 
 impl IntrinsicSize {
-    /// Creates intrinsic sizes from an explicit minimum- and maximum-content size.
+    #[doc = include_str!("intrinsic_size.doc/new.md")]
     #[must_use]
     pub const fn new(min_content: Size, max_content: Size) -> Self {
         Self {
@@ -27,8 +19,7 @@ impl IntrinsicSize {
         }
     }
 
-    /// Creates intrinsic sizes for content that has a single fixed size, where
-    /// the minimum- and maximum-content sizes are equal.
+    #[doc = include_str!("intrinsic_size.doc/fixed.md")]
     #[must_use]
     pub const fn fixed(size: Size) -> Self {
         Self {
@@ -37,13 +28,13 @@ impl IntrinsicSize {
         }
     }
 
-    /// The minimum-content size.
+    #[doc = include_str!("intrinsic_size.doc/min_content.md")]
     #[must_use]
     pub const fn min_content(self) -> Size {
         self.min_content
     }
 
-    /// The maximum-content size.
+    #[doc = include_str!("intrinsic_size.doc/max_content.md")]
     #[must_use]
     pub const fn max_content(self) -> Size {
         self.max_content

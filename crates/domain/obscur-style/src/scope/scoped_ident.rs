@@ -1,21 +1,9 @@
-//! A local identifier isolated to a style scope.
-//!
-//! CSS-module isolation (§4.15) means a component's internal class names do not
-//! need global uniqueness: two different modules may both use `.item` without
-//! colliding. [`ScopedIdent`] models that by pairing a local
-//! [`InternedSymbol`] with the [`ScopeId`] it belongs to, so identity is the
-//! *combination* of scope and local name rather than the name alone.
+#![doc = include_str!("scoped_ident.doc/_module.md")]
 
 use crate::scope::ScopeId;
 use obscur_identity::InternedSymbol;
 
-/// A local identifier (for example a class name) qualified by the scope that
-/// owns it (§4.15).
-///
-/// Because equality and hashing consider *both* fields, `.item` in one module
-/// and `.item` in another are distinct [`ScopedIdent`]s — this is how module
-/// isolation avoids requiring local identifiers to be globally unique.
-/// `Copy + Eq + Hash` so it can key maps directly.
+#[doc = include_str!("scoped_ident.doc/ScopedIdent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopedIdent {
     scope: ScopeId,
@@ -23,19 +11,19 @@ pub struct ScopedIdent {
 }
 
 impl ScopedIdent {
-    /// Creates a scoped identifier binding `local` to `scope`.
+    #[doc = include_str!("scoped_ident.doc/new.md")]
     #[must_use]
     pub const fn new(scope: ScopeId, local: InternedSymbol) -> Self {
         Self { scope, local }
     }
 
-    /// Returns the scope that owns this identifier.
+    #[doc = include_str!("scoped_ident.doc/scope.md")]
     #[must_use]
     pub const fn scope(self) -> ScopeId {
         self.scope
     }
 
-    /// Returns the local (unqualified) identifier.
+    #[doc = include_str!("scoped_ident.doc/local.md")]
     #[must_use]
     pub const fn local(self) -> InternedSymbol {
         self.local

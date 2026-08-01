@@ -1,25 +1,4 @@
-//! **Headless Browser-Elements-Wireframe-Kit → PNG.**
-//!
-//! Renders the shared [`wireframe`] scene — the masthead over the 15 native-control
-//! group cards — through the **software** [`CpuRenderer`] (no display, no GPU) and
-//! writes the frame to `target/wireframe_kit.png`, a real viewable artifact.
-//!
-//! The scene is a grayscale, flat "spec sheet": every native HTML control drawn
-//! across all of its states. [`wireframe::view`] builds it from semantic classes
-//! and [`wireframe::stylesheet`] supplies the wireframe user-agent appearance.
-//! Because the design is grayscale + flat (solid fills, 1.5px borders, small radii,
-//! text, flex, grid, absolute position), the CPU backend reproduces it near-
-//! faithfully; the handful of engine gaps are approximated + documented in the
-//! scene module (search "SUBSTITUTE" there).
-//!
-//! Supersample factor: `UIKIT_SCALE` (default 2.0, clamped 1.0..=4.0). The sheet is
-//! laid out at the LOGICAL [`VIEWPORT`] while the CPU render target is `VIEWPORT ×
-//! scale`; `set_device_scale(scale)` brackets the scene in a root `scale()` so the
-//! physical buffer fills crisply. `UIKIT_SCALE=1` reproduces the logical 1:1 output.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example wireframe_png \
-//!   --features "render-cpu resource-fs resource-decode text-harfrust text-unicode"`
+#![doc = include_str!("wireframe_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -42,9 +21,7 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "wireframe/scene.rs"]
 mod wireframe;
 
-/// The viewport the sheet is laid out and rasterized under: wide enough for the
-/// 1120px cards plus page padding, and tall enough for the masthead, all 15 group
-/// cards, and the footer.
+#[doc = include_str!("wireframe_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1200.0, 4160.0);
 
 fn main() {
@@ -114,8 +91,7 @@ fn main() {
     );
 }
 
-/// The supersample render scale: the `UIKIT_SCALE` env var parsed as a float and
-/// clamped to `1.0..=4.0`, defaulting to `2.0` for a crisp PNG.
+#[doc = include_str!("wireframe_png.doc/render_scale.md")]
 fn render_scale() -> f32 {
     std::env::var("UIKIT_SCALE")
         .ok()
@@ -124,14 +100,14 @@ fn render_scale() -> f32 {
         .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("wireframe_png.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("wireframe_png.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -139,8 +115,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the full text stack and registers `bytes` under the `sans-serif` generic
-/// family on both the resolver and the CPU renderer.
+#[doc = include_str!("wireframe_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -158,12 +133,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("wireframe_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("wireframe_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

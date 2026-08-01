@@ -1,40 +1,30 @@
-//! An ordered, timestamped log of recorded steps for record & replay (spec §7.13).
+#![doc = include_str!("event_recording.doc/_module.md")]
 
 use crate::input::SyntheticInput;
 
-/// How sensitive a recorded input is — the classification that drives redaction.
-///
-/// A caller tags each recorded input with its sensitivity so the
-/// [`RedactionPolicy`] can decide whether the payload is stored verbatim or
-/// dropped and replaced with a [`RecordedEvent::Redacted`] marker (spec §7.13).
+#[doc = include_str!("event_recording.doc/Sensitivity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Sensitivity {
-    /// Ordinary, non-sensitive input; recorded verbatim.
+    #[doc = include_str!("event_recording.doc/Normal.md")]
     #[default]
     Normal,
-    /// A secret (password, token, credential); redacted by default.
+    #[doc = include_str!("event_recording.doc/Secret.md")]
     Secret,
-    /// Protected clipboard data; redacted by default.
+    #[doc = include_str!("event_recording.doc/Clipboard.md")]
     Clipboard,
 }
 
-/// Which classes of sensitive input are redacted when recorded (spec §7.13).
-///
-/// Redaction is **default-on**: [`RedactionPolicy::default`] redacts both
-/// secrets and protected clipboard data. Redaction is also **irreversible** —
-/// when a class is redacted the original payload is dropped, never stored, so a
-/// recording can never leak a redacted secret no matter how it is later
-/// inspected or replayed.
+#[doc = include_str!("event_recording.doc/RedactionPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RedactionPolicy {
-    /// Whether [`Sensitivity::Secret`] inputs are redacted. Default `true`.
+    #[doc = include_str!("event_recording.doc/redact_secrets.md")]
     pub redact_secrets: bool,
-    /// Whether [`Sensitivity::Clipboard`] inputs are redacted. Default `true`.
+    #[doc = include_str!("event_recording.doc/redact_clipboard.md")]
     pub redact_clipboard: bool,
 }
 
 impl Default for RedactionPolicy {
-    /// The safe default: redact both secrets and protected clipboard data.
+    #[doc = include_str!("event_recording.doc/default.md")]
     fn default() -> Self {
         Self {
             redact_secrets: true,
@@ -44,16 +34,13 @@ impl Default for RedactionPolicy {
 }
 
 impl RedactionPolicy {
-    /// A policy that redacts both secrets and clipboard data (the default).
+    #[doc = include_str!("event_recording.doc/redacting.md")]
     #[must_use]
     pub fn redacting() -> Self {
         Self::default()
     }
 
-    /// A policy that records everything verbatim, redacting nothing.
-    ///
-    /// This opts out of the default protection; use it only for recordings that
-    /// are known not to carry sensitive input.
+    #[doc = include_str!("event_recording.doc/allow_all.md")]
     #[must_use]
     pub const fn allow_all() -> Self {
         Self {
@@ -62,8 +49,7 @@ impl RedactionPolicy {
         }
     }
 
-    /// Returns `true` when input of the given `sensitivity` must be redacted
-    /// under this policy. [`Sensitivity::Normal`] is never redacted.
+    #[doc = include_str!("event_recording.doc/redacts.md")]
     #[must_use]
     pub const fn redacts(&self, sensitivity: Sensitivity) -> bool {
         match sensitivity {
@@ -74,107 +60,92 @@ impl RedactionPolicy {
     }
 }
 
-/// One recorded happening, covering the categories a record-replay run may
-/// capture (spec §7.13): normalized platform events, scheduler decisions, clock
-/// ticks, async completions, resource versions, and window/environment changes —
-/// plus a [`Redacted`](RecordedEvent::Redacted) placeholder for input whose
-/// payload was dropped by the [`RedactionPolicy`].
+#[doc = include_str!("event_recording.doc/RecordedEvent.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordedEvent {
-    /// A normalized platform input event.
+    #[doc = include_str!("event_recording.doc/Input.md")]
     Input(SyntheticInput),
-    /// A deterministic clock tick, advancing virtual time by `nanos`.
+    #[doc = include_str!("event_recording.doc/ClockTick.md")]
     ClockTick {
-        /// Nanoseconds the clock advanced.
+        #[doc = include_str!("event_recording.doc/nanos.md")]
         nanos: u64,
     },
-    /// An async completion delivered for the given `operation`.
+    #[doc = include_str!("event_recording.doc/AsyncCompletion.md")]
     AsyncCompletion {
-        /// The raw operation id the completion resolves.
+        #[doc = include_str!("event_recording.doc/operation.md")]
         operation: u64,
     },
-    /// A scheduler decision, recorded as a typed marker.
+    #[doc = include_str!("event_recording.doc/SchedulerDecision.md")]
     SchedulerDecision {
-        /// Why the scheduler made this decision.
+        #[doc = include_str!("event_recording.doc/reason.md")]
         reason: SchedulerReason,
-        /// Whether the scheduled work was accepted (vs. coalesced/dropped).
+        #[doc = include_str!("event_recording.doc/accepted.md")]
         accepted: bool,
     },
-    /// A resource whose version changed.
+    #[doc = include_str!("event_recording.doc/ResourceVersion.md")]
     ResourceVersion {
-        /// The raw resource id.
+        #[doc = include_str!("event_recording.doc/resource.md")]
         resource: u64,
-        /// The new version of that resource.
+        #[doc = include_str!("event_recording.doc/version.md")]
         version: u64,
     },
-    /// A window/environment change.
+    #[doc = include_str!("event_recording.doc/EnvironmentChange.md")]
     EnvironmentChange(EnvironmentChange),
-    /// A placeholder for input whose payload was redacted and dropped. Carries
-    /// only the [`Sensitivity`] class, never the original data (spec §7.13).
+    #[doc = include_str!("event_recording.doc/Redacted.md")]
     Redacted {
-        /// Which sensitivity class was redacted.
+        #[doc = include_str!("event_recording.doc/kind.md")]
         kind: Sensitivity,
     },
 }
 
-/// Why the scheduler reached a recorded decision (a small typed marker).
+#[doc = include_str!("event_recording.doc/SchedulerReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SchedulerReason {
-    /// A frame was scheduled.
+    #[doc = include_str!("event_recording.doc/Frame.md")]
     Frame,
-    /// A timer fired.
+    #[doc = include_str!("event_recording.doc/Timer.md")]
     Timer,
-    /// Idle work was scheduled.
+    #[doc = include_str!("event_recording.doc/Idle.md")]
     Idle,
-    /// Work was coalesced with pending work of the same kind.
+    #[doc = include_str!("event_recording.doc/Coalesced.md")]
     Coalesced,
 }
 
-/// A recorded window/environment change (spec §7.13).
+#[doc = include_str!("event_recording.doc/EnvironmentChange_2.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EnvironmentChange {
-    /// The window was resized to `(width, height)` in physical pixels.
+    #[doc = include_str!("event_recording.doc/WindowResized.md")]
     WindowResized {
-        /// New window width.
+        #[doc = include_str!("event_recording.doc/width.md")]
         width: u32,
-        /// New window height.
+        #[doc = include_str!("event_recording.doc/height.md")]
         height: u32,
     },
-    /// The window's visibility changed (`true` = visible).
+    #[doc = include_str!("event_recording.doc/VisibilityChanged.md")]
     VisibilityChanged {
-        /// Whether the window is now visible.
+        #[doc = include_str!("event_recording.doc/visible.md")]
         visible: bool,
     },
 }
 
-/// One entry in an [`EventRecording`]: a monotonic `tick` and its `event`.
-///
-/// `tick` is either a monotonic sequence index or the deterministic clock value
-/// at record time; the recording preserves entries in the order they were added.
+#[doc = include_str!("event_recording.doc/RecordedStep.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordedStep {
-    /// The monotonic tick (sequence index or clock value) at record time.
+    #[doc = include_str!("event_recording.doc/tick.md")]
     pub tick: u64,
-    /// What happened at this tick.
+    #[doc = include_str!("event_recording.doc/event.md")]
     pub event: RecordedEvent,
 }
 
 impl RecordedStep {
-    /// Creates a recorded step pairing `tick` with `event`.
+    #[doc = include_str!("event_recording.doc/new.md")]
     #[must_use]
     pub const fn new(tick: u64, event: RecordedEvent) -> Self {
         Self { tick, event }
     }
 }
 
-/// An ordered, timestamped log of recorded steps together with the
-/// [`RedactionPolicy`] under which it was captured (spec §7.13).
-///
-/// Steps are appended in order via [`record`](Self::record) /
-/// [`record_input`](Self::record_input). Recording an input goes through the
-/// policy: a sensitive class that the policy redacts is stored as a
-/// [`RecordedEvent::Redacted`] marker with its payload dropped, so a recording
-/// never carries redacted secrets.
+#[doc = include_str!("event_recording.doc/EventRecording.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventRecording {
     steps: Vec<RecordedStep>,
@@ -182,7 +153,7 @@ pub struct EventRecording {
 }
 
 impl EventRecording {
-    /// Creates an empty recording using the default (redacting) policy.
+    #[doc = include_str!("event_recording.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -191,7 +162,7 @@ impl EventRecording {
         }
     }
 
-    /// Creates an empty recording using an explicit redaction `policy`.
+    #[doc = include_str!("event_recording.doc/with_policy.md")]
     #[must_use]
     pub fn with_policy(policy: RedactionPolicy) -> Self {
         Self {
@@ -200,27 +171,18 @@ impl EventRecording {
         }
     }
 
-    /// Returns the redaction policy this recording was captured under.
+    #[doc = include_str!("event_recording.doc/policy.md")]
     #[must_use]
     pub fn policy(&self) -> RedactionPolicy {
         self.policy
     }
 
-    /// Appends `event` at `tick`. Structured events pass through unchanged; use
-    /// [`record_input`](Self::record_input) to record input through the
-    /// redaction policy.
+    #[doc = include_str!("event_recording.doc/record.md")]
     pub fn record(&mut self, tick: u64, event: RecordedEvent) {
         self.steps.push(RecordedStep::new(tick, event));
     }
 
-    /// Records a normalized platform `input` at `tick`, applying the redaction
-    /// policy for its `sensitivity`.
-    ///
-    /// When the policy redacts that class, only a [`RecordedEvent::Redacted`]
-    /// marker (carrying the [`Sensitivity`] class) is stored — the original
-    /// `input` payload is dropped and never persisted (spec §7.13). A
-    /// [`Sensitivity::Normal`] input, or any class the policy does not redact,
-    /// is recorded verbatim as [`RecordedEvent::Input`].
+    #[doc = include_str!("event_recording.doc/record_input.md")]
     pub fn record_input(&mut self, tick: u64, input: SyntheticInput, sensitivity: Sensitivity) {
         let event = if self.policy.redacts(sensitivity) {
             // The payload is intentionally dropped here; redaction is irreversible.
@@ -231,25 +193,25 @@ impl EventRecording {
         self.steps.push(RecordedStep::new(tick, event));
     }
 
-    /// Returns the recorded steps in order.
+    #[doc = include_str!("event_recording.doc/steps.md")]
     #[must_use]
     pub fn steps(&self) -> &[RecordedStep] {
         &self.steps
     }
 
-    /// Returns the number of recorded steps.
+    #[doc = include_str!("event_recording.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.steps.len()
     }
 
-    /// Returns `true` when no steps have been recorded.
+    #[doc = include_str!("event_recording.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }
 
-    /// Iterates over the recorded steps in order.
+    #[doc = include_str!("event_recording.doc/iter.md")]
     pub fn iter(&self) -> std::slice::Iter<'_, RecordedStep> {
         self.steps.iter()
     }

@@ -1,0 +1,1 @@
+A radial (concentric) gradient.

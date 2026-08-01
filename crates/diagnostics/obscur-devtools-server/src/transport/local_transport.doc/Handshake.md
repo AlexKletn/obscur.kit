@@ -1,0 +1,1 @@
+A connection handshake request.

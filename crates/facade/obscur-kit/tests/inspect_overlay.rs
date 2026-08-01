@@ -1,6 +1,4 @@
-//! End-to-end: the in-window inspect overlay (spec §7.6) highlights the hovered
-//! node's box and the runtime reports its readout, driven through the real
-//! render + hit-test path (render → `handle_pointer` → hover → compose overlay).
+#![doc = include_str!("inspect_overlay.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -14,7 +12,7 @@ use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A `#root` container holding one `.box` child.
+#[doc = include_str!("inspect_overlay.doc/view.md")]
 fn view() -> View {
     let root = ComponentId::from_raw(0x00C0_0001);
     let box_child =
@@ -31,7 +29,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Moves the pointer to `(x, y)` so the runtime hit-tests and updates hover.
+#[doc = include_str!("inspect_overlay.doc/hover.md")]
 fn hover(runtime: &mut UiRuntime, x: f32, y: f32) {
     runtime.handle_pointer(PointerEvent::new(
         PointerId::MOUSE,

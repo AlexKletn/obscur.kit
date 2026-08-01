@@ -1,46 +1,36 @@
-//! A style-local `transform-origin` (spec §5.2).
+#![doc = include_str!("transform_origin.doc/_module.md")]
 
 use crate::property::Length;
 
-/// The CSS `transform-origin`: the point a `transform` pivots about.
-///
-/// Each component is a [`Length`] — an absolute `px` or a `Percent` of the box's
-/// border-box width (`x`) / height (`y`). The `left`/`center`/`right` and
-/// `top`/`center`/`bottom` keywords lower to `0%` / `50%` / `100%`. The CSS
-/// initial value is `50% 50%` (the box center), exposed as [`TransformOrigin::CENTER`];
-/// an unauthored `transform-origin` is left unresolved and the coordinator
-/// defaults to the center.
-///
-/// Because [`Length`] carries `f32` data, this derives [`PartialEq`] but not
-/// [`Eq`]/[`Hash`].
+#[doc = include_str!("transform_origin.doc/TransformOrigin.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransformOrigin {
-    /// The horizontal origin (a `px` or a percentage of the box width).
+    #[doc = include_str!("transform_origin.doc/x.md")]
     x: Length,
-    /// The vertical origin (a `px` or a percentage of the box height).
+    #[doc = include_str!("transform_origin.doc/y.md")]
     y: Length,
 }
 
 impl TransformOrigin {
-    /// The initial `transform-origin`: `50% 50%` (the box center).
+    #[doc = include_str!("transform_origin.doc/CENTER.md")]
     pub const CENTER: Self = Self {
         x: Length::Percent(50.0),
         y: Length::Percent(50.0),
     };
 
-    /// Creates a transform origin from its horizontal and vertical components.
+    #[doc = include_str!("transform_origin.doc/new.md")]
     #[must_use]
     pub const fn new(x: Length, y: Length) -> Self {
         Self { x, y }
     }
 
-    /// Returns the horizontal origin component.
+    #[doc = include_str!("transform_origin.doc/x_2.md")]
     #[must_use]
     pub const fn x(&self) -> Length {
         self.x
     }
 
-    /// Returns the vertical origin component.
+    #[doc = include_str!("transform_origin.doc/y_2.md")]
     #[must_use]
     pub const fn y(&self) -> Length {
         self.y
@@ -48,7 +38,7 @@ impl TransformOrigin {
 }
 
 impl Default for TransformOrigin {
-    /// The default is the CSS initial [`TransformOrigin::CENTER`].
+    #[doc = include_str!("transform_origin.doc/default.md")]
     fn default() -> Self {
         Self::CENTER
     }

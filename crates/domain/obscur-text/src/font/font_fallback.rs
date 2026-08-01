@@ -1,21 +1,15 @@
-//! An ordered fallback chain of font families (spec §5.18, §5.10).
+#![doc = include_str!("font_fallback.doc/_module.md")]
 
 use crate::font::{FontFamily, GenericFamily};
 
-/// An ordered chain of [`FontFamily`] values tried in turn when resolving text
-/// (spec §5.18 fallback resolution, §5.10 font fallback).
-///
-/// The first family is the *primary* choice; later families are consulted only
-/// when an earlier one cannot supply a needed glyph. The chain is kept
-/// deduplicated: pushing a family already present is a no-op, so order is
-/// preserved and the first occurrence wins.
+#[doc = include_str!("font_fallback.doc/FontFallback.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontFallback {
     families: Vec<FontFamily>,
 }
 
 impl FontFallback {
-    /// Creates a chain containing just `primary`.
+    #[doc = include_str!("font_fallback.doc/new.md")]
     #[must_use]
     pub fn new(primary: FontFamily) -> Self {
         Self {
@@ -23,8 +17,7 @@ impl FontFallback {
         }
     }
 
-    /// Creates a chain from `families`, preserving order while dropping any
-    /// duplicates (the first occurrence of each family is kept).
+    #[doc = include_str!("font_fallback.doc/from_families.md")]
     #[must_use]
     pub fn from_families(families: Vec<FontFamily>) -> Self {
         let mut chain = Self {
@@ -36,9 +29,7 @@ impl FontFallback {
         chain
     }
 
-    /// Creates a sensible default chain: the platform UI font followed by the
-    /// generic `sans-serif`, so resolution always terminates in
-    /// [`GenericFamily::SansSerif`] (spec §5.18).
+    #[doc = include_str!("font_fallback.doc/default_chain.md")]
     #[must_use]
     pub fn default_chain() -> Self {
         Self::from_families(vec![
@@ -47,53 +38,51 @@ impl FontFallback {
         ])
     }
 
-    /// Appends `family` to the end of the chain unless it is already present, in
-    /// which case the call is a no-op (spec §5.18).
+    #[doc = include_str!("font_fallback.doc/push.md")]
     pub fn push(&mut self, family: FontFamily) {
         if !self.families.contains(&family) {
             self.families.push(family);
         }
     }
 
-    /// Returns this chain with `family` appended (a fluent [`push`](Self::push),
-    /// deduplicated the same way).
+    #[doc = include_str!("font_fallback.doc/with.md")]
     #[must_use]
     pub fn with(mut self, family: FontFamily) -> Self {
         self.push(family);
         self
     }
 
-    /// Returns the families in fallback order.
+    #[doc = include_str!("font_fallback.doc/families.md")]
     #[must_use]
     pub fn families(&self) -> &[FontFamily] {
         &self.families
     }
 
-    /// Returns the primary (first) family, or `None` if the chain is empty.
+    #[doc = include_str!("font_fallback.doc/primary.md")]
     #[must_use]
     pub fn primary(&self) -> Option<&FontFamily> {
         self.families.first()
     }
 
-    /// Returns whether `family` appears anywhere in the chain.
+    #[doc = include_str!("font_fallback.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, family: &FontFamily) -> bool {
         self.families.contains(family)
     }
 
-    /// Returns the number of families in the chain.
+    #[doc = include_str!("font_fallback.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.families.len()
     }
 
-    /// Returns whether the chain is empty.
+    #[doc = include_str!("font_fallback.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.families.is_empty()
     }
 
-    /// Returns an iterator over the families in fallback order.
+    #[doc = include_str!("font_fallback.doc/iter.md")]
     pub fn iter(&self) -> std::slice::Iter<'_, FontFamily> {
         self.families.iter()
     }

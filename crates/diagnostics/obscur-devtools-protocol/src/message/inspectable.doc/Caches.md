@@ -1,0 +1,1 @@
+Cache occupancy and statistics.

@@ -1,5 +1,4 @@
-//! [`ReconcileEnactor`]: enacts a frame's root reconcile through the atomic
-//! transaction commit boundary (spec §3.2, §3.4 phase 4).
+#![doc = include_str!("reconcile_enactor.doc/_module.md")]
 
 use obscur_identity::{NodeId, VersionStamp};
 use obscur_tree::reconciliation::{Reconciler, ReconciliationPlan};
@@ -12,46 +11,17 @@ use super::transaction_validator::TransactionValidator;
 use super::ui_operation::UiOperation;
 use super::ui_transaction::UiTransaction;
 
-/// Enacts a frame's tree mutation **through** the UI-transaction boundary so the
-/// spec §3.2 rule — "mutations are normalized into validated `UiOps` and
-/// committed atomically between frames" — is realized on the live frame path
-/// rather than only unit-tested.
-///
-/// The frame pipeline used to mutate the retained tree by calling
-/// [`Reconciler::reconcile_root`] directly, bypassing the transaction layer. This
-/// enactor makes the reconcile step go through the validated commit boundary
-/// instead, while keeping reconciliation itself as the underlying mechanism:
-///
-/// 1. **Stage** the intent as a [`UiTransaction`] carrying a single
-///    [`UiOperation::ReplaceRoot`] — the normalized "the root desired output
-///    changed, reconcile the whole tree" operation.
-/// 2. **Validate** the staged batch with a [`TransactionValidator`] *before*
-///    application; a rejected batch aborts with no mutation (a single
-///    `ReplaceRoot` is always structurally valid, so this never rejects in
-///    practice, but the gate is real and observable).
-/// 3. **Apply** the reconcile as the commit's effect: `reconcile_root` performs
-///    the actual retained-tree mutation.
-/// 4. **Commit** atomically: when the reconcile changed the tree, advance the
-///    [`VersionStamp`] and record a [`TransactionCommit`] carrying the applied
-///    operation stamped with the new version; an idempotent (no-op) reconcile
-///    produces an empty commit and leaves the version untouched.
-///
-/// Because the effect is exactly the previous `reconcile_root` call, the retained
-/// tree — and therefore every downstream style/layout/scene result — is
-/// **identical** to the pre-boundary behavior. What changes is only that the
-/// mutation now flows through a validated, versioned commit that a caller can
-/// observe (via [`version`](Self::version) and the returned [`TransactionCommit`]).
+#[doc = include_str!("reconcile_enactor.doc/ReconcileEnactor.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ReconcileEnactor {
-    /// The stateless structural validator each staged batch passes through.
+    #[doc = include_str!("reconcile_enactor.doc/validator.md")]
     validator: TransactionValidator,
-    /// The last version stamped at a committing frame boundary. Advances only
-    /// when a commit actually changed the tree.
+    #[doc = include_str!("reconcile_enactor.doc/version.md")]
     version: VersionStamp,
 }
 
 impl ReconcileEnactor {
-    /// Creates an enactor whose commit version starts at the default stamp.
+    #[doc = include_str!("reconcile_enactor.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -60,53 +30,19 @@ impl ReconcileEnactor {
         }
     }
 
-    /// Returns the version stamped at the most recent committing frame boundary.
-    ///
-    /// It advances by one every time [`commit_root`](Self::commit_root) applies a
-    /// reconcile that actually changed the tree, and is unchanged by a no-op
-    /// (idempotent) reconcile, so a caller can observe whether a frame committed a
-    /// real tree change.
+    #[doc = include_str!("reconcile_enactor.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> VersionStamp {
         self.version
     }
 
-    /// The validator this enactor gates its own commits with.
-    ///
-    /// Exposed so another commit path — a
-    /// [`ProvisionalTransaction`](super::ProvisionalTransaction) being committed,
-    /// say — is checked against **this** rulebook rather than a second one it
-    /// constructed for itself. The validator is stateless, so sharing it costs
-    /// nothing; the point is that there is one set of rules, and no way for a
-    /// caller to drift from it.
+    #[doc = include_str!("reconcile_enactor.doc/validator_2.md")]
     #[must_use]
     pub const fn validator(&self) -> &TransactionValidator {
         &self.validator
     }
 
-    /// Enacts a root reconcile of `tree` toward `desired` through the atomic
-    /// transaction commit boundary and returns the committed record.
-    ///
-    /// The returned [`TransactionCommit`] is non-empty (and carries the advanced
-    /// [`version`](Self::version)) exactly when the reconcile changed the tree;
-    /// it is empty when the reconcile was an idempotent no-op. Callers derive the
-    /// frame's `reconciled` flag from [`TransactionCommit::is_empty`], matching
-    /// the previous `!plan.is_empty()` semantics precisely.
-    ///
-    /// The underlying [`ReconciliationPlan`] is returned alongside it, because the
-    /// commit records the *transaction* (one normalized `ReplaceRoot`) while the
-    /// plan records the *structural deltas* — which nodes were inserted, updated,
-    /// moved or removed. A caller that maintains per-node state (component
-    /// instances) needs those deltas; a tree walk would have to rediscover what
-    /// the plan already states.
-    ///
-    /// # Errors
-    ///
-    /// Returns the [`TransactionError`] from validation if the staged batch is
-    /// rejected *before* any mutation. The batch is a single
-    /// [`UiOperation::ReplaceRoot`], which is always structurally valid, so this
-    /// never returns `Err` in practice — the `Result` keeps the validation gate
-    /// honest and total rather than assumed.
+    #[doc = include_str!("reconcile_enactor.doc/commit_root.md")]
     pub fn commit_root(
         &mut self,
         reconciler: &Reconciler,
@@ -137,26 +73,7 @@ impl ReconcileEnactor {
         ))
     }
 
-    /// Enacts a **subtree** reconcile — one mounted component's freshly rendered
-    /// output into its own children — through the same commit boundary, and
-    /// returns the committed record plus the structural deltas.
-    ///
-    /// This is the [`UiOperation::Rerender`] counterpart of
-    /// [`commit_root`](Self::commit_root): where a root replacement restates the
-    /// whole desired tree, a rerender restates exactly one component's output.
-    /// The tree below `node` is the only thing that can change, so a component
-    /// whose local state advanced costs its own subtree rather than the document.
-    ///
-    /// Version semantics match `commit_root` exactly: an idempotent rerender —
-    /// a component that re-rendered to the same output — commits empty and leaves
-    /// the stamp untouched, so a caller can tell a real change from a no-op.
-    ///
-    /// # Errors
-    ///
-    /// Returns the [`TransactionError`] from validation if the staged batch is
-    /// rejected *before* any mutation. A single [`UiOperation::Rerender`] is
-    /// always structurally valid, so this does not return `Err` in practice; the
-    /// `Result` keeps the validation gate total rather than assumed.
+    #[doc = include_str!("reconcile_enactor.doc/commit_subtree.md")]
     pub fn commit_subtree(
         &mut self,
         reconciler: &Reconciler,

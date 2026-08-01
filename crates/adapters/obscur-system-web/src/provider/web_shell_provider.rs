@@ -1,29 +1,13 @@
-//! A web [`ShellProvider`] that opens targets via `window.open` (spec §6.11).
-//!
-//! [`WebShellProvider`] implements the pure
-//! [`ShellProvider`](obscur_system::shell::ShellProvider) port in the browser by
-//! calling [`Window::open_with_url`](web_sys::Window::open_with_url). The open is
-//! best-effort: a browser may block the pop-up (for example when the call is not
-//! made in direct response to a user gesture), in which case `open` returns no
-//! window handle and this provider reports [`ShellResult::Failed`].
-//!
-//! The `window.open` binding only exists on `wasm32`; on any other target the
-//! provider reports [`ShellResult::Unsupported`] and [`Self::can_open`] is
-//! `false`, so the crate stays honest on the default host build.
+#![doc = include_str!("web_shell_provider.doc/_module.md")]
 
 use obscur_system::shell::{ShellProvider, ShellResult, ShellTarget};
 
-/// A web [`ShellProvider`] backed by `window.open` (spec §6.11).
-///
-/// The provider is stateless: it forwards each target to the browser's
-/// `window.open`. Because pop-ups may be blocked by the browser unless the call
-/// originates from a user gesture, a successful spawn is not guaranteed — a
-/// blocked open is reported as [`ShellResult::Failed`].
+#[doc = include_str!("web_shell_provider.doc/WebShellProvider.md")]
 #[derive(Debug, Clone, Default)]
 pub struct WebShellProvider;
 
 impl WebShellProvider {
-    /// Creates a web shell provider (spec §6.11).
+    #[doc = include_str!("web_shell_provider.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
@@ -65,11 +49,7 @@ impl ShellProvider for WebShellProvider {
     }
 }
 
-/// Extracts the string handed to `window.open` for `target` (spec §6.11).
-///
-/// A [`ShellTarget::Uri`] contributes the URI, a [`ShellTarget::Document`] its
-/// opaque token, and a [`ShellTarget::File`] its advisory path hint when present,
-/// falling back to the handle token otherwise — mirroring the Linux adapter.
+#[doc = include_str!("web_shell_provider.doc/target_url.md")]
 #[cfg(target_arch = "wasm32")]
 fn target_url(target: &ShellTarget) -> String {
     match target {

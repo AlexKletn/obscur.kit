@@ -1,61 +1,32 @@
-//! `ErasedComponent`: calling a typed [`Component`] from behind a `dyn` handle.
+#![doc = include_str!("erased_component.doc/_module.md")]
 
 use crate::boundary::ErrorBoundaryPolicy;
 use crate::component::{Component, ComponentContext, FromProps, PropsError};
 use crate::lifecycle::{MountContext, UnmountContext, UpdateContext};
 use crate::view::{View, ViewProperty};
 
-/// The object-safe face of a [`Component`], so a runtime can hold many
-/// differently-typed components behind one handle and render them (spec §2.1,
-/// §2.14).
-///
-/// [`Component`] is deliberately **not** object-safe: it has an associated
-/// `Props` type, which is the whole point — props stay strongly typed. That
-/// leaves a gap the runtime cannot cross on its own, because a retained node
-/// carries only an untyped `&[ViewProperty]`. This trait is the crossing, and it
-/// is the *only* place the erasure happens.
-///
-/// # You do not implement this
-///
-/// There is a blanket impl for every `C: Component` whose `C::Props: FromProps`,
-/// so deriving `Contract` on the props struct is enough to make a component
-/// erasable. The blanket impl decodes the properties into `C::Props` and then
-/// calls the author's own typed [`render`](Component::render) — the component
-/// never sees an untyped value, and the runtime never sees a typed one.
-///
-/// # Where local state lives
-///
-/// Nowhere here. A component owns its [`LocalState`](crate::state::LocalState)
-/// as plain fields on `Self`, so keeping the same erased value alive across
-/// frames is exactly what preserves that state; there is no store to consult and
-/// the runtime never reaches in (spec §2.1, §3.1).
+#[doc = include_str!("erased_component.doc/ErasedComponent.md")]
 pub trait ErasedComponent {
-    /// Decodes `props` into the component's typed props and renders it.
-    ///
-    /// # Errors
-    ///
-    /// Returns the [`PropsError`] from decoding when the node's properties do not
-    /// satisfy the component's typed props. Render itself cannot fail — a
-    /// component that wants to signal failure does so through its error boundary.
+    #[doc = include_str!("erased_component.doc/render_erased.md")]
     fn render_erased(
         &mut self,
         ctx: &mut ComponentContext<'_>,
         props: &[ViewProperty],
     ) -> Result<View, PropsError>;
 
-    /// Runs the component's [`on_mount`](Component::on_mount) hook.
+    #[doc = include_str!("erased_component.doc/on_mount_erased.md")]
     fn on_mount_erased(&mut self, ctx: &mut MountContext<'_, '_>);
 
-    /// Runs the component's [`on_update`](Component::on_update) hook.
+    #[doc = include_str!("erased_component.doc/on_update_erased.md")]
     fn on_update_erased(&mut self, ctx: &mut UpdateContext<'_, '_>);
 
-    /// Runs the component's [`on_unmount`](Component::on_unmount) hook.
+    #[doc = include_str!("erased_component.doc/on_unmount_erased.md")]
     fn on_unmount_erased(&mut self, ctx: &mut UnmountContext<'_, '_>);
 
-    /// The component's [`error_boundary`](Component::error_boundary) policy.
+    #[doc = include_str!("erased_component.doc/error_boundary_erased.md")]
     fn error_boundary_erased(&self) -> ErrorBoundaryPolicy;
 
-    /// The component's [`fallback`](Component::fallback) UI.
+    #[doc = include_str!("erased_component.doc/fallback_erased.md")]
     fn fallback_erased(&self) -> Option<View>;
 }
 

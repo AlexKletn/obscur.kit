@@ -1,4 +1,4 @@
-//! A backend-agnostic caching decorator for the [`TextShaper`] port (spec §5.10).
+#![doc = include_str!("caching_shaper.doc/_module.md")]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -7,15 +7,7 @@ use crate::font::{FontAttributes, FontFamily};
 use crate::shaping::face_source_key::FaceSourceKey;
 use crate::shaping::{GlyphRun, LineMetrics, ShapingRequest, TextDirection, TextShaper};
 
-/// The full cache key: everything a [`ShapingRequest`] carries that can change
-/// the shaped output.
-///
-/// The `f32` font size is stored via [`f32::to_bits`] so the key can derive
-/// `Eq` and `Hash` (a raw `f32` cannot). Face identity is captured by family,
-/// attributes, and the cheap [`FaceSourceKey`]; text, direction, and the
-/// optional language hint round it out. Two requests with the same key produce
-/// byte-identical shaped runs, and any observable difference lands in a
-/// different bucket.
+#[doc = include_str!("caching_shaper.doc/ShapeKey.md")]
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct ShapeKey {
     text: Box<str>,
@@ -28,8 +20,7 @@ struct ShapeKey {
 }
 
 impl ShapeKey {
-    /// Extracts a key from a [`ShapingRequest`], cloning only cheap owned data
-    /// (never the font bytes).
+    #[doc = include_str!("caching_shaper.doc/from_request.md")]
     fn from_request(request: &ShapingRequest) -> Self {
         let face = request.face();
         Self {
@@ -44,56 +35,27 @@ impl ShapeKey {
     }
 }
 
-/// A caching decorator that memoizes [`shape`](TextShaper::shape) results for an
-/// inner [`TextShaper`] (spec §5.10).
-///
-/// The runtime shapes each text node up to three times per frame — once to
-/// **measure**, once to **arrange**, and once to **compose** — and re-shapes
-/// every frame even when nothing changed. Wrapping the active shaper in a
-/// `CachingShaper` collapses all of that to a **single** call to the inner
-/// engine per unique request: the first `shape` for a given text/size/face
-/// invokes the inner shaper and stores the [`GlyphRun`]; every later identical
-/// request (this frame or a future one) returns a clone of the cached run. The
-/// output is byte-identical to shaping without the cache — this is a pure
-/// performance change.
-///
-/// [`can_shape`](TextShaper::can_shape) and [`line_metrics`](TextShaper::line_metrics)
-/// delegate straight to the inner shaper (both are cheap; only shaping is
-/// cached).
-///
-/// The cache is single-threaded interior state (`RefCell`): the runtime shapes
-/// on one thread, and `Box<dyn TextShaper>` carries no `Send`/`Sync` bound.
-///
-/// # Bound
-///
-/// The cache holds at most [`MAX_ENTRIES`](Self::MAX_ENTRIES) runs. When a new
-/// entry would exceed the cap the whole map is cleared before inserting — a
-/// simple, deterministic, occasional flush that keeps memory bounded without an
-/// eviction-order dependency (headless output never observes iteration order,
-/// only the single returned value).
+#[doc = include_str!("caching_shaper.doc/CachingShaper.md")]
 pub struct CachingShaper {
-    /// The wrapped shaper doing the real work on a cache miss.
+    #[doc = include_str!("caching_shaper.doc/inner.md")]
     inner: Box<dyn TextShaper>,
-    /// Memoized shaped runs, keyed by every input that affects the output.
+    #[doc = include_str!("caching_shaper.doc/cache.md")]
     cache: RefCell<HashMap<ShapeKey, GlyphRun>>,
-    /// The maximum number of cached runs before a flush.
+    #[doc = include_str!("caching_shaper.doc/capacity.md")]
     capacity: usize,
 }
 
 impl CachingShaper {
-    /// The default cache capacity: the number of distinct shaped runs kept
-    /// before the cache is flushed.
+    #[doc = include_str!("caching_shaper.doc/MAX_ENTRIES.md")]
     pub const MAX_ENTRIES: usize = 1024;
 
-    /// Wraps `inner` in a cache with the default capacity
-    /// ([`MAX_ENTRIES`](Self::MAX_ENTRIES)).
+    #[doc = include_str!("caching_shaper.doc/new.md")]
     #[must_use]
     pub fn new(inner: Box<dyn TextShaper>) -> Self {
         Self::with_capacity(inner, Self::MAX_ENTRIES)
     }
 
-    /// Wraps `inner` in a cache holding at most `capacity` runs (a `capacity` of
-    /// zero is treated as one, so a single entry can always be cached).
+    #[doc = include_str!("caching_shaper.doc/with_capacity.md")]
     #[must_use]
     pub fn with_capacity(inner: Box<dyn TextShaper>, capacity: usize) -> Self {
         Self {
@@ -103,13 +65,13 @@ impl CachingShaper {
         }
     }
 
-    /// Returns the number of currently cached runs (for tests and diagnostics).
+    #[doc = include_str!("caching_shaper.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.cache.borrow().len()
     }
 
-    /// Returns whether the cache currently holds no runs.
+    #[doc = include_str!("caching_shaper.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.cache.borrow().is_empty()

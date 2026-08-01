@@ -1,23 +1,4 @@
-//! `WireCodec`: a std-only byte codec for the DevTools wire envelopes, and its
-//! colocated [`WireError`] (spec §7.6 local socket transport).
-//!
-//! The protocol messages ([`ServerBound`]/[`ClientBound`]) are ordinary Rust
-//! values with no serialization of their own; the in-process
-//! [`LocalTransport`](crate::transport::LocalTransport) simply moves them
-//! between queues. To carry the *same* messages over a real kernel socket this
-//! codec turns them into bytes, mirroring the deterministic little-endian layout
-//! the kit uses elsewhere (see `obscur-ui-ir`'s codec):
-//!
-//! - All multi-byte integers are **little-endian** (`to_le_bytes`).
-//! - Enums are tagged with a leading `u8` discriminant.
-//! - Strings are a `u32` byte-length prefix followed by their UTF-8 bytes.
-//! - `ScopeSet` is a single `u8` bitset assembled through the public
-//!   `contains`/`with` API (bit0 `Read`, bit1 `Subscribe`, bit2 `Control`,
-//!   bit3 `Inject`).
-//!
-//! The codec produces the raw message body only; frame delimitation (the
-//! length prefix) is added by [`SocketStream`](crate::transport::SocketStream).
-//! Decode is the exact inverse of encode, so `decode(encode(m)) == m`.
+#![doc = include_str!("wire_codec.doc/_module.md")]
 
 use core::fmt;
 
@@ -31,20 +12,14 @@ use obscur_devtools_protocol::message::{
 
 use crate::transport::{ClientBound, ServerBound};
 
-/// A fault encountered while decoding a DevTools wire envelope (spec §7.6).
-///
-/// The variants name the ways a byte buffer can fail to be a well-formed
-/// message: a truncated buffer, a string that is not UTF-8, or an unknown
-/// discriminant tag. The socket driver maps every one of these to a
-/// [`ProtocolError::MalformedMessage`] on the wire (spec §7.7).
+#[doc = include_str!("wire_codec.doc/WireError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireError {
-    /// The buffer ended before a value that was expected could be read.
+    #[doc = include_str!("wire_codec.doc/UnexpectedEof.md")]
     UnexpectedEof,
-    /// A length-prefixed string held bytes that were not valid UTF-8.
+    #[doc = include_str!("wire_codec.doc/InvalidUtf8.md")]
     InvalidUtf8,
-    /// A discriminant tag fell outside the range known for its position; the
-    /// payload is the unknown tag.
+    #[doc = include_str!("wire_codec.doc/UnknownTag.md")]
     UnknownTag(u8),
 }
 
@@ -66,17 +41,12 @@ impl From<WireError> for ProtocolError {
     }
 }
 
-/// A stateless byte codec for the DevTools wire envelopes (spec §7.6).
-///
-/// Every method is independent; the codec holds no state. It encodes and decodes
-/// exactly the two directions the transport carries — [`ServerBound`] toward the
-/// server and [`ClientBound`] toward the client — in the layout documented at
-/// the [module level](self).
+#[doc = include_str!("wire_codec.doc/WireCodec.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct WireCodec;
 
 impl WireCodec {
-    /// Encodes a client→server envelope into a fresh byte buffer.
+    #[doc = include_str!("wire_codec.doc/encode_server_bound.md")]
     #[must_use]
     pub fn encode_server_bound(message: &ServerBound) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -93,13 +63,7 @@ impl WireCodec {
         buf
     }
 
-    /// Decodes a client→server envelope, reversing
-    /// [`encode_server_bound`](Self::encode_server_bound).
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WireError`] when the buffer is truncated, holds invalid
-    /// UTF-8, or carries an unknown discriminant tag.
+    #[doc = include_str!("wire_codec.doc/decode_server_bound.md")]
     pub fn decode_server_bound(bytes: &[u8]) -> Result<ServerBound, WireError> {
         let mut cursor = Cursor::new(bytes);
         let out = match cursor.read_u8()? {
@@ -110,7 +74,7 @@ impl WireCodec {
         Ok(out)
     }
 
-    /// Encodes a server→client envelope into a fresh byte buffer.
+    #[doc = include_str!("wire_codec.doc/encode_client_bound.md")]
     #[must_use]
     pub fn encode_client_bound(message: &ClientBound) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -143,13 +107,7 @@ impl WireCodec {
         buf
     }
 
-    /// Decodes a server→client envelope, reversing
-    /// [`encode_client_bound`](Self::encode_client_bound).
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WireError`] when the buffer is truncated, holds invalid
-    /// UTF-8, or carries an unknown discriminant tag.
+    #[doc = include_str!("wire_codec.doc/decode_client_bound.md")]
     pub fn decode_client_bound(bytes: &[u8]) -> Result<ClientBound, WireError> {
         let mut cursor = Cursor::new(bytes);
         let out = match cursor.read_u8()? {
@@ -472,7 +430,7 @@ fn read_version_range(cursor: &mut Cursor<'_>) -> Result<VersionRange, WireError
     Ok(VersionRange::new(min, max))
 }
 
-/// Encodes a scope set as a single `u8` bitset via the public `contains` API.
+#[doc = include_str!("wire_codec.doc/push_scope_set.md")]
 fn push_scope_set(buf: &mut Vec<u8>, scopes: ScopeSet) {
     let mut bits = 0u8;
     for (bit, scope) in scope_bits() {
@@ -483,7 +441,7 @@ fn push_scope_set(buf: &mut Vec<u8>, scopes: ScopeSet) {
     push_u8(buf, bits);
 }
 
-/// Rebuilds a scope set from its `u8` bitset via the public `with` API.
+#[doc = include_str!("wire_codec.doc/read_scope_set.md")]
 fn read_scope_set(cursor: &mut Cursor<'_>) -> Result<ScopeSet, WireError> {
     let bits = cursor.read_u8()?;
     let mut set = ScopeSet::empty();
@@ -636,8 +594,7 @@ fn push_str(buf: &mut Vec<u8>, value: &str) {
 
 // --- Reading cursor --------------------------------------------------------
 
-/// A bounds-checked reading cursor over a byte slice. Every read advances past
-/// the bytes consumed and maps a short read to [`WireError::UnexpectedEof`].
+#[doc = include_str!("wire_codec.doc/Cursor.md")]
 struct Cursor<'a> {
     data: &'a [u8],
     pos: usize,

@@ -1,4 +1,4 @@
-//! Display module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod display;
 pub use display::{Display, DisplayId};
 mod display_color_capability;

@@ -1,25 +1,18 @@
-//! The [`CommandState`] dynamic runtime state of a command (spec §6.7).
+#![doc = include_str!("command_state.doc/_module.md")]
 
-/// The dynamic runtime state of a command (spec §6.7).
-///
-/// A [`Command`](crate::command::Command) is a static descriptor; its live state
-/// changes as the application runs. `CommandState` carries that mutable part:
-/// whether the command is currently `enabled`, whether it is a toggle and if so
-/// `checked`, and whether it is `visible`. The default state is a live command:
-/// enabled, not checkable, and visible.
+#[doc = include_str!("command_state.doc/CommandState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandState {
-    /// Whether the command can currently be invoked.
+    #[doc = include_str!("command_state.doc/enabled.md")]
     enabled: bool,
-    /// The toggle state: `None` if the command is not checkable, `Some(true)` if
-    /// checked, `Some(false)` if an unchecked toggle.
+    #[doc = include_str!("command_state.doc/checked.md")]
     checked: Option<bool>,
-    /// Whether the command is shown in its surfaces.
+    #[doc = include_str!("command_state.doc/visible.md")]
     visible: bool,
 }
 
 impl CommandState {
-    /// Creates the default live state: enabled, not checkable, and visible.
+    #[doc = include_str!("command_state.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -29,53 +22,52 @@ impl CommandState {
         }
     }
 
-    /// Returns this state with its `enabled` flag set.
+    #[doc = include_str!("command_state.doc/enabled_2.md")]
     #[must_use]
     pub const fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
     }
 
-    /// Returns this state with its `checked` toggle set (`None` = not
-    /// checkable).
+    #[doc = include_str!("command_state.doc/with_checked.md")]
     #[must_use]
     pub const fn with_checked(mut self, checked: Option<bool>) -> Self {
         self.checked = checked;
         self
     }
 
-    /// Returns this state with its `visible` flag set.
+    #[doc = include_str!("command_state.doc/visible_2.md")]
     #[must_use]
     pub const fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
     }
 
-    /// Returns whether the command can currently be invoked.
+    #[doc = include_str!("command_state.doc/is_enabled.md")]
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Returns the toggle state: `None` if not checkable, else `Some`.
+    #[doc = include_str!("command_state.doc/checked_2.md")]
     #[must_use]
     pub const fn checked(&self) -> Option<bool> {
         self.checked
     }
 
-    /// Returns whether the command is shown in its surfaces.
+    #[doc = include_str!("command_state.doc/is_visible.md")]
     #[must_use]
     pub const fn is_visible(&self) -> bool {
         self.visible
     }
 
-    /// Returns whether the command is actionable right now: enabled and visible.
+    #[doc = include_str!("command_state.doc/is_actionable.md")]
     #[must_use]
     pub const fn is_actionable(&self) -> bool {
         self.enabled && self.visible
     }
 
-    /// Returns whether the command is a checked toggle (`checked == Some(true)`).
+    #[doc = include_str!("command_state.doc/is_checked.md")]
     #[must_use]
     pub const fn is_checked(&self) -> bool {
         matches!(self.checked, Some(true))
@@ -83,7 +75,7 @@ impl CommandState {
 }
 
 impl Default for CommandState {
-    /// The default live state: enabled, not checkable, and visible.
+    #[doc = include_str!("command_state.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }

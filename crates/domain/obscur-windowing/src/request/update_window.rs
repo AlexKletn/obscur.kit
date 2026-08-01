@@ -1,51 +1,36 @@
-//! A delta of dynamic property changes for an existing window (spec §6.2).
+#![doc = include_str!("update_window.doc/_module.md")]
 
 use obscur_geometry::{Point, Size};
 use obscur_identity::WindowId;
 
 use crate::window::{WindowProperties, WindowState};
 
-/// A delta of property changes to apply to an existing window (spec §6.2).
-///
-/// Spec §6.2 makes window properties dynamically mutable. An `UpdateWindow`
-/// carries only the changes an application wants to make: every property is an
-/// `Option`, and a `None` field means "leave this property unchanged". Applying
-/// the delta with [`UpdateWindow::apply`] writes only the fields that are set.
-///
-/// The [`UpdateWindow::position`] field is two-level to distinguish "do not
-/// touch the position" from "clear the explicit position and let the platform
-/// choose": the outer `None` leaves the position unchanged, while an outer
-/// `Some(None)` clears it to a platform-chosen position (matching
-/// [`WindowProperties::position`]).
+#[doc = include_str!("update_window.doc/UpdateWindow.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateWindow {
-    /// The window this delta applies to.
+    #[doc = include_str!("update_window.doc/target.md")]
     target: WindowId,
-    /// A new title, or `None` to leave the title unchanged.
+    #[doc = include_str!("update_window.doc/title.md")]
     title: Option<Box<str>>,
-    /// A new size, or `None` to leave the size unchanged.
+    #[doc = include_str!("update_window.doc/size.md")]
     size: Option<Size>,
-    /// A change to the position: outer `None` leaves it unchanged; `Some(Some)`
-    /// sets an explicit position; `Some(None)` clears it to platform-chosen.
-    ///
-    /// The nested option is intentional: all three cases are meaningful, so it
-    /// cannot collapse to a single [`Option`].
+    #[doc = include_str!("update_window.doc/position.md")]
     #[allow(clippy::option_option)]
     position: Option<Option<Point>>,
-    /// A new presentation state, or `None` to leave the state unchanged.
+    #[doc = include_str!("update_window.doc/state.md")]
     state: Option<WindowState>,
-    /// A new resizable flag, or `None` to leave it unchanged.
+    #[doc = include_str!("update_window.doc/resizable.md")]
     resizable: Option<bool>,
-    /// A new decorated flag, or `None` to leave it unchanged.
+    #[doc = include_str!("update_window.doc/decorated.md")]
     decorated: Option<bool>,
-    /// A new always-on-top flag, or `None` to leave it unchanged.
+    #[doc = include_str!("update_window.doc/always_on_top.md")]
     always_on_top: Option<bool>,
-    /// A new transparent flag, or `None` to leave it unchanged.
+    #[doc = include_str!("update_window.doc/transparent.md")]
     transparent: Option<bool>,
 }
 
 impl UpdateWindow {
-    /// Creates an empty delta targeting `target` with no changes requested.
+    #[doc = include_str!("update_window.doc/new.md")]
     #[must_use]
     pub const fn new(target: WindowId) -> Self {
         Self {
@@ -61,82 +46,75 @@ impl UpdateWindow {
         }
     }
 
-    /// Returns the window this delta targets.
+    #[doc = include_str!("update_window.doc/target_2.md")]
     #[must_use]
     pub const fn target(&self) -> WindowId {
         self.target
     }
 
-    /// Sets a new title, returning the updated delta.
+    #[doc = include_str!("update_window.doc/set_title.md")]
     #[must_use]
     pub fn set_title(mut self, title: impl Into<Box<str>>) -> Self {
         self.title = Some(title.into());
         self
     }
 
-    /// Sets a new size, returning the updated delta.
+    #[doc = include_str!("update_window.doc/set_size.md")]
     #[must_use]
     pub fn set_size(mut self, size: Size) -> Self {
         self.size = Some(size);
         self
     }
 
-    /// Sets a position change, returning the updated delta.
-    ///
-    /// Pass `Some(point)` to request an explicit position, or `None` to clear
-    /// the position to a platform-chosen one. Either way the position field is
-    /// marked as changed; leaving it unchanged means not calling this setter.
+    #[doc = include_str!("update_window.doc/set_position.md")]
     #[must_use]
     pub fn set_position(mut self, position: Option<Point>) -> Self {
         self.position = Some(position);
         self
     }
 
-    /// Sets a new presentation state, returning the updated delta.
+    #[doc = include_str!("update_window.doc/set_state.md")]
     #[must_use]
     pub fn set_state(mut self, state: WindowState) -> Self {
         self.state = Some(state);
         self
     }
 
-    /// Sets a new resizable flag, returning the updated delta.
+    #[doc = include_str!("update_window.doc/set_resizable.md")]
     #[must_use]
     pub fn set_resizable(mut self, resizable: bool) -> Self {
         self.resizable = Some(resizable);
         self
     }
 
-    /// Sets a new decorated flag, returning the updated delta.
+    #[doc = include_str!("update_window.doc/set_decorated.md")]
     #[must_use]
     pub fn set_decorated(mut self, decorated: bool) -> Self {
         self.decorated = Some(decorated);
         self
     }
 
-    /// Sets a new always-on-top flag, returning the updated delta.
+    #[doc = include_str!("update_window.doc/set_always_on_top.md")]
     #[must_use]
     pub fn set_always_on_top(mut self, always_on_top: bool) -> Self {
         self.always_on_top = Some(always_on_top);
         self
     }
 
-    /// Returns the requested always-on-top change, if any.
-    ///
-    /// A backend inspects this to decide whether the delta touches a property it
-    /// cannot service (§6.2): keeping a window above others needs a compositor.
+    #[doc = include_str!("update_window.doc/always_on_top_2.md")]
     #[must_use]
     pub const fn always_on_top(&self) -> Option<bool> {
         self.always_on_top
     }
 
-    /// Sets a new transparent flag, returning the updated delta.
+    #[doc = include_str!("update_window.doc/set_transparent.md")]
     #[must_use]
     pub fn set_transparent(mut self, transparent: bool) -> Self {
         self.transparent = Some(transparent);
         self
     }
 
-    /// Returns whether this delta requests no changes at all.
+    #[doc = include_str!("update_window.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.title.is_none()
@@ -149,11 +127,7 @@ impl UpdateWindow {
             && self.transparent.is_none()
     }
 
-    /// Applies this delta to `props`, writing only the fields that are set.
-    ///
-    /// Unchanged (`None`) fields are left as-is. For the position, an outer
-    /// `Some(inner)` overwrites [`WindowProperties::position`] with `inner`
-    /// (an explicit point or a platform-chosen `None`).
+    #[doc = include_str!("update_window.doc/apply.md")]
     pub fn apply(&self, props: &mut WindowProperties) {
         if let Some(title) = &self.title {
             props.title = title.clone();

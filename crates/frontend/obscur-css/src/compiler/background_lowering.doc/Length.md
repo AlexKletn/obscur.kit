@@ -1,0 +1,1 @@
+An explicit `<length-percentage>`.

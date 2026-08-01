@@ -1,9 +1,4 @@
-//! **SPECIFICATION-DERIVED** diagnostics-endpoint security cases for obscur.kit
-//! §7.7.
-//!
-//! Written by an agent reading obscur.kit §7.7 with **no access to this
-//! repository's source**. Every quoted bullet appears in the doc comment of the
-//! test that encodes it.
+#![doc = include_str!("spec_ch7_endpoint_security.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::net::TcpStream;
@@ -35,8 +30,7 @@ fn connect(endpoint: &mut DevToolsEndpoint<NullInspectSource>) -> HandshakeRespo
     ))
 }
 
-/// §7.7, verbatim: "The diagnostics endpoint:" / "- is disabled by default;" /
-/// "- is local-only unless explicitly configured;".
+#[doc = include_str!("spec_ch7_endpoint_security.doc/the_endpoint_is_disabled_by_default_and_binds_only_loopback.md")]
 #[test]
 fn the_endpoint_is_disabled_by_default_and_binds_only_loopback() {
     // Default configuration, in a debug build: nothing is listening.
@@ -89,8 +83,7 @@ fn the_endpoint_is_disabled_by_default_and_binds_only_loopback() {
     // property the clause states.)
 }
 
-/// §7.7, verbatim: "- separates read, subscribe, control and event-injection
-/// permissions;".
+#[doc = include_str!("spec_ch7_endpoint_security.doc/read_alone_grants_neither_subscribe_nor_control_nor_injection.md")]
 #[test]
 fn read_alone_grants_neither_subscribe_nor_control_nor_injection() {
     let queue = InjectionQueue::new();
@@ -156,8 +149,7 @@ fn read_alone_grants_neither_subscribe_nor_control_nor_injection() {
     );
 }
 
-/// §7.7: "- authenticates with token/capability;" and "- supports protocol
-/// version negotiation;".
+#[doc = include_str!("spec_ch7_endpoint_security.doc/nothing_is_served_before_authentication_and_a_bad_version_is_typed.md")]
 #[test]
 fn nothing_is_served_before_authentication_and_a_bad_version_is_typed() {
     // (i) A tree-fetch with no token presented transmits no tree.
@@ -209,33 +201,7 @@ fn nothing_is_served_before_authentication_and_a_bad_version_is_typed() {
     );
 }
 
-/// §7.7, verbatim: "- enforces message/subscription limits;" and "- audits
-/// dangerous operations;".
-///
-/// WEAKENED 2026-07-19, subscription-limit half only. It opened
-/// `SUBSCRIPTION_LIMIT` subscriptions expecting each to be granted and the next
-/// to be a typed `LimitExceeded`. Every subscription was denied instead, and
-/// that denial is deliberate and documented: endpoint.rs:252-262 refuses a
-/// `Subscribe` while `!self.event_push`, because "a grant is a promise to
-/// deliver" and this session is request/reply only until a pushing loop marks
-/// itself serviced. The case built exactly that environment and then asserted
-/// against it.
-///
-/// It could not have built any other. `mark_event_push_serviced` is
-/// `pub(crate)`, so no consumer outside `obscur-devtools-server` can put an
-/// endpoint into the state where a subscription is grantable — which means
-/// §7.7's "- enforces message/subscription limits;" has NO route to a test
-/// through the public API. That is recorded as a finding here, not fixed:
-/// implementation files are out of scope for this pass.
-///
-/// What replaces it is the §7.7-adjacent property the same code path does
-/// expose, and it discriminates: an endpoint must not hand back a grant it has
-/// no way to honour, and refusing must cost neither the connection nor an audit
-/// entry. The "- audits dangerous operations;" half below is untouched.
-///
-/// Candidate spec amendment: say whether a subscription may be granted before a
-/// delivery path exists, and expose whatever state gates that so the limit is
-/// reachable from a conformance test.
+#[doc = include_str!("spec_ch7_endpoint_security.doc/limits_are_enforced_without_collateral_and_dangerous_operations_are_audited.md")]
 #[test]
 fn limits_are_enforced_without_collateral_and_dangerous_operations_are_audited() {
     let queue = InjectionQueue::new();

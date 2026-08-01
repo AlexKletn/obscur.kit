@@ -1,87 +1,61 @@
-//! The vocabulary of editing operations submitted to the engine (spec §5.11).
+#![doc = include_str!("edit_command.doc/_module.md")]
 
 use crate::selection::TextSelection;
 use crate::span::TextRange;
 
 use super::{DeletionUnit, NavigationUnit};
 
-/// The direction an edit operation travels relative to the caret (spec §5.11).
-///
-/// Distinguishes the two halves of the symmetric editing keys — Backspace vs
-/// Delete, Left vs Right — so a single [`DeletionUnit`] or [`NavigationUnit`]
-/// serves both.
+#[doc = include_str!("edit_command.doc/EditDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EditDirection {
-    /// Toward the start of the buffer (left / up / Backspace).
+    #[doc = include_str!("edit_command.doc/Backward.md")]
     Backward,
-    /// Toward the end of the buffer (right / down / Delete).
+    #[doc = include_str!("edit_command.doc/Forward.md")]
     Forward,
 }
 
-/// A single editing operation submitted to the editing engine (spec §5.11
-/// editing engine).
-///
-/// [`EditCommand`] is the engine's input vocabulary: a platform keymap resolves
-/// key chords, clipboard actions, and IME events into these commands, which the
-/// engine applies to the buffer and selection. The command names *what* to do;
-/// resolving it against the current text and selection — and producing the
-/// invertible [`EditTransaction`](crate::editing::EditTransaction) — is the
-/// engine's job, not the command's.
+#[doc = include_str!("edit_command.doc/EditCommand.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
-    /// Insert text at the caret, replacing the current selection if it is
-    /// non-empty (typing, IME commit of simple text, or programmatic insert).
+    #[doc = include_str!("edit_command.doc/Insert.md")]
     Insert(Box<str>),
-    /// Delete `unit` worth of text in `direction` from the caret, or the
-    /// selection if one is active (deletion semantics).
+    #[doc = include_str!("edit_command.doc/Delete.md")]
     Delete {
-        /// How much text to remove.
+        #[doc = include_str!("edit_command.doc/unit.md")]
         unit: DeletionUnit,
-        /// Which side of the caret to remove it from.
+        #[doc = include_str!("edit_command.doc/direction.md")]
         direction: EditDirection,
     },
-    /// Move the caret by one `unit` in `direction`. When `extend` is true the
-    /// selection's anchor is kept and only the focus moves (shift-extend);
-    /// otherwise the selection collapses to the moved caret.
+    #[doc = include_str!("edit_command.doc/Move.md")]
     Move {
-        /// The granularity of the movement.
+        #[doc = include_str!("edit_command.doc/unit_2.md")]
         unit: NavigationUnit,
-        /// The direction to move.
+        #[doc = include_str!("edit_command.doc/direction_2.md")]
         direction: EditDirection,
-        /// Whether to extend the selection (shift held) rather than collapse it.
+        #[doc = include_str!("edit_command.doc/extend.md")]
         extend: bool,
     },
-    /// Select the entire document (Ctrl+A / Cmd+A).
+    #[doc = include_str!("edit_command.doc/SelectAll.md")]
     SelectAll,
-    /// Replace the current selection with `selection` outright — used to seat a
-    /// caret from a pointer hit or to restore a saved selection.
+    #[doc = include_str!("edit_command.doc/SetSelection.md")]
     SetSelection(TextSelection),
-    /// Replace an explicit byte `range` with `text`, independent of the current
-    /// caret — used for IME commits over the composition span and for
-    /// programmatic edits.
+    #[doc = include_str!("edit_command.doc/Replace.md")]
     Replace {
-        /// The pre-edit byte range to replace.
+        #[doc = include_str!("edit_command.doc/range.md")]
         range: TextRange,
-        /// The replacement text.
+        #[doc = include_str!("edit_command.doc/text.md")]
         text: Box<str>,
     },
 }
 
 impl EditCommand {
-    /// Creates an [`Insert`](Self::Insert) command from anything convertible into
-    /// a `Box<str>` (`&str`, `String`, `Box<str>`).
+    #[doc = include_str!("edit_command.doc/insert.md")]
     #[must_use]
     pub fn insert(text: impl Into<Box<str>>) -> Self {
         Self::Insert(text.into())
     }
 
-    /// Returns whether applying this command mutates the buffer's text.
-    ///
-    /// [`Insert`](Self::Insert), [`Delete`](Self::Delete), and
-    /// [`Replace`](Self::Replace) change text and therefore produce an
-    /// [`EditTransaction`](crate::editing::EditTransaction);
-    /// [`Move`](Self::Move), [`SelectAll`](Self::SelectAll), and
-    /// [`SetSelection`](Self::SetSelection) only move the selection.
+    #[doc = include_str!("edit_command.doc/is_mutating.md")]
     #[must_use]
     pub const fn is_mutating(&self) -> bool {
         matches!(

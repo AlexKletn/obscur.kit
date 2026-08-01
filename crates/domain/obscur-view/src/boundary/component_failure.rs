@@ -1,33 +1,22 @@
-//! `ComponentFailure`: the structured record of a contained component failure.
+#![doc = include_str!("component_failure.doc/_module.md")]
 
 use obscur_diagnostics::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
 use crate::lifecycle::LifecycleState;
 
-/// A structured record of a failure the runtime detected inside a component
-/// (spec §1.7).
-///
-/// This is *not* panic-catching: native Rust is trusted (spec §1.8), so there
-/// is no `catch_unwind` here. It is the honest, structured value the runtime
-/// produces when it detects a contained failure in view generation,
-/// reconciliation, or a local lifecycle hook — carrying the
-/// [`LifecycleState`] the failure happened in, the retry attempt that produced
-/// it, and a [`Diagnostic`] (subsystem [`DiagnosticSubsystem::View`]) describing
-/// it for diagnostics and `DevTools`.
+#[doc = include_str!("component_failure.doc/ComponentFailure.md")]
 #[derive(Debug, Clone)]
 pub struct ComponentFailure {
-    /// The lifecycle phase the failure occurred in.
+    #[doc = include_str!("component_failure.doc/phase.md")]
     phase: LifecycleState,
-    /// Which retry attempt produced this failure (0 for the first occurrence).
+    #[doc = include_str!("component_failure.doc/attempt.md")]
     attempt: u32,
-    /// The structured diagnostic describing the failure.
+    #[doc = include_str!("component_failure.doc/diagnostic.md")]
     diagnostic: Diagnostic,
 }
 
 impl ComponentFailure {
-    /// Records a failure in `phase` on retry `attempt`, building an `Error`
-    /// [`Diagnostic`] in the [`View`](DiagnosticSubsystem::View) subsystem from
-    /// `code` and `message`.
+    #[doc = include_str!("component_failure.doc/new.md")]
     #[must_use]
     pub fn new(
         phase: LifecycleState,
@@ -48,8 +37,7 @@ impl ComponentFailure {
         }
     }
 
-    /// Records a failure in `phase` on retry `attempt` from an already-built
-    /// [`Diagnostic`].
+    #[doc = include_str!("component_failure.doc/from_diagnostic.md")]
     #[must_use]
     pub fn from_diagnostic(phase: LifecycleState, attempt: u32, diagnostic: Diagnostic) -> Self {
         Self {
@@ -59,19 +47,19 @@ impl ComponentFailure {
         }
     }
 
-    /// The lifecycle phase the failure occurred in.
+    #[doc = include_str!("component_failure.doc/phase_2.md")]
     #[must_use]
     pub const fn phase(&self) -> LifecycleState {
         self.phase
     }
 
-    /// The retry attempt that produced this failure.
+    #[doc = include_str!("component_failure.doc/attempt_2.md")]
     #[must_use]
     pub const fn attempt(&self) -> u32 {
         self.attempt
     }
 
-    /// The structured diagnostic describing the failure.
+    #[doc = include_str!("component_failure.doc/diagnostic_2.md")]
     #[must_use]
     pub const fn diagnostic(&self) -> &Diagnostic {
         &self.diagnostic

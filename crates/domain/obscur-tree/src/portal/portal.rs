@@ -1,4 +1,4 @@
-//! A single portal: content whose logical position stays put but paints elsewhere.
+#![doc = include_str!("portal.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
@@ -7,58 +7,35 @@ use crate::tree::RetainedTree;
 
 use super::PortalTarget;
 
-/// Represents one portal (spec §4.14).
-///
-/// A portal changes where a node is *painted* — its visual parent / stacking
-/// position — while **preserving its logical parent**, and therefore its style
-/// and theme scope. It pairs a **source** node (whose logical position is
-/// unchanged) with a **target** ([`PortalTarget`]) naming the visual
-/// destination host.
-///
-/// # Invariant (spec §4.14)
-///
-/// Applying a portal moves **only** the source node's visual parent to the
-/// target host; its logical parent is left exactly as it was. Because logical
-/// parentage defines style/theme scope, the portalled node keeps inheriting from
-/// its original place in the tree even though it paints under the host.
+#[doc = include_str!("portal.doc/Portal.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Portal {
-    /// The source node whose logical position stays put.
+    #[doc = include_str!("portal.doc/source.md")]
     source: NodeId,
-    /// The visual destination the source is painted into.
+    #[doc = include_str!("portal.doc/target.md")]
     target: PortalTarget,
 }
 
 impl Portal {
-    /// Creates a portal from `source` to the visual destination `target`.
+    #[doc = include_str!("portal.doc/new.md")]
     #[must_use]
     pub const fn new(source: NodeId, target: PortalTarget) -> Self {
         Self { source, target }
     }
 
-    /// Returns the source node whose logical position is preserved.
+    #[doc = include_str!("portal.doc/source_2.md")]
     #[must_use]
     pub const fn source(self) -> NodeId {
         self.source
     }
 
-    /// Returns the visual destination this portal renders into.
+    #[doc = include_str!("portal.doc/target_2.md")]
     #[must_use]
     pub const fn target(self) -> PortalTarget {
         self.target
     }
 
-    /// Enacts the portal on `tree`.
-    ///
-    /// This sets the **source node's visual parent** to the target's host
-    /// ([`VisualParent::of`]), **leaves its logical parent unchanged**
-    /// (preserving style/theme scope, spec §4.14), and flags the **host** node
-    /// with [`NodeFlags::PORTAL_HOST`].
-    ///
-    /// Returns `true` when both the source and the host are live and the portal
-    /// was applied; returns `false` (a no-op) otherwise. It is defensive about
-    /// stale ids: if either endpoint does not resolve to a live node, nothing is
-    /// mutated and `false` is returned, so the call is panic-free.
+    #[doc = include_str!("portal.doc/apply.md")]
     pub fn apply(self, tree: &mut RetainedTree) -> bool {
         let host = self.target.host_node();
         // Both endpoints must be live before mutating anything.

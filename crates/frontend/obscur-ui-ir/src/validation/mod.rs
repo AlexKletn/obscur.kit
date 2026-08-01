@@ -1,7 +1,4 @@
-//! Structural validation of UI IR documents: the [`UiIrValidator`] walks a
-//! document and accumulates [`UiIrValidationError`]s into a
-//! [`UiIrValidationResult`], threading a [`ValidationContext`] for cross-node
-//! state (spec §2.5 validation).
+#![doc = include_str!("mod.doc/_module.md")]
 mod ui_ir_validator;
 pub use ui_ir_validator::UiIrValidator;
 mod validation_context;

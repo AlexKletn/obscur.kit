@@ -1,0 +1,1 @@
+Interned symbol handle.

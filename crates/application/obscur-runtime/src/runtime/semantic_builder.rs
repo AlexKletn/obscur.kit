@@ -1,4 +1,4 @@
-//! Derives the semantic accessibility tree from the retained UI tree (§7.1).
+#![doc = include_str!("semantic_builder.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
@@ -11,31 +11,19 @@ use obscur_tree::node::{NodeFlags, NodeKind, RetainedNode};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
 
-/// The structural state a node's subtree inherits, carried down the walk.
-///
-/// The runtime's behavioural gates are **inherited, not per-node**:
-/// `is_within_disabled` / `is_within_readonly` answer for the node's own
-/// attribute *or any element ancestor's*, and a field counts as editable when
-/// anything in its ancestor chain binds [`EVENT_INPUT`]. Reading only a node's
-/// own attributes here would therefore still publish the opposite of what the
-/// runtime does for a control nested inside a disabled panel, so the same
-/// inheritance is folded down this walk.
+#[doc = include_str!("semantic_builder.doc/InheritedState.md")]
 #[derive(Debug, Clone, Copy, Default)]
 struct InheritedState {
-    /// The node or an ancestor carries `:disabled` — the whole subtree is inert.
+    #[doc = include_str!("semantic_builder.doc/disabled.md")]
     disabled: bool,
-    /// The node or an ancestor carries `readonly` — the subtree's value is
-    /// immutable (but still focusable and selectable).
+    #[doc = include_str!("semantic_builder.doc/readonly.md")]
     readonly: bool,
-    /// The node or an ancestor binds [`EVENT_INPUT`], making it a text field
-    /// whose `EVENT_CHANGE` is a *commit*, not a click activation.
+    #[doc = include_str!("semantic_builder.doc/editable.md")]
     editable: bool,
 }
 
 impl InheritedState {
-    /// Folds `node`'s own structural state into the state it and its subtree
-    /// see. These are the very attributes the CSS matcher reads for
-    /// `:disabled` / `:checked`, so both paths answer from one source.
+    #[doc = include_str!("semantic_builder.doc/extend.md")]
     fn extend(self, node: &RetainedNode) -> Self {
         let attributes = node.attributes();
         Self {
@@ -46,100 +34,12 @@ impl InheritedState {
     }
 }
 
-/// Projects a [`RetainedTree`] into a semantic accessibility tree (spec §7.1).
-///
-/// §7.1 requires accessibility to use "a semantic tree linked to the retained UI
-/// tree". This builder is that link: it walks the live retained tree from its
-/// root and emits one [`SemanticNode`] per retained node — keyed by the very same
-/// [`NodeId`] — deriving each node's [`role`](SemanticRole),
-/// accessible name, and [`state`](SemanticState) from what the retained node
-/// actually carries. It invents no data the tree does not hold.
-///
-/// The mapping is deterministic (`same tree → same semantic tree`) and pure: it
-/// reads the retained tree and produces an owned [`SemanticTree`] / immutable
-/// [`SemanticSnapshot`], leaving the retained tree untouched. The keeps
-/// `obscur-accessibility` free of any dependency on `obscur-tree`.
-///
-/// # Mapping
-///
-/// - [`NodeKind::Root`] → [`SemanticRole::Group`] (the structural grouping root);
-/// - [`NodeKind::Text`] → [`SemanticRole::Text`], with the literal content as the
-///   accessible name and [`SemanticValue::Text`] value;
-/// - [`NodeKind::Synthetic`] → [`SemanticRole::Group`], flagged
-///   [`decorative`](SemanticNode::decorative) (system parts are not exposed as
-///   content);
-/// - [`NodeKind::Element`] → the role named by its CSS *type* / local name (e.g.
-///   `button` → [`SemanticRole::Button`], `text` → [`SemanticRole::Text`]),
-///   defaulting to [`SemanticRole::Group`] when the element carries no
-///   recognised local name. An element's accessible name is drawn from its direct
-///   text children.
-///
-/// # State
-///
-/// A retained node's [`NodeFlags::HIDDEN`] maps to
-/// [`SemanticState::hidden`], and the `focused` node passed to
-/// [`build`](Self::build) is marked [`SemanticState::focused`]; every interactive
-/// role is marked [`SemanticState::focusable`].
-///
-/// [`disabled`](SemanticState::disabled) and [`readonly`](SemanticState::readonly)
-/// are read from the **same** [`StyleAttributes`](obscur_view::view::StyleAttributes)
-/// the CSS matcher consumes for `:disabled` (see
-/// [`TreeElement`](crate::orchestration::TreeElement)) and that the runtime's
-/// `is_within_disabled` / `is_within_readonly` gates consume for interaction —
-/// *including their inheritance*: a control nested inside a disabled panel is
-/// inert to the runtime, and is published disabled here. So a disabled control
-/// is never [`is_actionable`](SemanticState::is_actionable), and the CSS,
-/// interaction and accessibility paths cannot disagree about it.
-/// [`checked`](SemanticState::checked) carries the `:checked` attribute, but only
-/// for a role that is genuinely checkable ([`Checkbox`](SemanticRole::Checkbox) /
-/// [`RadioButton`](SemanticRole::RadioButton)); every other role stays `None`
-/// (not checkable) rather than claiming a two-state it does not have.
-///
-/// # Actions
-///
-/// [`actions`](SemanticNode::actions) are read from a node's **own event
-/// bindings**, never inferred from its role: a bound
-/// [`EVENT_CLICK`] — or a bound [`EVENT_CHANGE`] on a non-editable control, which
-/// is how the runtime resolves a checkbox/radio activation — yields
-/// [`SemanticAction::Activate`], and an actionable node yields
-/// [`SemanticAction::Focus`]. A disabled node offers no actions, because the
-/// runtime fires none for it. This mirrors `UiRuntime::activation_command_for`
-/// for the node itself; unlike that method it does not bubble, since an action
-/// list answers what invoking *this* node does.
-///
-/// # Not derived
-///
-/// The retained tree holds no source for these, so they are deliberately left at
-/// their defaults rather than invented:
-///
-/// - [`bounds`](SemanticNode::bounds): layout output, not tree state — this
-///   builder takes only a [`RetainedTree`] and never sees a layout result;
-/// - [`description`](SemanticNode::description) and
-///   [`relations`](SemanticNode::relations): no `aria-describedby` / `aria-labelledby`
-///   equivalent exists in the reserved attribute set;
-/// - [`selected`](SemanticState::selected), [`busy`](SemanticState::busy),
-///   [`required`](SemanticState::required), [`invalid`](SemanticState::invalid),
-///   [`expanded`](SemanticState::expanded): no reserved attribute carries them.
-///   A node's raw props *do* survive reconciliation — `set_props` stamps the
-///   full list and `RetainedNode::props` hands it back — but only the seven
-///   reserved names (`class` / `id` / `type` / `src` / `disabled` / `checked` /
-///   `readonly`) are extracted into `StyleAttributes`, and no convention
-///   establishes what a prop named `selected` would mean. Deriving these would
-///   be inventing data, not reading it.
-///
-/// A checkbox's *indeterminate* state is likewise not representable: the widget
-/// emits the reserved `checked` attribute only when **definitely** checked, so a
-/// mixed checkbox reads as `Some(false)` here.
+#[doc = include_str!("semantic_builder.doc/SemanticTreeBuilder.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SemanticTreeBuilder;
 
 impl SemanticTreeBuilder {
-    /// Builds a [`SemanticTree`] from `tree`, marking `focused` (if live) as the
-    /// focused node.
-    ///
-    /// Walks from the retained root, preserving child order and the retained
-    /// [`NodeId`] of every node. Returns an empty tree when the retained tree has
-    /// no designated root.
+    #[doc = include_str!("semantic_builder.doc/build.md")]
     #[must_use]
     pub fn build(tree: &RetainedTree, focused: Option<NodeId>) -> SemanticTree {
         let mut semantic = SemanticTree::new();
@@ -162,18 +62,13 @@ impl SemanticTreeBuilder {
         semantic
     }
 
-    /// Builds a [`SemanticTree`] and captures it as an immutable
-    /// [`SemanticSnapshot`] for hand-off to an
-    /// [`AccessibilityBridge`](obscur_accessibility::port::AccessibilityBridge).
+    #[doc = include_str!("semantic_builder.doc/snapshot.md")]
     #[must_use]
     pub fn snapshot(tree: &RetainedTree, focused: Option<NodeId>) -> SemanticSnapshot {
         SemanticSnapshot::from_tree(&Self::build(tree, focused))
     }
 
-    /// Recursively inserts `id` and its descendants into `semantic`, linking each
-    /// under `parent` and folding `id`'s own structural state into the
-    /// `inherited` state its subtree sees. The `visited` set guards against a
-    /// malformed (cyclic) retained tree by inserting each node at most once.
+    #[doc = include_str!("semantic_builder.doc/walk.md")]
     fn walk(
         tree: &RetainedTree,
         id: NodeId,
@@ -199,10 +94,7 @@ impl SemanticTreeBuilder {
         }
     }
 
-    /// Maps a single retained `node` (identified by `id`) to its
-    /// [`SemanticNode`], deriving role, accessible name, value, state and actions
-    /// from the node's kind, attributes, event bindings and flags, plus the
-    /// `inherited` structural state of its ancestors.
+    #[doc = include_str!("semantic_builder.doc/map_node.md")]
     fn map_node(
         tree: &RetainedTree,
         id: NodeId,
@@ -244,21 +136,13 @@ impl SemanticTreeBuilder {
         semantic
     }
 
-    /// The [`checked`](SemanticState::checked) tri-state for `node`: the same
-    /// `:checked` attribute the CSS matcher reads, but reported only for a role
-    /// that is genuinely checkable — a `None` here means "not checkable", which
-    /// would be a lie for a button, so a non-checkable role never claims a
-    /// two-state at all.
+    #[doc = include_str!("semantic_builder.doc/checked_state.md")]
     fn checked_state(role: SemanticRole, node: &RetainedNode) -> Option<bool> {
         matches!(role, SemanticRole::Checkbox | SemanticRole::RadioButton)
             .then(|| node.attributes().is_checked())
     }
 
-    /// The actions `node` genuinely supports, read from its own event bindings.
-    ///
-    /// A disabled node reports none: the runtime seats no focus on it and fires
-    /// no activation command, so advertising an action would invite assistive
-    /// tech to invoke something that provably does nothing.
+    #[doc = include_str!("semantic_builder.doc/actions_of.md")]
     fn actions_of(
         node: &RetainedNode,
         state: SemanticState,
@@ -277,18 +161,13 @@ impl SemanticTreeBuilder {
         actions
     }
 
-    /// Whether `node`'s own bindings make it activatable, mirroring the runtime's
-    /// `UiRuntime::activation_command_for`: a bound [`EVENT_CLICK`] activates,
-    /// and so does a bound [`EVENT_CHANGE`] — but only on a **non-editable**
-    /// control, since a checkbox's click *is* its change while a text field's
-    /// `change` fires on commit (blur / Enter), not on the click.
+    #[doc = include_str!("semantic_builder.doc/is_activatable.md")]
     fn is_activatable(node: &RetainedNode, inherited: InheritedState) -> bool {
         node.command_for_event(EVENT_CLICK).is_some()
             || (!inherited.editable && node.command_for_event(EVENT_CHANGE).is_some())
     }
 
-    /// Chooses a [`SemanticRole`] for a retained node from its kind and, for
-    /// elements, its CSS *type* / local name.
+    #[doc = include_str!("semantic_builder.doc/role_of.md")]
     fn role_of(node: &RetainedNode) -> SemanticRole {
         match node.kind() {
             // The structural root and system-generated synthetic parts are both
@@ -302,9 +181,7 @@ impl SemanticTreeBuilder {
         }
     }
 
-    /// Maps an element's local name (CSS type selector target) onto a
-    /// [`SemanticRole`], falling back to [`SemanticRole::Group`] for names with no
-    /// established semantics — inventing no role the tree does not name.
+    #[doc = include_str!("semantic_builder.doc/role_for_local_name.md")]
     fn role_for_local_name(local_name: &str) -> SemanticRole {
         match local_name {
             "button" => SemanticRole::Button,
@@ -335,9 +212,7 @@ impl SemanticTreeBuilder {
         }
     }
 
-    /// Derives an element's accessible name from its direct text children, joining
-    /// their non-empty trimmed contents with a single space. Returns `None` when
-    /// the element has no text children with content.
+    #[doc = include_str!("semantic_builder.doc/element_name.md")]
     fn element_name(tree: &RetainedTree, node: &RetainedNode) -> Option<String> {
         let parts: Vec<String> = node
             .child_nodes()

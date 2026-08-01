@@ -1,54 +1,34 @@
-//! The typed environment values a host reports and CSS `env()` reads (spec
-//! §6.15 insets and virtual keyboard).
+#![doc = include_str!("environment.doc/_module.md")]
 
 use obscur_geometry::Insets;
 
-/// One CSS environment value, named by `env(<name>)` (spec §6.15; css-env-1).
-///
-/// These are **reported by the host, not chosen by the application**: the notch
-/// a phone's screen is cut by and the on-screen keyboard's geometry are facts
-/// about the device and the moment, and an app can only lay itself out around
-/// them. That is why they arrive as a typed environment rather than as
-/// properties an author sets.
-///
-/// A name this enum does not list is not an environment value here, and a
-/// declaration using one is dropped as invalid rather than silently resolving to
-/// zero — an unknown name is a typo or a value the kit does not model, and both
-/// are better as a dropped declaration than as an inset that quietly is not
-/// there.
+#[doc = include_str!("environment.doc/EnvVar.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EnvVar {
-    /// `safe-area-inset-top` — the distance from the top edge of the viewport to
-    /// the first row that is not obscured by a cutout, a rounded corner or a
-    /// system bar.
+    #[doc = include_str!("environment.doc/SafeAreaInsetTop.md")]
     SafeAreaInsetTop,
-    /// `safe-area-inset-right`.
+    #[doc = include_str!("environment.doc/SafeAreaInsetRight.md")]
     SafeAreaInsetRight,
-    /// `safe-area-inset-bottom` — a home indicator or gesture bar lives here.
+    #[doc = include_str!("environment.doc/SafeAreaInsetBottom.md")]
     SafeAreaInsetBottom,
-    /// `safe-area-inset-left`.
+    #[doc = include_str!("environment.doc/SafeAreaInsetLeft.md")]
     SafeAreaInsetLeft,
-    /// `keyboard-inset-top` — the top edge of the on-screen keyboard, measured
-    /// from the top of the viewport, or the viewport height when no keyboard is
-    /// shown.
+    #[doc = include_str!("environment.doc/KeyboardInsetTop.md")]
     KeyboardInsetTop,
-    /// `keyboard-inset-right`.
+    #[doc = include_str!("environment.doc/KeyboardInsetRight.md")]
     KeyboardInsetRight,
-    /// `keyboard-inset-bottom`.
+    #[doc = include_str!("environment.doc/KeyboardInsetBottom.md")]
     KeyboardInsetBottom,
-    /// `keyboard-inset-left`.
+    #[doc = include_str!("environment.doc/KeyboardInsetLeft.md")]
     KeyboardInsetLeft,
-    /// `keyboard-inset-width` — the on-screen keyboard's width, `0` when hidden.
+    #[doc = include_str!("environment.doc/KeyboardInsetWidth.md")]
     KeyboardInsetWidth,
-    /// `keyboard-inset-height` — the on-screen keyboard's height, `0` when
-    /// hidden. This is the one an app usually wants: it is how much of the
-    /// viewport the keyboard has taken.
+    #[doc = include_str!("environment.doc/KeyboardInsetHeight.md")]
     KeyboardInsetHeight,
 }
 
 impl EnvVar {
-    /// Resolves the CSS name inside `env(…)`, or [`None`] for a name this kit
-    /// does not model.
+    #[doc = include_str!("environment.doc/from_name.md")]
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
@@ -66,7 +46,7 @@ impl EnvVar {
         }
     }
 
-    /// The CSS name this value is written as.
+    #[doc = include_str!("environment.doc/name.md")]
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -84,26 +64,17 @@ impl EnvVar {
     }
 }
 
-/// The environment values in force, in logical pixels (spec §6.15).
-///
-/// All zero by default, and that default is **correct rather than merely safe**:
-/// a display with no cutout and no on-screen keyboard genuinely has no insets, so
-/// a desktop host that reports nothing gets the right answer without knowing this
-/// type exists. A host that does know — a tablet shell, a mobile platform — sets
-/// what it measures, and the values change over the app's life as the keyboard
-/// comes and goes or the device is rotated.
+#[doc = include_str!("environment.doc/EnvironmentValues.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct EnvironmentValues {
-    /// The safe-area insets: how far in from each viewport edge content must stay
-    /// to clear cutouts, rounded corners and system bars.
+    #[doc = include_str!("environment.doc/safe_area.md")]
     pub safe_area: Insets,
-    /// The on-screen keyboard's occluded region, as insets from each viewport
-    /// edge. A hidden keyboard is all zeroes.
+    #[doc = include_str!("environment.doc/keyboard.md")]
     pub keyboard: Insets,
 }
 
 impl EnvironmentValues {
-    /// The environment of a host that reports nothing: no cutouts, no keyboard.
+    #[doc = include_str!("environment.doc/none.md")]
     #[must_use]
     pub const fn none() -> Self {
         Self {
@@ -112,25 +83,21 @@ impl EnvironmentValues {
         }
     }
 
-    /// Returns these values with `safe_area` replaced.
+    #[doc = include_str!("environment.doc/with_safe_area.md")]
     #[must_use]
     pub const fn with_safe_area(mut self, insets: Insets) -> Self {
         self.safe_area = insets;
         self
     }
 
-    /// Returns these values with the keyboard's occluded region replaced.
+    #[doc = include_str!("environment.doc/with_keyboard.md")]
     #[must_use]
     pub const fn with_keyboard(mut self, insets: Insets) -> Self {
         self.keyboard = insets;
         self
     }
 
-    /// The logical-pixel value of `var`.
-    ///
-    /// `keyboard-inset-width` / `-height` are derived from the occluded region
-    /// rather than stored: they are the extent of the keyboard, which is what the
-    /// left/right and top/bottom insets already say.
+    #[doc = include_str!("environment.doc/get.md")]
     #[must_use]
     pub fn get(self, var: EnvVar) -> f32 {
         match var {

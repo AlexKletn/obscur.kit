@@ -1,4 +1,4 @@
-//! Span module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod text_range;
 pub use text_range::TextRange;
 mod text_span;

@@ -1,15 +1,9 @@
-//! `ParseResult`: the outcome of a parse — the lossless tree plus any
-//! diagnostics gathered along the way.
+#![doc = include_str!("parse_result.doc/_module.md")]
 
 use crate::parser::ParseError;
 use crate::syntax::SyntaxTree;
 
-/// The outcome of parsing a `.okui` source (spec §2.9).
-///
-/// A parse *always* produces a lossless [`SyntaxTree`] whose
-/// [`text`](SyntaxTree::text) reproduces the source byte-for-byte, even when the
-/// input was malformed. Any recoverable problems are collected into `errors`;
-/// an empty `errors` list means the source parsed cleanly ([`is_ok`](Self::is_ok)).
+#[doc = include_str!("parse_result.doc/ParseResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseResult {
     tree: SyntaxTree,
@@ -17,37 +11,37 @@ pub struct ParseResult {
 }
 
 impl ParseResult {
-    /// Creates a result from a lossless `tree` and its `errors`.
+    #[doc = include_str!("parse_result.doc/new.md")]
     #[must_use]
     pub fn new(tree: SyntaxTree, errors: Vec<ParseError>) -> Self {
         Self { tree, errors }
     }
 
-    /// Returns the lossless syntax tree.
+    #[doc = include_str!("parse_result.doc/tree.md")]
     #[must_use]
     pub const fn tree(&self) -> &SyntaxTree {
         &self.tree
     }
 
-    /// Returns the diagnostics gathered while parsing.
+    #[doc = include_str!("parse_result.doc/errors.md")]
     #[must_use]
     pub fn errors(&self) -> &[ParseError] {
         &self.errors
     }
 
-    /// Returns `true` if the source parsed without any diagnostics.
+    #[doc = include_str!("parse_result.doc/is_ok.md")]
     #[must_use]
     pub fn is_ok(&self) -> bool {
         self.errors.is_empty()
     }
 
-    /// Returns the number of diagnostics gathered.
+    #[doc = include_str!("parse_result.doc/error_count.md")]
     #[must_use]
     pub fn error_count(&self) -> usize {
         self.errors.len()
     }
 
-    /// Consumes the result, returning just the lossless tree.
+    #[doc = include_str!("parse_result.doc/into_tree.md")]
     #[must_use]
     pub fn into_tree(self) -> SyntaxTree {
         self.tree

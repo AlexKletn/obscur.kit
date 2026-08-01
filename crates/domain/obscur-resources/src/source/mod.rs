@@ -1,4 +1,4 @@
-//! Source module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod document_source;
 pub use document_source::DocumentSource;
 mod dpi_variant;

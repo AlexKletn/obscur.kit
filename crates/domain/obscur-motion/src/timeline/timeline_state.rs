@@ -1,44 +1,33 @@
-//! The [`TimelineState`] playback lifecycle (spec §4.17 "motion engine").
+#![doc = include_str!("timeline_state.doc/_module.md")]
 
-/// The lifecycle state of a [`Timeline`](super::Timeline) (spec §4.17).
-///
-/// A timeline moves `Idle` → `Running` when started, may toggle between
-/// `Running` and `Paused` while it plays, and settles in `Finished` once all its
-/// iterations are consumed. Because the engine is time-agnostic and
-/// event-driven, these transitions are driven by explicit calls
-/// (start/pause/resume/advance), never by a clock.
+#[doc = include_str!("timeline_state.doc/TimelineState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TimelineState {
-    /// Created but not yet started: holds its initial position and does not
-    /// advance. This is the default state.
+    #[doc = include_str!("timeline_state.doc/Idle.md")]
     #[default]
     Idle,
-    /// Actively playing: [`advance`](super::Timeline::advance) integrates elapsed
-    /// time and moves the position forward.
+    #[doc = include_str!("timeline_state.doc/Running.md")]
     Running,
-    /// Started but temporarily suspended: retains its position and ignores
-    /// `advance` until resumed.
+    #[doc = include_str!("timeline_state.doc/Paused.md")]
     Paused,
-    /// Completed: every iteration has been played out and the position rests at
-    /// the end. A finished timeline does not advance further.
+    #[doc = include_str!("timeline_state.doc/Finished.md")]
     Finished,
 }
 
 impl TimelineState {
-    /// Returns whether the timeline is actively playing (`Running`).
+    #[doc = include_str!("timeline_state.doc/is_running.md")]
     #[must_use]
     pub const fn is_running(self) -> bool {
         matches!(self, Self::Running)
     }
 
-    /// Returns whether the timeline has completed (`Finished`).
+    #[doc = include_str!("timeline_state.doc/is_finished.md")]
     #[must_use]
     pub const fn is_finished(self) -> bool {
         matches!(self, Self::Finished)
     }
 
-    /// Returns whether the timeline has started but not yet finished, i.e. it is
-    /// `Running` or `Paused`.
+    #[doc = include_str!("timeline_state.doc/is_active.md")]
     #[must_use]
     pub const fn is_active(self) -> bool {
         matches!(self, Self::Running | Self::Paused)

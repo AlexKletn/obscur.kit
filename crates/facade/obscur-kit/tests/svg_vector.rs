@@ -1,20 +1,4 @@
-//! End-to-end verification that an **SVG `src` paints as vector, and follows the
-//! computed `color`** through the *real* live pipeline (spec §5.17).
-//!
-//! §5.17 is two sentences and this file checks both, against a real file read off
-//! disk by the sandbox-rooted `FsResourceLoader`:
-//!
-//! - *"SVG remains vector through the scene pipeline where possible"* — the icon
-//!   reaches the scene as `DrawPath` outlines and never as a rasterized
-//!   `DrawImage`, and the CPU backend really draws it;
-//! - *"`currentColor` … resolves from computed `color`, allowing theme/state
-//!   changes **without reparsing**"* — the same loaded document, composed under a
-//!   different computed `color`, paints a different colour. The runtime parses a
-//!   source once and caches it colour-independently, so the second frame does no
-//!   parsing at all.
-//!
-//! This closes the audit's §5 finding that SVG was decoded and validated but never
-//! painted by anything.
+#![doc = include_str!("svg_vector.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(
     feature = "resource-fs",
@@ -43,20 +27,19 @@ use obscur_kit::scene::paint::{Brush, Paint};
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under, so geometry is deterministic.
+#[doc = include_str!("svg_vector.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 64.0;
 
-/// A real SVG: one 10×10 square filled with `currentColor`. Nothing in the file
-/// names a colour, so what it paints is entirely the host's computed `color`.
+#[doc = include_str!("svg_vector.doc/ICON_SVG.md")]
 const ICON_SVG: &[u8] =
     br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
   <rect width="10" height="10" fill="currentColor"/>
 </svg>"##;
 
-/// Process-unique counter so concurrent tests never collide on a temp name.
+#[doc = include_str!("svg_vector.doc/COUNTER.md")]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A fresh temp directory holding `icon.svg` — the loader's sandbox root.
+#[doc = include_str!("svg_vector.doc/temp_asset_dir.md")]
 fn temp_asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-svg-{}-{n}", std::process::id()));
@@ -71,7 +54,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// An `Image` primitive referencing `icon.svg`, classed `.icon`.
+#[doc = include_str!("svg_vector.doc/icon_view.md")]
 fn icon_view() -> View {
     let node = Image::new("icon.svg")
         .into_view_node()
@@ -79,8 +62,7 @@ fn icon_view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![node]))
 }
 
-/// A runtime with both the raster and the vector capabilities installed by the
-/// facade, sandboxed to `dir`.
+#[doc = include_str!("svg_vector.doc/runtime_at.md")]
 fn runtime_at(dir: &PathBuf) -> UiRuntime {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     let boot = KitBootstrap::new();
@@ -89,7 +71,7 @@ fn runtime_at(dir: &PathBuf) -> UiRuntime {
     runtime
 }
 
-/// The solid fill colours of every `DrawPath` in `result`'s scene.
+#[doc = include_str!("svg_vector.doc/painted_fills.md")]
 fn painted_fills(result: &obscur_kit::runtime::frame::FrameResult) -> Vec<Color> {
     result
         .snapshot()

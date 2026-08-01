@@ -1,22 +1,16 @@
-//! Whether a layout context contains layout/size effects at its boundary.
+#![doc = include_str!("layout_containment.doc/_module.md")]
 
-/// Declares whether a [`LayoutContext`](super::LayoutContext) *contains* layout
-/// and/or size effects so that changes inside it do not cross its boundary
-/// (spec §4.3; analogous to CSS `contain`).
-///
-/// A containment boundary stops **upward** invalidation propagation: when a
-/// context contains layout, changes to its internal layout cannot escape to
-/// affect ancestors, so incremental recalculation need not propagate past it.
+#[doc = include_str!("layout_containment.doc/LayoutContainment.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LayoutContainment {
-    /// Whether internal layout changes are contained (cannot escape the boundary).
+    #[doc = include_str!("layout_containment.doc/contains_layout.md")]
     contains_layout: bool,
-    /// Whether the node's own size is contained (independent of its contents).
+    #[doc = include_str!("layout_containment.doc/contains_size.md")]
     contains_size: bool,
 }
 
 impl LayoutContainment {
-    /// No containment: neither layout nor size effects are contained.
+    #[doc = include_str!("layout_containment.doc/none.md")]
     #[must_use]
     pub const fn none() -> Self {
         Self {
@@ -25,7 +19,7 @@ impl LayoutContainment {
         }
     }
 
-    /// Contains layout effects only.
+    #[doc = include_str!("layout_containment.doc/layout.md")]
     #[must_use]
     pub const fn layout() -> Self {
         Self {
@@ -34,7 +28,7 @@ impl LayoutContainment {
         }
     }
 
-    /// Contains size effects only.
+    #[doc = include_str!("layout_containment.doc/size.md")]
     #[must_use]
     pub const fn size() -> Self {
         Self {
@@ -43,7 +37,7 @@ impl LayoutContainment {
         }
     }
 
-    /// Contains both layout and size effects.
+    #[doc = include_str!("layout_containment.doc/layout_and_size.md")]
     #[must_use]
     pub const fn layout_and_size() -> Self {
         Self {
@@ -52,22 +46,19 @@ impl LayoutContainment {
         }
     }
 
-    /// Whether internal layout changes are contained.
+    #[doc = include_str!("layout_containment.doc/contains_layout_2.md")]
     #[must_use]
     pub const fn contains_layout(self) -> bool {
         self.contains_layout
     }
 
-    /// Whether the node's own size is contained.
+    #[doc = include_str!("layout_containment.doc/contains_size_2.md")]
     #[must_use]
     pub const fn contains_size(self) -> bool {
         self.contains_size
     }
 
-    /// Whether this containment forms a boundary that stops upward propagation.
-    ///
-    /// True when layout is contained: inner layout changes cannot escape, so
-    /// invalidation does not need to propagate to ancestors past this context.
+    #[doc = include_str!("layout_containment.doc/is_boundary.md")]
     #[must_use]
     pub const fn is_boundary(self) -> bool {
         self.contains_layout

@@ -1,31 +1,15 @@
-//! The US-English Knuth-Liang [`Hyphenator`] adapter (spec §5.10).
+#![doc = include_str!("english_hyphenator.doc/_module.md")]
 
 use hyphenation::{Hyphenator as _, Language, Load, Standard};
 use obscur_text::layout::Hyphenator;
 
-/// A [`Hyphenator`] backed by the embedded US-English Knuth-Liang patterns
-/// (spec §5.10).
-///
-/// [`EnglishHyphenator::new`] loads the `hyphenation` crate's embedded
-/// `Language::EnglishUS` dictionary once; [`hyphenate`](Hyphenator::hyphenate)
-/// then asks it for a word's break opportunities and returns their byte offsets.
-/// The dictionary's built-in minimum prefix/suffix bounds keep a break from
-/// stranding a single letter, and the standard patterns are deterministic, so
-/// the same word always yields the same offsets.
+#[doc = include_str!("english_hyphenator.doc/EnglishHyphenator.md")]
 pub struct EnglishHyphenator {
     dictionary: Standard,
 }
 
 impl EnglishHyphenator {
-    /// Loads the embedded US-English dictionary.
-    ///
-    /// The dictionary is compiled into the binary by the `hyphenation` crate's
-    /// `embed_en-us` feature, so loading it is infallible in practice.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the embedded dictionary cannot be deserialized, which indicates
-    /// a broken build rather than a runtime condition.
+    #[doc = include_str!("english_hyphenator.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         let dictionary = Standard::from_embedded(Language::EnglishUS)
@@ -41,8 +25,7 @@ impl Default for EnglishHyphenator {
 }
 
 impl Hyphenator for EnglishHyphenator {
-    /// Returns the interior byte offsets within `word` at which US-English
-    /// hyphenation permits a break, ascending (spec §5.10).
+    #[doc = include_str!("english_hyphenator.doc/hyphenate.md")]
     fn hyphenate(&self, word: &str) -> Vec<usize> {
         self.dictionary.hyphenate(word).breaks
     }

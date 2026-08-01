@@ -1,20 +1,19 @@
-//! A 2D point in logical pixels.
+#![doc = include_str!("point.doc/_module.md")]
 
-/// A point in logical-pixel space. Coordinate-space tagging is layered on top
-/// by consumers (spec §4.5); this primitive is space-agnostic.
+#[doc = include_str!("point.doc/Point.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Point {
-    /// Horizontal coordinate.
+    #[doc = include_str!("point.doc/x.md")]
     pub x: f32,
-    /// Vertical coordinate.
+    #[doc = include_str!("point.doc/y.md")]
     pub y: f32,
 }
 
 impl Point {
-    /// The origin (0, 0).
+    #[doc = include_str!("point.doc/ORIGIN.md")]
     pub const ORIGIN: Self = Self { x: 0.0, y: 0.0 };
 
-    /// Constructs a point.
+    #[doc = include_str!("point.doc/new.md")]
     #[must_use]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }

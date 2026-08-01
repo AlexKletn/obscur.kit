@@ -1,8 +1,4 @@
-//! **SPECIFICATION-DERIVED** snapshot and record/replay cases for obscur.kit
-//! §7.12 / §7.13.
-//!
-//! Written by an agent reading obscur.kit §7.12, §7.13 and §7.14 with **no
-//! access to this repository's source**.
+#![doc = include_str!("spec_ch7_snapshot_replay.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7_support/mod.rs"]
@@ -37,8 +33,7 @@ fn tree() -> obscur_kit::view::view::View {
     )])
 }
 
-/// §7.12: "Development/diagnostic mode may serialize snapshots of:" (list) with
-/// §7.14 "Golden tests should prefer backend-independent snapshots:".
+#[doc = include_str!("spec_ch7_snapshot_replay.doc/snapshots_are_deterministic_and_carry_no_run_varying_values.md")]
 #[test]
 fn snapshots_are_deterministic_and_carry_no_run_varying_values() {
     let mut rt = drive(VW, VW, CSS, &tree());
@@ -75,17 +70,7 @@ fn snapshots_are_deterministic_and_carry_no_run_varying_values() {
     }
 }
 
-/// §7.12, verbatim: "Development/diagnostic mode may serialize snapshots of:" /
-/// "- focus;" / "- selection;" / "- scroll;" / "- animation;".
-///
-/// FIXTURE REPAIRED 2026-07-19: nothing here is weakened. The case set a scroll
-/// offset of 120 on `.panel` and read back 0, and the shared `CSS` above styles
-/// `.panel` as `width: 400px; height: 300px` with no `overflow` declaration — so
-/// it is not a scroll container, `set_scroll_top` is correctly a no-op on it,
-/// and there was no scroll state for any snapshot to record. The case now uses
-/// its own stylesheet in which the panel actually scrolls (49 rows of 20px
-/// against a 300px viewport, so 120 is well inside range). The assertion is
-/// unchanged.
+#[doc = include_str!("spec_ch7_snapshot_replay.doc/a_snapshot_records_focus_selection_and_scroll.md")]
 #[test]
 fn a_snapshot_records_focus_selection_and_scroll() {
     const SCROLLING_CSS: &str = ".panel { width: 400px; height: 300px; overflow: auto } \
@@ -124,8 +109,7 @@ fn a_snapshot_records_focus_selection_and_scroll() {
     );
 }
 
-/// §7.13, verbatim: "Sensitive input such as passwords, secrets and protected
-/// clipboard data is excluded or redacted by default."
+#[doc = include_str!("spec_ch7_snapshot_replay.doc/sensitive_input_is_redacted_by_default.md")]
 #[test]
 fn sensitive_input_is_redacted_by_default() {
     // NO redaction options are passed: the default policy is what is under test.
@@ -187,10 +171,7 @@ fn sensitive_input_is_redacted_by_default() {
     );
 }
 
-/// §7.13, verbatim: "Replay runs against deterministic clocks/executors." and
-/// "Optional development/test record-replay may capture:" /
-/// "- scheduler decisions;" / "- clock ticks;" / "- async completions;" /
-/// "- resource versions;".
+#[doc = include_str!("spec_ch7_snapshot_replay.doc/replay_is_bit_reproducible_under_load.md")]
 #[test]
 fn replay_is_bit_reproducible_under_load() {
     let mut recording = EventRecording::new();

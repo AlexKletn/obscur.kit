@@ -1,5 +1,4 @@
-//! `UiIrLowering`: lowers a `.okui` [`Document`] AST into a [`UiIrDocument`]
-//! (spec §2.15).
+#![doc = include_str!("ui_ir_lowering.doc/_module.md")]
 
 use obscur_capability::CapabilityId;
 use obscur_okui_syntax::ast::{Attribute, Document, Element, Expression};
@@ -11,22 +10,14 @@ use obscur_ui_ir::version::UiIrVersion;
 
 use crate::lowering::{ExpressionLowering, SourceMapBuilder};
 
-/// Why lowering a `.okui` document into UI IR failed, or a non-fatal lowering
-/// diagnostic (spec §2.15).
-///
-/// [`EmptyDocument`](Self::EmptyDocument) and [`MissingTagName`](Self::MissingTagName)
-/// are *fatal*: they prevent building a tree and surface as the `Err` of
-/// [`UiIrLowering::lower`]. [`MissingLoopKey`](Self::MissingLoopKey) is *non-fatal*:
-/// the `<For>` is still lowered (keyless), but the missing mandatory key is
-/// reported through the lowering's accumulated diagnostics (spec §2.11).
+#[doc = include_str!("ui_ir_lowering.doc/LoweringError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweringError {
-    /// The document had no top-level elements to lower.
+    #[doc = include_str!("ui_ir_lowering.doc/EmptyDocument.md")]
     EmptyDocument,
-    /// An element carried no tag name; the byte offset locates it in the source.
+    #[doc = include_str!("ui_ir_lowering.doc/MissingTagName.md")]
     MissingTagName(u32),
-    /// A `<For>`/`<VirtualFor>` loop lacked the mandatory stable `key={…}`
-    /// (spec §2.11); the byte offset locates it in the source.
+    #[doc = include_str!("ui_ir_lowering.doc/MissingLoopKey.md")]
     MissingLoopKey(u32),
 }
 
@@ -46,42 +37,7 @@ impl std::fmt::Display for LoweringError {
 
 impl std::error::Error for LoweringError {}
 
-/// Lowers a parsed `.okui` [`Document`] into a versioned [`UiIrDocument`]
-/// (spec §2.15).
-///
-/// # Algorithm
-///
-/// The pass walks the top-level [`elements`](Document::elements) of the
-/// document and turns each into a [`UiIrNode`]:
-///
-/// - **Root shape.** A document with exactly one top-level element lowers that
-///   element as the root; several top-level elements are wrapped in a
-///   [`fragment`](UiIrNode::fragment) root, each lowered as a child. An empty
-///   document is a [`LoweringError::EmptyDocument`].
-/// - **Node kind.** An element whose tag starts with an uppercase letter becomes
-///   a [`component`](UiIrNode::component); otherwise an
-///   [`element`](UiIrNode::element). The element-shaped
-///   [`Conditional`](Element::is_conditional) (`<If>`/`<ElseIf>`/`<Else>`) and
-///   [`loop`](Element::is_loop) (`<For>`/`<VirtualFor>`) constructs lower to the
-///   dedicated [`Conditional`](UiIrNode::conditional)/[`Loop`](UiIrNode::loop_node)
-///   IR kinds (spec §2.11): a loop carries its mandatory `key={…}` on the node
-///   (a missing key is a [`LoweringError::MissingLoopKey`] diagnostic) and its
-///   `each={…}` collection as a property; a conditional carries its `cond={…}`
-///   as a property.
-/// - **Attributes.** An event attribute (`on:click=…`) becomes a
-///   [`UiIrEvent`] wiring the local event name (after the `:`) to its handler;
-///   every other attribute becomes a [`UiIrProperty`] whose value is the lowered
-///   expression, string literal, or `Null`. A `requires="cap"` attribute is
-///   additionally collected as a declared capability (the §2.13 convention, as
-///   in `CapabilityValidator`).
-/// - **Children.** Element/conditional/loop children recurse; a non-blank
-///   [`TextNode`](SyntaxKind::TextNode) becomes a [`text`](UiIrNode::text) child
-///   (blank text is skipped); an [`Expression`](SyntaxKind::Expression)
-///   interpolation becomes a synthetic `Expression` element child carrying the
-///   lowered expression under a `value` property.
-/// - **Ids and source map.** Every node is assigned a stable id from a counter
-///   starting at `1`, and each id is recorded against its source byte offset in
-///   the [`SourceMapBuilder`].
+#[doc = include_str!("ui_ir_lowering.doc/UiIrLowering.md")]
 #[derive(Debug, Clone)]
 pub struct UiIrLowering {
     source_map: SourceMapBuilder,
@@ -92,8 +48,7 @@ pub struct UiIrLowering {
 }
 
 impl UiIrLowering {
-    /// Creates a lowering pass whose source map records spans under
-    /// `source_name` (the logical `.okui` source identifier).
+    #[doc = include_str!("ui_ir_lowering.doc/new.md")]
     #[must_use]
     pub fn new(source_name: impl Into<Box<str>>) -> Self {
         Self {
@@ -105,24 +60,14 @@ impl UiIrLowering {
         }
     }
 
-    /// Allocates the next stable node id (post-increment).
+    #[doc = include_str!("ui_ir_lowering.doc/alloc_id.md")]
     fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         id
     }
 
-    /// Lowers `doc` into a complete [`UiIrDocument`], consuming the pass and
-    /// appending any non-fatal lowering diagnostics (e.g. a `<For>` missing its
-    /// mandatory key, spec §2.11) to `diagnostics`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`LoweringError::EmptyDocument`] when the document has no
-    /// top-level elements, or [`LoweringError::MissingTagName`] when an element
-    /// carries no tag name. These are fatal — no document is produced; a
-    /// [`LoweringError::MissingLoopKey`] is *not* fatal and is reported through
-    /// `diagnostics` while the document is still lowered.
+    #[doc = include_str!("ui_ir_lowering.doc/lower.md")]
     pub fn lower(
         mut self,
         doc: &Document,
@@ -155,13 +100,7 @@ impl UiIrLowering {
         Ok(document)
     }
 
-    /// Lowers a single element (recursively) into a [`UiIrNode`].
-    ///
-    /// The element-shaped `<For>`/`<VirtualFor>` and `<If>`/`<ElseIf>`/`<Else>`
-    /// control-flow constructs (spec §2.11) lower to the dedicated
-    /// [`Loop`](obscur_ui_ir::document::UiIrNodeKind::Loop) and
-    /// [`Conditional`](obscur_ui_ir::document::UiIrNodeKind::Conditional) IR
-    /// kinds; every other element lowers to a component or element node.
+    #[doc = include_str!("ui_ir_lowering.doc/lower_element.md")]
     fn lower_element(&mut self, element: &Element) -> Result<UiIrNode, LoweringError> {
         let offset = element.syntax().offset().unwrap_or(0);
         let id = self.alloc_id();
@@ -189,10 +128,7 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    /// Lowers a `<For>`/`<VirtualFor>` into a [`Loop`](obscur_ui_ir::document::UiIrNodeKind::Loop)
-    /// node, carrying the mandatory `key={…}` on the node and the iterated
-    /// collection (`each={…}`) as a property; a missing key is a non-fatal
-    /// [`LoweringError::MissingLoopKey`] diagnostic (spec §2.11).
+    #[doc = include_str!("ui_ir_lowering.doc/lower_loop.md")]
     fn lower_loop(
         &mut self,
         element: &Element,
@@ -218,10 +154,7 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    /// Lowers an `<If>`/`<ElseIf>`/`<Else>` into a
-    /// [`Conditional`](obscur_ui_ir::document::UiIrNodeKind::Conditional) node;
-    /// the branch condition (`cond={…}`) flows through as a property and the
-    /// guarded body as children (spec §2.11).
+    #[doc = include_str!("ui_ir_lowering.doc/lower_conditional.md")]
     fn lower_conditional(
         &mut self,
         element: &Element,
@@ -234,8 +167,7 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    /// Folds every attribute of `element` onto `node` as an event or property,
-    /// collecting any declared `requires` capability along the way.
+    #[doc = include_str!("ui_ir_lowering.doc/lower_attributes.md")]
     fn lower_attributes(&mut self, element: &Element, mut node: UiIrNode) -> UiIrNode {
         for attribute in element.attributes() {
             if attribute.is_event() {
@@ -273,7 +205,7 @@ impl UiIrLowering {
         node
     }
 
-    /// Folds every content child of `element` onto `node`.
+    #[doc = include_str!("ui_ir_lowering.doc/lower_children.md")]
     fn lower_children(
         &mut self,
         element: &Element,
@@ -306,9 +238,7 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    /// Lowers an `{expr}` interpolation to the IR's
-    /// [interpolation node](UiIrNode::interpolation), carrying the expression
-    /// itself — `ViewCodegen` emits it as the text node's content.
+    #[doc = include_str!("ui_ir_lowering.doc/lower_interpolation.md")]
     fn lower_interpolation(&mut self, node: &SyntaxNode, expression: &Expression) -> UiIrNode {
         let id = self.alloc_id();
         self.source_map.record(id, node.offset().unwrap_or(0));
@@ -316,19 +246,12 @@ impl UiIrLowering {
     }
 }
 
-/// Returns whether `tag`'s first character is an ASCII uppercase letter — the
-/// component-vs-element distinction.
+#[doc = include_str!("ui_ir_lowering.doc/starts_uppercase.md")]
 fn starts_uppercase(tag: &str) -> bool {
     tag.chars().next().is_some_and(char::is_uppercase)
 }
 
-/// Returns an event attribute's local name — the identifier after the `:` in
-/// `on:click` (`"click"`), falling back to the attribute's own name.
-///
-/// `pub(crate)` because the validators must name an event exactly as the IR does:
-/// a diagnostic about `on:clik` has to quote the string the binding was built
-/// from, and the `ContractValidator` used to keep a byte-identical private copy of
-/// this function to do it.
+#[doc = include_str!("ui_ir_lowering.doc/event_local_name.md")]
 pub(crate) fn event_local_name(attribute: &Attribute) -> String {
     let mut seen_colon = false;
     for token in attribute.syntax().tokens() {
@@ -341,16 +264,7 @@ pub(crate) fn event_local_name(attribute: &Attribute) -> String {
     attribute.name().unwrap_or_default()
 }
 
-/// Extracts an attribute's value as raw text: a quoted string's inner text, a
-/// dynamic expression's source, or a bare `AttributeValue` token's text (as in
-/// `on:click=submit`). Returns `None` when the attribute has no value.
-///
-/// `pub(crate)` because for an **event** attribute this string *is* the handler
-/// reference — the name `name_binding::fallback_symbol` hashes into the command
-/// symbol the runtime dispatches on. A checker that re-derived it would be
-/// checking a name the IR might not carry, and a validator that admits one string
-/// while the IR emits another is worse than no validator at all. One extraction,
-/// so the checked name and the hashed name cannot drift.
+#[doc = include_str!("ui_ir_lowering.doc/attribute_value_text.md")]
 pub(crate) fn attribute_value_text(attribute: &Attribute) -> Option<String> {
     if let Some(literal) = attribute.string_value() {
         return Some(literal);

@@ -1,4 +1,4 @@
-//! Normalizes a pipeline snapshot into a stable form: [`SnapshotNormalizer`].
+#![doc = include_str!("snapshot_normalizer.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
@@ -6,42 +6,18 @@ use obscur_identity::NodeId;
 
 use super::{NormalizedNode, NormalizedPipeline, PipelineSnapshot};
 
-/// Normalizes a [`PipelineSnapshot`] into a stable, deterministically-ordered
-/// [`NormalizedPipeline`] for reproducible golden diffs (spec §7.14).
-///
-/// A raw snapshot keeps its per-node stage data in
-/// [`HashMap`](std::collections::HashMap)s whose iteration order is unstable, so
-/// it cannot be compared byte-for-byte across runs. The normalizer resolves
-/// this by collecting every node that appears in the computed styles **or** the
-/// layout boxes and emitting them **sorted by [`NodeId`]**, producing output
-/// that is identical across runs of the same frame.
-///
-/// The normalizer is a zero-sized, stateless value; construct it with
-/// [`new`](Self::new) or [`Default`].
+#[doc = include_str!("snapshot_normalizer.doc/SnapshotNormalizer.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SnapshotNormalizer;
 
 impl SnapshotNormalizer {
-    /// Creates a normalizer.
+    #[doc = include_str!("snapshot_normalizer.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Normalizes `snapshot` into a stable, comparable [`NormalizedPipeline`].
-    ///
-    /// The tree's root and node count are copied through. Every node that
-    /// appears in `snapshot`'s computed styles or layout boxes becomes one
-    /// [`NormalizedNode`] — reading its computed `opacity` (if present) and its
-    /// absolute layout `bounds` (if present) — and the rows are emitted **sorted
-    /// by [`NodeId`]**. Because the sort is total and deterministic, two
-    /// normalizations of equal snapshots are byte-for-byte equal (spec §7.14).
-    ///
-    /// The remaining §7.4 stages are copied through as stable scalar summaries,
-    /// each already order-independent: the scene's fill count and balance, the
-    /// paint-command stream length, the accessibility snapshot's node count and
-    /// root, the render graph's pass count, and the rendered image (if a backend
-    /// attached one).
+    #[doc = include_str!("snapshot_normalizer.doc/normalize.md")]
     #[must_use]
     pub fn normalize(&self, snapshot: &PipelineSnapshot) -> NormalizedPipeline {
         let computed = snapshot.computed();

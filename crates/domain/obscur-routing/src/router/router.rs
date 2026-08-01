@@ -1,33 +1,20 @@
-//! The router composing a route registry with a history provider (spec §6.13).
+#![doc = include_str!("router.doc/_module.md")]
 
 use crate::history::{HistoryProvider, MemoryHistory, NavigationEntry};
 use crate::route::{Route, RouteState};
 use crate::router::{NavigationResult, RouteRegistry};
 
-/// The router: a [`RouteRegistry`] composed with a history provider (spec
-/// §6.13).
-///
-/// The router is the toolkit's composition point for URL-like navigation. It
-/// owns the pattern-to-target [`RouteRegistry`] and a boxed
-/// [`HistoryProvider`], and turns a path into a typed [`NavigationResult`] while
-/// maintaining the back/forward history stack. Application navigation *policy*
-/// (guards, redirects, what a target means) stays outside the toolkit.
-///
-/// `Router` derives only [`Debug`] — not `Clone` or `PartialEq` — because it
-/// holds a `Box<dyn HistoryProvider>`, a trait object that is neither `Clone`
-/// nor `PartialEq`. The [`HistoryProvider`] trait carries a
-/// [`std::fmt::Debug`] supertrait so the boxed provider is `Debug`.
+#[doc = include_str!("router.doc/Router.md")]
 #[derive(Debug)]
 pub struct Router {
-    /// The pattern-to-target mapping navigations resolve against.
+    #[doc = include_str!("router.doc/registry.md")]
     registry: RouteRegistry,
-    /// The replaceable history stack backing back/forward navigation.
+    #[doc = include_str!("router.doc/history.md")]
     history: Box<dyn HistoryProvider>,
 }
 
 impl Router {
-    /// Creates a router for `registry`, backed by an in-memory history
-    /// ([`MemoryHistory`]).
+    #[doc = include_str!("router.doc/new.md")]
     #[must_use]
     pub fn new(registry: RouteRegistry) -> Self {
         Self {
@@ -36,29 +23,18 @@ impl Router {
         }
     }
 
-    /// Creates a router for `registry` backed by the supplied `history`
-    /// provider.
+    #[doc = include_str!("router.doc/with_history.md")]
     #[must_use]
     pub fn with_history(registry: RouteRegistry, history: Box<dyn HistoryProvider>) -> Self {
         Self { registry, history }
     }
 
-    /// Navigates to `path` with empty state, returning the typed outcome (spec
-    /// §6.13).
-    ///
-    /// See [`navigate_with_state`](Router::navigate_with_state) for the full
-    /// contract; this is the empty-state shorthand.
+    #[doc = include_str!("router.doc/navigate.md")]
     pub fn navigate(&mut self, path: &str) -> NavigationResult {
         self.navigate_with_state(path, RouteState::empty())
     }
 
-    /// Navigates to `path`, attaching `state` on a match (spec §6.13).
-    ///
-    /// The `path` is parsed into a [`Route`] and resolved against the registry.
-    /// On a match the route is pushed onto history (carrying `state`) and a
-    /// [`NavigationResult::Matched`] is returned. On no match a
-    /// [`NavigationResult::NotFound`] is returned and **history is not mutated** —
-    /// a failed navigation leaves the back/forward stack untouched.
+    #[doc = include_str!("router.doc/navigate_with_state.md")]
     pub fn navigate_with_state(&mut self, path: &str, state: RouteState) -> NavigationResult {
         let route = Route::parse(path);
         match self.registry.resolve(&route) {
@@ -75,12 +51,7 @@ impl Router {
         }
     }
 
-    /// Moves history back one entry and re-resolves it, or returns `None` when
-    /// already at the start (spec §6.13).
-    ///
-    /// The new current entry's route is re-resolved against the *current*
-    /// registry, so an entry whose pattern is no longer registered yields a
-    /// [`NavigationResult::NotFound`] rather than a stale match.
+    #[doc = include_str!("router.doc/back.md")]
     pub fn back(&mut self) -> Option<NavigationResult> {
         // Move the cursor; the borrowed entry is dropped at the semicolon so
         // resolve_current can re-borrow self.
@@ -88,12 +59,7 @@ impl Router {
         self.resolve_current()
     }
 
-    /// Moves history forward one entry and re-resolves it, or returns `None`
-    /// when already at the end (spec §6.13).
-    ///
-    /// Like [`back`](Router::back), the entry is re-resolved against the current
-    /// registry, so a now-unregistered pattern yields a
-    /// [`NavigationResult::NotFound`].
+    #[doc = include_str!("router.doc/forward.md")]
     pub fn forward(&mut self) -> Option<NavigationResult> {
         // Move the cursor; the borrowed entry is dropped at the semicolon so
         // resolve_current can re-borrow self.
@@ -101,9 +67,7 @@ impl Router {
         self.resolve_current()
     }
 
-    /// Re-resolves the current history entry's route against the registry.
-    ///
-    /// Returns `None` only when there is no current entry (empty history).
+    #[doc = include_str!("router.doc/resolve_current.md")]
     fn resolve_current(&self) -> Option<NavigationResult> {
         let entry = self.history.current()?;
         let route = entry.route();
@@ -117,25 +81,25 @@ impl Router {
         })
     }
 
-    /// Returns the current history entry, or `None` when history is empty.
+    #[doc = include_str!("router.doc/current.md")]
     #[must_use]
     pub fn current(&self) -> Option<&NavigationEntry> {
         self.history.current()
     }
 
-    /// Returns whether a [`back`](Router::back) move is possible.
+    #[doc = include_str!("router.doc/can_go_back.md")]
     #[must_use]
     pub fn can_go_back(&self) -> bool {
         self.history.can_go_back()
     }
 
-    /// Returns whether a [`forward`](Router::forward) move is possible.
+    #[doc = include_str!("router.doc/can_go_forward.md")]
     #[must_use]
     pub fn can_go_forward(&self) -> bool {
         self.history.can_go_forward()
     }
 
-    /// Returns the pattern-to-target registry this router resolves against.
+    #[doc = include_str!("router.doc/registry_2.md")]
     #[must_use]
     pub fn registry(&self) -> &RouteRegistry {
         &self.registry

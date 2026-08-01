@@ -1,0 +1,1 @@
+Forgets every memoized size.

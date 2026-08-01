@@ -1,17 +1,9 @@
-//! Conversion from fontconfig's own weight/slant/width scales to the CSS ones
-//! [`FontAttributes`] carries (spec §5.18).
+#![doc = include_str!("attribute_scale.doc/_module.md")]
 
 use obscur_text::font::FontStretch;
 use obscur_text::span::{FontSlant, FontWeight};
 
-/// fontconfig weight → CSS weight anchors, from `fontconfig.h`'s `FC_WEIGHT_*`
-/// constants paired with the CSS weight each names.
-///
-/// fontconfig's weight axis is **not** CSS's: it runs `0..=215` and is
-/// deliberately non-linear (`REGULAR` is 80, `MEDIUM` 100, but `BOLD` is 200 and
-/// `BLACK` only 210 — the top of the scale is compressed). Reading a `%{weight}`
-/// as if it were a CSS weight would call every regular face a hairline. The table
-/// is sorted by the fontconfig value so [`css_weight`] can interpolate.
+#[doc = include_str!("attribute_scale.doc/WEIGHT_ANCHORS.md")]
 const WEIGHT_ANCHORS: &[(i32, u16)] = &[
     (0, 100),    // FC_WEIGHT_THIN
     (40, 200),   // FC_WEIGHT_EXTRALIGHT
@@ -27,12 +19,7 @@ const WEIGHT_ANCHORS: &[(i32, u16)] = &[
     (215, 1000), // FC_WEIGHT_EXTRABLACK
 ];
 
-/// Maps a fontconfig `%{weight}` to a CSS [`FontWeight`].
-///
-/// Exact at every anchor and piecewise-linear between them — the same shape
-/// fontconfig's own `FcWeightToOpenType` uses, so a face fontconfig calls
-/// `REGULAR` (80) is CSS `400` rather than an unrecognisable `80`. Values off
-/// either end clamp to the nearest anchor.
+#[doc = include_str!("attribute_scale.doc/css_weight.md")]
 pub(super) fn css_weight(fc_weight: i32) -> FontWeight {
     let first = WEIGHT_ANCHORS[0];
     let last = WEIGHT_ANCHORS[WEIGHT_ANCHORS.len() - 1];
@@ -61,12 +48,7 @@ pub(super) fn css_weight(fc_weight: i32) -> FontWeight {
     FontWeight::NORMAL
 }
 
-/// Maps a fontconfig `%{slant}` to a [`FontSlant`].
-///
-/// `fontconfig.h`: `FC_SLANT_ROMAN` 0, `FC_SLANT_ITALIC` 100, `FC_SLANT_OBLIQUE`
-/// 110. Anything at or past oblique reads as oblique; anything past roman but
-/// short of italic reads as italic, since a slanted face is nearer italic than
-/// upright.
+#[doc = include_str!("attribute_scale.doc/css_slant.md")]
 pub(super) fn css_slant(fc_slant: i32) -> FontSlant {
     match fc_slant {
         i32::MIN..=0 => FontSlant::Normal,
@@ -75,12 +57,7 @@ pub(super) fn css_slant(fc_slant: i32) -> FontSlant {
     }
 }
 
-/// Maps a fontconfig `%{width}` to the nearest [`FontStretch`].
-///
-/// fontconfig's width scale is already a percentage of normal
-/// (`FC_WIDTH_NORMAL` = 100), matching CSS's, so this only has to snap to the
-/// nearest named step — fontconfig reports whole percents (`63`) where CSS names
-/// fractions (`62.5`).
+#[doc = include_str!("attribute_scale.doc/css_stretch.md")]
 pub(super) fn css_stretch(fc_width: i32) -> FontStretch {
     const STEPS: &[FontStretch] = &[
         FontStretch::UltraCondensed,

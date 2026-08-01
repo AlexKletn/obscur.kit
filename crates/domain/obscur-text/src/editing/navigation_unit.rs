@@ -1,39 +1,24 @@
-//! The granularity of caret movement in the editing engine (spec §5.11).
+#![doc = include_str!("navigation_unit.doc/_module.md")]
 
-/// The granularity of a caret movement, i.e. how far one navigation step travels
-/// (spec §5.11 editing engine — word/line/document navigation, Home/End).
-///
-/// A [`NavigationUnit`] answers "by how much?" for a move or shift-extend: it
-/// pairs with a direction (and an *extend* flag) in
-/// [`EditCommand::Move`](crate::editing::EditCommand::Move) to describe every
-/// caret motion a keymap can bind. It carries no direction of its own — moving
-/// left or right by a word both use [`Word`](Self::Word).
+#[doc = include_str!("navigation_unit.doc/NavigationUnit.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NavigationUnit {
-    /// One extended grapheme cluster — the Left/Right arrow keys.
+    #[doc = include_str!("navigation_unit.doc/Grapheme.md")]
     Grapheme,
-    /// One word — Ctrl+Left / Ctrl+Right (Alt+Left / Alt+Right on macOS).
+    #[doc = include_str!("navigation_unit.doc/Word.md")]
     Word,
-    /// One visual (wrapped) or logical line in the move direction — the Up/Down
-    /// arrow keys.
+    #[doc = include_str!("navigation_unit.doc/Line.md")]
     Line,
-    /// The nearest line boundary — Home (start) / End (end) within the current
-    /// visual line.
+    #[doc = include_str!("navigation_unit.doc/LineBoundary.md")]
     LineBoundary,
-    /// One paragraph — Ctrl+Up / Ctrl+Down (Alt+Up / Alt+Down on macOS).
+    #[doc = include_str!("navigation_unit.doc/Paragraph.md")]
     Paragraph,
-    /// The start or end of the whole document — Ctrl+Home / Ctrl+End.
+    #[doc = include_str!("navigation_unit.doc/Document.md")]
     Document,
 }
 
 impl NavigationUnit {
-    /// Returns whether this unit snaps the caret to a fixed edge rather than
-    /// advancing it a countable amount.
-    ///
-    /// True for [`LineBoundary`](Self::LineBoundary) (Home/End) and
-    /// [`Document`](Self::Document) (Ctrl+Home/End): both jump to an edge, so a
-    /// repeated move in the same direction is idempotent, whereas the other
-    /// units keep advancing.
+    #[doc = include_str!("navigation_unit.doc/is_boundary.md")]
     #[must_use]
     pub const fn is_boundary(&self) -> bool {
         matches!(self, Self::LineBoundary | Self::Document)

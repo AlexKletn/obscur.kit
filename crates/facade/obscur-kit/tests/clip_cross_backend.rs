@@ -1,55 +1,4 @@
-//! The two render backends must agree about clipping (spec §5.2).
-//!
-//! §5.2 draws the determinism boundary explicitly. "Must match across backends"
-//! names **clipping**, **paint order**, and **scene geometry**; "allowed
-//! differences" names **rasterization**, **anti-aliasing**, and backend-specific
-//! precision. So the property under test here is the *clip decision* — for a
-//! given scene, which points does drawing reach? — and not the pixels each
-//! rasterizer produces for it.
-//!
-//! There was no cross-backend test in this repo at all, which is why `Clip::Mask`
-//! was able to mean opposite things on the two backends: the CPU renderer painted
-//! masked content, Vello clipped it entirely away, and nothing compared them.
-//!
-//! # How each backend is asked
-//!
-//! - **CPU** — the real [`CpuRenderer`] rasterizes the scene into a bitmap and a
-//!   probe pixel is read back. This is the production path, end to end.
-//! - **Vello** — the real [`ClipConverter`] resolves the clip to its outline and
-//!   the probe point is tested against it. Vello's *rasterizer* needs a GPU, but
-//!   the clip decision does not: the adapter is deliberately built so that "only
-//!   rasterization is device-bound" (`vello_device.rs`), which puts the whole of
-//!   §5.2's must-match clip geometry on this GPU-free path.
-//!
-//! # What this does NOT cover — read before trusting it
-//!
-//! - **No pixels from Vello.** Vello's clip outline is compared against the CPU's
-//!   *rasterized coverage*, so this proves the two backends make the same clip
-//!   decision, not that Vello's rasterizer honors it. A true golden-image
-//!   comparison needs a GPU; this workspace has no GPU test target at all (every
-//!   GPU proof in `obscur-kit` is an `[[example]]` run by hand), so a
-//!   `#[test]` doing readback would silently no-op on any CI without an adapter —
-//!   a worse lie than this stated gap.
-//! - **Nesting and paint order are not compared**, only a single clip bracket.
-//! - The **layer-clip** comparison shares the Vello limitation above. It does
-//!   drive Vello's real `push_layer`: `a_layer_clip_reaches_vellos_push_layer`
-//!   converts through the public `SceneConverter` and reads the clip back out of
-//!   `Scene::encoding()`, which is GPU-free. What that cannot show is the
-//!   *rasterized* result, which is the same gap as above.
-//! - **Mask coverage is not tested because neither backend implements it.** Both
-//!   now *ignore* mask coverage identically (the §5.8 fallback). Agreeing to
-//!   ignore it is what this test pins; it is not evidence that masks work.
-//! - Antialiased clip edges are avoided by probing well inside/outside a clip
-//!   rather than on its boundary, since §5.2 lets AA differ.
-//! - **Agreement cannot catch a shared bug.** Both backends resolve a
-//!   `ClipShape::RoundedRect` through the *same* `Path::rounded_rect`, so a defect
-//!   in that one builder makes both backends wrong *together* and the
-//!   backends-agree assertion still passes. This was measured, not assumed:
-//!   replacing the elliptical radii below with a single scalar leaves every
-//!   `cpu == vello` assertion green. Only the `expected` column catches it, which
-//!   is why the ellipse cases' expected values are chosen to sit in the region
-//!   where a scalar radius and a true ellipse actually disagree. Treat `expected`
-//!   as the real oracle here and agreement as the weaker, secondary claim.
+#![doc = include_str!("clip_cross_backend.doc/_module.md")]
 
 use obscur_geometry::{CornerRadii, Point, Rect, Size};
 use obscur_render::frame::{FrameSubmission, RenderFrame};
@@ -66,14 +15,13 @@ use obscur_scene::path::Path;
 use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
 use vello::kurbo::{Point as KurboPoint, Shape};
 
-/// The surface both backends are asked about.
+#[doc = include_str!("clip_cross_backend.doc/SURFACE.md")]
 const SURFACE: f32 = 64.0;
 
-/// A deliberately NON-SQUARE box, for the `border-radius: 50%` ellipse cases: 2:1,
-/// so the horizontal radius (w/2 = 32) and the vertical (h/2 = 16) differ.
+#[doc = include_str!("clip_cross_backend.doc/ELLIPSE_BOX.md")]
 const ELLIPSE_BOX: Rect = Rect::new(Point::new(0.0, 0.0), Size::new(64.0, 32.0));
 
-/// A closed rectangular outline.
+#[doc = include_str!("clip_cross_backend.doc/rect_path.md")]
 fn rect_path(rect: Rect) -> Path {
     let mut path = Path::new();
     path.move_to(Point::new(rect.origin.x, rect.origin.y))
@@ -87,8 +35,7 @@ fn rect_path(rect: Rect) -> Path {
     path
 }
 
-/// `clip` bracketing an opaque red fill over the whole surface. Whatever survives
-/// the clip is exactly what the clip admits.
+#[doc = include_str!("clip_cross_backend.doc/clipped_fill.md")]
 fn clipped_fill(clip: Clip) -> FrameSubmission {
     let list = DisplayList::from_commands(vec![
         PaintCommand::PushClip(clip),
@@ -102,9 +49,7 @@ fn clipped_fill(clip: Clip) -> FrameSubmission {
     FrameSubmission::new(RenderFrame::new(snapshot, Size::new(SURFACE, SURFACE)))
 }
 
-/// Whether the CPU backend's rasterized output is painted at `point` — the real
-/// renderer, asked the only way a rasterizer can be asked. Probe points are pixel
-/// centers, so the two backends are asked about the same spot without a cast.
+#[doc = include_str!("clip_cross_backend.doc/cpu_paints.md")]
 fn cpu_paints(clip: Clip, point: (u32, u32)) -> bool {
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
     let target = RenderTarget::bitmap(BitmapTarget::new(Size::new(SURFACE, SURFACE)));
@@ -118,20 +63,14 @@ fn cpu_paints(clip: Clip, point: (u32, u32)) -> bool {
     pixel.alpha() > 0
 }
 
-/// Whether the Vello backend's clip admits `point`.
+#[doc = include_str!("clip_cross_backend.doc/vello_admits.md")]
 fn vello_admits(clip: &Clip, point: (u32, u32)) -> bool {
     ClipConverter::default()
         .shape(clip)
         .contains(KurboPoint::new(f64::from(point.0), f64::from(point.1)))
 }
 
-/// The same fill, but with the clip riding on a [`SceneLayer`] instead of being
-/// bracketed by a `PushClip` — the shape the coordinator actually emits.
-///
-/// `opacity` is a parameter because the CPU backend takes two different paths: a
-/// layer below `1.0` rasterizes its subtree into an offscreen buffer and
-/// composites it back, while a trivial layer is a passthrough. A layer clip has to
-/// be honored on both.
+#[doc = include_str!("clip_cross_backend.doc/layer_clipped_fill.md")]
 fn layer_clipped_fill(clip: Clip, opacity: f32) -> FrameSubmission {
     let list = DisplayList::from_commands(vec![
         PaintCommand::PushLayer(SceneLayer::new().with_clip(clip).with_opacity(opacity)),
@@ -145,7 +84,7 @@ fn layer_clipped_fill(clip: Clip, opacity: f32) -> FrameSubmission {
     FrameSubmission::new(RenderFrame::new(snapshot, Size::new(SURFACE, SURFACE)))
 }
 
-/// Whether the CPU backend paints at `point` when the clip rides on the layer.
+#[doc = include_str!("clip_cross_backend.doc/cpu_paints_layer_clip.md")]
 fn cpu_paints_layer_clip(clip: Clip, opacity: f32, point: (u32, u32)) -> bool {
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
     let target = RenderTarget::bitmap(BitmapTarget::new(Size::new(SURFACE, SURFACE)));
@@ -159,15 +98,7 @@ fn cpu_paints_layer_clip(clip: Clip, opacity: f32, point: (u32, u32)) -> bool {
     pixel.alpha() > 0
 }
 
-/// The cases both backends must answer identically, each with a probe point and
-/// the answer the domain requires.
-///
-/// `Clip::Mask` is the regression this test was written for. The domain settles
-/// which answer is correct: a `Mask` "does not carry the source itself"
-/// (`mask.rs`) and `Clip::bounds()` is `None` for a mask because "a mask's extent
-/// depends on its source content, which is not known to the clip itself"
-/// (`clip.rs`). A mask clip therefore states no extent, and a backend may not
-/// invent one — least of all the empty extent, which throws the content away.
+#[doc = include_str!("clip_cross_backend.doc/cases.md")]
 fn cases() -> Vec<(&'static str, Clip, (u32, u32), bool)> {
     let inner = Rect::new(Point::new(16.0, 16.0), Size::new(32.0, 32.0));
     vec![
@@ -277,7 +208,7 @@ fn cases() -> Vec<(&'static str, Clip, (u32, u32), bool)> {
     ]
 }
 
-/// The test that did not exist: the same scene, both backends, one answer.
+#[doc = include_str!("clip_cross_backend.doc/backends_agree_on_every_clip_variant.md")]
 #[test]
 fn backends_agree_on_every_clip_variant() {
     for (name, clip, point, expected) in cases() {
@@ -297,19 +228,7 @@ fn backends_agree_on_every_clip_variant() {
     }
 }
 
-/// A clip on a [`SceneLayer`] must confine drawing exactly as the same clip
-/// bracketed by `PushClip` does, on both backends.
-///
-/// This is the divergence next door to §5-D, and a larger one: Vello honored
-/// `SceneLayer::clip()` (`push_layer`'s bounding shape) and the CPU backend
-/// dropped it on the floor, applying only the layer's opacity. It is not an edge
-/// case — the coordinator brackets every `filter: blur()` / color-matrix group
-/// with `with_clip`, so a real blurred element painted outside its clip on CPU and
-/// inside it on Vello.
-///
-/// Both opacities are exercised because they are different code paths in the CPU
-/// backend: a reduced-opacity layer rasterizes into an offscreen buffer, a trivial
-/// one does not.
+#[doc = include_str!("clip_cross_backend.doc/backends_agree_when_the_clip_rides_on_the_layer.md")]
 #[test]
 fn backends_agree_when_the_clip_rides_on_the_layer() {
     for (name, clip, point, expected) in cases() {
@@ -343,13 +262,7 @@ fn backends_agree_when_the_clip_rides_on_the_layer() {
     }
 }
 
-/// A layer's clip must stop confining drawing once the layer is popped.
-///
-/// The other direction of honoring a layer clip, and the one a single-bracket
-/// scene cannot see: a clip that is pushed but never popped confines everything
-/// drawn afterwards too, which is just as wrong as ignoring it and would let the
-/// push half of the fix pass this file alone. The scene draws *outside* the
-/// layer's clip after `PopLayer`; that paint must survive.
+#[doc = include_str!("clip_cross_backend.doc/a_layer_clip_does_not_outlive_its_layer.md")]
 #[test]
 fn a_layer_clip_does_not_outlive_its_layer() {
     let inner = Rect::new(Point::new(16.0, 16.0), Size::new(32.0, 32.0));
@@ -383,18 +296,7 @@ fn a_layer_clip_does_not_outlive_its_layer() {
     );
 }
 
-/// A layer's clip reaches Vello's real `push_layer`, carrying the geometry the
-/// domain asked for.
-///
-/// The other layer test asks `ClipConverter` what Vello *would* resolve, which
-/// proves the rule and not the plumbing: a `push_layer` that dropped `clip()` on
-/// the floor — the CPU backend's exact bug — would pass it. This drives the public
-/// `SceneConverter::convert` and reads the clip back out of `Scene::encoding()`,
-/// so the assertion is that the converter really encoded it.
-///
-/// No GPU: `encoding()` is the scene's CPU-side buffer, populated by `push_layer`
-/// before anything is submitted. This is the one part of the Vello comparison that
-/// does not need an adapter.
+#[doc = include_str!("clip_cross_backend.doc/a_layer_clip_reaches_vellos_push_layer.md")]
 #[test]
 fn a_layer_clip_reaches_vellos_push_layer() {
     let inner = Rect::new(Point::new(16.0, 16.0), Size::new(32.0, 32.0));
@@ -430,11 +332,7 @@ fn a_layer_clip_reaches_vellos_push_layer() {
     );
 }
 
-/// The §5-D regression, stated on its own so a failure names the bug.
-///
-/// Vello resolved a mask clip to an empty `BezPath`, which clips *everything*
-/// away, while the CPU backend inherited the enclosing clip and painted. Same
-/// scene, opposite pixels.
+#[doc = include_str!("clip_cross_backend.doc/a_mask_clip_does_not_erase_content_on_either_backend.md")]
 #[test]
 fn a_mask_clip_does_not_erase_content_on_either_backend() {
     for mask in [Mask::luminance(), Mask::alpha()] {

@@ -1,35 +1,24 @@
-//! The four positioning insets of a node (`top` / `right` / `bottom` / `left`).
+#![doc = include_str!("inset.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
 use crate::model::{BoxSizing, Dimension};
 
-/// A node's positioning insets — the `top` / `right` / `bottom` / `left`
-/// offsets used by a positioned node (spec §4.1; CSS `inset`).
-///
-/// Each edge is a [`Dimension`], so it distinguishes a definite offset
-/// ([`Dimension::Px`] / [`Dimension::Percent`]) from `auto`
-/// ([`Dimension::Auto`], the initial value). This is separate from the pixel
-/// [`Insets`](obscur_geometry::Insets) used for margin/padding/border, which
-/// cannot carry `auto` or percentages.
-///
-/// The insets take effect for a [`Position::Relative`](crate::model::Position::Relative),
-/// out-of-flow, or [`Position::Sticky`](crate::model::Position::Sticky) node; a
-/// [`Position::Static`](crate::model::Position::Static) node ignores them entirely.
+#[doc = include_str!("inset.doc/Inset.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Inset {
-    /// The `top` inset.
+    #[doc = include_str!("inset.doc/top.md")]
     pub top: Dimension,
-    /// The `right` inset.
+    #[doc = include_str!("inset.doc/right.md")]
     pub right: Dimension,
-    /// The `bottom` inset.
+    #[doc = include_str!("inset.doc/bottom.md")]
     pub bottom: Dimension,
-    /// The `left` inset.
+    #[doc = include_str!("inset.doc/left.md")]
     pub left: Dimension,
 }
 
 impl Inset {
-    /// The all-`auto` insets — the CSS initial value, contributing no offset.
+    #[doc = include_str!("inset.doc/AUTO.md")]
     pub const AUTO: Self = Self {
         top: Dimension::Auto,
         right: Dimension::Auto,
@@ -37,7 +26,7 @@ impl Inset {
         left: Dimension::Auto,
     };
 
-    /// Builds insets from the four edges (top / right / bottom / left).
+    #[doc = include_str!("inset.doc/new.md")]
     #[must_use]
     pub const fn new(top: Dimension, right: Dimension, bottom: Dimension, left: Dimension) -> Self {
         Self {
@@ -48,36 +37,7 @@ impl Inset {
         }
     }
 
-    /// Resolves these insets into the absolute border-box [`Rect`] of an
-    /// out-of-flow ([`Position::Absolute`](crate::model::Position::Absolute) /
-    /// [`Position::Fixed`](crate::model::Position::Fixed)) node within its
-    /// containing block `cb` (spec §4.1).
-    ///
-    /// `width` / `height` are the node's explicit size preferences and `natural`
-    /// its measured natural (content) size; each is used when the corresponding
-    /// axis is not fully pinned by both insets. Insets and explicit sizes resolve
-    /// percentages against `cb`. Per axis (horizontal shown; vertical analogous
-    /// with `top` / `bottom` / `height`):
-    ///
-    /// * **both `left` and `right` definite** → the box is pinned to both edges:
-    ///   `x = cb.x + left`, `width = cb.width − left − right` (clamped ≥ 0). The
-    ///   insets win; the explicit/natural width is ignored.
-    /// * **only `left` definite** → `x = cb.x + left`, `width` = the explicit
-    ///   width if set, else `natural.width`.
-    /// * **only `right` definite** → `width` = explicit-or-natural, then
-    ///   `x = cb.right − right − width`.
-    /// * **neither definite** → **static-position fallback**: `x = cb.x` (a
-    ///   documented simplification — the true static position would be the node's
-    ///   in-flow position), `width` = explicit-or-natural.
-    ///
-    /// `box_sizing` and `border_padding` (the per-axis border + padding sum) convert
-    /// an explicit `width`/`height` — which under `box-sizing: content-box` is a
-    /// *content* size — into the **border-box** size this function returns: the
-    /// border box is `content_extent(size) + border_padding`, so a `content-box`
-    /// width grows by its border + padding and a `border-box` width is used as-is
-    /// (CSS 2.1 §10.3.7 uses content widths; the flow path applies the same
-    /// [`BoxSizing::content_extent`]). Insets and `natural` are already border-box
-    /// values and are unaffected.
+    #[doc = include_str!("inset.doc/resolve_absolute_box.md")]
     #[must_use]
     pub fn resolve_absolute_box(
         self,
@@ -112,39 +72,7 @@ impl Inset {
         Rect::new(Point::new(x, y), Size::new(w, h))
     }
 
-    /// Computes the used-position offset `(dx, dy)` of an **in-flow**
-    /// [`Position::Sticky`](crate::model::Position::Sticky) node relative to its
-    /// static (normal-flow) position (spec §4.1; CSS `position: sticky`).
-    ///
-    /// A sticky node keeps its flow box (its siblings are never perturbed), but
-    /// once its scroll container has scrolled past its inset threshold the node's
-    /// *used* position sticks to the scrollport edge, clamped to stay within its
-    /// containing block. This returns the delta to add to the node's static
-    /// origin — `(0.0, 0.0)` whenever the node is at (or before) its threshold, so
-    /// a zero scroll offset is transparent.
-    ///
-    /// * `static_pos` is the node's static absolute origin (top-left).
-    /// * `node_size` is its border-box size.
-    /// * `cb` is its containing block (the clamp keeps the node inside it).
-    /// * `scrollport` is the scroll container's visible rect in the same document
-    ///   coordinates as the boxes — its top-left is the viewport origin translated
-    ///   by the current scroll offset (`viewport.origin + scroll_offset`), so
-    ///   `scrollport.top` is the document-coordinate y currently at the top of the
-    ///   viewport. The single scroll container is the viewport.
-    ///
-    /// Each axis is clamped independently. On the vertical axis (horizontal is
-    /// analogous with `left` / `right` / width):
-    ///
-    /// * **`top` set** — `sticky_lower = scrollport.top + top`,
-    ///   `sticky_upper = cb.bottom − height`;
-    ///   `used_top = min(max(sticky_lower, static_top), sticky_upper)` — the node
-    ///   never rises above its static position and never falls past the CB.
-    /// * **only `bottom` set** — the sticky edge is the scrollport bottom:
-    ///   `sticky_from_bottom = scrollport.bottom − bottom − height`;
-    ///   `used_top = max(min(sticky_from_bottom, static_top), cb.top)`.
-    /// * **neither inset on the axis** — that axis is not sticky (delta `0`).
-    ///
-    /// `top` wins over `bottom` and `left` over `right` when both are set.
+    #[doc = include_str!("inset.doc/sticky_offset.md")]
     #[must_use]
     pub fn sticky_offset(
         self,
@@ -177,12 +105,7 @@ impl Inset {
     }
 }
 
-/// Resolves one axis of a sticky node's used start position (top or left) from
-/// its start/end insets, its static position, and the scrollport / containing
-/// block edges along that axis. See [`Inset::sticky_offset`] for the semantics.
-///
-/// Returns the static position unchanged when neither inset is set on the axis,
-/// so a non-sticky axis contributes a zero delta.
+#[doc = include_str!("inset.doc/sticky_axis.md")]
 // The two insets, the static position, the node extent, and the CB / scrollport
 // edges are the cohesive per-axis inputs of one clamp; they are not a public API.
 #[allow(clippy::too_many_arguments)]
@@ -211,10 +134,7 @@ fn sticky_axis(
     }
 }
 
-/// Resolves one axis of an out-of-flow box from its start/end insets, explicit
-/// size, containing-block origin/extent, and natural size, returning
-/// `(position, size)` along that axis. See
-/// [`Inset::resolve_absolute_box`] for the branch semantics.
+#[doc = include_str!("inset.doc/resolve_axis.md")]
 fn resolve_axis(
     start: Option<f32>,
     end: Option<f32>,
@@ -239,7 +159,7 @@ fn resolve_axis(
 }
 
 impl Default for Inset {
-    /// The initial value: all edges `auto`.
+    #[doc = include_str!("inset.doc/default.md")]
     fn default() -> Self {
         Self::AUTO
     }

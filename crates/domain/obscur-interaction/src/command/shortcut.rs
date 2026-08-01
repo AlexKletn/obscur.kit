@@ -1,27 +1,22 @@
-//! The [`Shortcut`] key+modifier combination and its [`Modifiers`] bitset and
-//! [`Modifier`] members (spec §6.7).
+#![doc = include_str!("shortcut.doc/_module.md")]
 
 use crate::command::LogicalKey;
 
-/// A single keyboard modifier (spec §6.7).
-///
-/// Each variant maps to one bit in a [`Modifiers`] bitset via
-/// [`Modifier::mask`].
+#[doc = include_str!("shortcut.doc/Modifier.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Modifier {
-    /// The `Control` modifier.
+    #[doc = include_str!("shortcut.doc/Ctrl.md")]
     Ctrl,
-    /// The `Alt` / `Option` modifier.
+    #[doc = include_str!("shortcut.doc/Alt.md")]
     Alt,
-    /// The `Shift` modifier.
+    #[doc = include_str!("shortcut.doc/Shift.md")]
     Shift,
-    /// The `Meta` / `Super` / `Command` modifier.
+    #[doc = include_str!("shortcut.doc/Meta.md")]
     Meta,
 }
 
 impl Modifier {
-    /// Returns the single-bit mask this modifier occupies within a
-    /// [`Modifiers`] bitset.
+    #[doc = include_str!("shortcut.doc/mask.md")]
     #[must_use]
     pub const fn mask(self) -> u8 {
         match self {
@@ -33,75 +28,68 @@ impl Modifier {
     }
 }
 
-/// The set of modifiers held for a shortcut (spec §6.7).
-///
-/// Backed by a `u8` bitset; each [`Modifier`] contributes one bit. An empty set
-/// means no modifiers are held.
+#[doc = include_str!("shortcut.doc/Modifiers.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Modifiers(u8);
 
 impl Modifiers {
-    /// Bit for [`Modifier::Ctrl`].
+    #[doc = include_str!("shortcut.doc/CTRL.md")]
     pub const CTRL: u8 = 1;
-    /// Bit for [`Modifier::Alt`].
+    #[doc = include_str!("shortcut.doc/ALT.md")]
     pub const ALT: u8 = 2;
-    /// Bit for [`Modifier::Shift`].
+    #[doc = include_str!("shortcut.doc/SHIFT.md")]
     pub const SHIFT: u8 = 4;
-    /// Bit for [`Modifier::Meta`].
+    #[doc = include_str!("shortcut.doc/META.md")]
     pub const META: u8 = 8;
 
-    /// Creates an empty modifier set (no modifiers held).
+    #[doc = include_str!("shortcut.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self(0)
     }
 
-    /// Returns this set with `modifier` added.
+    #[doc = include_str!("shortcut.doc/with.md")]
     #[must_use]
     pub const fn with(self, modifier: Modifier) -> Self {
         Self(self.0 | modifier.mask())
     }
 
-    /// Returns this set with `modifier` removed (a no-op when it was absent).
+    #[doc = include_str!("shortcut.doc/without.md")]
     #[must_use]
     pub const fn without(self, modifier: Modifier) -> Self {
         Self(self.0 & !modifier.mask())
     }
 
-    /// Returns whether `modifier` is present in this set.
+    #[doc = include_str!("shortcut.doc/contains.md")]
     #[must_use]
     pub const fn contains(&self, modifier: Modifier) -> bool {
         self.0 & modifier.mask() != 0
     }
 
-    /// Returns whether no modifiers are held.
+    #[doc = include_str!("shortcut.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.0 == 0
     }
 
-    /// Returns the raw `u8` bitmask backing this set.
+    #[doc = include_str!("shortcut.doc/bits.md")]
     #[must_use]
     pub const fn bits(&self) -> u8 {
         self.0
     }
 }
 
-/// A key and modifier combination that triggers a command (spec §6.7).
-///
-/// A shortcut pairs a [`LogicalKey`] with a [`Modifiers`] set. It uses logical
-/// (layout-dependent) keys so bindings follow the user's keyboard layout. A
-/// shortcut with no modifiers is a bare key press.
+#[doc = include_str!("shortcut.doc/Shortcut.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Shortcut {
-    /// The logical key that triggers the shortcut.
+    #[doc = include_str!("shortcut.doc/key.md")]
     key: LogicalKey,
-    /// The modifiers that must be held.
+    #[doc = include_str!("shortcut.doc/modifiers.md")]
     modifiers: Modifiers,
 }
 
 impl Shortcut {
-    /// Creates a shortcut for `key` with no modifiers.
+    #[doc = include_str!("shortcut.doc/new_2.md")]
     #[must_use]
     pub const fn new(key: LogicalKey) -> Self {
         Self {
@@ -110,37 +98,33 @@ impl Shortcut {
         }
     }
 
-    /// Returns this shortcut with its modifier set replaced by `modifiers`.
+    #[doc = include_str!("shortcut.doc/with_modifiers.md")]
     #[must_use]
     pub const fn with_modifiers(mut self, modifiers: Modifiers) -> Self {
         self.modifiers = modifiers;
         self
     }
 
-    /// Returns this shortcut with `modifier` added to its modifier set.
+    #[doc = include_str!("shortcut.doc/with_2.md")]
     #[must_use]
     pub const fn with(mut self, modifier: Modifier) -> Self {
         self.modifiers = self.modifiers.with(modifier);
         self
     }
 
-    /// Returns the logical key that triggers this shortcut.
+    #[doc = include_str!("shortcut.doc/key_2.md")]
     #[must_use]
     pub const fn key(&self) -> LogicalKey {
         self.key
     }
 
-    /// Returns the modifiers that must be held.
+    #[doc = include_str!("shortcut.doc/modifiers_2.md")]
     #[must_use]
     pub const fn modifiers(&self) -> Modifiers {
         self.modifiers
     }
 
-    /// Returns whether this shortcut is triggered by `key` with exactly
-    /// `modifiers` held.
-    ///
-    /// Matching requires an exact modifier set: an extra held modifier, or a
-    /// missing one, does not match.
+    #[doc = include_str!("shortcut.doc/matches.md")]
     #[must_use]
     pub fn matches(&self, key: LogicalKey, modifiers: Modifiers) -> bool {
         self.key == key && self.modifiers == modifiers

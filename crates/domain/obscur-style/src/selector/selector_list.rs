@@ -1,28 +1,25 @@
-//! A comma-separated list of complex selectors: [`SelectorList`].
+#![doc = include_str!("selector_list.doc/_module.md")]
 
 use super::complex_selector::ComplexSelector;
 
-/// A comma-separated list of complex selectors (`a, b > c`).
-///
-/// An element matches the list if it matches any one of the contained complex
-/// selectors; the cascade uses the highest specificity among those that match.
+#[doc = include_str!("selector_list.doc/SelectorList.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SelectorList(Vec<ComplexSelector>);
 
 impl SelectorList {
-    /// Creates a selector list from its complex selectors.
+    #[doc = include_str!("selector_list.doc/new.md")]
     #[must_use]
     pub const fn new(selectors: Vec<ComplexSelector>) -> Self {
         Self(selectors)
     }
 
-    /// Returns the complex selectors in this list.
+    #[doc = include_str!("selector_list.doc/selectors.md")]
     #[must_use]
     pub fn selectors(&self) -> &[ComplexSelector] {
         &self.0
     }
 
-    /// Returns `true` if the list contains no selectors.
+    #[doc = include_str!("selector_list.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()

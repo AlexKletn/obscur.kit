@@ -1,5 +1,4 @@
-//! The [`UnicodeTextItemizer`] adapter implementing [`TextItemizer`] over real
-//! Unicode script and bidi tables (spec §5.10).
+#![doc = include_str!("itemizer.doc/_module.md")]
 
 use obscur_text::shaping::{ScriptTag, TextDirection, TextItem, TextItemizer};
 use obscur_text::span::TextRange;
@@ -7,51 +6,30 @@ use unicode_bidi::{BidiInfo, Level};
 
 use crate::script_mapping::script_tag_for;
 
-/// A real [`TextItemizer`] that splits text by bidi level and script (spec §5.10).
-///
-/// Itemization runs in two nested passes over the source text in logical order:
-///
-/// 1. **Bidi.** `unicode-bidi` resolves the Unicode Bidirectional Algorithm for
-///    the whole string, seeded by the caller's base direction, producing one
-///    embedding [`Level`] per byte. A run is cut wherever the level changes; the
-///    run's [`direction`](TextItem::direction) follows the level parity (even =
-///    left-to-right, odd = right-to-left) and its [`level`](TextItem::level) is
-///    that embedding level.
-/// 2. **Script.** Within a single-level run the text is cut again wherever the
-///    `unicode-script` script changes. Script-neutral characters (`Common` /
-///    `Inherited` — spaces, punctuation, digits, combining marks) never start a
-///    new run: they extend the current one, and a leading neutral prefix adopts
-///    the script of the run that follows it.
-///
-/// The emitted items are contiguous, non-overlapping, and cover `0..text.len()`
-/// with no gaps, so every range lands on a UTF-8 character boundary. An empty
-/// string yields a single empty item `0..0` carrying the base direction (level
-/// `0` for LTR, `1` for RTL) and script [`ScriptTag::COMMON`], matching the
-/// reference `SingleRunItemizer`.
+#[doc = include_str!("itemizer.doc/UnicodeTextItemizer.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnicodeTextItemizer;
 
 impl UnicodeTextItemizer {
-    /// Creates a `UnicodeTextItemizer`.
+    #[doc = include_str!("itemizer.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 }
 
-/// The run currently being accumulated during a single left-to-right pass.
+#[doc = include_str!("itemizer.doc/PendingRun.md")]
 struct PendingRun {
-    /// Byte offset where the run starts.
+    #[doc = include_str!("itemizer.doc/start.md")]
     start: usize,
-    /// The run's uniform bidi embedding level.
+    #[doc = include_str!("itemizer.doc/level.md")]
     level: u8,
-    /// The run's resolved script, or `None` while only neutral characters have
-    /// been seen (a leading neutral prefix awaiting a concrete script).
+    #[doc = include_str!("itemizer.doc/script.md")]
     script: Option<ScriptTag>,
 }
 
 impl PendingRun {
-    /// Finalizes the run as a [`TextItem`] spanning `self.start..end`.
+    #[doc = include_str!("itemizer.doc/finish.md")]
     fn finish(&self, end: usize) -> TextItem {
         let direction = if self.level.is_multiple_of(2) {
             TextDirection::LeftToRight

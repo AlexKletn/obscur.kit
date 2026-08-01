@@ -1,6 +1,5 @@
-//! PackageFormat (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("package_format.doc/_module.md")]
 
-/// Placeholder for the `PackageFormat` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("package_format.doc/PackageFormat.md")]
 #[derive(Debug)]
 pub struct PackageFormat;

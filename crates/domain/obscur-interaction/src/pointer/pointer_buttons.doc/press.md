@@ -1,0 +1,1 @@
+Marks `button` as pressed.

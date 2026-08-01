@@ -1,33 +1,21 @@
-//! One node's normalized pipeline data: [`NormalizedNode`].
+#![doc = include_str!("normalized_node.doc/_module.md")]
 
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
-/// The normalized, comparable pipeline data for a single node (spec §7.14).
-///
-/// A [`NormalizedNode`] is one row of a
-/// [`NormalizedPipeline`](super::NormalizedPipeline): it pairs a node's
-/// [`NodeId`] with the observable stage data keyed by that id — its computed
-/// `opacity` (if the computed style carries one) and its absolute layout
-/// `bounds` (if the node was arranged). Either may be absent, so both are
-/// [`Option`]s.
-///
-/// The type is deliberately small and fully comparable ([`PartialEq`]): a
-/// `NormalizedPipeline` holds these in a `NodeId`-sorted [`Vec`], so equal
-/// frames produce equal, order-stable node lists — the basis for golden diffs.
+#[doc = include_str!("normalized_node.doc/NormalizedNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedNode {
-    /// The stable identity this row describes.
+    #[doc = include_str!("normalized_node.doc/node.md")]
     node: NodeId,
-    /// The node's computed `opacity`, if its computed style carries one.
+    #[doc = include_str!("normalized_node.doc/opacity.md")]
     opacity: Option<f32>,
-    /// The node's absolute layout bounds, if it was arranged.
+    #[doc = include_str!("normalized_node.doc/layout_bounds.md")]
     layout_bounds: Option<Rect>,
 }
 
 impl NormalizedNode {
-    /// Builds a normalized row for `node` from its (optional) computed opacity
-    /// and (optional) layout bounds.
+    #[doc = include_str!("normalized_node.doc/new.md")]
     #[must_use]
     pub fn new(node: NodeId, opacity: Option<f32>, layout_bounds: Option<Rect>) -> Self {
         Self {
@@ -37,19 +25,19 @@ impl NormalizedNode {
         }
     }
 
-    /// Returns the identity this row describes.
+    #[doc = include_str!("normalized_node.doc/node_2.md")]
     #[must_use]
     pub fn node(&self) -> NodeId {
         self.node
     }
 
-    /// Returns the node's computed `opacity`, if present.
+    #[doc = include_str!("normalized_node.doc/opacity_2.md")]
     #[must_use]
     pub fn opacity(&self) -> Option<f32> {
         self.opacity
     }
 
-    /// Returns the node's absolute layout bounds, if it was arranged.
+    #[doc = include_str!("normalized_node.doc/layout_bounds_2.md")]
     #[must_use]
     pub fn layout_bounds(&self) -> Option<Rect> {
         self.layout_bounds

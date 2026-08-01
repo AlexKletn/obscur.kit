@@ -1,4 +1,4 @@
-//! Scene module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod scene;
 pub use scene::Scene;
 mod scene_generation;

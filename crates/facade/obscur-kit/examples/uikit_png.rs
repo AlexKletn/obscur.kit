@@ -1,26 +1,4 @@
-//! **Headless imported-UI-Kit → PNG.**
-//!
-//! Renders the shared [`uikit`] scene — the theme-switcher bar over the component
-//! gallery — through the **software** [`CpuRenderer`] (no display, no GPU) and
-//! writes the frame to `target/uikit_<slug>_cpu.png`, a real viewable artifact.
-//!
-//! The scene is *theme-agnostic*: [`uikit::view`] uses only semantic classes and
-//! [`uikit::themes`] supplies the appearance. The active theme is selected by the
-//! `UIKIT_THEME` env var (a 0-based index into [`uikit::themes`], default
-//! [`uikit::MATERIAL_INDEX`]); e.g. `UIKIT_THEME=4` renders the **Skeuomorphic**
-//! theme to `target/uikit_skeuo_cpu.png`.
-//!
-//! This is deliberately the **honest CPU approximation**: GPU-class effects degrade
-//! per the project's effect-split policy (a multi-layer `box-shadow` paints as flat
-//! offset rects — inset gloss lines and cast shadows both flatten; a
-//! `linear-gradient` paints only its FIRST stop, so the Skeuomorphic theme's glossy
-//! ramps read as flat light fills). Layout, text, borders, radius, and color render
-//! faithfully. Compare with `uikit_vello_png.rs`, the GPU render where the same
-//! gradients and shadows are real.
-//!
-//! Run it (Skeuomorphic):
-//! `UIKIT_THEME=4 cargo run -p obscur-kit --example uikit_png \
-//!   --features "render-cpu resource-fs resource-decode text-harfrust text-unicode"`
+#![doc = include_str!("uikit_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -43,8 +21,7 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "uikit/scene.rs"]
 mod uikit;
 
-/// The viewport the gallery is laid out and rasterized under: wide enough for the
-/// two-column card grid and tall enough for all nine cards plus the switcher.
+#[doc = include_str!("uikit_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1280.0, 2080.0);
 
 fn main() {
@@ -124,9 +101,7 @@ fn main() {
     );
 }
 
-/// The theme index to render: the `UIKIT_THEME` env var parsed as a 0-based index
-/// into [`uikit::themes`], clamped to a valid slot, defaulting to
-/// [`uikit::MATERIAL_INDEX`] when unset or unparseable.
+#[doc = include_str!("uikit_png.doc/theme_index.md")]
 fn theme_index() -> usize {
     let count = uikit::themes().len();
     std::env::var("UIKIT_THEME")
@@ -136,9 +111,7 @@ fn theme_index() -> usize {
         .unwrap_or(uikit::MATERIAL_INDEX)
 }
 
-/// The supersample render scale: the `UIKIT_SCALE` env var parsed as a float and
-/// clamped to `1.0..=4.0`, defaulting to `2.0` for a crisp PNG. `1.0` reproduces
-/// the historical logical-1:1 output.
+#[doc = include_str!("uikit_png.doc/render_scale.md")]
 fn render_scale() -> f32 {
     std::env::var("UIKIT_SCALE")
         .ok()
@@ -147,8 +120,7 @@ fn render_scale() -> f32 {
         .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
-/// A short filename slug for a theme name: `Skeuomorphic` → `skeuo`, otherwise the
-/// lowercased name with spaces folded to underscores (`Dark SaaS` → `dark_saas`).
+#[doc = include_str!("uikit_png.doc/theme_slug.md")]
 fn theme_slug(name: &str) -> String {
     match name {
         "Skeuomorphic" => "skeuo".to_owned(),
@@ -156,14 +128,14 @@ fn theme_slug(name: &str) -> String {
     }
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("uikit_png.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("uikit_png.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -171,8 +143,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the full text stack and registers `bytes` under the `sans-serif` generic
-/// family on both the resolver and the CPU renderer.
+#[doc = include_str!("uikit_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -190,12 +161,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("uikit_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("uikit_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

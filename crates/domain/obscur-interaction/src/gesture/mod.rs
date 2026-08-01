@@ -1,4 +1,4 @@
-//! Gesture module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod gesture_arena;
 pub use gesture_arena::GestureArena;
 mod gesture_contender;

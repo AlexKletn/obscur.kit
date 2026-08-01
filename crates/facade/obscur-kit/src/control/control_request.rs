@@ -1,22 +1,14 @@
-//! [`ControlRequest`] — one queued instruction from application code to the runtime.
+#![doc = include_str!("control_request.doc/_module.md")]
 
 use crate::runtime::UiRuntime;
 
-/// Something an application asked the runtime to do, waiting for the point in the
-/// frame where doing it is safe.
-///
-/// Only the requests that need the *host's* collaborators are queued: replacing the
-/// authored stylesheets needs the [`CssPipeline`](crate::bootstrap::CssPipeline)
-/// that owns §4.12's parse cache, and an arbitrary mutation needs a `&mut
-/// UiRuntime`. A positional registration is not here — it needs no runtime to be
-/// *recorded*, only to be *resolved*, so it goes straight into
-/// [`CommandBindings`](super::CommandBindings) and is resolved on the same pass.
+#[doc = include_str!("control_request.doc/ControlRequest.md")]
 pub(crate) enum ControlRequest {
-    /// Replace the authored stylesheet set with these sources, in order.
+    #[doc = include_str!("control_request.doc/Stylesheets.md")]
     Stylesheets(Vec<String>),
-    /// Run this once against the runtime.
+    #[doc = include_str!("control_request.doc/Runtime.md")]
     Runtime(Box<dyn FnOnce(&mut UiRuntime)>),
-    /// Schedule a frame, for a state change the runtime cannot have noticed.
+    #[doc = include_str!("control_request.doc/Frame.md")]
     Frame,
 }
 

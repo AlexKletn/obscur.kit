@@ -1,5 +1,7 @@
-//! `ContractValidator`: checks an element against a component contract (spec
-//! §2.13), plus the colocated [`ComponentContract`] that describes one.
+#![doc = include_str!("contract_validator.doc/_module.md")]
+
+// xtask:allow(multiple-entities) — the validator and the `ComponentContract`
+// it validates against; see tools/xtask/src/rule/main_entity.rs.
 
 use obscur_okui_syntax::ast::{Attribute, Element};
 use obscur_okui_syntax::syntax::SyntaxKind;
@@ -12,46 +14,7 @@ use crate::validation::contract_rule::{
 };
 use crate::validation::{ChildPolicy, SlotRule, ValidationDiagnostic};
 
-/// The usage contract of a component: what an instance of it must and may carry
-/// (spec §2.13).
-///
-/// A contract names the `component` it constrains and records:
-///
-/// - `required_props` — attribute names every instance must set;
-/// - `allowed_props` — additional attribute names an instance *may* set. The
-///   prop surface is **closed** once the contract declares *any* prop — required
-///   or allowed: an attribute is then permitted only if it is in `allowed_props`
-///   or `required_props`, is a [reserved](is_reserved_attribute) structural
-///   attribute, or is an `on:*` event (events are governed by `allowed_events`);
-///   every other attribute is an unknown-attribute violation. A contract that
-///   declares **no** props at all leaves the surface *open* (any attribute is
-///   accepted);
-/// - `allowed_events` — the `on:<event>` names an instance may bind; an
-///   **empty** list means *no event restriction*. A non-empty list closes the
-///   event surface: an `on:<event>` binding is permitted only if `<event>` is
-///   listed;
-/// - `children` — which children an instance may hold, as a [`ChildPolicy`]:
-///   [`Any`](ChildPolicy::Any), [`None`](ChildPolicy::None) (a leaf — see
-///   [`no_children`](Self::no_children)) or [`Only`](ChildPolicy::Only) the listed
-///   tags. This is the one surface that is **not** governed by emptiness: it used
-///   to be a `Vec` whose empty state meant "any child", which left "no children"
-///   inexpressible for every component that synthesises its own content;
-/// - `slots` — the named slots the component declares (§2.12). An **empty** list
-///   closes the slot surface rather than opening it: a `slot="…"` on a child of
-///   a component that declares none names nothing, and there is no permissive
-///   reading of that to fall back to.
-///
-/// Contracts are built fluently, for example:
-///
-/// ```
-/// use obscur_okui_compiler::validation::ComponentContract;
-/// let contract = ComponentContract::new("Tabs")
-///     .requiring_prop("selected")
-///     .allowing_prop("orientation")
-///     .allowing_event("change")
-///     .allowing_child("Tab");
-/// assert_eq!(contract.component(), "Tabs");
-/// ```
+#[doc = include_str!("contract_validator.doc/ComponentContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentContract {
     component: Box<str>,
@@ -64,8 +27,7 @@ pub struct ComponentContract {
 }
 
 impl ComponentContract {
-    /// Creates a contract for `component` with no required props and no prop,
-    /// event or child restriction (any attribute, event and child allowed).
+    #[doc = include_str!("contract_validator.doc/new.md")]
     #[must_use]
     pub fn new(component: impl Into<Box<str>>) -> Self {
         Self {
@@ -79,19 +41,14 @@ impl ComponentContract {
         }
     }
 
-    /// Records the declared type category of prop `name` (fluent; spec §2.8), so
-    /// [`validate_element`](ContractValidator::validate_element) can reject a
-    /// literal of the wrong kind. Bridged from a
-    /// [`ComponentSurface`](obscur_view::contract::ComponentSurface); a prop with
-    /// no recorded type, or one recorded as [`PropTypeSurface::Other`], is not
-    /// type-checked.
+    #[doc = include_str!("contract_validator.doc/with_prop_type.md")]
     #[must_use]
     pub fn with_prop_type(mut self, name: impl Into<Box<str>>, ty: PropTypeSurface) -> Self {
         self.prop_types.push((name.into(), ty));
         self
     }
 
-    /// Returns the declared type category of prop `name`, if one was recorded.
+    #[doc = include_str!("contract_validator.doc/prop_type.md")]
     #[must_use]
     pub fn prop_type(&self, name: &str) -> Option<PropTypeSurface> {
         self.prop_types
@@ -100,200 +57,115 @@ impl ComponentContract {
             .map(|(_, ty)| *ty)
     }
 
-    /// Adds `name` to the contract's required props (fluent).
+    #[doc = include_str!("contract_validator.doc/requiring_prop.md")]
     #[must_use]
     pub fn requiring_prop(mut self, name: impl Into<Box<str>>) -> Self {
         self.required_props.push(name.into());
         self
     }
 
-    /// Adds `name` to the contract's allowed (optional) props (fluent).
-    ///
-    /// The prop surface is closed once the contract declares any prop (required
-    /// or allowed): only listed props, required props, reserved structural
-    /// attributes and `on:*` events are then permitted; every other attribute is
-    /// an unknown-attribute violation.
+    #[doc = include_str!("contract_validator.doc/allowing_prop.md")]
     #[must_use]
     pub fn allowing_prop(mut self, name: impl Into<Box<str>>) -> Self {
         self.allowed_props.push(name.into());
         self
     }
 
-    /// Adds `name` to the contract's allowed `on:<event>` names (fluent).
-    ///
-    /// Adding any allowed event closes the event surface: once the list is
-    /// non-empty, only listed events are permitted; every other `on:*` binding
-    /// is an unknown-event violation.
+    #[doc = include_str!("contract_validator.doc/allowing_event.md")]
     #[must_use]
     pub fn allowing_event(mut self, name: impl Into<Box<str>>) -> Self {
         self.allowed_events.push(name.into());
         self
     }
 
-    /// Adds `tag` to the contract's allowed child tags (fluent), switching the
-    /// [`ChildPolicy`] to [`Only`](ChildPolicy::Only).
-    ///
-    /// Naming an allowed child is what turns child restriction on: from then on
-    /// only the listed tags are permitted.
+    #[doc = include_str!("contract_validator.doc/allowing_child.md")]
     #[must_use]
     pub fn allowing_child(mut self, tag: impl Into<Box<str>>) -> Self {
         self.children.allow(tag);
         self
     }
 
-    /// Declares that the component takes **no children at all** (fluent) — the
-    /// [`ChildPolicy::None`] leaf state.
-    ///
-    /// This is the §2.13 "allowed children" case the contract could not express:
-    /// an empty allowed-children list already meant *any* child, so a component
-    /// whose content is synthesised from its own model — every shipped widget
-    /// except `Dialog` — had no way to refuse the children an author wrote, and
-    /// `<Button>OK</Button>` compiled into a text run that nothing ever mounts.
-    ///
-    /// It forbids element children *and* text/`{expr}` content: the claim is that
-    /// the position is a leaf, and text renders nowhere in a leaf exactly as an
-    /// element does.
+    #[doc = include_str!("contract_validator.doc/no_children.md")]
     #[must_use]
     pub fn no_children(mut self) -> Self {
         self.children = ChildPolicy::None;
         self
     }
 
-    /// Declares a named slot on the contract (fluent; spec §2.12).
-    ///
-    /// Declaring any slot is what *opens* the component's slot surface: until
-    /// one is declared, a child's `slot="…"` has nothing to name.
+    #[doc = include_str!("contract_validator.doc/with_slot.md")]
     #[must_use]
     pub fn with_slot(mut self, slot: SlotRule) -> Self {
         self.slots.push(slot);
         self
     }
 
-    /// Returns the constrained component's name.
+    #[doc = include_str!("contract_validator.doc/component.md")]
     #[must_use]
     pub fn component(&self) -> &str {
         &self.component
     }
 
-    /// Returns the declared named slots (spec §2.12); an empty slice means the
-    /// component declares none and accepts no slot assignment at all.
+    #[doc = include_str!("contract_validator.doc/slots.md")]
     #[must_use]
     pub fn slots(&self) -> &[SlotRule] {
         &self.slots
     }
 
-    /// Returns the declared slot called `name`, if any.
+    #[doc = include_str!("contract_validator.doc/slot.md")]
     #[must_use]
     pub fn slot(&self, name: &str) -> Option<&SlotRule> {
         self.slots.iter().find(|slot| slot.name() == name)
     }
 
-    /// Returns the required prop names.
+    #[doc = include_str!("contract_validator.doc/required_props.md")]
     #[must_use]
     pub fn required_props(&self) -> &[Box<str>] {
         &self.required_props
     }
 
-    /// Returns the allowed (optional) prop names. Props are unrestricted only
-    /// when the contract declares no props at all (this slice *and*
-    /// [`required_props`](Self::required_props) both empty).
+    #[doc = include_str!("contract_validator.doc/allowed_props.md")]
     #[must_use]
     pub fn allowed_props(&self) -> &[Box<str>] {
         &self.allowed_props
     }
 
-    /// Returns the allowed `on:<event>` names; an empty slice means events are
-    /// unrestricted.
+    #[doc = include_str!("contract_validator.doc/allowed_events.md")]
     #[must_use]
     pub fn allowed_events(&self) -> &[Box<str>] {
         &self.allowed_events
     }
 
-    /// Returns which children the contract admits (spec §2.13).
-    ///
-    /// This replaced an `allowed_children() -> &[Box<str>]` accessor whose empty
-    /// slice meant "any child": there was no answer it could give for a leaf, and
-    /// every caller that read emptiness as permission was reading the bug. Ask the
-    /// [`ChildPolicy`] instead — [`admits`](ChildPolicy::admits) for an element
-    /// tag, [`admits_content`](ChildPolicy::admits_content) for text.
+    #[doc = include_str!("contract_validator.doc/children.md")]
     #[must_use]
     pub const fn children(&self) -> &ChildPolicy {
         &self.children
     }
 
-    /// Returns whether `name` is an accepted attribute: a required prop, an
-    /// allowed prop, or a reserved structural attribute. Only consulted when the
-    /// prop surface is closed (`allowed_props` non-empty).
+    #[doc = include_str!("contract_validator.doc/permits_prop.md")]
     pub(crate) fn permits_prop(&self, name: &str) -> bool {
         is_reserved_attribute(name)
             || self.required_props.iter().any(|p| p.as_ref() == name)
             || self.allowed_props.iter().any(|p| p.as_ref() == name)
     }
 
-    /// Returns whether `event` is an accepted `on:<event>` name. Only consulted
-    /// when the event surface is closed (`allowed_events` non-empty).
+    #[doc = include_str!("contract_validator.doc/permits_event.md")]
     pub(crate) fn permits_event(&self, event: &str) -> bool {
         self.allowed_events.iter().any(|e| e.as_ref() == event)
     }
 }
 
-/// Validates a component instance against its [`ComponentContract`] (spec
-/// §2.12, §2.13).
-///
-/// This is the **file** front end's adapter onto the shared rule in
-/// [`contract_rule`](crate::validation::contract_rule): it describes a parsed
-/// [`Element`] as a plain [`ElementUse`], runs [`check_contract`], and resolves
-/// each violation's [`ViolationAnchor`] to a source byte offset. The rule itself
-/// lives elsewhere precisely so the `okui!` macro — which has no syntax tree —
-/// can reach the same verdict from `syn` tokens.
+#[doc = include_str!("contract_validator.doc/ContractValidator.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ContractValidator;
 
 impl ContractValidator {
-    /// Creates a new contract validator.
+    #[doc = include_str!("contract_validator.doc/new_2.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Validates `element` against `contract`, returning one diagnostic per
-    /// violation (spec §2.13).
-    ///
-    /// The checks are:
-    ///
-    /// - **required props** — every name in
-    ///   [`required_props`](ComponentContract::required_props) must appear as an
-    ///   attribute on `element`; a missing one yields
-    ///   `"component '<c>' requires prop '<p>'"`;
-    /// - **unknown attributes** — when the prop surface is closed (the contract
-    ///   declares any required or allowed prop), every non-event attribute must
-    ///   be a required/allowed prop or a reserved structural attribute
-    ///   (`key`/`class`/`id`/`requires`); an unrecognised one yields
-    ///   `"unknown attribute '<a>' on component '<c>'"`;
-    /// - **unknown events** — when the event surface is closed
-    ///   ([`allowed_events`](ComponentContract::allowed_events) non-empty),
-    ///   every `on:<event>` binding's event must be listed; an unrecognised one
-    ///   yields `"unknown event '<e>' on component '<c>'"`;
-    /// - **allowed children** — under [`ChildPolicy::Only`] every child
-    ///   *element*'s tag must be listed; a disallowed tag yields
-    ///   `"'<tag>' is not an allowed child of '<c>'"`. Under
-    ///   [`ChildPolicy::None`] no child is admitted at all, element or text, and
-    ///   each one yields `"component '<c>' takes no children: …"`;
-    /// - **slots** (§2.12) — a child's `slot="…"` must name a slot the contract
-    ///   declares and satisfy that slot's own child rule, and every declared
-    ///   slot's cardinality must hold.
-    ///
-    /// Attribute-, event-, child- and slot-assignment diagnostics are anchored at
-    /// the offending attribute's or child's byte offset; the required-prop and
-    /// cardinality diagnostics are anchored at the element's own.
-    ///
-    /// **String-based method dispatch** (§2.3, §2.13) *is* modelled, at the one
-    /// place the `.okui` AST spells it: an `on:<event>` whose value is a string
-    /// literal — `on:pressed="handle_submit"` — is a named-method reference, which
-    /// §2.3 ("Events are typed. String-based method dispatch is not used.")
-    /// forbids. It is refused whether or not the event is declared, because the
-    /// *form* is the fault: a handler is bound with `{…}`, never named by string.
-    /// See [`check_string_dispatch`](Self::check_string_dispatch).
+    #[doc = include_str!("contract_validator.doc/validate_element.md")]
     #[must_use]
     pub fn validate_element(
         &self,
@@ -317,16 +189,7 @@ impl ContractValidator {
         diagnostics
     }
 
-    /// Appends a diagnostic for every prop attribute given a literal of the wrong
-    /// type — a `String` prop handed an integer, an `i64` prop handed a string
-    /// (spec §2.8, "typed props … compile-time validation").
-    ///
-    /// One diagnostic per offending attribute, anchored at that attribute, so two
-    /// wrong props on one element are two pointed errors, not one merged one. A
-    /// prop the contract records no type for (or records as
-    /// [`PropTypeSurface::Other`]), an attribute whose value is not a literal
-    /// (`count={total}` — a binding whose type is unknown here), and every event
-    /// attribute are all left alone.
+    #[doc = include_str!("contract_validator.doc/check_prop_types.md")]
     fn check_prop_types(
         element: &Element,
         contract: &ComponentContract,
@@ -359,14 +222,7 @@ impl ContractValidator {
         }
     }
 
-    /// Appends a diagnostic for every `on:<event>` handler given as a string
-    /// literal — string-based method dispatch, which §2.3/§2.13 forbid.
-    ///
-    /// A handler is bound as an expression (`on:pressed={handle_submit}`) or, on
-    /// the file path, a bare reference (`on:pressed=handle_submit`); a *quoted*
-    /// value names a method by string, and that is the form refused. A prop
-    /// attribute's string value is untouched — only an event's is a dispatch
-    /// reference.
+    #[doc = include_str!("contract_validator.doc/check_string_dispatch.md")]
     fn check_string_dispatch(
         element: &Element,
         contract: &ComponentContract,
@@ -391,36 +247,27 @@ impl ContractValidator {
     }
 }
 
-/// The owned strings one parsed [`Element`] contributes to an [`ElementUse`],
-/// plus the byte offset each part is reported at.
-///
-/// It exists because the rule borrows `&str` while the AST hands out `String`:
-/// the storage must outlive the borrow, and the offsets must travel with it so a
-/// [`ViolationAnchor`] can be resolved back to a source position.
+#[doc = include_str!("contract_validator.doc/AstInstance.md")]
 struct AstInstance {
     tag: String,
     attributes: Vec<(String, bool)>,
     attribute_offsets: Vec<u32>,
     members: Vec<(String, Option<Slot>, MemberArity)>,
     member_offsets: Vec<u32>,
-    /// Whether a text child or an `{expr}` interpolation reaches this instance —
-    /// the content a member list cannot record, since neither has a tag.
+    #[doc = include_str!("contract_validator.doc/content.md")]
     content: bool,
 }
 
-/// A member's slot assignment, owned. The borrowed
-/// [`SlotUse`](crate::validation::contract_rule::SlotUse) the rule takes cannot
-/// hold a `String` the AST just minted.
+#[doc = include_str!("contract_validator.doc/Slot.md")]
 enum Slot {
-    /// `slot="header"`.
+    #[doc = include_str!("contract_validator.doc/Named.md")]
     Named(String),
-    /// `slot={expr}`.
+    #[doc = include_str!("contract_validator.doc/Dynamic.md")]
     Dynamic,
 }
 
 impl AstInstance {
-    /// Describes `element`, defaulting any part with no recorded position to
-    /// `offset` (the element's own).
+    #[doc = include_str!("contract_validator.doc/of.md")]
     fn of(element: &Element, offset: u32) -> Self {
         let mut instance = Self {
             tag: element.tag_name().unwrap_or_default(),
@@ -446,19 +293,7 @@ impl AstInstance {
         instance
     }
 
-    /// Appends `element`'s members, looking through the control flow that
-    /// splices into it (see the [`contract_rule`](crate::validation::contract_rule)
-    /// module docs).
-    ///
-    /// `<Empty>` / `<Separator>` inside a `<For>` are looked through for the same
-    /// reason: they are §2.11 slots whose *bodies* reach the loop's parent, not
-    /// nodes of their own.
-    ///
-    /// The same walk records [`content`](Self::content): a text child or an
-    /// `{expr}` reaching this instance, from here or from inside the control flow
-    /// that splices into it. Whitespace-only text is not content — the lowering
-    /// trims it away and emits no node, so refusing it would reject the
-    /// indentation of every multi-line document.
+    #[doc = include_str!("contract_validator.doc/collect_members.md")]
     fn collect_members(&mut self, element: &Element, arity: MemberArity, offset: u32) {
         for child in element.children() {
             if matches!(child.kind(), SyntaxKind::Expression)
@@ -497,7 +332,7 @@ impl AstInstance {
         }
     }
 
-    /// Borrows this instance as the plain [`ElementUse`] the rule takes.
+    #[doc = include_str!("contract_validator.doc/as_use.md")]
     fn as_use(&self) -> ElementUse<'_> {
         ElementUse {
             tag: &self.tag,
@@ -525,7 +360,7 @@ impl AstInstance {
         }
     }
 
-    /// Resolves an anchor to the byte offset its diagnostic is reported at.
+    #[doc = include_str!("contract_validator.doc/offset_of.md")]
     fn offset_of(&self, anchor: ViolationAnchor, element: u32) -> u32 {
         match anchor {
             ViolationAnchor::Element => element,
@@ -541,10 +376,7 @@ impl AstInstance {
     }
 }
 
-/// Weakens `arity` to `inner`, keeping the weaker of the two.
-///
-/// Nesting only ever loosens the bound: a member already inside a `<For>` stays
-/// unbounded when an `<If>` wraps it.
+#[doc = include_str!("contract_validator.doc/degrade.md")]
 const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
     match arity {
         MemberArity::Any => MemberArity::Any,
@@ -552,29 +384,22 @@ const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
     }
 }
 
-/// The kind of literal an attribute was given, as far as it can be told at
-/// compile time (spec §2.8).
+#[doc = include_str!("contract_validator.doc/AttributeValueType.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttributeValueType {
-    /// A quoted `attr="…"` value, or a braced string literal `attr={"…"}`.
+    #[doc = include_str!("contract_validator.doc/String.md")]
     String,
-    /// A braced integer literal `attr={5}` (or its negation).
+    #[doc = include_str!("contract_validator.doc/Int.md")]
     Int,
-    /// A braced float literal `attr={1.5}` (or its negation).
+    #[doc = include_str!("contract_validator.doc/Float.md")]
     Float,
-    /// A braced boolean literal `attr={true}`.
+    #[doc = include_str!("contract_validator.doc/Bool.md")]
     Bool,
-    /// A binding, a computed expression, or a bare word — nothing a literal type
-    /// can be read from, so it is not type-checked.
+    #[doc = include_str!("contract_validator.doc/Unknown.md")]
     Unknown,
 }
 
-/// Classifies the literal an attribute carries, for the §2.8 type check.
-///
-/// A quoted value is a string; a braced value is parsed as a Rust expression and
-/// classified only when it is a literal (or a negated numeric literal). Anything
-/// else — a binding `{count}`, an arithmetic expression `{a + b}`, a bare word —
-/// is [`Unknown`](AttributeValueType::Unknown) and left unchecked.
+#[doc = include_str!("contract_validator.doc/attribute_value_type.md")]
 fn attribute_value_type(attribute: &Attribute) -> AttributeValueType {
     if let Some(expression) = attribute.value_expression() {
         let Ok(expr) = syn::parse_str::<syn::Expr>(&expression.text()) else {
@@ -588,8 +413,7 @@ fn attribute_value_type(attribute: &Attribute) -> AttributeValueType {
     AttributeValueType::Unknown
 }
 
-/// Classifies a braced expression that is a literal (or a negated numeric
-/// literal), else [`Unknown`](AttributeValueType::Unknown).
+#[doc = include_str!("contract_validator.doc/literal_expr_type.md")]
 fn literal_expr_type(expr: &syn::Expr) -> AttributeValueType {
     match expr {
         syn::Expr::Lit(lit) => match &lit.lit {
@@ -610,13 +434,7 @@ fn literal_expr_type(expr: &syn::Expr) -> AttributeValueType {
     }
 }
 
-/// Whether a value of type `found` satisfies a prop declared `expected`.
-///
-/// An [`Unknown`](AttributeValueType::Unknown) value and an
-/// [`Other`](PropTypeSurface::Other) prop are always accepted — neither carries
-/// enough information to prove a mismatch. An integer literal is accepted for a
-/// float prop (`opacity={1}`), since it is a valid float; every other pairing
-/// must match exactly.
+#[doc = include_str!("contract_validator.doc/value_type_matches.md")]
 fn value_type_matches(expected: PropTypeSurface, found: AttributeValueType) -> bool {
     if found == AttributeValueType::Unknown || expected == PropTypeSurface::Other {
         return true;
@@ -632,7 +450,7 @@ fn value_type_matches(expected: PropTypeSurface, found: AttributeValueType) -> b
     }
 }
 
-/// The human phrase for a declared prop type, for a diagnostic.
+#[doc = include_str!("contract_validator.doc/describe_prop_type.md")]
 fn describe_prop_type(ty: PropTypeSurface) -> &'static str {
     match ty {
         PropTypeSurface::String => "a string",
@@ -643,7 +461,7 @@ fn describe_prop_type(ty: PropTypeSurface) -> &'static str {
     }
 }
 
-/// The human phrase for the literal an attribute was given, for a diagnostic.
+#[doc = include_str!("contract_validator.doc/describe_value_type.md")]
 fn describe_value_type(ty: AttributeValueType) -> &'static str {
     match ty {
         AttributeValueType::String => "a string",

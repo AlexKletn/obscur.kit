@@ -1,25 +1,21 @@
-//! The output of the measure phase for a node.
+#![doc = include_str!("layout_result.doc/_module.md")]
 
 use obscur_geometry::Size;
 
-/// The result of the **measure** phase for a node: the size it resolved to
-/// under the constraints it was measured against (spec §4.2).
-///
-/// The size is expressed in fractional logical pixels; no rounding is applied
-/// (spec §4.6).
+#[doc = include_str!("layout_result.doc/LayoutResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct LayoutResult {
     size: Size,
 }
 
 impl LayoutResult {
-    /// Creates a measure result carrying the resolved `size`.
+    #[doc = include_str!("layout_result.doc/new.md")]
     #[must_use]
     pub const fn new(size: Size) -> Self {
         Self { size }
     }
 
-    /// The resolved size the node wants.
+    #[doc = include_str!("layout_result.doc/size.md")]
     #[must_use]
     pub const fn size(self) -> Size {
         self.size

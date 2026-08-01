@@ -1,38 +1,14 @@
-//! Samples motion tracks into presentation values: [`MotionCoordinator`].
-//!
-//! This is the runtime-side orchestration entry point for the motion engine
-//! (spec §4.17). The timeline integration, easing curves and value
-//! interpolation all live in `obscur-motion`; the coordinator's job is to turn a
-//! track plus a normalized progress into a concrete [`MotionValue`] the runtime
-//! can overlay onto a node's computed style before layout and paint.
+#![doc = include_str!("motion_coordinator.doc/_module.md")]
 
 use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::value::MotionValue;
 
-/// Samples motion tracks at a normalized progress (spec §4.17).
-///
-/// The coordinator is **orchestration only** and stateless: it owns no timelines
-/// (the [`UiRuntime`](crate::UiRuntime) owns the
-/// [`MotionScheduler`](obscur_motion::scheduler::MotionScheduler) and its
-/// bindings) and reimplements no domain math — it merely locates the bracketing
-/// keyframes for a progress `t`, eases the local segment through the lower
-/// keyframe's timing function, and blends the two endpoint values, matching the
-/// domain [`KeyframeTrack`] sampling contract.
+#[doc = include_str!("motion_coordinator.doc/MotionCoordinator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MotionCoordinator;
 
 impl MotionCoordinator {
-    /// Samples `track` at normalized progress `t`, returning the presentation
-    /// [`MotionValue`] to overlay (spec §4.17).
-    ///
-    /// `t` is clamped to `[0, 1]`. Returns [`None`] only for an **empty** track
-    /// (no keyframes to present). Progress at or before the first keyframe holds
-    /// the first value; at or after the last keyframe holds the last value.
-    /// Between two keyframes the local progress is eased by the lower keyframe's
-    /// [`Easing`](obscur_motion::track::Easing) and used to blend the two values,
-    /// falling back to the upper value on a variant mismatch — exactly the
-    /// [`KeyframeTrack`] sampling rule, but surfaced as an [`Option`] so an empty
-    /// track produces no overlay rather than a degenerate zero.
+    #[doc = include_str!("motion_coordinator.doc/sample_keyframes.md")]
     #[must_use]
     pub fn sample_keyframes(track: &KeyframeTrack, t: f32) -> Option<MotionValue> {
         let frames = track.keyframes();

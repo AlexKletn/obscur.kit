@@ -1,18 +1,13 @@
-//! A vector outline: an ordered list of segments plus a fill rule.
+#![doc = include_str!("path.doc/_module.md")]
 
 use obscur_geometry::{CornerRadii, Point, Rect, Size};
 
 use super::{FillRule, PathSegment};
 
-/// The Bézier arc approximation constant (`4/3 * (sqrt(2) - 1)`), used to place
-/// cubic control points that closely approximate a quarter-circle.
+#[doc = include_str!("path.doc/KAPPA.md")]
 const KAPPA: f32 = 0.552_284_8;
 
-/// A vector outline (spec §5.1): an ordered sequence of [`PathSegment`]s plus a
-/// [`FillRule`] describing how the interior is filled.
-///
-/// A `Path` is plain, backend-independent data. It carries no rendering state
-/// and references no GPU or renderer types; a backend interprets the segments.
+#[doc = include_str!("path.doc/Path.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Path {
     segments: Vec<PathSegment>,
@@ -20,13 +15,13 @@ pub struct Path {
 }
 
 impl Path {
-    /// Creates an empty path with the default [`FillRule::NonZero`].
+    #[doc = include_str!("path.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Creates an empty path with the given fill rule.
+    #[doc = include_str!("path.doc/with_fill_rule.md")]
     #[must_use]
     pub fn with_fill_rule(rule: FillRule) -> Self {
         Self {
@@ -35,27 +30,25 @@ impl Path {
         }
     }
 
-    /// Starts a new subpath at `p`. Returns `&mut Self` for chaining.
+    #[doc = include_str!("path.doc/move_to.md")]
     pub fn move_to(&mut self, p: Point) -> &mut Self {
         self.segments.push(PathSegment::MoveTo(p));
         self
     }
 
-    /// Adds a straight line to `p`. Returns `&mut Self` for chaining.
+    #[doc = include_str!("path.doc/line_to.md")]
     pub fn line_to(&mut self, p: Point) -> &mut Self {
         self.segments.push(PathSegment::LineTo(p));
         self
     }
 
-    /// Adds a quadratic Bézier curve to `end` via `control`. Returns
-    /// `&mut Self` for chaining.
+    #[doc = include_str!("path.doc/quad_to.md")]
     pub fn quad_to(&mut self, control: Point, end: Point) -> &mut Self {
         self.segments.push(PathSegment::QuadTo { control, end });
         self
     }
 
-    /// Adds a cubic Bézier curve to `end` via `c1` and `c2`. Returns
-    /// `&mut Self` for chaining.
+    #[doc = include_str!("path.doc/cubic_to.md")]
     pub fn cubic_to(&mut self, c1: Point, c2: Point, end: Point) -> &mut Self {
         self.segments.push(PathSegment::CubicTo {
             control1: c1,
@@ -65,43 +58,43 @@ impl Path {
         self
     }
 
-    /// Closes the current subpath. Returns `&mut Self` for chaining.
+    #[doc = include_str!("path.doc/close.md")]
     pub fn close(&mut self) -> &mut Self {
         self.segments.push(PathSegment::Close);
         self
     }
 
-    /// The ordered segments making up this path.
+    #[doc = include_str!("path.doc/segments.md")]
     #[must_use]
     pub fn segments(&self) -> &[PathSegment] {
         &self.segments
     }
 
-    /// The fill rule used to determine this path's interior.
+    #[doc = include_str!("path.doc/fill_rule.md")]
     #[must_use]
     pub fn fill_rule(&self) -> FillRule {
         self.fill_rule
     }
 
-    /// Replaces the fill rule.
+    #[doc = include_str!("path.doc/set_fill_rule.md")]
     pub fn set_fill_rule(&mut self, rule: FillRule) -> &mut Self {
         self.fill_rule = rule;
         self
     }
 
-    /// Whether the path has no segments.
+    #[doc = include_str!("path.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
 
-    /// The number of segments in the path.
+    #[doc = include_str!("path.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.segments.len()
     }
 
-    /// Builds a closed rectangular path (four line segments plus a close).
+    #[doc = include_str!("path.doc/rect.md")]
     #[must_use]
     pub fn rect(rect: Rect) -> Path {
         let x0 = rect.origin.x;
@@ -117,22 +110,7 @@ impl Path {
         path
     }
 
-    /// Builds a closed rounded-rectangle path.
-    ///
-    /// Each corner is a **quarter ellipse** (CSS Backgrounds 3 §4.1) drawn with a
-    /// single cubic Bézier whose control points use the [`KAPPA`] constant — a
-    /// close but not exact approximation, which is standard for vector rounded
-    /// rectangles. The corner's horizontal radius governs the control points'
-    /// horizontal reach and its vertical radius the vertical one, so a
-    /// `border-radius: 50%` on a 2:1 box draws the ellipse the spec asks for
-    /// rather than a circle.
-    ///
-    /// `radii` are floored at zero and put through the §4.5 overlapping-curves
-    /// correction ([`CornerRadii::normalized`]) for `rect`, so adjacent corners
-    /// can never overlap however the caller built them. That correction is
-    /// idempotent for radii that already fit, so a caller that has already
-    /// normalized (the scene coordinator does, once, for the whole node) pays
-    /// nothing and gets the same path.
+    #[doc = include_str!("path.doc/rounded_rect.md")]
     #[must_use]
     pub fn rounded_rect(rect: Rect, radii: CornerRadii) -> Path {
         let x0 = rect.origin.x;
@@ -189,17 +167,7 @@ impl Path {
         path
     }
 
-    /// Builds a closed rounded-rectangle **ring**: an `outer` rounded rectangle
-    /// with an `inner` rounded rectangle punched out as a hole, filled with the
-    /// [`FillRule::EvenOdd`] rule so the inner rectangle's interior is excluded.
-    ///
-    /// The result is a single path holding two subpaths — the outer rounded rect
-    /// followed by the inner rounded rect (each built by [`Path::rounded_rect`]).
-    /// Under the even-odd rule the region between the two outlines is filled while
-    /// the inner region is left empty, yielding a rounded border ring whose OUTER
-    /// **and** INNER corners are rounded. Callers pass the border-box rect with the
-    /// authored corner radii as `outer`, and the inner (padding-box) rect with
-    /// per-corner radii reduced by the border width as `inner`.
+    #[doc = include_str!("path.doc/rounded_rect_ring.md")]
     #[must_use]
     pub fn rounded_rect_ring(
         outer: Rect,
@@ -214,12 +182,7 @@ impl Path {
         path
     }
 
-    /// The axis-aligned bounding box of every point referenced by the path, or
-    /// `None` if the path is empty (has no points).
-    ///
-    /// Control points of quadratic and cubic segments are included, so the box
-    /// is a conservative bound: it always contains the drawn curves but may be
-    /// larger than their tight bounds. Never panics.
+    #[doc = include_str!("path.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         let mut bounds: Option<(Point, Point)> = None;

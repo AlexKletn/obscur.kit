@@ -1,6 +1,5 @@
-//! Entrypoint (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("entrypoint.doc/_module.md")]
 
-/// Placeholder for the `Entrypoint` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("entrypoint.doc/Entrypoint.md")]
 #[derive(Debug)]
 pub struct Entrypoint;

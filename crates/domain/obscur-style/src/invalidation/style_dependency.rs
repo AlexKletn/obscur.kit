@@ -1,27 +1,4 @@
-//! The per-node style dependency record: [`StyleDependency`] (§4.3, §4.14).
-//!
-//! When a node's computed style is resolved it consumes a few typed inputs. This
-//! record captures *which* of those inputs the node actually read, so a later
-//! change to one of them can decide precisely whether the node is affected —
-//! invalidating only affected consumers (§4.14) rather than everything.
-//!
-//! # Status: nothing populates this
-//!
-//! No production code constructs a `StyleDependency`, because nothing records what
-//! a node's matching consulted: `StyleMatcher::match_element_in` returns the
-//! cascaded declarations and no dependency trace, so there is no moment at which
-//! the `with_*`/`add_*` builders could be called. Its `affected_by_*` gates
-//! therefore have no production consumer either, and it is not what makes today's
-//! style invalidation per-node.
-//!
-//! What does: the runtime's `RestyleScope` bounds a `:hover`/`:focus` change
-//! *structurally* — a node's state can only be read while matching its own
-//! subtree and its following siblings' subtrees, because those are the only nodes
-//! `MatchElement`'s `parent()`/`previous_sibling_element()` can reach it from. That
-//! is a sound upper bound and needs no per-node record. This type would narrow it
-//! (a node whose matching never mentioned `:hover` need not be restyled at all),
-//! which is the reason to keep it — but narrowing needs the matcher to trace its
-//! reads first.
+#![doc = include_str!("style_dependency.doc/_module.md")]
 
 use crate::computed::StyleDiff;
 use crate::invalidation::StyleInvalidationReason;
@@ -30,19 +7,7 @@ use crate::selector::PseudoState;
 use obscur_identity::InternedSymbol;
 use std::collections::HashSet;
 
-/// Records what a single node's computed style depended on (§4.3).
-///
-/// A node's style depends on: whether it inherited any value from its parent
-/// ([`inherits_from_parent`](Self::inherits_from_parent)), which custom
-/// properties it read ([`custom_properties`](Self::custom_properties)), and which
-/// interaction states its matching depends on
-/// ([`pseudo_states`](Self::pseudo_states)). A later change consults this record
-/// via the `affected_by_*` methods to decide whether the node must be restyled;
-/// those methods are the gate that would keep invalidation confined to affected
-/// consumers (§4.14).
-///
-/// Would, not does — see the module docs: nothing builds one of these, so the
-/// runtime keeps no such record alongside a node's cached style.
+#[doc = include_str!("style_dependency.doc/StyleDependency.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleDependency {
     inherits_from_parent: bool,
@@ -51,11 +16,7 @@ pub struct StyleDependency {
 }
 
 impl StyleDependency {
-    /// Creates an empty dependency record: no inheritance, no custom properties,
-    /// no pseudo-state dependence.
-    ///
-    /// Build it up with the `with_*`/`add_*` methods as resolution discovers what
-    /// the node actually consumed.
+    #[doc = include_str!("style_dependency.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -65,86 +26,67 @@ impl StyleDependency {
         }
     }
 
-    /// Sets whether the node computed at least one inherited/default-inherited
-    /// value from its parent, returning `self` for builder-style chaining.
+    #[doc = include_str!("style_dependency.doc/with_inherits_from_parent.md")]
     #[must_use]
     pub fn with_inherits_from_parent(mut self, inherits: bool) -> Self {
         self.inherits_from_parent = inherits;
         self
     }
 
-    /// Sets the interaction states the node's matching depends on, returning
-    /// `self` for builder-style chaining.
+    #[doc = include_str!("style_dependency.doc/with_pseudo_states.md")]
     #[must_use]
     pub fn with_pseudo_states(mut self, states: PseudoState) -> Self {
         self.pseudo_states = states;
         self
     }
 
-    /// Records that the node read the custom property `name` (e.g. via `var()`),
-    /// returning `self` for builder-style chaining.
+    #[doc = include_str!("style_dependency.doc/with_custom_property.md")]
     #[must_use]
     pub fn with_custom_property(mut self, name: InternedSymbol) -> Self {
         self.custom_properties.insert(name);
         self
     }
 
-    /// Records that the node read the custom property `name` (e.g. via `var()`).
+    #[doc = include_str!("style_dependency.doc/add_custom_property.md")]
     pub fn add_custom_property(&mut self, name: InternedSymbol) {
         self.custom_properties.insert(name);
     }
 
-    /// Records that the node computed at least one value inherited from its
-    /// parent.
+    #[doc = include_str!("style_dependency.doc/set_inherits_from_parent.md")]
     pub fn set_inherits_from_parent(&mut self, inherits: bool) {
         self.inherits_from_parent = inherits;
     }
 
-    /// Records the interaction states the node's matching depends on.
+    #[doc = include_str!("style_dependency.doc/set_pseudo_states.md")]
     pub fn set_pseudo_states(&mut self, states: PseudoState) {
         self.pseudo_states = states;
     }
 
-    /// Returns whether the node inherited any value from its parent.
+    #[doc = include_str!("style_dependency.doc/inherits_from_parent.md")]
     #[must_use]
     pub fn inherits_from_parent(&self) -> bool {
         self.inherits_from_parent
     }
 
-    /// Returns the set of custom properties the node read.
+    #[doc = include_str!("style_dependency.doc/custom_properties.md")]
     #[must_use]
     pub fn custom_properties(&self) -> &HashSet<InternedSymbol> {
         &self.custom_properties
     }
 
-    /// Returns whether the node read any custom property.
+    #[doc = include_str!("style_dependency.doc/reads_custom_properties.md")]
     #[must_use]
     pub fn reads_custom_properties(&self) -> bool {
         !self.custom_properties.is_empty()
     }
 
-    /// Returns the interaction states the node's matching depends on.
+    #[doc = include_str!("style_dependency.doc/pseudo_states.md")]
     #[must_use]
     pub fn pseudo_states(&self) -> PseudoState {
         self.pseudo_states
     }
 
-    /// Decides whether a change to the *parent's* computed style affects this
-    /// node, returning the typed reason if so (§4.14).
-    ///
-    /// The node is affected when either:
-    /// - it inherited from its parent and `parent_diff` changed at least one
-    ///   property that inherits by default (checked with
-    ///   [`InheritedProperty::of`] over
-    ///   [`StyleDiff::changed_properties`]) — yields
-    ///   [`StyleInvalidationReason::ParentStyleChanged`]; or
-    /// - it reads custom properties and `parent_diff` reports a custom-property
-    ///   change ([`StyleDiff::custom_properties_changed`]) — yields
-    ///   [`StyleInvalidationReason::CustomPropertyChanged`].
-    ///
-    /// The inherited-property check is preferred when both apply. Returns `None`
-    /// when the node consumed nothing the parent changed, so an unaffected node is
-    /// never restyled.
+    #[doc = include_str!("style_dependency.doc/affected_by_parent_change.md")]
     #[must_use]
     pub fn affected_by_parent_change(
         &self,
@@ -164,11 +106,7 @@ impl StyleDependency {
         None
     }
 
-    /// Returns whether a change to the node's active pseudo-states affects it.
-    ///
-    /// True when the flags that `changed` toggled intersect the states this
-    /// node's matching depends on; a state the node never matched on cannot alter
-    /// its style.
+    #[doc = include_str!("style_dependency.doc/affected_by_pseudo_change.md")]
     #[must_use]
     pub fn affected_by_pseudo_change(&self, changed: PseudoState) -> bool {
         (self.pseudo_states.bits() & changed.bits()) != 0

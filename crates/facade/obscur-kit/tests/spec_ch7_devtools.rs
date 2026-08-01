@@ -1,8 +1,4 @@
-//! **SPECIFICATION-DERIVED** DevTools inspect-mode cases for obscur.kit §7.6.
-//!
-//! Written by an agent reading obscur.kit §7.6 (with §7.5 "- do not affect
-//! visual output;" and §7.10 "It must not degrade:" / "- input correctness;")
-//! with **no access to this repository's source**.
+#![doc = include_str!("spec_ch7_devtools.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7_support/mod.rs"]
@@ -13,7 +9,7 @@ use support::{all_geom, at, click, drive, el, hover, view};
 
 const VW: f32 = 400.0;
 
-/// A 100x40 `.box` rotated 45 degrees about its centre, inside a 400x400 root.
+#[doc = include_str!("spec_ch7_devtools.doc/rotated.md")]
 fn rotated() -> View {
     view(vec![el(1, "root", vec![el(2, "box", vec![])])])
 }
@@ -23,8 +19,7 @@ const ROTATED_CSS: &str = ".root { width: 400px; height: 400px } \
                                   transform: rotate(45deg); \
                                   background-color: #cc3333 }";
 
-/// §7.6, verbatim: "Inspect mode uses the same hit-testing engine as runtime and
-/// can highlight bounds."
+#[doc = include_str!("spec_ch7_devtools.doc/inspect_picking_uses_the_runtime_hit_test_not_the_layout_rect.md")]
 #[test]
 fn inspect_picking_uses_the_runtime_hit_test_not_the_layout_rect() {
     let mut rt = drive(VW, VW, ROTATED_CSS, &rotated());
@@ -62,8 +57,7 @@ fn inspect_picking_uses_the_runtime_hit_test_not_the_layout_rect() {
     );
 }
 
-/// §7.6: "Inspect mode uses the same hit-testing engine as runtime" — an overlay
-/// above a button takes the pick from both engines.
+#[doc = include_str!("spec_ch7_devtools.doc/inspect_picking_honours_stacking_order.md")]
 #[test]
 fn inspect_picking_honours_stacking_order() {
     let css = ".root { width: 400px; height: 400px; position: relative } \
@@ -94,8 +88,7 @@ fn inspect_picking_honours_stacking_order() {
     );
 }
 
-/// §7.6 "…and can highlight bounds." with §7.5 "- do not affect visual output;"
-/// in spirit and §7.10 "It must not degrade:" / "- input correctness;".
+#[doc = include_str!("spec_ch7_devtools.doc/the_inspect_highlight_is_inert.md")]
 #[test]
 fn the_inspect_highlight_is_inert() {
     let css = ".root { width: 400px; height: 400px } \

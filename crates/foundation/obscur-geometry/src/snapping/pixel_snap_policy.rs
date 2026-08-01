@@ -1,6 +1,5 @@
-//! `PixelSnapPolicy` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("pixel_snap_policy.doc/_module.md")]
 
-/// Placeholder for the `PixelSnapPolicy` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("pixel_snap_policy.doc/PixelSnapPolicy.md")]
 #[derive(Debug)]
 pub(crate) struct PixelSnapPolicy;

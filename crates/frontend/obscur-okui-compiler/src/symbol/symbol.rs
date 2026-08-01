@@ -1,49 +1,31 @@
-//! `Symbol`: a named entity visible within a lexical scope (spec §2.10).
+#![doc = include_str!("symbol.doc/_module.md")]
 
-/// The kind of entity a [`Symbol`] names (spec §2.10).
-///
-/// The kind determines how a symbol may be used during name resolution. The
-/// three *reference targets* — [`Prop`](SymbolKind::Prop),
-/// [`State`](SymbolKind::State) and [`LoopLocal`](SymbolKind::LoopLocal) — are
-/// the value bindings an interpolated expression is allowed to read; the
-/// remaining kinds name declarations (components, functions, slots) that live
-/// in a scope but are not themselves read as expression values.
+#[doc = include_str!("symbol.doc/SymbolKind.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SymbolKind {
-    /// A component input prop bound by the caller (spec §2.9).
+    #[doc = include_str!("symbol.doc/Prop.md")]
     Prop,
-    /// A piece of component-local reactive state (spec §2.9).
+    #[doc = include_str!("symbol.doc/State.md")]
     State,
-    /// A loop-local binding introduced by a `<For>` body — `item` or `index`
-    /// (spec §2.11).
+    #[doc = include_str!("symbol.doc/LoopLocal.md")]
     LoopLocal,
-    /// A component declaration referenced by name (spec §2.9).
+    #[doc = include_str!("symbol.doc/Component.md")]
     Component,
-    /// A callable function declaration (spec §2.10).
+    #[doc = include_str!("symbol.doc/Function.md")]
     Function,
-    /// A named content slot (spec §2.9).
+    #[doc = include_str!("symbol.doc/Slot.md")]
     Slot,
 }
 
 impl SymbolKind {
-    /// Returns whether a symbol of this kind may be read as an expression value
-    /// (spec §2.10).
-    ///
-    /// Only the value bindings — [`Prop`](SymbolKind::Prop),
-    /// [`State`](SymbolKind::State) and [`LoopLocal`](SymbolKind::LoopLocal) —
-    /// are valid reference targets; declarations of components, functions and
-    /// slots are not.
+    #[doc = include_str!("symbol.doc/is_reference_target.md")]
     #[must_use]
     pub const fn is_reference_target(&self) -> bool {
         matches!(self, Self::Prop | Self::State | Self::LoopLocal)
     }
 }
 
-/// A named entity visible within a lexical scope (spec §2.10).
-///
-/// A symbol pairs a `name` with its [`SymbolKind`]. Symbols are held by a
-/// [`Scope`](crate::symbol::Scope) keyed by name and looked up outward through
-/// the enclosing scopes during name resolution.
+#[doc = include_str!("symbol.doc/Symbol.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     name: Box<str>,
@@ -51,7 +33,7 @@ pub struct Symbol {
 }
 
 impl Symbol {
-    /// Creates a symbol with the given `name` and `kind`.
+    #[doc = include_str!("symbol.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, kind: SymbolKind) -> Self {
         Self {
@@ -60,44 +42,43 @@ impl Symbol {
         }
     }
 
-    /// Creates a [`Prop`](SymbolKind::Prop) symbol.
+    #[doc = include_str!("symbol.doc/prop.md")]
     #[must_use]
     pub fn prop(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::Prop)
     }
 
-    /// Creates a [`State`](SymbolKind::State) symbol.
+    #[doc = include_str!("symbol.doc/state.md")]
     #[must_use]
     pub fn state(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::State)
     }
 
-    /// Creates a [`LoopLocal`](SymbolKind::LoopLocal) symbol.
+    #[doc = include_str!("symbol.doc/loop_local.md")]
     #[must_use]
     pub fn loop_local(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::LoopLocal)
     }
 
-    /// Creates a [`Component`](SymbolKind::Component) symbol.
+    #[doc = include_str!("symbol.doc/component.md")]
     #[must_use]
     pub fn component(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::Component)
     }
 
-    /// Returns the symbol's name.
+    #[doc = include_str!("symbol.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the symbol's kind.
+    #[doc = include_str!("symbol.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> &SymbolKind {
         &self.kind
     }
 
-    /// Returns whether this symbol may be read as an expression value (spec
-    /// §2.10); see [`SymbolKind::is_reference_target`].
+    #[doc = include_str!("symbol.doc/is_reference_target_2.md")]
     #[must_use]
     pub const fn is_reference_target(&self) -> bool {
         self.kind.is_reference_target()

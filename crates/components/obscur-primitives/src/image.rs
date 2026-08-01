@@ -1,15 +1,9 @@
-//! `Image`: a raster/vector image primitive (spec §2.6, §5.16).
+#![doc = include_str!("image.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{SRC, View, ViewNode, ViewProperty, ViewValue};
 
-/// A reference to an image resource drawn into the view tree.
-///
-/// `Image` is one of the minimal built-in primitives (spec §2.6). It names an
-/// image by an opaque `source` key that the resource hub resolves to real pixel
-/// or vector data (spec §5.16), and optionally an `alt` accessible name. It is
-/// a leaf element primitive: it lowers to a [`ViewNode::Element`] carrying its
-/// source (and alt, when present) as properties.
+#[doc = include_str!("image.doc/Image.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
     source: Box<str>,
@@ -17,25 +11,15 @@ pub struct Image {
 }
 
 impl Image {
-    /// Stable component id for the image primitive (see [`Container::COMPONENT_ID`]
-    /// for the shared id scheme).
-    ///
-    /// [`Container::COMPONENT_ID`]: crate::Container::COMPONENT_ID
+    #[doc = include_str!("image.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0003);
 
-    /// Property name for the image source key.
-    ///
-    /// Unlike the other primitive props (which live in the `0x00C1_NNXX` prop
-    /// space), the source points at [`obscur_view::view::SRC`] — the reserved
-    /// low-symbol attribute the reconciler extracts onto the retained node's
-    /// [`StyleAttributes`](obscur_view::view::StyleAttributes) — so an image's
-    /// `src` survives reconciliation as `image_source()` and the runtime can
-    /// resolve and paint it. Aliased here so `Image::PROP_SRC` still exists.
+    #[doc = include_str!("image.doc/PROP_SRC.md")]
     pub const PROP_SRC: InternedSymbol = SRC;
-    /// Property name for the accessible alternative text.
+    #[doc = include_str!("image.doc/PROP_ALT.md")]
     pub const PROP_ALT: InternedSymbol = InternedSymbol::from_raw(0x00C1_0302);
 
-    /// Creates an image referencing `source` with no alternative text.
+    #[doc = include_str!("image.doc/new.md")]
     #[must_use]
     pub fn new(source: impl Into<Box<str>>) -> Self {
         Self {
@@ -44,15 +28,14 @@ impl Image {
         }
     }
 
-    /// Sets the accessible alternative text, returning the updated image.
+    #[doc = include_str!("image.doc/with_alt.md")]
     #[must_use]
     pub fn with_alt(mut self, alt: impl Into<Box<str>>) -> Self {
         self.alt = Some(alt.into());
         self
     }
 
-    /// Lowers this image into its [`ViewNode::Element`], emitting the source
-    /// property and, when set, the alt property.
+    #[doc = include_str!("image.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         let mut node = ViewNode::element(Self::COMPONENT_ID).with_prop(ViewProperty::new(
@@ -65,7 +48,7 @@ impl Image {
         node
     }
 
-    /// Lowers this image into a single-node [`View`].
+    #[doc = include_str!("image.doc/view.md")]
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

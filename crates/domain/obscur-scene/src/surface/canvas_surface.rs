@@ -1,28 +1,18 @@
-//! `CanvasSurface`: descriptor for a built-in Canvas rendering surface (§5.3).
+#![doc = include_str!("canvas_surface.doc/_module.md")]
 
 use obscur_geometry::Size;
 
-/// A descriptor for a built-in Canvas surface (Obscur Kit 2 specs §5.3).
-///
-/// A Canvas is a custom rendering surface that draws via the common Paint model
-/// and participates in the normal scene: layout, clipping, transforms, hit
-/// testing, input, accessibility, and composition. This type is a pure data
-/// descriptor — Phase 1 models only the descriptor; the actual drawing and
-/// compositing behaviour lands in a later phase.
-///
-/// The `content_version` is a monotonically increasing counter the compositor
-/// can use to detect when the Canvas has redrawn its contents (so cached output
-/// can be invalidated). It is bumped whenever the Canvas content changes.
+#[doc = include_str!("canvas_surface.doc/CanvasSurface.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasSurface {
-    /// The logical size of the Canvas surface in logical pixels.
+    #[doc = include_str!("canvas_surface.doc/size.md")]
     size: Size,
-    /// A monotonic content version, incremented each time the Canvas redraws.
+    #[doc = include_str!("canvas_surface.doc/content_version.md")]
     content_version: u64,
 }
 
 impl CanvasSurface {
-    /// Creates a Canvas surface of the given logical size with content version `0`.
+    #[doc = include_str!("canvas_surface.doc/new.md")]
     #[must_use]
     pub const fn new(size: Size) -> Self {
         Self {
@@ -31,28 +21,25 @@ impl CanvasSurface {
         }
     }
 
-    /// Returns a copy of this descriptor with the given content version.
+    #[doc = include_str!("canvas_surface.doc/with_content_version.md")]
     #[must_use]
     pub const fn with_content_version(mut self, content_version: u64) -> Self {
         self.content_version = content_version;
         self
     }
 
-    /// Increments the content version to signal that the Canvas content changed.
-    ///
-    /// Saturates at [`u64::MAX`] rather than wrapping, so the version never
-    /// appears to move backwards.
+    #[doc = include_str!("canvas_surface.doc/bump_version.md")]
     pub fn bump_version(&mut self) {
         self.content_version = self.content_version.saturating_add(1);
     }
 
-    /// Returns the logical size of the Canvas surface.
+    #[doc = include_str!("canvas_surface.doc/size_2.md")]
     #[must_use]
     pub const fn size(self) -> Size {
         self.size
     }
 
-    /// Returns the current content version.
+    #[doc = include_str!("canvas_surface.doc/content_version_2.md")]
     #[must_use]
     pub const fn content_version(self) -> u64 {
         self.content_version

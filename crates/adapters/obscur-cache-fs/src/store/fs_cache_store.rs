@@ -1,40 +1,4 @@
-//! A filesystem-backed [`CacheStore`] adapter (spec §5.20 persistent derived
-//! cache, §2.7 "persistent cache adapter").
-//!
-//! Spec §5.20 describes a store of expensive *derived* artifacts (compiled
-//! shaders, rasterised glyphs, prepared display lists) that survives across runs:
-//! it is **versioned**, **content-addressed where useful**, **compatibility-aware**
-//! (a stored entry is served only while its version still matches), and
-//! **disposable** — every entry is derived data that can be safely deleted and
-//! recomputed. The kit's core performs no filesystem access itself; an interface
-//! adapter does (spec §2.7). This module is that adapter: [`FsCacheStore`]
-//! implements the pure [`CacheStore`] port using only `std`, persisting each entry
-//! as a single file under a cache directory.
-//!
-//! # On-disk format
-//!
-//! One file per entry. The filename is content-addressed from the key so distinct
-//! keys never collide:
-//!
-//! ```text
-//! <resource-id>-<variant>.oc
-//! ```
-//!
-//! where `<resource-id>` is [`CacheKey::resource`]'s raw `u64` and `<variant>` is
-//! [`CacheKey::variant`]. The file contents are the 8-byte little-endian version
-//! stamp followed by the raw artifact bytes:
-//!
-//! ```text
-//! [ version_stamp: u64 LE (8 bytes) ][ artifact bytes … ]
-//! ```
-//!
-//! [`CacheStore::get`] reads the 8-byte header and returns the payload only when it
-//! equals the requested version (§5.20 compatibility-awareness); a stale header, a
-//! truncated file, or any I/O error is treated as a miss.
-//!
-//! The whole directory is safe to delete: every `.oc` file is derived data. This
-//! adapter only ever touches its own `.oc` files, leaving any other files in the
-//! directory untouched.
+#![doc = include_str!("fs_cache_store.doc/_module.md")]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,43 +7,21 @@ use obscur_resources::cache::CacheKey;
 use obscur_resources::port::CacheStore;
 use obscur_resources::state::ResourceVersion;
 
-/// The number of leading bytes of an entry file that hold the little-endian
-/// version stamp (spec §5.20 versioned / compatibility-aware).
+#[doc = include_str!("fs_cache_store.doc/VERSION_HEADER_LEN.md")]
 const VERSION_HEADER_LEN: usize = 8;
 
-/// The filename extension marking a file as one of this adapter's cache entries.
-/// Only files with this extension are read, counted, or cleared, so unrelated
-/// files sharing the cache directory are left alone.
+#[doc = include_str!("fs_cache_store.doc/ENTRY_EXTENSION.md")]
 const ENTRY_EXTENSION: &str = "oc";
 
-/// A filesystem-backed [`CacheStore`] that persists each derived artifact as a
-/// single file under a cache directory (spec §5.20, §2.7).
-///
-/// Each entry file is named from its [`CacheKey`] (`<resource>-<variant>.oc`) and
-/// stores the artifact's [`ResourceVersion`] stamp inline ahead of the bytes, so a
-/// [`CacheStore::get`] served by a *different* process or run still enforces the
-/// §5.20 compatibility check. Because every entry is derived data, the entire
-/// directory is disposable: [`CacheStore::clear`], [`CacheStore::remove`], or
-/// deleting the directory outright is always safe.
-///
-/// Writes are best-effort. `put` swaps a fully written temp file into place with a
-/// rename, so a crash never leaves a half-written entry, and any I/O failure during
-/// `put` is swallowed — a failed write simply means a later `get` misses and the
-/// artifact is recomputed.
+#[doc = include_str!("fs_cache_store.doc/FsCacheStore.md")]
 #[derive(Debug, Clone)]
 pub struct FsCacheStore {
-    /// The cache directory holding the `.oc` entry files.
+    #[doc = include_str!("fs_cache_store.doc/root.md")]
     root: PathBuf,
 }
 
 impl FsCacheStore {
-    /// Creates a store rooted at `root`, creating the directory (and any missing
-    /// parents) if it does not already exist.
-    ///
-    /// A pre-existing directory is fine; only a genuine creation failure other than
-    /// "already exists" is surfaced — and even that is swallowed, since the store is
-    /// best-effort and a later `get`/`put` against an absent directory simply
-    /// misses.
+    #[doc = include_str!("fs_cache_store.doc/new.md")]
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
@@ -92,16 +34,13 @@ impl FsCacheStore {
         Self { root }
     }
 
-    /// Returns the cache directory this store writes its entry files into.
+    #[doc = include_str!("fs_cache_store.doc/root_2.md")]
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    /// Returns the absolute path of the entry file backing `key`.
-    ///
-    /// The name (`<resource>-<variant>.oc`) is derived entirely from the key, so it
-    /// is stable across runs and collision-free between distinct keys.
+    #[doc = include_str!("fs_cache_store.doc/entry_path.md")]
     fn entry_path(&self, key: &CacheKey) -> PathBuf {
         self.root.join(format!(
             "{}-{}.{ENTRY_EXTENSION}",
@@ -110,7 +49,7 @@ impl FsCacheStore {
         ))
     }
 
-    /// Returns whether `path`'s name marks it as one of this adapter's entry files.
+    #[doc = include_str!("fs_cache_store.doc/is_entry.md")]
     fn is_entry(path: &Path) -> bool {
         path.extension().is_some_and(|ext| ext == ENTRY_EXTENSION)
     }

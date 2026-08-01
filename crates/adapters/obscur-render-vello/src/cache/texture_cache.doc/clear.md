@@ -1,0 +1,1 @@
+Clears every cached texture.

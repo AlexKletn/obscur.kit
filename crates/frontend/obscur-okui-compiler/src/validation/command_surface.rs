@@ -1,77 +1,23 @@
-//! `CommandSurface`: the set of command names a document is allowed to reference
-//! from an `on:<event>` binding (spec §2.13).
+#![doc = include_str!("command_surface.doc/_module.md")]
 
-/// The commands a document may bind a handler to — the declared side of §2.13's
-/// "Unknown attributes, events and **string method names** are compile errors."
-///
-/// # What is being checked, and why nothing checked it
-///
-/// `on:click=increment` names a handler by string. The front ends hash that string
-/// (`name_binding::fallback_symbol`, pinned equal to `InternedSymbol::named` by a
-/// drift test) into the command symbol the runtime dispatches on, and the runtime
-/// matches it against whatever an application registered. The hashing is sound;
-/// what was missing is that **nothing ever asked whether the name is claimed by
-/// anybody**. A misspelled handler was a silent no-op: no compile error, no
-/// runtime diagnostic, a button that does nothing. That is precisely the failure
-/// §2.13's sentence exists to prevent, and it is the one member of its list —
-/// attributes, events, string method names — that was unenforced.
-///
-/// # Why the declaration comes from the caller
-///
-/// A command is claimed by a *runtime registration*
-/// (`UiRuntime::on_command`/`on_command_at`, `App::on_command`), which is a value
-/// that exists when the application runs — after every compiler has finished. No
-/// pass over the document can discover it, so the checkable form of the rule is
-/// the one §2.13 already uses for capabilities: the **caller declares** what
-/// exists, and the compiler holds the document to it.
-/// [`Compiler::granting`](crate::compile::Compiler::granting) does exactly this for
-/// `requires="camera"`; [`Compiler::claiming_command`](crate::compile::Compiler::claiming_command)
-/// does it for handlers.
-///
-/// # Why the default is [`Unchecked`](Self::Unchecked) and not an empty set
-///
-/// Because a false "unknown command" is worse than a silent no-op. A document
-/// carries no declaration of its own — §2.13 names no authoring surface for one,
-/// and inventing syntax the spec does not describe is not this type's business —
-/// so a caller that declares nothing has told the compiler nothing, which is not
-/// the same as telling it that no command exists. The two states are therefore
-/// named rather than distinguished by emptiness:
-/// [`Declared`](Self::Declared)`(vec![])` means "this document may bind no handler
-/// at all", and that is a real, checkable claim a caller can make.
-///
-/// # The half that stays unreachable
-///
-/// The `okui!` macro cannot use this, and no wiring will change that: it expands
-/// while the application crate is still compiling, so the registrations it would
-/// check against do not exist yet, and a proc-macro has no argument to be handed a
-/// surface through. See
-/// [`ContractRegistry::register_surface`](crate::compile::ContractRegistry::register_surface),
-/// whose reachability analysis is the same one, component-for-command.
+#[doc = include_str!("command_surface.doc/CommandSurface.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CommandSurface {
-    /// No command names were declared, so no handler reference can be judged. The
-    /// default: silence about the surface must not read as a claim about it.
+    #[doc = include_str!("command_surface.doc/Unchecked.md")]
     #[default]
     Unchecked,
-    /// Exactly these command names are claimed. A handler naming anything else is
-    /// a compile error — including when the list is empty, which claims that the
-    /// document binds no handler at all.
+    #[doc = include_str!("command_surface.doc/Declared.md")]
     Declared(Vec<Box<str>>),
 }
 
 impl CommandSurface {
-    /// A closed surface claiming exactly `names`.
+    #[doc = include_str!("command_surface.doc/declared.md")]
     #[must_use]
     pub fn declared<N: Into<Box<str>>>(names: impl IntoIterator<Item = N>) -> Self {
         Self::Declared(names.into_iter().map(Into::into).collect())
     }
 
-    /// Adds `name` to the claimed commands, closing the surface if it was
-    /// [`Unchecked`](Self::Unchecked).
-    ///
-    /// Naming one command is what turns the check on: a caller that can name one
-    /// registration can name them all, and a partial list would report the rest as
-    /// unknown.
+    #[doc = include_str!("command_surface.doc/claim.md")]
     pub fn claim(&mut self, name: impl Into<Box<str>>) {
         match self {
             Self::Declared(names) => names.push(name.into()),
@@ -79,15 +25,13 @@ impl CommandSurface {
         }
     }
 
-    /// Returns whether this surface can judge a handler reference at all.
+    #[doc = include_str!("command_surface.doc/is_checked.md")]
     #[must_use]
     pub const fn is_checked(&self) -> bool {
         matches!(self, Self::Declared(_))
     }
 
-    /// Returns the declared command names — empty for
-    /// [`Unchecked`](Self::Unchecked), which is *not* a claim that no command
-    /// exists. Ask [`is_checked`](Self::is_checked) before reading emptiness.
+    #[doc = include_str!("command_surface.doc/names.md")]
     #[must_use]
     pub fn names(&self) -> &[Box<str>] {
         match self {
@@ -96,11 +40,7 @@ impl CommandSurface {
         }
     }
 
-    /// Returns whether `name` is claimed by a declared command.
-    ///
-    /// Always `true` on an [`Unchecked`](Self::Unchecked) surface: with nothing
-    /// declared, no name can be shown to be unclaimed, and refusing one would be
-    /// the false error this type exists to avoid.
+    #[doc = include_str!("command_surface.doc/claims.md")]
     #[must_use]
     pub fn claims(&self, name: &str) -> bool {
         match self {
@@ -109,22 +49,7 @@ impl CommandSurface {
         }
     }
 
-    /// The declared command name closest to `name`, for a did-you-mean suggestion,
-    /// or [`None`] when nothing is close enough.
-    ///
-    /// # The bar
-    ///
-    /// Levenshtein distance, with an explicit threshold — 1 for a name of three
-    /// characters or fewer, 2 above that — because a suggestion that is not
-    /// obviously the intended name is noise, and short names are too easy to be
-    /// two edits from each other by coincidence (`add` and `sub` would suggest each
-    /// other at 2). The nearest candidate wins; a tie goes to the first declared,
-    /// so the answer is deterministic in declaration order rather than in hash
-    /// order.
-    ///
-    /// A spec test recorded this as a candidate amendment: §2.13 asks for the
-    /// compile error and says nothing about suggestions, so the bar is an
-    /// implementation choice stated here rather than a requirement met.
+    #[doc = include_str!("command_surface.doc/nearest.md")]
     #[must_use]
     pub fn nearest(&self, name: &str) -> Option<&str> {
         let limit = if name.chars().count() <= 3 { 1 } else { 2 };
@@ -137,11 +62,7 @@ impl CommandSurface {
     }
 }
 
-/// The Levenshtein distance between `left` and `right`, counted over `char`s.
-///
-/// The textbook two-row dynamic program: `O(len × len)` time, `O(len)` space, over
-/// characters rather than bytes so a non-ASCII handler name is not measured in
-/// UTF-8 code units.
+#[doc = include_str!("command_surface.doc/edit_distance.md")]
 fn edit_distance(left: &str, right: &str) -> usize {
     let right: Vec<char> = right.chars().collect();
     let mut previous: Vec<usize> = (0..=right.len()).collect();

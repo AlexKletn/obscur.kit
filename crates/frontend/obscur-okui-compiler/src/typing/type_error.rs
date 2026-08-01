@@ -1,26 +1,21 @@
-//! `TypeError`: why a type check failed for an expression (spec §2.9).
+#![doc = include_str!("type_error.doc/_module.md")]
 
 use crate::typing::ValueType;
 
-/// The kind of failure a [`TypeError`] reports (spec §2.9).
+#[doc = include_str!("type_error.doc/TypeErrorKind.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeErrorKind {
-    /// A value's type is not assignable to the expected type.
+    #[doc = include_str!("type_error.doc/Mismatch.md")]
     Mismatch,
-    /// Two operands cannot be compared with each other.
+    #[doc = include_str!("type_error.doc/NotComparable.md")]
     NotComparable,
-    /// A value used as a condition is not boolean-assignable.
+    #[doc = include_str!("type_error.doc/NotBoolean.md")]
     NotBoolean,
-    /// A required type could not be determined.
+    #[doc = include_str!("type_error.doc/UnknownType.md")]
     UnknownType,
 }
 
-/// Why a type check failed for an expression (spec §2.9).
-///
-/// The error records the [`kind`](TypeError::kind) of failure, the `expected`
-/// and `found` [`ValueType`]s, and the byte `offset` into the source where the
-/// failure was detected, so a diagnostic can point at it. This type implements
-/// [`std::error::Error`] so it composes with the standard error ecosystem.
+#[doc = include_str!("type_error.doc/TypeError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeError {
     kind: TypeErrorKind,
@@ -30,8 +25,7 @@ pub struct TypeError {
 }
 
 impl TypeError {
-    /// Creates a type error of `kind` with the `expected` and `found` types at
-    /// byte `offset`.
+    #[doc = include_str!("type_error.doc/new.md")]
     #[must_use]
     pub const fn new(
         kind: TypeErrorKind,
@@ -47,39 +41,37 @@ impl TypeError {
         }
     }
 
-    /// Creates a [`Mismatch`](TypeErrorKind::Mismatch) error: `found` is not
-    /// assignable to `expected`.
+    #[doc = include_str!("type_error.doc/mismatch.md")]
     #[must_use]
     pub const fn mismatch(expected: ValueType, found: ValueType, offset: u32) -> Self {
         Self::new(TypeErrorKind::Mismatch, expected, found, offset)
     }
 
-    /// Creates a [`NotBoolean`](TypeErrorKind::NotBoolean) error: a condition of
-    /// type `found` is not boolean-assignable.
+    #[doc = include_str!("type_error.doc/not_boolean.md")]
     #[must_use]
     pub const fn not_boolean(found: ValueType, offset: u32) -> Self {
         Self::new(TypeErrorKind::NotBoolean, ValueType::Bool, found, offset)
     }
 
-    /// Returns the error's kind.
+    #[doc = include_str!("type_error.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> &TypeErrorKind {
         &self.kind
     }
 
-    /// Returns the expected type.
+    #[doc = include_str!("type_error.doc/expected.md")]
     #[must_use]
     pub const fn expected(&self) -> &ValueType {
         &self.expected
     }
 
-    /// Returns the type that was actually found.
+    #[doc = include_str!("type_error.doc/found.md")]
     #[must_use]
     pub const fn found(&self) -> &ValueType {
         &self.found
     }
 
-    /// Returns the byte offset into the source where the failure was detected.
+    #[doc = include_str!("type_error.doc/offset.md")]
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset

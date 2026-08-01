@@ -1,27 +1,4 @@
-//! **Proof: CSS 2.1 §9.9 seven-layer paint order (catalog bug B2).**
-//!
-//! Two independent demonstrations sit side by side, driven through the REAL scene
-//! coordinator ([`SceneCoordinator::compose`]) — the same code path the runtime
-//! uses — then rasterized headless through the software [`CpuRenderer`] (no GPU) to
-//! `target/stacking_order_proof.png`.
-//!
-//! **Left — the lift (§9.9 layer 6 above layers 1–5).** A positioned `z:auto` box
-//! `B` (BLUE) is the FIRST child; a non-positioned in-flow block `A` (GREEN) is the
-//! SECOND child and overlaps it. Per §9.9 a positioned `z:auto`/`0` box paints
-//! ABOVE non-positioned siblings regardless of tree order, so `B` must show ON TOP
-//! of `A` in the overlap. The old flat `(z, tree_index)` sort painted `A` (later in
-//! the tree) on top — the bug.
-//!
-//! **Right — negative z below non-positioned (§9.9 layer 2).** A non-positioned
-//! block `S` (YELLOW) is a child; a positioned box `N` (RED) with `z-index: -2`
-//! comes LATER in the tree and overlaps it. A negative-z positioned box paints
-//! UNDER non-positioned content, so `S` must show ON TOP of `N` even though `N`
-//! comes later in document order.
-//!
-//! Before writing the PNG it machine-checks the pixels at each overlap.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example stacking_order_proof --features render-cpu`
+#![doc = include_str!("stacking_order_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
@@ -42,7 +19,7 @@ use obscur_kit::style::property::{PropertyId, StyleColor, layout_keyword};
 use obscur_kit::tree::node::{LogicalParent, NodeKind};
 use obscur_kit::tree::tree::RetainedTree;
 
-/// The output image extent.
+#[doc = include_str!("stacking_order_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(400.0, 200.0);
 
 fn main() {
@@ -133,8 +110,7 @@ fn main() {
     );
 }
 
-/// Allocates an element node under `parent`, wiring the child + logical-parent
-/// links, and returns its id.
+#[doc = include_str!("stacking_order_proof.doc/element.md")]
 fn element(tree: &mut RetainedTree, parent: NodeId, raw: u64) -> NodeId {
     let id = tree.alloc(NodeKind::Element {
         component: ComponentId::from_raw(raw),
@@ -148,14 +124,14 @@ fn element(tree: &mut RetainedTree, parent: NodeId, raw: u64) -> NodeId {
     id
 }
 
-/// A computed style carrying just a `background-color` (a non-positioned block).
+#[doc = include_str!("stacking_order_proof.doc/background.md")]
 fn background(color: StyleColor) -> ComputedStyle {
     let mut style = ComputedStyle::new();
     style.set(PropertyId::BackgroundColor, ComputedValue::color(color));
     style
 }
 
-/// A positioned (`position: absolute`) box with `z-index: auto` — §9.9 layer 6.
+#[doc = include_str!("stacking_order_proof.doc/positioned_auto.md")]
 fn positioned_auto(color: StyleColor) -> ComputedStyle {
     let mut style = background(color);
     style.set(
@@ -165,14 +141,14 @@ fn positioned_auto(color: StyleColor) -> ComputedStyle {
     style
 }
 
-/// A positioned box with an explicit integer `z-index`.
+#[doc = include_str!("stacking_order_proof.doc/positioned_z.md")]
 fn positioned_z(color: StyleColor, z: f32) -> ComputedStyle {
     let mut style = positioned_auto(color);
     style.set(PropertyId::ZIndex, ComputedValue::number(z));
     style
 }
 
-/// Renders `list` through the software renderer into a pixmap at [`VIEWPORT`].
+#[doc = include_str!("stacking_order_proof.doc/render.md")]
 fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -185,7 +161,7 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Reads a pixel as `(r, g, b)` bytes.
+#[doc = include_str!("stacking_order_proof.doc/rgb.md")]
 fn rgb(pixmap: &tiny_skia::Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
     let p = pixmap.pixel(x, y).expect("pixel in range");
     (p.red(), p.green(), p.blue())
@@ -204,7 +180,7 @@ fn is_red(p: (u8, u8, u8)) -> bool {
     p.0 > 180 && p.1 < 120 && p.2 < 120
 }
 
-/// Machine-checks the §9.9 paint order at each sample point.
+#[doc = include_str!("stacking_order_proof.doc/verify.md")]
 #[allow(clippy::too_many_arguments)]
 fn verify(
     pixmap: &tiny_skia::Pixmap,
@@ -256,7 +232,7 @@ fn verify(
     println!("[verify] OK — CSS 2.1 §9.9 seven-layer paint order");
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("stacking_order_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

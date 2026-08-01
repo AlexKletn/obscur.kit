@@ -1,44 +1,31 @@
-//! The typed outcome of presenting a frame (spec §5.2 explicit diagnostics).
+#![doc = include_str!("present_result.doc/_module.md")]
 
 use obscur_scene::scene::SceneGeneration;
 
-/// The typed outcome of presenting a [`FrameSubmission`](crate::frame::FrameSubmission)
-/// (spec §5.2).
-///
-/// Presentation outcomes are explicit diagnostics rather than silent failures
-/// (spec §5.2): a frame either reaches the screen, is dropped as a stale
-/// intermediate frame (spec §3.5), triggers device loss (see
-/// [`DeviceLoss`](crate::frame::DeviceLoss)), or fails outright with a reason.
+#[doc = include_str!("present_result.doc/PresentResult.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresentResult {
-    /// The frame reached the screen, echoing which scene generation was
-    /// presented.
+    #[doc = include_str!("present_result.doc/Presented.md")]
     Presented {
-        /// The generation of the scene that reached the screen.
+        #[doc = include_str!("present_result.doc/generation.md")]
         generation: SceneGeneration,
     },
-    /// A stale intermediate frame was dropped before presentation (spec §3.5).
+    #[doc = include_str!("present_result.doc/Skipped.md")]
     Skipped,
-    /// The GPU device was lost during presentation; see
-    /// [`DeviceLoss`](crate::frame::DeviceLoss) for the reason and
-    /// recoverability.
+    #[doc = include_str!("present_result.doc/DeviceLost.md")]
     DeviceLost,
-    /// Presentation failed for the given human-readable reason.
+    #[doc = include_str!("present_result.doc/Failed.md")]
     Failed(Box<str>),
 }
 
 impl PresentResult {
-    /// Whether the frame was successfully presented.
+    #[doc = include_str!("present_result.doc/is_presented.md")]
     #[must_use]
     pub const fn is_presented(&self) -> bool {
         matches!(self, Self::Presented { .. })
     }
 
-    /// Whether the caller can continue after this outcome.
-    ///
-    /// A successful present, a skipped stale frame, and a device-loss event are
-    /// all recoverable: the caller can render again. Only [`PresentResult::Failed`]
-    /// is terminal (spec §5.2).
+    #[doc = include_str!("present_result.doc/is_recoverable.md")]
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         matches!(
@@ -47,8 +34,7 @@ impl PresentResult {
         )
     }
 
-    /// The failure reason when this outcome is [`PresentResult::Failed`], else
-    /// `None`.
+    #[doc = include_str!("present_result.doc/failure_reason.md")]
     #[must_use]
     pub fn failure_reason(&self) -> Option<&str> {
         match self {

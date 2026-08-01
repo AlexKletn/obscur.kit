@@ -1,4 +1,4 @@
-//! Capability and permission model used by platform and plugin layers.
+#![doc = include_str!("lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

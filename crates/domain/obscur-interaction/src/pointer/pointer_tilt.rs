@@ -1,47 +1,22 @@
-//! The angle a stylus is held at, per axis (spec §2.4).
+#![doc = include_str!("pointer_tilt.doc/_module.md")]
 
-/// §2.4's pointer **tilt**: the angle between the pointer's axis and the surface
-/// normal, in degrees, resolved per plane.
-///
-/// §2.4 lists tilt as a required pointer fact, alongside pressure and rotation,
-/// because a pen is not a point: a drawing surface needs to know which way the
-/// barrel leans to shape a stroke, and only the device can say.
-///
-/// Both angles are in `-90..=90` degrees, matching the Pointer Events convention:
-/// [`x_degrees`](Self::x_degrees) is the tilt in the plane containing the Y axis
-/// (a lean left/right, negative toward the left), and
-/// [`y_degrees`](Self::y_degrees) is the tilt in the plane containing the X axis
-/// (a lean toward/away from the user, negative toward the top). A device held
-/// perpendicular to the surface, and every device that cannot report tilt at all,
-/// reports [`UPRIGHT`](Self::UPRIGHT) — zero on both axes.
-///
-/// A mouse or a touchscreen contact therefore reports `UPRIGHT` too. That is a
-/// deliberate flattening rather than a missing value: §2.4 requires the field on
-/// every pointer event, and "no lean" is the honest reading of a device with no
-/// barrel.
+#[doc = include_str!("pointer_tilt.doc/PointerTilt.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PointerTilt {
-    /// Tilt in the plane containing the Y axis, in `-90..=90` degrees; negative
-    /// leans left.
+    #[doc = include_str!("pointer_tilt.doc/x_degrees.md")]
     pub x_degrees: f32,
-    /// Tilt in the plane containing the X axis, in `-90..=90` degrees; negative
-    /// leans toward the top of the surface.
+    #[doc = include_str!("pointer_tilt.doc/y_degrees.md")]
     pub y_degrees: f32,
 }
 
 impl PointerTilt {
-    /// A device held perpendicular to the surface, and the reading for any device
-    /// that cannot report tilt.
+    #[doc = include_str!("pointer_tilt.doc/UPRIGHT.md")]
     pub const UPRIGHT: Self = Self {
         x_degrees: 0.0,
         y_degrees: 0.0,
     };
 
-    /// Creates a tilt, clamping both angles into `-90..=90` degrees.
-    ///
-    /// Clamping rather than trusting the caller: a platform that reports tilt in
-    /// a different unit, or an uninitialised field, would otherwise hand an
-    /// application an angle no physical stylus can be at.
+    #[doc = include_str!("pointer_tilt.doc/new.md")]
     #[must_use]
     pub fn new(x_degrees: f32, y_degrees: f32) -> Self {
         Self {
@@ -50,8 +25,7 @@ impl PointerTilt {
         }
     }
 
-    /// Returns whether the device is perpendicular to the surface (no lean on
-    /// either axis).
+    #[doc = include_str!("pointer_tilt.doc/is_upright.md")]
     #[must_use]
     pub fn is_upright(self) -> bool {
         self.x_degrees == 0.0 && self.y_degrees == 0.0

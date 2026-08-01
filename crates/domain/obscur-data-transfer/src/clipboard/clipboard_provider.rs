@@ -1,57 +1,27 @@
-//! The replaceable clipboard port and its in-process reference implementation
-//! (spec §6.20 data transfer — clipboard).
-//!
-//! [`ClipboardProvider`] is the hexagonal port through which the pure
-//! data-transfer domain drives a real system clipboard: an interface adapter
-//! implements it once per platform and the domain holds it as
-//! `Box<dyn ClipboardProvider>`. The colocated [`MemoryClipboard`] is a
-//! deterministic, in-process reference implementation — the honest default for
-//! headless runs and tests. System clipboard *history* is explicitly out of
-//! scope (spec §6.20): a provider models only the current contents.
+#![doc = include_str!("clipboard_provider.doc/_module.md")]
 
 use super::{ClipboardRequest, ClipboardResult};
 use crate::offer::DataOffer;
 
-/// The replaceable port for a system clipboard (spec §6.20 data transfer —
-/// clipboard).
-///
-/// Every clipboard operation the domain performs funnels through this trait's
-/// single [`execute`](ClipboardProvider::execute) entry point, which dispatches
-/// copy/cut/paste/clear and reports an honest [`ClipboardResult`]. The trait is
-/// deliberately **object-safe** — no generic or `Self`-returning methods — so
-/// adapters can be held polymorphically behind `Box<dyn ClipboardProvider>`.
+#[doc = include_str!("clipboard_provider.doc/ClipboardProvider.md")]
 pub trait ClipboardProvider {
-    /// Performs `request` against the clipboard, reporting the honest outcome
-    /// (spec §6.20).
-    ///
-    /// This is the unified copy/cut/paste/clear entry point; it never panics on
-    /// an unsatisfiable request, returning the appropriate non-success
-    /// [`ClipboardResult`] instead.
+    #[doc = include_str!("clipboard_provider.doc/execute.md")]
     fn execute(&mut self, request: ClipboardRequest) -> ClipboardResult;
 
-    /// Returns whether a system clipboard is reachable through this provider
-    /// (spec §6.20).
+    #[doc = include_str!("clipboard_provider.doc/is_available.md")]
     #[must_use]
     fn is_available(&self) -> bool;
 }
 
-/// A deterministic, in-process reference [`ClipboardProvider`] (spec §6.20).
-///
-/// `MemoryClipboard` holds only the current clipboard contents — the last
-/// written [`DataOffer`] — in memory, with no platform dependency. It is the
-/// honest default for headless environments and tests, and documents the port's
-/// contract concretely. System clipboard *history* is out of scope (spec §6.20);
-/// this holds a single slot. At the storage level a cut is treated exactly like
-/// a copy — the source-side deletion a [`Cut`](super::ClipboardWriteMode::Cut)
-/// implies is the caller's concern, not the clipboard's.
+#[doc = include_str!("clipboard_provider.doc/MemoryClipboard.md")]
 #[derive(Debug, Default, Clone)]
 pub struct MemoryClipboard {
-    /// The current clipboard contents: the last written offer, if any.
+    #[doc = include_str!("clipboard_provider.doc/contents.md")]
     contents: Option<DataOffer>,
 }
 
 impl MemoryClipboard {
-    /// Creates an empty in-process clipboard (spec §6.20).
+    #[doc = include_str!("clipboard_provider.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self { contents: None }

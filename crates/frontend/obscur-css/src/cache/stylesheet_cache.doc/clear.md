@@ -1,0 +1,1 @@
+Drops every entry.

@@ -1,31 +1,4 @@
-//! `SocketTransport`: the server-side driver that runs a [`DevToolsEndpoint`]
-//! over a real local socket (spec §7.6 local socket transport, §7.7 security).
-//!
-//! This is the real counterpart to the in-process
-//! [`LocalTransport`](crate::transport::LocalTransport): instead of moving typed
-//! values between two [`VecDeque`](std::collections::VecDeque)s, it reads framed
-//! [`WireCodec`](crate::transport::WireCodec) messages off a
-//! [`SocketStream`], feeds each into the *unchanged* endpoint (handshake →
-//! authorize → dispatch → audit), and writes the endpoint's typed response back.
-//! The transport never bypasses authentication, never grants a scope, and
-//! enables nothing: a fresh endpoint is still disabled by default and rejects
-//! every handshake until the host calls [`enable`](DevToolsEndpoint::enable)
-//! (spec §7.7).
-//!
-//! It writes exactly one bit of session state, and only
-//! [`serve_with_events`](SocketTransport::serve_with_events) does: that this
-//! session's events are being serviced, which is a fact about the loop the
-//! caller is standing in rather than a permission. It cannot loosen an
-//! authorisation — a `Subscribe` is still checked against the granted
-//! [`ScopeSet`](obscur_devtools_protocol::message::ScopeSet) first, and this bit
-//! only decides whether a scope-authorised subscription is honoured or denied.
-//!
-//! A single [`serve`](SocketTransport::serve) call handles one connected client
-//! session in its own thread; the endpoint's session state (negotiated version,
-//! granted scopes, subscriptions, audit log) persists across the messages of
-//! that session. At most [`MESSAGE_LIMIT`] messages are served per connection,
-//! honouring the §7.7 message limit the in-process transport enforces on its
-//! queue depth.
+#![doc = include_str!("socket_transport.doc/_module.md")]
 
 use std::io;
 
@@ -36,11 +9,7 @@ use crate::endpoint::{CommandOutcome, DevToolsEndpoint};
 use crate::transport::{ClientBound, EventQueue, ServerBound, SocketStream, WireCodec};
 use std::time::Duration;
 
-/// Serves a [`DevToolsEndpoint`] over one framed local-socket connection.
-///
-/// Constructed from an accepted [`SocketStream`]
-/// (see [`SocketListener::accept`](crate::transport::SocketListener::accept)),
-/// it owns the connection for the lifetime of a single client session.
+#[doc = include_str!("socket_transport.doc/SocketTransport.md")]
 #[derive(Debug)]
 pub struct SocketTransport {
     stream: SocketStream,
@@ -48,30 +17,19 @@ pub struct SocketTransport {
 }
 
 impl SocketTransport {
-    /// Wraps an accepted connection ready to drive an endpoint.
+    #[doc = include_str!("socket_transport.doc/new.md")]
     #[must_use]
     pub fn new(stream: SocketStream) -> Self {
         Self { stream, served: 0 }
     }
 
-    /// Returns how many messages this transport has served so far.
+    #[doc = include_str!("socket_transport.doc/served.md")]
     #[must_use]
     pub const fn served(&self) -> usize {
         self.served
     }
 
-    /// Reads and answers exactly one client message, driving `endpoint`.
-    ///
-    /// Returns `Ok(false)` when the client has closed the connection cleanly (no
-    /// more messages) or the per-connection [`MESSAGE_LIMIT`] has been reached,
-    /// and `Ok(true)` after a message was answered. A message that does not
-    /// decode is answered with a [`ClientBound::Error`] carrying
-    /// [`ProtocolError::MalformedMessage`](obscur_devtools_protocol::error::ProtocolError::MalformedMessage)
-    /// rather than terminating the session.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] on any underlying socket read/write failure.
+    #[doc = include_str!("socket_transport.doc/serve_one.md")]
     pub fn serve_one<S: InspectSource>(
         &mut self,
         endpoint: &mut DevToolsEndpoint<S>,
@@ -92,12 +50,7 @@ impl SocketTransport {
         Ok(true)
     }
 
-    /// Drives `endpoint` until the client disconnects or the message limit is
-    /// reached, answering each message in turn.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] on any underlying socket read/write failure.
+    #[doc = include_str!("socket_transport.doc/serve.md")]
     pub fn serve<S: InspectSource>(
         &mut self,
         endpoint: &mut DevToolsEndpoint<S>,
@@ -106,36 +59,7 @@ impl SocketTransport {
         Ok(())
     }
 
-    /// Drives `endpoint` like [`serve`](Self::serve), additionally **pushing**
-    /// queued events to subscribers between client messages (spec §7.6).
-    ///
-    /// This is what makes the endpoint live rather than poll-only: a host states
-    /// what happened by pushing onto `events` from its own thread, and this loop
-    /// fans each out through the endpoint — so subscription state, scopes and
-    /// authentication stay exactly where they were, on this thread.
-    ///
-    /// # Why this is what grants a subscription
-    ///
-    /// Entering this loop is what makes `granted: true` true, so it is this call
-    /// — not the host's word for it — that marks the endpoint as servicing event
-    /// push. An endpoint driven by [`serve`](Self::serve) instead denies every
-    /// `Subscribe`, because nothing there would ever drain a queue.
-    ///
-    /// # Why a read timeout
-    ///
-    /// A blocking read parks here until the client speaks, so a queued event could
-    /// not be written until the client happened to send something — which is not a
-    /// push. `poll` bounds the wait: the loop wakes, drains the queue, and goes
-    /// back to reading. It is the *maximum* latency of a push, not a busy-wait —
-    /// nothing spins, the thread sleeps in `read` between wakes.
-    ///
-    /// An event for a topic nobody subscribed to fans out to nothing and writes
-    /// nothing, so an unwatched host pays only the wake.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`io::Error`] on any underlying socket read/write failure. A
-    /// read that merely timed out is not a failure and does not end the session.
+    #[doc = include_str!("socket_transport.doc/serve_with_events.md")]
     pub fn serve_with_events<S: InspectSource>(
         &mut self,
         endpoint: &mut DevToolsEndpoint<S>,
@@ -164,11 +88,7 @@ impl SocketTransport {
     }
 }
 
-/// Whether `error` is a read that simply timed out rather than a broken socket.
-///
-/// Platforms disagree on which kind a socket read timeout reports, so both are
-/// accepted; treating either as fatal would end a healthy session on its first
-/// quiet interval.
+#[doc = include_str!("socket_transport.doc/is_timeout.md")]
 fn is_timeout(error: &io::Error) -> bool {
     matches!(
         error.kind(),
@@ -176,9 +96,7 @@ fn is_timeout(error: &io::Error) -> bool {
     )
 }
 
-/// Feeds one decoded client message through the endpoint and maps its typed
-/// outcome to the matching client-bound reply. The endpoint enforces all §7.7
-/// checks; this function only routes the result onto the wire.
+#[doc = include_str!("socket_transport.doc/answer.md")]
 fn answer<S: InspectSource>(
     endpoint: &mut DevToolsEndpoint<S>,
     message: ServerBound,

@@ -1,25 +1,11 @@
-//! `TrackList`: one axis of a grid template — explicit tracks plus an optional
-//! `repeat(auto-fill | auto-fit, …)` auto-repetition (CSS §4.1).
+#![doc = include_str!("track_list.doc/_module.md")]
 
 use super::{AutoRepeat, AutoRepeatMode, TrackSize};
 
-/// The largest repetition count an auto-repeat may expand to, so a pathological
-/// container extent / pattern size cannot blow the track list up unboundedly.
+#[doc = include_str!("track_list.doc/MAX_AUTO_REPEAT.md")]
 const MAX_AUTO_REPEAT: usize = 10_000;
 
-/// One axis of a grid template: leading explicit tracks, an optional auto-repeat,
-/// and trailing explicit tracks (CSS §4.1 `grid-template-columns` / `-rows`).
-///
-/// A plain track list (no `repeat(auto-fill|auto-fit, …)`) is modelled with all
-/// tracks in [`leading`](Self::leading) and no [`auto_repeat`](Self::auto_repeat)
-/// — [`TrackList::from_tracks`] builds exactly that, so a template without an
-/// auto-repeat expands **byte-identically** to its explicit track vector.
-///
-/// When an [`AutoRepeat`] is present the list reads
-/// `leading ++ (N × pattern) ++ trailing`, where the repetition count `N` is
-/// computed from the container's content extent along the axis at track-sizing
-/// time by [`expand`](Self::expand). Only one auto-repeat is representable per
-/// axis (as in CSS).
+#[doc = include_str!("track_list.doc/TrackList.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TrackList {
     leading: Vec<TrackSize>,
@@ -28,8 +14,7 @@ pub struct TrackList {
 }
 
 impl TrackList {
-    /// Builds a track list with an explicit `leading` run, an optional
-    /// `auto_repeat`, and an explicit `trailing` run.
+    #[doc = include_str!("track_list.doc/new.md")]
     #[must_use]
     pub fn new(
         leading: Vec<TrackSize>,
@@ -43,10 +28,7 @@ impl TrackList {
         }
     }
 
-    /// Builds a track list from a flat explicit track vector (no auto-repeat).
-    ///
-    /// This is the common no-repeat case; the tracks become the `leading` run and
-    /// the list expands to exactly this vector.
+    #[doc = include_str!("track_list.doc/from_tracks.md")]
     #[must_use]
     pub fn from_tracks(tracks: Vec<TrackSize>) -> Self {
         Self {
@@ -56,34 +38,31 @@ impl TrackList {
         }
     }
 
-    /// The leading explicit tracks (before any auto-repeat).
+    #[doc = include_str!("track_list.doc/leading.md")]
     #[must_use]
     pub fn leading(&self) -> &[TrackSize] {
         &self.leading
     }
 
-    /// The auto-repeat pattern, if this axis has one.
+    #[doc = include_str!("track_list.doc/auto_repeat.md")]
     #[must_use]
     pub const fn auto_repeat(&self) -> Option<&AutoRepeat> {
         self.auto_repeat.as_ref()
     }
 
-    /// The trailing explicit tracks (after any auto-repeat).
+    #[doc = include_str!("track_list.doc/trailing.md")]
     #[must_use]
     pub fn trailing(&self) -> &[TrackSize] {
         &self.trailing
     }
 
-    /// Whether the list has no explicit tracks and no auto-repeat.
+    #[doc = include_str!("track_list.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.leading.is_empty() && self.auto_repeat.is_none() && self.trailing.is_empty()
     }
 
-    /// A representative explicit track count: the explicit tracks plus one copy of
-    /// any auto-repeat pattern. Used only for the informational
-    /// [`GridLayout::columns`](super::super::GridLayout::columns) reporting; the
-    /// real per-content count comes from [`expand`](Self::expand).
+    #[doc = include_str!("track_list.doc/explicit_len.md")]
     #[must_use]
     pub fn explicit_len(&self) -> usize {
         self.leading.len()
@@ -91,21 +70,7 @@ impl TrackList {
             + self.trailing.len()
     }
 
-    /// Expands this list into a concrete track vector for a `content_extent`-wide
-    /// axis with `gap` between tracks.
-    ///
-    /// With no auto-repeat this is simply `leading ++ trailing` and the second
-    /// element is [`None`]. With an auto-repeat the pattern is repeated `N` times
-    /// (§4.1): `N = max(1, floor((free + gap) / (pattern_extent + gap)))`, where
-    /// `free` is the content extent minus the definite (fixed/percentage) size of
-    /// the leading and trailing tracks and their gaps, and `pattern_extent` is the
-    /// sum of the pattern's definite track sizes plus its interior gaps. The result
-    /// is `leading ++ (N × pattern) ++ trailing`.
-    ///
-    /// The second element is `Some((start, end))` — the half-open index range of
-    /// the generated pattern tracks — **only** for an `auto-fit` repeat, so the
-    /// caller can collapse the empty ones after placement; it is [`None`] for
-    /// `auto-fill` (whose empty tracks are kept).
+    #[doc = include_str!("track_list.doc/expand.md")]
     #[must_use]
     pub fn expand(
         &self,
@@ -136,10 +101,7 @@ impl TrackList {
     }
 }
 
-/// The definite (fixed/percentage) extent a single track contributes when fitting
-/// auto-repeat copies. An `fr` / `auto` / intrinsic-keyword track has no definite
-/// size — it cannot bound a repetition count — so it contributes `0` (a
-/// documented fallback); a `minmax` uses its `min` bound as the definite floor.
+#[doc = include_str!("track_list.doc/definite_extent.md")]
 fn definite_extent(track: &TrackSize, content_extent: f32) -> f32 {
     match track {
         TrackSize::Fixed(px) => px.max(0.0),
@@ -149,8 +111,7 @@ fn definite_extent(track: &TrackSize, content_extent: f32) -> f32 {
     }
 }
 
-/// Computes the auto-repeat repetition count `N ≥ 1` that fits the pattern into
-/// `content_extent` alongside the leading/trailing explicit tracks (§4.1).
+#[doc = include_str!("track_list.doc/repetition_count.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn repetition_count(
     leading: &[TrackSize],

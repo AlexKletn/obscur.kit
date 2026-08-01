@@ -1,5 +1,4 @@
-//! `OutletValidator`: the **file** front end's adapter onto the §2.12 outlet
-//! rule.
+#![doc = include_str!("outlet_validator.doc/_module.md")]
 
 use obscur_okui_syntax::ast::{Attribute, Document, Element};
 use obscur_okui_syntax::syntax::SyntaxKind;
@@ -7,31 +6,18 @@ use obscur_okui_syntax::syntax::SyntaxKind;
 use crate::validation::ValidationDiagnostic;
 use crate::validation::outlet_rule::{OutletName, OutletUse, check_outlet, is_outlet_tag};
 
-/// Checks every authored `<slot …/>` in a `.okui` document against the §2.12
-/// outlet rule.
-///
-/// The rule itself is [`check_outlet`](crate::validation::check_outlet) — the same
-/// function the `okui!` macro is checked with. This type only walks the syntax
-/// tree and attaches a byte offset to each refusal, the mirror of what
-/// [`CollectionValidator`](crate::validation::CollectionValidator) does for §2.11.
-///
-/// Every diagnostic is anchored at the `<slot>` element itself rather than at the
-/// offending attribute. That is deliberate and it is the honest anchor: an outlet
-/// is a two-token construct, and every rule here is about *the outlet* — that it
-/// has no name, that its name is not decidable, that it carries something it
-/// cannot carry. There is no case where the author needs to be pointed inside it.
+#[doc = include_str!("outlet_validator.doc/OutletValidator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OutletValidator;
 
 impl OutletValidator {
-    /// Creates a validator.
+    #[doc = include_str!("outlet_validator.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Validates every element in `doc`, recursively, reporting each outlet
-    /// violation at that element's byte offset.
+    #[doc = include_str!("outlet_validator.doc/validate.md")]
     #[must_use]
     pub fn validate(&self, doc: &Document) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
@@ -41,11 +27,7 @@ impl OutletValidator {
         diagnostics
     }
 
-    /// Checks one element, then recurses into its element-shaped children.
-    ///
-    /// The walk does not stop at a refusal, and it does not stop at an outlet
-    /// either: a document with two bad `<slot>`s reports both, the same
-    /// report-them-all policy `Compiler::compile` follows.
+    #[doc = include_str!("outlet_validator.doc/validate_element.md")]
     fn validate_element(element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         if let Some(tag) = element.tag_name()
             && is_outlet_tag(&tag)
@@ -83,12 +65,7 @@ impl OutletValidator {
     }
 }
 
-/// An attribute's spelling as the author wrote it — `class`, or `on:click` for an
-/// event-style one.
-///
-/// [`Attribute::name`] returns the *first* identifier, which for `on:click` is
-/// `on`. Quoting `'on'` back at an author who wrote `on:click` is a message that
-/// names a thing they cannot find, so the prefix is put back.
+#[doc = include_str!("outlet_validator.doc/authored_spelling.md")]
 fn authored_spelling(attribute: &Attribute) -> String {
     let name = attribute.name().unwrap_or_default();
     if !attribute.is_event() {

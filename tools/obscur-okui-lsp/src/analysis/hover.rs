@@ -1,23 +1,18 @@
-//! `Hover`: the result of a `textDocument/hover` query — a label for the
-//! innermost element under the cursor.
+#![doc = include_str!("hover.doc/_module.md")]
 
 use crate::diagnostics::Range;
 
-/// Hover information for a position in a `.okui` document.
-///
-/// Returned by [`Analyzer::hover`](crate::Analyzer::hover), it carries a
-/// human-readable `contents` string (the element/component name and its kind)
-/// and the `range` of the element it describes.
+#[doc = include_str!("hover.doc/Hover.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hover {
-    /// The human-readable hover text.
+    #[doc = include_str!("hover.doc/contents.md")]
     pub contents: Box<str>,
-    /// The source range the hover describes.
+    #[doc = include_str!("hover.doc/range.md")]
     pub range: Range,
 }
 
 impl Hover {
-    /// Creates a hover with `contents` over `range`.
+    #[doc = include_str!("hover.doc/new.md")]
     #[must_use]
     pub fn new(contents: impl Into<Box<str>>, range: Range) -> Self {
         Self {

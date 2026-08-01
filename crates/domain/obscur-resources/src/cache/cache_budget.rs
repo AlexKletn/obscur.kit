@@ -1,30 +1,18 @@
-//! Memory budget and disable switch for one cache (spec §5.19 caches).
+#![doc = include_str!("cache_budget.doc/_module.md")]
 
-/// The memory budget and per-cache disable switch for one runtime cache (spec
-/// §5.19 *memory budgets; per-cache disable switches for tests*).
-///
-/// A budget bounds a cache in two independent dimensions — total bytes and total
-/// entry count — either of which may be unlimited (`None`). It also carries an
-/// `enabled` flag: a **disabled** cache admits nothing, which lets tests turn an
-/// individual cache off (spec §5.19) to exercise the uncached path deterministically.
-///
-/// This is pure policy data. It decides *whether* a store may hold more — via
-/// [`admits`](CacheBudget::admits) before an insert and
-/// [`exceeds`](CacheBudget::exceeds) to detect an over-budget cache that needs
-/// eviction — but it never stores entries itself; that is the cache store's job
-/// (a later sub-step).
+#[doc = include_str!("cache_budget.doc/CacheBudget.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CacheBudget {
-    /// Maximum total bytes, or `None` for unlimited (spec §5.19 memory budgets).
+    #[doc = include_str!("cache_budget.doc/max_bytes.md")]
     max_bytes: Option<u64>,
-    /// Maximum total entry count, or `None` for unlimited.
+    #[doc = include_str!("cache_budget.doc/max_entries.md")]
     max_entries: Option<usize>,
-    /// Whether the cache may store anything at all (spec §5.19 disable switch).
+    #[doc = include_str!("cache_budget.doc/enabled.md")]
     enabled: bool,
 }
 
 impl CacheBudget {
-    /// An enabled, unbounded budget: no byte or entry limit.
+    #[doc = include_str!("cache_budget.doc/unlimited.md")]
     #[must_use]
     pub const fn unlimited() -> Self {
         Self {
@@ -34,7 +22,7 @@ impl CacheBudget {
         }
     }
 
-    /// An enabled budget capped at `max_bytes` total bytes (spec §5.19).
+    #[doc = include_str!("cache_budget.doc/bytes.md")]
     #[must_use]
     pub const fn bytes(max_bytes: u64) -> Self {
         Self {
@@ -44,7 +32,7 @@ impl CacheBudget {
         }
     }
 
-    /// An enabled budget capped at `max_entries` total entries.
+    #[doc = include_str!("cache_budget.doc/entries.md")]
     #[must_use]
     pub const fn entries(max_entries: usize) -> Self {
         Self {
@@ -54,8 +42,7 @@ impl CacheBudget {
         }
     }
 
-    /// A disabled budget: nothing may be stored (spec §5.19 per-cache disable
-    /// switch for tests).
+    #[doc = include_str!("cache_budget.doc/disabled.md")]
     #[must_use]
     pub const fn disabled() -> Self {
         Self {
@@ -65,52 +52,46 @@ impl CacheBudget {
         }
     }
 
-    /// Returns this budget with its byte cap set (`None` = unlimited).
+    #[doc = include_str!("cache_budget.doc/with_max_bytes.md")]
     #[must_use]
     pub const fn with_max_bytes(mut self, max_bytes: Option<u64>) -> Self {
         self.max_bytes = max_bytes;
         self
     }
 
-    /// Returns this budget with its entry cap set (`None` = unlimited).
+    #[doc = include_str!("cache_budget.doc/with_max_entries.md")]
     #[must_use]
     pub const fn with_max_entries(mut self, max_entries: Option<usize>) -> Self {
         self.max_entries = max_entries;
         self
     }
 
-    /// Returns this budget with its enabled flag set (spec §5.19 disable switch).
+    #[doc = include_str!("cache_budget.doc/with_enabled.md")]
     #[must_use]
     pub const fn with_enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
     }
 
-    /// Returns whether the cache is enabled (spec §5.19 disable switch).
+    #[doc = include_str!("cache_budget.doc/is_enabled.md")]
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Returns the byte cap, or `None` if unlimited.
+    #[doc = include_str!("cache_budget.doc/max_bytes_2.md")]
     #[must_use]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
 
-    /// Returns the entry cap, or `None` if unlimited.
+    #[doc = include_str!("cache_budget.doc/max_entries_2.md")]
     #[must_use]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
 
-    /// Returns whether a new entry of `incoming_bytes` may be admitted given the
-    /// cache's current size (spec §5.19 memory budgets).
-    ///
-    /// This is `false` when the cache is disabled (spec §5.19 disable switch),
-    /// when adding `incoming_bytes` would push total bytes past `max_bytes`, or
-    /// when the additional entry would push the count past `max_entries`. A
-    /// saturating add keeps a very large `incoming_bytes` from overflowing.
+    #[doc = include_str!("cache_budget.doc/admits.md")]
     #[must_use]
     pub const fn admits(
         &self,
@@ -134,12 +115,7 @@ impl CacheBudget {
         true
     }
 
-    /// Returns whether the cache is already over budget and needs eviction (spec
-    /// §5.19 eviction).
-    ///
-    /// This is `true` when the current bytes or entries strictly exceed their
-    /// respective caps. A disabled cache is not "over budget" in this sense — it
-    /// simply never admits — so this reports only the size limits.
+    #[doc = include_str!("cache_budget.doc/exceeds.md")]
     #[must_use]
     pub const fn exceeds(&self, current_bytes: u64, current_entries: usize) -> bool {
         if let Some(max) = self.max_bytes
@@ -157,7 +133,7 @@ impl CacheBudget {
 }
 
 impl Default for CacheBudget {
-    /// The default budget is [`CacheBudget::unlimited`].
+    #[doc = include_str!("cache_budget.doc/default.md")]
     fn default() -> Self {
         Self::unlimited()
     }

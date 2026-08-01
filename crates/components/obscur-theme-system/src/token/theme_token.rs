@@ -1,50 +1,35 @@
-//! A named design token: the atomic themeable value (spec §2.6).
+#![doc = include_str!("theme_token.doc/_module.md")]
 
 use obscur_scene::color::Color;
 
-/// The kinds of value a [`ThemeToken`] can hold (spec §2.6).
-///
-/// A token is a single named design value; this enum enumerates the concrete
-/// value shapes the theme system understands — colors, lengths and unitless
-/// numbers, free text, font-family names, and animation durations. Because the
-/// payloads include [`Color`] and `f32`, `TokenValue` derives `PartialEq` but
-/// deliberately not `Eq`.
+#[doc = include_str!("theme_token.doc/TokenValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenValue {
-    /// An sRGB color value (e.g. `color.primary`).
+    #[doc = include_str!("theme_token.doc/Color.md")]
     Color(Color),
-    /// A length in logical pixels (e.g. `space.md`, `radius.sm`).
+    #[doc = include_str!("theme_token.doc/Length.md")]
     Length(f32),
-    /// A unitless number (e.g. a scale factor or opacity).
+    #[doc = include_str!("theme_token.doc/Number.md")]
     Number(f32),
-    /// A free-text value (e.g. a label or opaque identifier).
+    #[doc = include_str!("theme_token.doc/Text.md")]
     Text(Box<str>),
-    /// A font-family name (e.g. `"sans-serif"`).
+    #[doc = include_str!("theme_token.doc/FontFamily.md")]
     FontFamily(Box<str>),
-    /// An animation/transition duration in milliseconds.
+    #[doc = include_str!("theme_token.doc/DurationMillis.md")]
     DurationMillis(u32),
 }
 
-/// A named design token pairing a stable name with its [`TokenValue`] (spec §2.6).
-///
-/// Tokens are the atomic, themeable values a preset is built from. The `name` is
-/// a dotted, namespaced key such as `"color.primary"`, `"space.md"`,
-/// `"radius.sm"`, or `"font.body"`; the `value` carries the concrete data. A
-/// [`ThemePreset`](crate::preset::ThemePreset) is little more than an ordered
-/// collection of these tokens keyed by name.
-///
-/// The [`Color`] and `f32` payloads block `Eq`, so this type derives `Debug`,
-/// `Clone`, and `PartialEq` only.
+#[doc = include_str!("theme_token.doc/ThemeToken.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeToken {
-    /// The dotted, namespaced token name (e.g. `"color.primary"`).
+    #[doc = include_str!("theme_token.doc/name.md")]
     pub name: Box<str>,
-    /// The token's value.
+    #[doc = include_str!("theme_token.doc/value.md")]
     pub value: TokenValue,
 }
 
 impl ThemeToken {
-    /// Creates a token from a name and an explicit [`TokenValue`].
+    #[doc = include_str!("theme_token.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, value: TokenValue) -> Self {
         Self {
@@ -53,55 +38,55 @@ impl ThemeToken {
         }
     }
 
-    /// Creates a [`TokenValue::Color`] token.
+    #[doc = include_str!("theme_token.doc/color.md")]
     #[must_use]
     pub fn color(name: impl Into<Box<str>>, color: Color) -> Self {
         Self::new(name, TokenValue::Color(color))
     }
 
-    /// Creates a [`TokenValue::Length`] token.
+    #[doc = include_str!("theme_token.doc/length.md")]
     #[must_use]
     pub fn length(name: impl Into<Box<str>>, length: f32) -> Self {
         Self::new(name, TokenValue::Length(length))
     }
 
-    /// Creates a [`TokenValue::Number`] token.
+    #[doc = include_str!("theme_token.doc/number.md")]
     #[must_use]
     pub fn number(name: impl Into<Box<str>>, number: f32) -> Self {
         Self::new(name, TokenValue::Number(number))
     }
 
-    /// Creates a [`TokenValue::Text`] token.
+    #[doc = include_str!("theme_token.doc/text.md")]
     #[must_use]
     pub fn text(name: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         Self::new(name, TokenValue::Text(text.into()))
     }
 
-    /// Creates a [`TokenValue::FontFamily`] token.
+    #[doc = include_str!("theme_token.doc/font_family.md")]
     #[must_use]
     pub fn font_family(name: impl Into<Box<str>>, family: impl Into<Box<str>>) -> Self {
         Self::new(name, TokenValue::FontFamily(family.into()))
     }
 
-    /// Creates a [`TokenValue::DurationMillis`] token.
+    #[doc = include_str!("theme_token.doc/duration_millis.md")]
     #[must_use]
     pub fn duration_millis(name: impl Into<Box<str>>, millis: u32) -> Self {
         Self::new(name, TokenValue::DurationMillis(millis))
     }
 
-    /// Returns the token's namespaced name.
+    #[doc = include_str!("theme_token.doc/name_2.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the token's value.
+    #[doc = include_str!("theme_token.doc/value_2.md")]
     #[must_use]
     pub fn value(&self) -> &TokenValue {
         &self.value
     }
 
-    /// Returns the color payload, or `None` if the value is not a color.
+    #[doc = include_str!("theme_token.doc/as_color.md")]
     #[must_use]
     pub fn as_color(&self) -> Option<Color> {
         match self.value {
@@ -110,7 +95,7 @@ impl ThemeToken {
         }
     }
 
-    /// Returns the length payload, or `None` if the value is not a length.
+    #[doc = include_str!("theme_token.doc/as_length.md")]
     #[must_use]
     pub fn as_length(&self) -> Option<f32> {
         match self.value {
@@ -119,8 +104,7 @@ impl ThemeToken {
         }
     }
 
-    /// Returns the text payload for [`TokenValue::Text`] or
-    /// [`TokenValue::FontFamily`], or `None` otherwise.
+    #[doc = include_str!("theme_token.doc/as_text.md")]
     #[must_use]
     pub fn as_text(&self) -> Option<&str> {
         match &self.value {

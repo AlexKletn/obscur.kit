@@ -1,52 +1,25 @@
-//! The [`SpatialNavigation`] helper for directional focus movement
-//! (spec §4.7).
+#![doc = include_str!("spatial_navigation.doc/_module.md")]
 
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
 use super::NavigationDirection;
 
-/// Cross-axis misalignment penalty applied when scoring candidates.
-///
-/// Weighting the cross-axis distance above the primary-axis distance biases the
-/// result toward candidates that are well aligned with the source along the
-/// direction of travel, matching the "nearest aligned neighbour" feel of
-/// arrow-key navigation.
+#[doc = include_str!("spatial_navigation.doc/CROSS_AXIS_PENALTY.md")]
 const CROSS_AXIS_PENALTY: f32 = 2.0;
 
-/// Stateless helper computing directional (spatial) focus navigation
-/// (spec §4.7).
-///
-/// Given a source rectangle and a set of candidate rectangles, [`find_next`]
-/// picks the best candidate to focus in a [`NavigationDirection`]. All geometry
-/// is compared by rectangle *centers*.
-///
-/// [`find_next`]: SpatialNavigation::find_next
+#[doc = include_str!("spatial_navigation.doc/SpatialNavigation.md")]
 #[derive(Debug, Default, Clone)]
 pub struct SpatialNavigation;
 
 impl SpatialNavigation {
-    /// Creates the navigation helper.
+    #[doc = include_str!("spatial_navigation.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self
     }
 
-    /// Picks the best candidate to focus moving `direction` from `from`.
-    ///
-    /// Only candidates lying in the requested direction are considered: the
-    /// candidate's center must be strictly beyond `from`'s center along the
-    /// direction's axis, in the direction's sign (e.g. for
-    /// [`Right`](NavigationDirection::Right), `candidate.center.x >
-    /// from.center.x`).
-    ///
-    /// Each remaining candidate is scored `along + 2.0 * across`, where `along`
-    /// is the absolute center distance along the primary (direction) axis and
-    /// `across` is the absolute center distance on the cross axis. Weighting the
-    /// cross-axis term favours well-aligned neighbours. The candidate with the
-    /// smallest score wins; ties are broken by ascending [`NodeId`].
-    ///
-    /// Returns `None` if no candidate lies in `direction`.
+    #[doc = include_str!("spatial_navigation.doc/find_next.md")]
     #[must_use]
     pub fn find_next(
         &self,
@@ -88,7 +61,7 @@ impl SpatialNavigation {
     }
 }
 
-/// Returns the center `(x, y)` of `rect`.
+#[doc = include_str!("spatial_navigation.doc/center.md")]
 fn center(rect: Rect) -> (f32, f32) {
     (
         rect.origin.x + rect.size.width / 2.0,

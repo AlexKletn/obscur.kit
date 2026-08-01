@@ -1,0 +1,1 @@
+Filesystem persistent cache adapter.

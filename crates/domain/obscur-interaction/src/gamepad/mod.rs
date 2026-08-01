@@ -1,4 +1,4 @@
-//! Gamepad module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod gamepad_button;
 pub use gamepad_button::GamepadButton;
 mod gamepad_event;

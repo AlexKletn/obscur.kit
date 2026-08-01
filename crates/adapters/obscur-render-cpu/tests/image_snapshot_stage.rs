@@ -1,17 +1,4 @@
-//! The §7.4 rendered-image stage, wired through the software backend.
-//!
-//! `obscur-headless` deliberately holds no rasterizer, so [`ImageSnapshot`]
-//! never *produces* pixels — it captures whatever raster a backend already made
-//! (`ImageSnapshot::from_rgba`). This integration test is where the one
-//! backend-dependent §7.4 stage is actually produced: the software
-//! [`CpuRenderer`] rasterizes a scene into a `tiny_skia::Pixmap`, and its bytes
-//! become the image snapshot. It proves the stage is deterministic (same scene
-//! → same image) and attaches into a [`PipelineSnapshot`].
-//!
-//! The assertions here are **exact**, and deliberately so: one backend
-//! rasterizing one scene twice must produce identical bytes, and a tolerance
-//! would only weaken that. §7.14's tolerance is for *cross*-backend and
-//! cross-font-version comparison, and lives in `golden_tolerance.rs`.
+#![doc = include_str!("image_snapshot_stage.doc/_module.md")]
 
 use obscur_geometry::{Point, Size};
 use obscur_headless::snapshot::ImageSnapshot;
@@ -25,7 +12,7 @@ use obscur_scene::paint::Paint;
 use obscur_scene::path::Path;
 use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// A 16×16 scene with one red rectangle filling `(4,4)..(12,12)`.
+#[doc = include_str!("image_snapshot_stage.doc/red_rect_submission.md")]
 fn red_rect_submission() -> FrameSubmission {
     let mut path = Path::new();
     path.move_to(Point::new(4.0, 4.0))
@@ -42,8 +29,7 @@ fn red_rect_submission() -> FrameSubmission {
     FrameSubmission::new(RenderFrame::new(snapshot, Size::new(16.0, 16.0)))
 }
 
-/// Rasterizes `submission` into a fresh 16×16 bitmap and captures the resulting
-/// pixels as the §7.4 image stage.
+#[doc = include_str!("image_snapshot_stage.doc/render_image.md")]
 fn render_image(submission: &FrameSubmission) -> ImageSnapshot {
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
     let target = RenderTarget::bitmap(BitmapTarget::new(Size::new(16.0, 16.0)));

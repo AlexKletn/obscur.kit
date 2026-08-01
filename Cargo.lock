@@ -1842,6 +1842,7 @@ dependencies = [
  "obscur-scene",
  "obscur-style",
  "obscur-task",
+ "obscur-testkit",
  "obscur-text",
  "obscur-tree",
  "obscur-view",
@@ -1944,6 +1945,18 @@ dependencies = [
 [[package]]
 name = "obscur-testkit"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+ "obscur-interaction",
+ "obscur-resources",
+ "obscur-runtime",
+ "obscur-scene",
+ "obscur-style",
+ "obscur-task",
+ "obscur-tree",
+ "obscur-view",
+]
 
 [[package]]
 name = "obscur-text"

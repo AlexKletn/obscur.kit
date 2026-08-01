@@ -1,0 +1,1 @@
+The golden's rect.

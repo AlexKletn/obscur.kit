@@ -1,5 +1,4 @@
-//! The [`FontconfigSource`]: system font lookup by shelling out to fontconfig's
-//! CLI (spec §5.18).
+#![doc = include_str!("fontconfig_source.doc/_module.md")]
 
 use std::path::Path;
 use std::process::Command;
@@ -10,18 +9,13 @@ use obscur_text::span::{FontSlant, FontWeight};
 use super::attribute_scale::{css_slant, css_stretch, css_weight};
 use super::system_face::SystemFace;
 
-/// The record separator asked of fontconfig's `-f` format. Font paths and family
-/// names may contain spaces and commas but not tabs in any real installation.
+#[doc = include_str!("fontconfig_source.doc/FIELD.md")]
 const FIELD: char = '\t';
 
-/// The `-f` format both queries request: family, file, weight, slant, width.
+#[doc = include_str!("fontconfig_source.doc/FORMAT.md")]
 const FORMAT: &str = "%{family[0]}\t%{file}\t%{weight}\t%{slant}\t%{width}\n";
 
-/// Locates host-installed faces through fontconfig (spec §5.18).
-///
-/// The tool names are held rather than hard-coded so a caller may point at a
-/// different fontconfig build; the defaults are the conventional `fc-match` /
-/// `fc-list`.
+#[doc = include_str!("fontconfig_source.doc/FontconfigSource.md")]
 #[derive(Debug, Clone)]
 pub struct FontconfigSource {
     match_tool: Box<str>,
@@ -29,7 +23,7 @@ pub struct FontconfigSource {
 }
 
 impl FontconfigSource {
-    /// Creates a source backed by the conventional `fc-match` / `fc-list`.
+    #[doc = include_str!("fontconfig_source.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -38,7 +32,7 @@ impl FontconfigSource {
         }
     }
 
-    /// Creates a source backed by explicitly named tools.
+    #[doc = include_str!("fontconfig_source.doc/with_tools.md")]
     #[must_use]
     pub fn with_tools(match_tool: impl Into<Box<str>>, list_tool: impl Into<Box<str>>) -> Self {
         Self {
@@ -47,24 +41,14 @@ impl FontconfigSource {
         }
     }
 
-    /// Whether fontconfig is usable here — i.e. both tools ran.
-    ///
-    /// A host with no fontconfig (a bare container, a non-Linux target, a
-    /// stripped image) is a normal state, not an error: the caller is expected to
-    /// supply bytes some other way.
+    #[doc = include_str!("fontconfig_source.doc/is_available.md")]
     #[must_use]
     pub fn is_available(&self) -> bool {
         Self::run(&self.match_tool, &["--version"]).is_some()
             && Self::run(&self.list_tool, &["--version"]).is_some()
     }
 
-    /// Resolves a CSS **generic** family to the face the host nominates for it.
-    ///
-    /// This is `fc-match`, and substitution is the point: `sans-serif` is a
-    /// request for *whatever this host calls its sans*, so an answer that is not
-    /// literally named "sans-serif" is correct rather than a miss. Returns `None`
-    /// only when fontconfig is absent, answers nothing, or answers with a file
-    /// this toolkit cannot load (see [`is_loadable`]).
+    #[doc = include_str!("fontconfig_source.doc/match_generic.md")]
     #[must_use]
     pub fn match_generic(&self, generic: GenericFamily) -> Option<SystemFace> {
         let pattern = generic_pattern(generic);
@@ -72,22 +56,7 @@ impl FontconfigSource {
         parse_faces(&out).into_iter().next()
     }
 
-    /// Finds a face the host says covers `character` — the query a per-character
-    /// fallback needs (spec §5.10, §5.18).
-    ///
-    /// This is `fc-match :charset=<hex>`, which is fontconfig's own coverage
-    /// index: asked for `U+232B` it answers with a face that has that glyph
-    /// rather than with the default sans. That is the whole value here — an
-    /// application's chain is a handful of families, and everything outside them
-    /// (CJK, emoji, symbols) otherwise draws nothing.
-    ///
-    /// # The answer is a suggestion, not a guarantee
-    ///
-    /// `fc-match` never fails: given a charset nothing installed covers, it
-    /// returns the system default with exit status 0 — a face that does *not*
-    /// contain the character. **The caller must verify coverage** before trusting
-    /// it; `FontRegistry` re-checks the `cmap` and drops a non-covering answer.
-    /// Two independent guards, as with [`find_family`](Self::find_family).
+    #[doc = include_str!("fontconfig_source.doc/match_char.md")]
     #[must_use]
     pub fn match_char(&self, character: char) -> Option<SystemFace> {
         let pattern = format!(":charset={:x}", character as u32);
@@ -95,28 +64,7 @@ impl FontconfigSource {
         parse_faces(&out).into_iter().next()
     }
 
-    /// Finds an installed face by its **named** family, or `None` when the host
-    /// does not have it.
-    ///
-    /// # Why not `fc-match`
-    ///
-    /// `fc-match` never fails: asked for a family that is not installed it returns
-    /// the system default with exit status 0. Built on it, this would report every
-    /// absent family as present under a substituted face — `font-family: Inter,
-    /// sans-serif` would resolve "Inter" to Noto Sans on a machine with no Inter,
-    /// and the author's fallback chain would never be walked.
-    ///
-    /// Two things prevent that, and they are **redundant** — either alone suffices,
-    /// so neither should be read as the sole guard: `fc-list` returns nothing for
-    /// an absent family, and the name filter below rejects a face whose family is
-    /// not the one asked for. The filter is what makes the guarantee independent of
-    /// which tool is wired; `fc-list` is what leaves it nothing to reject.
-    ///
-    /// The independent reason to prefer `fc-list` is **attribute choice**: it lists
-    /// every installed cut, so the nearest to `attributes` by
-    /// [`FontAttributes::distance`] is picked here. `fc-match` returns a single
-    /// face, which would make that fontconfig's decision rather than this
-    /// toolkit's.
+    #[doc = include_str!("fontconfig_source.doc/find_family.md")]
     #[must_use]
     pub fn find_family(&self, name: &str, attributes: &FontAttributes) -> Option<SystemFace> {
         let out = Self::run(&self.list_tool, &["-f", FORMAT, name])?;
@@ -126,11 +74,7 @@ impl FontconfigSource {
             .min_by_key(|face| face.attributes().distance(attributes))
     }
 
-    /// Runs `tool` with `args`, returning its stdout on success.
-    ///
-    /// Any failure — tool absent, non-zero status, non-UTF-8 output — collapses to
-    /// `None`. There is nothing a caller could do with the distinction that it
-    /// would not also do for "no fonts here".
+    #[doc = include_str!("fontconfig_source.doc/run.md")]
     fn run(tool: &str, args: &[&str]) -> Option<String> {
         let out = Command::new(tool).args(args).output().ok()?;
         if !out.status.success() {
@@ -141,18 +85,13 @@ impl FontconfigSource {
 }
 
 impl Default for FontconfigSource {
-    /// The default source uses `fc-match` / `fc-list`.
+    #[doc = include_str!("fontconfig_source.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// The fontconfig pattern naming a CSS generic family.
-///
-/// fontconfig's own config defines `serif` / `sans-serif` / `monospace` aliases;
-/// `cursive` and `fantasy` are CSS generics fontconfig also recognises. `SystemUi`
-/// has no fontconfig alias, so it asks for the same face `sans-serif` does —
-/// which is what the freedesktop stack means by "the UI font".
+#[doc = include_str!("fontconfig_source.doc/generic_pattern.md")]
 const fn generic_pattern(generic: GenericFamily) -> &'static str {
     match generic {
         GenericFamily::Serif => "serif",
@@ -163,20 +102,7 @@ const fn generic_pattern(generic: GenericFamily) -> &'static str {
     }
 }
 
-/// Whether this toolkit can actually load `path`'s bytes as a single face.
-///
-/// **TrueType/OpenType collections (`.ttc`) are excluded**, and this is a real
-/// exclusion rather than caution: the shaping stack parses faces with
-/// `read_fonts::FontRef::new`, which rejects a collection outright
-/// (`InvalidSfnt(0x74746366)` — the `ttcf` tag) because a collection needs a face
-/// index this format string never carries. A `.ttc` handed onward would register
-/// as a face with no readable metrics and no `cmap` coverage, so it would resolve
-/// nothing and its text would silently *vanish*. Dropping it here instead lets the
-/// caller fall through to a face that works.
-///
-/// The cost is real and worth naming: on a host whose only face for a script is a
-/// collection — CJK installations commonly ship `.ttc` — this reports no face at
-/// all rather than a broken one. Collection support is unbuilt.
+#[doc = include_str!("fontconfig_source.doc/is_loadable.md")]
 fn is_loadable(path: &Path) -> bool {
     let ext = path
         .extension()
@@ -185,13 +111,12 @@ fn is_loadable(path: &Path) -> bool {
     matches!(ext.as_deref(), Some("ttf" | "otf"))
 }
 
-/// Parses `FORMAT`-shaped fontconfig output into faces, dropping any line that is
-/// malformed or names a file this toolkit cannot load.
+#[doc = include_str!("fontconfig_source.doc/parse_faces.md")]
 fn parse_faces(out: &str) -> Vec<SystemFace> {
     out.lines().filter_map(parse_face).collect()
 }
 
-/// Parses one `family\tfile\tweight\tslant\twidth` line.
+#[doc = include_str!("fontconfig_source.doc/parse_face.md")]
 fn parse_face(line: &str) -> Option<SystemFace> {
     let mut fields = line.split(FIELD);
     let family = fields.next()?.trim();

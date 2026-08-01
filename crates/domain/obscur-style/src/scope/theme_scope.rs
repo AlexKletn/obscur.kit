@@ -1,17 +1,8 @@
-//! A scoped theme applied to a subtree.
-//!
-//! Per §4.14/§4.15, a theme can be scoped to a subtree rooted at a style scope.
-//! A scoped theme inherits from its root / parent theme by default, so it
-//! *supplements* the ambient theme (adding or overriding tokens) rather than
-//! replacing it; a non-inheriting scoped theme instead starts fresh from the
-//! root theme. This type models that identity plus the inherit-from-parent flag;
-//! resolving the actual theme tokens lives elsewhere.
+#![doc = include_str!("theme_scope.doc/_module.md")]
 
 use crate::scope::ScopeId;
 
-/// A theme scoped to the subtree rooted at a style scope (§4.14/§4.15).
-///
-/// `Copy + Eq + Hash`.
+#[doc = include_str!("theme_scope.doc/ThemeScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ThemeScope {
     scope: ScopeId,
@@ -19,7 +10,7 @@ pub struct ThemeScope {
 }
 
 impl ThemeScope {
-    /// Creates a scoped theme, choosing whether it inherits from its parent.
+    #[doc = include_str!("theme_scope.doc/new.md")]
     #[must_use]
     pub const fn new(scope: ScopeId, inherits_parent: bool) -> Self {
         Self {
@@ -28,24 +19,19 @@ impl ThemeScope {
         }
     }
 
-    /// Creates a scoped theme rooted at `scope` that inherits from its parent —
-    /// the default behaviour (§4.15).
+    #[doc = include_str!("theme_scope.doc/rooted.md")]
     #[must_use]
     pub const fn rooted(scope: ScopeId) -> Self {
         Self::new(scope, true)
     }
 
-    /// Returns the scope this theme is applied to.
+    #[doc = include_str!("theme_scope.doc/scope.md")]
     #[must_use]
     pub const fn scope(self) -> ScopeId {
         self.scope
     }
 
-    /// Returns `true` when this scoped theme inherits from its parent theme.
-    ///
-    /// When it does, the scoped theme supplements the ambient theme rather than
-    /// replacing it; when it does not, it starts fresh from the root theme
-    /// (§4.14/§4.15).
+    #[doc = include_str!("theme_scope.doc/inherits_from_parent.md")]
     #[must_use]
     pub const fn inherits_from_parent(self) -> bool {
         self.inherits_parent

@@ -1,35 +1,24 @@
-//! The [`SelectionMode`] cardinality governing how many items may be selected
-//! (item-selection model).
+#![doc = include_str!("selection_mode.doc/_module.md")]
 
-/// How many items a [`Selection`](super::Selection) may hold at once.
-///
-/// This is the *item* selection model — selecting list rows, canvas objects, or
-/// tree nodes — and is distinct from text-caret selection in `obscur-text`.
-///
-/// - [`None`](Self::None) disables selection entirely.
-/// - [`Single`](Self::Single) allows at most one selected item.
-/// - [`Multiple`](Self::Multiple) allows many selected items and supports
-///   range (shift) extension.
+#[doc = include_str!("selection_mode.doc/SelectionMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SelectionMode {
-    /// Selection is disabled: no item can be selected.
+    #[doc = include_str!("selection_mode.doc/None.md")]
     None,
-    /// At most one item may be selected at a time.
+    #[doc = include_str!("selection_mode.doc/Single.md")]
     Single,
-    /// Many items may be selected, including contiguous ranges.
+    #[doc = include_str!("selection_mode.doc/Multiple.md")]
     Multiple,
 }
 
 impl SelectionMode {
-    /// Returns whether this mode allows more than one item to be selected
-    /// (only [`Multiple`](Self::Multiple)).
+    #[doc = include_str!("selection_mode.doc/allows_multiple.md")]
     #[must_use]
     pub const fn allows_multiple(&self) -> bool {
         matches!(self, Self::Multiple)
     }
 
-    /// Returns whether selection is enabled at all
-    /// ([`Single`](Self::Single) or [`Multiple`](Self::Multiple)).
+    #[doc = include_str!("selection_mode.doc/is_enabled.md")]
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
         matches!(self, Self::Single | Self::Multiple)
@@ -37,7 +26,7 @@ impl SelectionMode {
 }
 
 impl Default for SelectionMode {
-    /// Defaults to [`Single`](Self::Single).
+    #[doc = include_str!("selection_mode.doc/default.md")]
     fn default() -> Self {
         Self::Single
     }

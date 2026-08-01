@@ -1,15 +1,14 @@
-//! Recovery action taken or recommended for a diagnostic.
+#![doc = include_str!("recovery_action.doc/_module.md")]
 
-/// The recovery action associated with a diagnostic (spec §1.6). Failures
-/// prefer fallback over propagation where correctness holds.
+#[doc = include_str!("recovery_action.doc/RecoveryAction.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryAction {
-    /// No recovery was needed.
+    #[doc = include_str!("recovery_action.doc/None.md")]
     None,
-    /// A fallback value or UI was substituted.
+    #[doc = include_str!("recovery_action.doc/Fallback.md")]
     Fallback,
-    /// The affected subtree was retried.
+    #[doc = include_str!("recovery_action.doc/Retried.md")]
     Retried,
-    /// The affected subtree was replaced with an error boundary.
+    #[doc = include_str!("recovery_action.doc/BoundaryReplaced.md")]
     BoundaryReplaced,
 }

@@ -1,31 +1,22 @@
-//! Intent to create a new window (spec §6.1, §6.2).
+#![doc = include_str!("create_window.doc/_module.md")]
 
 use obscur_identity::WindowId;
 
 use crate::window::{Window, WindowConstraints, WindowProperties, WindowRelation};
 
-/// An application's intent to create a new window (spec §6.1, §6.2).
-///
-/// A `CreateWindow` bundles the desired [`WindowProperties`], size
-/// [`WindowConstraints`], and [`WindowRelation`] for a window that does not yet
-/// exist. It is a pure command value: a backend consumes it, mints a
-/// [`WindowId`], and the request can then be materialized into a retained
-/// [`Window`] via [`CreateWindow::into_window`].
+#[doc = include_str!("create_window.doc/CreateWindow.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateWindow {
-    /// The desired presentation properties of the new window.
+    #[doc = include_str!("create_window.doc/properties.md")]
     properties: WindowProperties,
-    /// The size constraints to apply to the new window.
+    #[doc = include_str!("create_window.doc/constraints.md")]
     constraints: WindowConstraints,
-    /// The owner/modality relationship of the new window to others.
+    #[doc = include_str!("create_window.doc/relation.md")]
     relation: WindowRelation,
 }
 
 impl CreateWindow {
-    /// Creates a request for a window with the given properties.
-    ///
-    /// Constraints default to unconstrained and the relation to a top-level,
-    /// modeless window.
+    #[doc = include_str!("create_window.doc/new.md")]
     #[must_use]
     pub fn new(properties: WindowProperties) -> Self {
         Self {
@@ -35,43 +26,39 @@ impl CreateWindow {
         }
     }
 
-    /// Sets the size constraints, returning the updated request.
+    #[doc = include_str!("create_window.doc/with_constraints.md")]
     #[must_use]
     pub fn with_constraints(mut self, constraints: WindowConstraints) -> Self {
         self.constraints = constraints;
         self
     }
 
-    /// Sets the owner/modality relation, returning the updated request.
+    #[doc = include_str!("create_window.doc/with_relation.md")]
     #[must_use]
     pub fn with_relation(mut self, relation: WindowRelation) -> Self {
         self.relation = relation;
         self
     }
 
-    /// Returns a shared reference to the requested properties.
+    #[doc = include_str!("create_window.doc/properties_2.md")]
     #[must_use]
     pub const fn properties(&self) -> &WindowProperties {
         &self.properties
     }
 
-    /// Returns the requested size constraints.
+    #[doc = include_str!("create_window.doc/constraints_2.md")]
     #[must_use]
     pub const fn constraints(&self) -> WindowConstraints {
         self.constraints
     }
 
-    /// Returns the requested owner/modality relation.
+    #[doc = include_str!("create_window.doc/relation_2.md")]
     #[must_use]
     pub const fn relation(&self) -> WindowRelation {
         self.relation
     }
 
-    /// Materializes this request into a retained [`Window`] using the identity
-    /// the backend assigned.
-    ///
-    /// The requested constraints and relation are applied on top of the freshly
-    /// constructed window, so the result reflects the full request.
+    #[doc = include_str!("create_window.doc/into_window.md")]
     #[must_use]
     pub fn into_window(self, id: WindowId) -> Window {
         let mut window = Window::new(id, self.properties);

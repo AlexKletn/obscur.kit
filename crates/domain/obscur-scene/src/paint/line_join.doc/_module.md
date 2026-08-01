@@ -1,0 +1,1 @@
+Stroke corner-join style.

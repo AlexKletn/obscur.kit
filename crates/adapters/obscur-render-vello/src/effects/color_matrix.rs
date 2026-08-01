@@ -1,51 +1,21 @@
-//! An owned wgpu 4×5 color-matrix pass layered over Vello (spec §5.2).
-//!
-//! Vello 0.9 has no color filters, so the CSS color-matrix `filter` functions
-//! (`brightness/contrast/saturate/grayscale/sepia/invert/hue-rotate/opacity`) are
-//! implemented as our **own** wgpu post-process. Because every one of those
-//! functions is an *affine* color transform, the coordinator folds a whole
-//! color-op chain into a single 4×5 matrix (a 4×4 linear part + a 4×1 bias); this
-//! pass applies it to an element's already-rendered sub-scene in **one** fragment
-//! shader (`rgba' = M · rgba + bias`, clamped to `0..1`).
-//!
-//! It shares the offscreen / composite plumbing with [`GaussianBlur`](super::GaussianBlur):
-//! the renderer renders a filter layer's subtree into a margin-padded offscreen,
-//! runs this color-matrix pass over it (into a scratch texture), then either blurs
-//! and composites (color + blur) or composites directly (color only). The pipeline
-//! and shader are built once and cached on the renderer; only the small per-call
-//! scratch texture and uniform buffer are per-filter.
-//!
-//! # Straight alpha
-//!
-//! Vello's texture output is STRAIGHT (non-premultiplied) alpha, which is exactly
-//! the space CSS color filters are defined over, so the matrix is applied directly
-//! to the sampled texels (no un-/re-premultiply).
+#![doc = include_str!("color_matrix.doc/_module.md")]
 
-/// The render-target texture format the color-matrix pipeline is built for —
-/// matching [`GaussianBlur`](super::GaussianBlur)'s and the Vello offscreen frame's
-/// [`wgpu::TextureFormat::Rgba8Unorm`], so the passes chain without a reformat.
+#[doc = include_str!("color_matrix.doc/COLOR_MATRIX_FORMAT.md")]
 const COLOR_MATRIX_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// The largest per-axis extent of a color-matrix scratch texture, clamping a
-/// pathological size so the pass never allocates an unbounded texture.
+#[doc = include_str!("color_matrix.doc/MAX_EXTENT.md")]
 const MAX_EXTENT: u32 = 8192;
 
-/// A cached wgpu pipeline applying a folded 4×5 color matrix in one fragment pass.
-///
-/// Built once via [`ColorMatrix::new`] and reused across frames; each
-/// [`ColorMatrix::apply`] call only allocates the small uniform buffer a single
-/// filter needs (the destination scratch texture is owned by the caller so it can
-/// be fed into a following blur/composite).
+#[doc = include_str!("color_matrix.doc/ColorMatrix.md")]
 pub struct ColorMatrix {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
-    /// Clamp-to-edge linear sampler (the pass is 1:1, so filtering is a no-op, but
-    /// a sampler is still required by the bind group).
+    #[doc = include_str!("color_matrix.doc/sampler.md")]
     sampler: wgpu::Sampler,
 }
 
 impl ColorMatrix {
-    /// Builds the color-matrix pipeline on `device` for [`COLOR_MATRIX_FORMAT`].
+    #[doc = include_str!("color_matrix.doc/new.md")]
     #[must_use]
     pub fn new(device: &wgpu::Device) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -135,10 +105,7 @@ impl ColorMatrix {
         }
     }
 
-    /// A scratch color texture (`COLOR_MATRIX_FORMAT`, sampled + render target) the
-    /// pass writes its transformed output into, `width`×`height` clamped to
-    /// [`MAX_EXTENT`] per axis. The caller owns it so it can feed a following blur /
-    /// composite, keeping it alive until the encoder is submitted.
+    #[doc = include_str!("color_matrix.doc/scratch_texture.md")]
     #[must_use]
     pub fn scratch_texture(&self, device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -157,12 +124,7 @@ impl ColorMatrix {
         })
     }
 
-    /// Records a color-matrix pass sampling `source` and writing the transformed
-    /// result into `destination` (replace), applying the folded 4×5 `matrix`.
-    ///
-    /// `matrix` is the flattened 20 entries the shader's uniform expects verbatim:
-    /// the four rows of the linear 4×4 part (`matrix[r*4 + c]`) followed by the
-    /// 4-entry bias (`matrix[16 + r]`) — exactly five `vec4`s.
+    #[doc = include_str!("color_matrix.doc/apply.md")]
     pub fn apply(
         &self,
         device: &wgpu::Device,
@@ -220,8 +182,7 @@ impl std::fmt::Debug for ColorMatrix {
     }
 }
 
-/// A transient uniform buffer initialised with the matrix's little-endian bytes
-/// (avoiding a `bytemuck` dependency — no new external deps).
+#[doc = include_str!("color_matrix.doc/uniform_buffer.md")]
 fn uniform_buffer(device: &wgpu::Device, matrix: &[f32; 20], label: &'static str) -> wgpu::Buffer {
     use wgpu::util::DeviceExt;
     let mut bytes = Vec::with_capacity(matrix.len() * 4);

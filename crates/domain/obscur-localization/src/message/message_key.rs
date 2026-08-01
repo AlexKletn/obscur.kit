@@ -1,26 +1,19 @@
-//! `MessageKey`: the identity of a translatable message (spec §7.2).
+#![doc = include_str!("message_key.doc/_module.md")]
 
 use std::fmt;
 
-/// The key half of §7.2's *key + parameters* abstraction: a stable, opaque name
-/// for a message, independent of any language's wording.
-///
-/// A key is a name, not a default translation. `"file.count"` is a key;
-/// `"{n} files"` is an English message that happens to be a string. Keying by the
-/// English text is the shortcut that makes English structurally privileged — it
-/// forces every other language to be a lookup *from* English and breaks the
-/// moment the English wording is edited.
+#[doc = include_str!("message_key.doc/MessageKey.md")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MessageKey(Box<str>);
 
 impl MessageKey {
-    /// Creates a key from its name.
+    #[doc = include_str!("message_key.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self(name.into())
     }
 
-    /// Returns the key's name.
+    #[doc = include_str!("message_key.doc/as_str.md")]
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0

@@ -1,34 +1,28 @@
-//! The [`VisibilityObserver`] — watches whether a node is visible (spec §4.4).
-//!
-//! Like all geometry observers it reports the coalesced net change after layout
-//! commit. A node is *visible* when its box has non-zero area and — if a
-//! viewport is supplied — its box overlaps that viewport. The observer fires
-//! only on a visible/hidden transition.
+#![doc = include_str!("visibility_observer.doc/_module.md")]
 
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
 use crate::model::LayoutBox;
 
-/// A visibility transition reported by a [`VisibilityObserver`] (spec §4.4).
+#[doc = include_str!("visibility_observer.doc/VisibilityChange.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VisibilityChange {
-    /// The observed node.
+    #[doc = include_str!("visibility_observer.doc/node.md")]
     pub node: NodeId,
-    /// The node's visibility after the transition.
+    #[doc = include_str!("visibility_observer.doc/visible.md")]
     pub visible: bool,
 }
 
 impl VisibilityChange {
-    /// Constructs a visibility change event.
+    #[doc = include_str!("visibility_observer.doc/new.md")]
     #[must_use]
     pub const fn new(node: NodeId, visible: bool) -> Self {
         Self { node, visible }
     }
 }
 
-/// Watches a node's visibility — non-zero area and (optionally) overlap with a
-/// viewport — firing on each visible/hidden transition (spec §4.4).
+#[doc = include_str!("visibility_observer.doc/VisibilityObserver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VisibilityObserver {
     node: NodeId,
@@ -36,32 +30,25 @@ pub struct VisibilityObserver {
 }
 
 impl VisibilityObserver {
-    /// Creates an observer for `node`. It has not yet observed visibility, so
-    /// the first [`observe`](Self::observe) fires with the initial value.
+    #[doc = include_str!("visibility_observer.doc/new_2.md")]
     #[must_use]
     pub const fn new(node: NodeId) -> Self {
         Self { node, last: None }
     }
 
-    /// The observed node.
+    #[doc = include_str!("visibility_observer.doc/node_2.md")]
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    /// The last observed visibility, or `None` before the first observation.
+    #[doc = include_str!("visibility_observer.doc/last.md")]
     #[must_use]
     pub const fn last(self) -> Option<bool> {
         self.last
     }
 
-    /// Records the newly-committed box and optional `viewport`, returning a
-    /// [`VisibilityChange`] on a visible/hidden transition (or on the first
-    /// observation).
-    ///
-    /// The node is visible when its box area is greater than zero and, when a
-    /// `viewport` is given, the box overlaps it. Returns `None` when visibility
-    /// is unchanged.
+    #[doc = include_str!("visibility_observer.doc/observe.md")]
     #[must_use]
     pub fn observe(&mut self, box_: LayoutBox, viewport: Option<Rect>) -> Option<VisibilityChange> {
         let size = box_.size();
@@ -74,15 +61,13 @@ impl VisibilityObserver {
         Some(VisibilityChange::new(self.node, visible))
     }
 
-    /// Forgets the last observed visibility, so the next observation fires
-    /// afresh.
+    #[doc = include_str!("visibility_observer.doc/reset.md")]
     pub const fn reset(&mut self) {
         self.last = None;
     }
 }
 
-/// Returns whether two rectangles share any interior area (half-open edges: a
-/// shared edge alone does not overlap).
+#[doc = include_str!("visibility_observer.doc/rects_overlap.md")]
 fn rects_overlap(a: Rect, b: Rect) -> bool {
     a.origin.x < b.right()
         && b.origin.x < a.right()

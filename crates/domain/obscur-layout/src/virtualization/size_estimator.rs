@@ -1,34 +1,18 @@
-//! The [`SizeEstimator`] — estimated and measured item extents along the scroll
-//! axis (spec §4.9 *estimated geometry*).
-//!
-//! A virtualized list cannot afford to measure every item up front, so it starts
-//! from a single `default_extent` estimate and refines it incrementally: as items
-//! are really laid out, their measured extents are recorded and override the
-//! estimate. The estimator maps between item indices and cumulative scroll offsets
-//! by walking those extents.
+#![doc = include_str!("size_estimator.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
-/// Estimated and measured item extents along the scroll axis (spec §4.9
-/// *estimated geometry*).
-///
-/// Every item is assumed to have `default_extent` logical pixels until it is
-/// really measured; a measurement recorded via [`set_measured`](Self::set_measured)
-/// then refines the estimate for that index. Cumulative queries
-/// ([`total_extent`](Self::total_extent), [`offset_of`](Self::offset_of),
-/// [`index_at_offset`](Self::index_at_offset)) walk the per-item extents so the
-/// mapping stays consistent as measurements accrue.
+#[doc = include_str!("size_estimator.doc/SizeEstimator.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizeEstimator {
-    /// The assumed extent, in logical pixels, of any un-measured item.
+    #[doc = include_str!("size_estimator.doc/default_extent.md")]
     default_extent: f32,
-    /// Known extents from real measurement, keyed by item index.
+    #[doc = include_str!("size_estimator.doc/measured.md")]
     measured: BTreeMap<usize, f32>,
 }
 
 impl SizeEstimator {
-    /// Creates an estimator whose items all start at `default_extent` logical
-    /// pixels, with no measurements yet (spec §4.9).
+    #[doc = include_str!("size_estimator.doc/new.md")]
     #[must_use]
     pub fn new(default_extent: f32) -> Self {
         Self {
@@ -37,25 +21,23 @@ impl SizeEstimator {
         }
     }
 
-    /// The estimate, in logical pixels, used for any un-measured item.
+    #[doc = include_str!("size_estimator.doc/default_extent_2.md")]
     #[must_use]
     pub const fn default_extent(&self) -> f32 {
         self.default_extent
     }
 
-    /// Records a measured `extent` (logical pixels) for the item at `index`,
-    /// overriding the estimate for that index (spec §4.9).
+    #[doc = include_str!("size_estimator.doc/set_measured.md")]
     pub fn set_measured(&mut self, index: usize, extent: f32) {
         self.measured.insert(index, extent);
     }
 
-    /// Forgets the measurement for `index`, returning `true` if one was present.
+    #[doc = include_str!("size_estimator.doc/clear_measured.md")]
     pub fn clear_measured(&mut self, index: usize) -> bool {
         self.measured.remove(&index).is_some()
     }
 
-    /// The extent of the item at `index`: its measured value if known, otherwise
-    /// the default estimate (spec §4.9).
+    #[doc = include_str!("size_estimator.doc/extent.md")]
     #[must_use]
     pub fn extent(&self, index: usize) -> f32 {
         self.measured
@@ -64,17 +46,13 @@ impl SizeEstimator {
             .unwrap_or(self.default_extent)
     }
 
-    /// The total extent of all items `0..item_count` (spec §4.9).
+    #[doc = include_str!("size_estimator.doc/total_extent.md")]
     #[must_use]
     pub fn total_extent(&self, item_count: usize) -> f32 {
         self.offset_of(item_count, item_count)
     }
 
-    /// The cumulative extent of every item before `index`, i.e. the scroll offset
-    /// at which the item at `index` begins (spec §4.9).
-    ///
-    /// `index` is clamped to `item_count`, so `offset_of(item_count, ..)` is the
-    /// total extent.
+    #[doc = include_str!("size_estimator.doc/offset_of.md")]
     #[must_use]
     pub fn offset_of(&self, index: usize, item_count: usize) -> f32 {
         let clamped = index.min(item_count);
@@ -87,13 +65,7 @@ impl SizeEstimator {
         offset
     }
 
-    /// The index of the item whose extent band contains `offset` (spec §4.9).
-    ///
-    /// Bands are half-open: the item at `index` spans
-    /// `[offset_of(index), offset_of(index + 1))`. An `offset` at or below `0`
-    /// resolves to item `0`; an `offset` at or beyond the total extent resolves to
-    /// `item_count` (one past the last item). When `item_count` is `0` the result
-    /// is `0`.
+    #[doc = include_str!("size_estimator.doc/index_at_offset.md")]
     #[must_use]
     pub fn index_at_offset(&self, offset: f32, item_count: usize) -> usize {
         if item_count == 0 || offset <= 0.0 {

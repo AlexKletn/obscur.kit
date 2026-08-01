@@ -1,31 +1,4 @@
-//! A minimal **file manager**, authored in `okui!` markup over real data — the
-//! demo that exercises the declarative entry point end to end.
-//!
-//! What it proves, concretely:
-//!
-//! * [`App`] boots a window in a handful of lines (see `main`).
-//! * `okui!` markup binds **real Rust values**: `{row.name}` renders the actual
-//!   file name, `class={row.class}` drives the selection highlight, and
-//!   `<For each={rows}>` emits one node per directory entry — a real Rust loop,
-//!   not a template materialized once. (A standalone `.okui` *file* cannot do
-//!   this today: `App::screen` resolves a binding against a `ScreenData` table
-//!   rather than against Rust scope, and its `<For>` is materialized once, so the
-//!   file route reaches *values* and not shape. The inline macro resolves bindings
-//!   in *this* function's scope, which is why the markup lives here.)
-//! * The kit performs no I/O of its own (§5.15): `std::fs` reads the directory,
-//!   the kit only renders. No network, no new dependency.
-//!
-//! Rows are **clickable**: a click selects an entry and a double click opens it (a
-//! directory is entered, a file reported in the status line), with the toolbar as a
-//! keyboard-free alternative. A per-row `on:click` cannot carry this — every row the
-//! builder emits lowers to the *same* command symbol, so the symbol alone can never
-//! say which row was hit. The runtime resolves the click to the entry's model index
-//! from its own geometry (the container box, its scroll offset, the row extent) and
-//! calls [`App::on_row_click`]; that is the same "only the runtime holds both halves"
-//! argument as the virtual list itself.
-//!
-//! Run it (a display and a GPU adapter are required):
-//! `cargo run -p obscur-kit --example file_manager --features full`
+#![doc = include_str!("file_manager.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -39,16 +12,13 @@ use obscur_kit::identity::InternedSymbol;
 use obscur_kit::ui_macros::okui;
 use obscur_kit::view::view::{View, ViewFragment, ViewNode};
 
-/// The row height the model is estimated at, matching the sheet. The runtime sizes
-/// its window and its spacers from this until real measurement refines it.
+#[doc = include_str!("file_manager.doc/ROW_H.md")]
 const ROW_H: f32 = 24.0;
 
-/// The registered virtual list's name — derived from the string rather than a
-/// hand-assigned index.
+#[doc = include_str!("file_manager.doc/FILES.md")]
 const FILES: InternedSymbol = InternedSymbol::named("files");
 
-/// The styling. Authored CSS, installed through the motion-aware pipeline by
-/// [`App::stylesheet`].
+#[doc = include_str!("file_manager.doc/CSS.md")]
 const CSS: &str = "\
 .app      { background-color: rgba(18, 22, 31, 0.78); width: 100%; height: 100%; \
             display: flex; flex-direction: column; }\n\
@@ -72,13 +42,7 @@ const CSS: &str = "\
 .hint     { color: #7f8db0; width: 100%; height: 20px; }\n\
 ";
 
-/// The same sheet with every `background-color` dropped — an overdraw probe.
-///
-/// The normal sheet stacks opaque fills: `.app` covers the window, `.list` covers
-/// it again, and each of the ~76 rows paints its own. A path renderer that does no
-/// occlusion culling pays for all of them. Running with `OBSCUR_NO_BG=1` renders the
-/// identical tree and the identical text with none of those fills, so the difference
-/// in `present` is the cost of the overdraw rather than of the geometry.
+#[doc = include_str!("file_manager.doc/CSS_NO_BG.md")]
 const CSS_NO_BG: &str = "\
 .app      { width: 100%; height: 100%; display: flex; flex-direction: column; }\n\
 .toolbar  { width: 100%; height: 46px; display: flex; flex-direction: row; gap: 8px; }\n\
@@ -97,35 +61,27 @@ const CSS_NO_BG: &str = "\
 .hint     { color: #7f8db0; width: 100%; height: 20px; }\n\
 ";
 
-/// Whether to blank every string the UI renders (`OBSCUR_NO_TEXT=1`).
-///
-/// A glyph probe. The tree, the node count, the classes and the layout stay
-/// **identical** — only the text content becomes empty, so no glyph is shaped or
-/// rasterized. The difference in `present` is therefore the cost of the text alone,
-/// with nothing else moving. Vello draws glyphs as filled paths rather than from an
-/// atlas, and this list carries ~230 runs a frame.
+#[doc = include_str!("file_manager.doc/blank_text.md")]
 fn blank_text() -> bool {
     std::env::var_os("OBSCUR_NO_TEXT").is_some()
 }
 
-/// `text` unless the glyph probe is on, in which case the empty string.
+#[doc = include_str!("file_manager.doc/maybe.md")]
 fn maybe(text: String) -> String {
     if blank_text() { String::new() } else { text }
 }
 
-/// The browser's state: where we are, what is there, and which line is selected.
+#[doc = include_str!("file_manager.doc/State.md")]
 struct State {
     dir: PathBuf,
     entries: Vec<Entry>,
     selected: usize,
     message: String,
-    /// Bumped on every successful directory load. Handed to the virtual-list marker
-    /// as its scroll-reset token so the runtime starts a freshly-entered directory at
-    /// the top instead of carrying the previous listing's scroll offset into it.
+    #[doc = include_str!("file_manager.doc/generation.md")]
     generation: u64,
 }
 
-/// A directory entry as read from the filesystem.
+#[doc = include_str!("file_manager.doc/Entry.md")]
 struct Entry {
     name: String,
     is_dir: bool,
@@ -133,9 +89,7 @@ struct Entry {
 }
 
 impl State {
-    /// Reads `dir`, sorting directories first and then by name. A read failure is
-    /// reported in the status line and leaves the previous listing in place — the
-    /// §1.x recoverable-failure posture, not a panic.
+    #[doc = include_str!("file_manager.doc/load.md")]
     fn load(&mut self, dir: PathBuf) {
         match read_entries(&dir) {
             Ok(entries) => {
@@ -160,7 +114,7 @@ impl State {
         }
     }
 
-    /// Moves the cursor to `index`, clamped to the listing. What a row click sets.
+    #[doc = include_str!("file_manager.doc/select.md")]
     fn select(&mut self, index: usize) {
         let last = self.entries.len().saturating_sub(1);
         self.selected = index.min(last);
@@ -175,8 +129,7 @@ impl State {
         self.selected = (self.selected + 1).min(last);
     }
 
-    /// Enters the selected directory; a file is reported rather than opened (the
-    /// kit launches nothing by itself).
+    #[doc = include_str!("file_manager.doc/open.md")]
     fn open(&mut self) {
         let Some(entry) = self.entries.get(self.selected) else {
             return;
@@ -189,10 +142,7 @@ impl State {
         }
     }
 
-    /// Reports what a held row *would* offer — the stand-in for a context menu,
-    /// which the kit has no popup surface for yet. Selecting first is deliberate:
-    /// a held row must become the selected one, or the action would be about a
-    /// different entry than the one under the finger.
+    #[doc = include_str!("file_manager.doc/describe.md")]
     fn describe(&mut self, index: usize) {
         self.select(index);
         let Some(entry) = self.entries.get(self.selected) else {
@@ -205,7 +155,7 @@ impl State {
         };
     }
 
-    /// Goes to the parent directory, if there is one.
+    #[doc = include_str!("file_manager.doc/parent.md")]
     fn parent(&mut self) {
         if let Some(parent) = self.dir.parent().map(Path::to_path_buf) {
             self.load(parent);
@@ -213,8 +163,7 @@ impl State {
     }
 }
 
-/// Reads and sorts one directory. Unreadable entries are skipped rather than
-/// failing the whole listing.
+#[doc = include_str!("file_manager.doc/read_entries.md")]
 fn read_entries(dir: &Path) -> std::io::Result<Vec<Entry>> {
     let mut entries: Vec<Entry> = fs::read_dir(dir)?
         .filter_map(Result::ok)
@@ -244,8 +193,7 @@ fn read_entries(dir: &Path) -> std::io::Result<Vec<Entry>> {
     Ok(entries)
 }
 
-/// Formats a byte count. Hand-rolled on purpose: the kit's locale-aware number
-/// formatting (§7.2) is not built, so no grouping separator is available.
+#[doc = include_str!("file_manager.doc/human_size.md")]
 fn human_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * KB;
@@ -261,14 +209,7 @@ fn human_size(bytes: u64) -> String {
     }
 }
 
-/// Builds the whole UI from the current state. Every `{…}` in **body** position
-/// below reads a real local of this function — `{path}`, `{status}` — and that is
-/// what the inline macro buys over a compiled `.okui` file.
-///
-/// A `{…}` in an `on:` attribute is the other thing the same syntax means: a
-/// command *name*, hashed into the symbol the runtime dispatches on. `goParent`
-/// below is not a binding and there is no Rust item of that name anywhere — only
-/// the `command("goParent")` registration in `main`.
+#[doc = include_str!("file_manager.doc/build_view.md")]
 fn build_view(state: &State) -> View {
     let path = maybe(state.dir.display().to_string());
     let status = maybe(state.message.clone());
@@ -305,7 +246,7 @@ fn build_view(state: &State) -> View {
     splice_list(shell, list)
 }
 
-/// Inserts `list` as the second child of the shell's root.
+#[doc = include_str!("file_manager.doc/splice_list.md")]
 fn splice_list(shell: View, list: ViewNode) -> View {
     let mut roots = shell.into_fragment().into_nodes();
     let ViewNode::Element { children, .. } = &mut roots[0] else {
@@ -317,9 +258,7 @@ fn splice_list(shell: View, list: ViewNode) -> View {
     View::from_fragment(ViewFragment::from_nodes(roots))
 }
 
-/// Builds one row, by model index — the builder the runtime calls for the window.
-///
-/// This is where `okui!` earns its place: the bindings read the real entry.
+#[doc = include_str!("file_manager.doc/row_node.md")]
 fn row_node(state: &State, index: usize) -> ViewNode {
     let Some(entry) = state.entries.get(index) else {
         return ViewNode::element(ComponentId::from_raw(0x00F0_0002));

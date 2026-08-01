@@ -1,39 +1,30 @@
-//! Typed failures of a data transfer (spec §6.20).
+#![doc = include_str!("transfer_error.doc/_module.md")]
 
-/// Why a clipboard or drag-and-drop transfer failed (spec §6.20).
-///
-/// Each variant is a pure, backend-agnostic value; the informational variants
-/// carry a human-readable reason describing the specific failure. This type
-/// implements [`std::error::Error`] so it composes with the standard error
-/// ecosystem while remaining I/O-free.
+#[doc = include_str!("transfer_error.doc/TransferError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferError {
-    /// A capability limit was exceeded (spec §6.20 limits); the payload
-    /// describes the limit that was hit.
+    #[doc = include_str!("transfer_error.doc/LimitExceeded.md")]
     LimitExceeded(Box<str>),
-    /// No offered representation matched the requested format (spec §6.20); the
-    /// payload names the unsupported format or reason.
+    #[doc = include_str!("transfer_error.doc/Unsupported.md")]
     Unsupported(Box<str>),
-    /// A permission check denied the transfer (spec §6.20 permissions).
+    #[doc = include_str!("transfer_error.doc/PermissionDenied.md")]
     PermissionDenied,
-    /// There was nothing to transfer (spec §6.20).
+    #[doc = include_str!("transfer_error.doc/Empty.md")]
     Empty,
-    /// The transfer was cancelled before it completed (spec §6.20).
+    #[doc = include_str!("transfer_error.doc/Cancelled.md")]
     Cancelled,
-    /// A lazy data provider failed to resolve its bytes (spec §6.20 lazy async
-    /// providers); the payload describes the provider failure.
+    #[doc = include_str!("transfer_error.doc/ProviderFailed.md")]
     ProviderFailed(Box<str>),
 }
 
 impl TransferError {
-    /// Returns whether this error is [`TransferError::Cancelled`] (spec §6.20).
+    #[doc = include_str!("transfer_error.doc/is_cancelled.md")]
     #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
     }
 
-    /// Returns whether this error is [`TransferError::PermissionDenied`] (spec
-    /// §6.20 permissions).
+    #[doc = include_str!("transfer_error.doc/is_denied.md")]
     #[must_use]
     pub const fn is_denied(&self) -> bool {
         matches!(self, Self::PermissionDenied)

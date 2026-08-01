@@ -1,4 +1,4 @@
-//! Reconciliation module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod child_matcher;
 pub use child_matcher::ChildMatcher;
 mod child_matching;

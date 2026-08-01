@@ -1,30 +1,18 @@
-//! The outcome of propagating a layout change upward toward a parent context.
+#![doc = include_str!("propagation_result.doc/_module.md")]
 
 use crate::pass::LayoutPassResult;
 
-/// The outcome of propagating a layout change **upward** from a context toward
-/// its parent (spec §4.3).
-///
-/// §4.3 propagates invalidation upward *only when a context's output geometry
-/// changes*: an unchanged result cannot affect ancestors and stops there.
-/// Independently, a **containment boundary** halts upward propagation even when
-/// geometry changed, because contained layout cannot escape the boundary to
-/// affect ancestors.
-///
-/// This value pairs those two facts so a caller can decide, via
-/// [`continues_upward`](Self::continues_upward), whether to keep walking toward
-/// the parent.
+#[doc = include_str!("propagation_result.doc/PropagationResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PropagationResult {
-    /// Whether this context's output geometry changed in the pass.
+    #[doc = include_str!("propagation_result.doc/geometry_changed.md")]
     geometry_changed: bool,
-    /// Whether this context is a containment boundary that stops escape.
+    #[doc = include_str!("propagation_result.doc/contained.md")]
     contained: bool,
 }
 
 impl PropagationResult {
-    /// Creates a result from whether geometry changed and whether this context
-    /// is a containment boundary.
+    #[doc = include_str!("propagation_result.doc/new.md")]
     #[must_use]
     pub const fn new(geometry_changed: bool, contained: bool) -> Self {
         Self {
@@ -33,32 +21,25 @@ impl PropagationResult {
         }
     }
 
-    /// Builds a result from a completed [`LayoutPassResult`], reading its
-    /// `geometry_changed()` flag, combined with whether this context contains
-    /// layout.
+    #[doc = include_str!("propagation_result.doc/from_pass.md")]
     #[must_use]
     pub const fn from_pass(pass: &LayoutPassResult, contained: bool) -> Self {
         Self::new(pass.geometry_changed(), contained)
     }
 
-    /// Whether this context's output geometry changed.
+    #[doc = include_str!("propagation_result.doc/geometry_changed_2.md")]
     #[must_use]
     pub const fn geometry_changed(&self) -> bool {
         self.geometry_changed
     }
 
-    /// Whether this context is a containment boundary that stops escape.
+    #[doc = include_str!("propagation_result.doc/contained_2.md")]
     #[must_use]
     pub const fn contained(&self) -> bool {
         self.contained
     }
 
-    /// Whether propagation should continue **upward** to the parent context.
-    ///
-    /// Per §4.3, propagation continues only when the output geometry changed
-    /// (`geometry_changed`) **and** this context does not contain layout
-    /// (`!contained`). A containment boundary halts propagation even on a
-    /// geometry change, and stable geometry halts it regardless of containment.
+    #[doc = include_str!("propagation_result.doc/continues_upward.md")]
     #[must_use]
     pub const fn continues_upward(&self) -> bool {
         self.geometry_changed && !self.contained

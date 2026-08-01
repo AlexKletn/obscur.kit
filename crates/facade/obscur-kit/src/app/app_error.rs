@@ -1,21 +1,19 @@
-//! [`AppError`] — why [`App::run`](super::App::run) could not start or complete.
+#![doc = include_str!("app_error.doc/_module.md")]
 
 use crate::screen::ScreenError;
 
-/// Why [`App::run`](super::App::run) could not start or complete.
+#[doc = include_str!("app_error.doc/AppError.md")]
 #[derive(Debug)]
 pub enum AppError {
-    /// An `.okui` [`screen`](super::App::screen) did not parse; carries one message
-    /// per parse error.
+    #[doc = include_str!("app_error.doc/ScreenParse.md")]
     ScreenParse(Vec<String>),
-    /// An `.okui` [`screen`](super::App::screen) parsed but failed to compile;
-    /// carries one message per compile diagnostic.
+    #[doc = include_str!("app_error.doc/ScreenCompile.md")]
     ScreenCompile(Vec<String>),
-    /// The winit event loop could not be built.
+    #[doc = include_str!("app_error.doc/EventLoop.md")]
     EventLoop(String),
-    /// The OS window could not be created.
+    #[doc = include_str!("app_error.doc/Window.md")]
     Window(String),
-    /// No usable GPU adapter/device/surface (as in a headless environment).
+    #[doc = include_str!("app_error.doc/Gpu.md")]
     Gpu(String),
 }
 
@@ -42,10 +40,7 @@ impl std::fmt::Display for AppError {
 impl std::error::Error for AppError {}
 
 impl From<ScreenError> for AppError {
-    /// Carries a screen front-end failure into the one error type a windowed
-    /// application sees, keeping the parse/compile split (and the diagnostics)
-    /// intact — the `.okui` front end is display-free and has its own error type, so
-    /// this is the only place the two meet.
+    #[doc = include_str!("app_error.doc/from.md")]
     fn from(error: ScreenError) -> Self {
         match error {
             ScreenError::Parse(messages) => Self::ScreenParse(messages),

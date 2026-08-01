@@ -1,48 +1,29 @@
-//! One listener attached to one node for one command, in one phase (spec §2.3).
+#![doc = include_str!("event_listener.doc/_module.md")]
 
 use obscur_interaction::event::{EventPhase, ListenerPhase};
 
 use super::CommandHandler;
 
-/// A single listener registered on a node by
-/// [`UiRuntime::add_event_listener`](super::UiRuntime::add_event_listener)
-/// (spec §2.3).
-///
-/// A listener is *not* the same thing as a §2.6 command **handler**, and the
-/// difference is worth stating because both are closures on a node:
-///
-/// - a **handler** ([`on_command_at`](super::UiRuntime::on_command_at)) is the one
-///   piece of logic that *claims* a command; §2.6's chain offers the command to
-///   each link in turn and stops at the first that has one. There is at most one
-///   per `(node, command)`, and registering again replaces it.
-/// - a **listener** *observes and steers* the same command as it propagates. Any
-///   number may sit on one node, they run in registration order, and none of them
-///   claims anything — they are §2.3's capture and bubble phases, which exist
-///   precisely so a node that is not the target gets a say.
-///
-/// That is why listeners are an ordered `Vec` while handlers are a single slot:
-/// `stop_immediate_propagation` — *"skip the remaining handlers on the current
-/// node"* — has nothing to skip unless a node can carry more than one, so the
-/// spec's own API implies the multiplicity.
+#[doc = include_str!("event_listener.doc/EventListener.md")]
 pub(crate) struct EventListener {
-    /// The phase this listener asked to run in.
+    #[doc = include_str!("event_listener.doc/phase.md")]
     phase: ListenerPhase,
-    /// The listener body, normalized like every other registered handler.
+    #[doc = include_str!("event_listener.doc/handler.md")]
     handler: CommandHandler,
 }
 
 impl EventListener {
-    /// Registers `handler` to run in `phase`.
+    #[doc = include_str!("event_listener.doc/new.md")]
     pub(crate) const fn new(phase: ListenerPhase, handler: CommandHandler) -> Self {
         Self { phase, handler }
     }
 
-    /// Returns whether this listener runs during `phase` of a propagation.
+    #[doc = include_str!("event_listener.doc/runs_in.md")]
     pub(crate) const fn runs_in(&self, phase: EventPhase) -> bool {
         self.phase.runs_in(phase)
     }
 
-    /// Returns the listener body, for the walk to call.
+    #[doc = include_str!("event_listener.doc/handler_mut.md")]
     pub(crate) const fn handler_mut(&mut self) -> &mut CommandHandler {
         &mut self.handler
     }

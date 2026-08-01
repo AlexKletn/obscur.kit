@@ -1,4 +1,4 @@
-//! History module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod history_provider;
 pub use history_provider::{HistoryProvider, MemoryHistory};
 mod navigation_direction;

@@ -1,16 +1,4 @@
-//! End-to-end verification that **authored border CSS** reaches paint and emits
-//! the border fills at the box's edges through the *real* live pipeline (spec CSS
-//! Backgrounds and Borders §4).
-//!
-//! Each test authors CSS text, compiles it through the real `obscur-css` frontend
-//! (`source -> parse -> compile -> matchable Stylesheet`), and renders one frame
-//! on a [`UiRuntime`] via [`render_now`](UiRuntime::render_now), which runs
-//! `reconcile -> match -> cascade -> resolve (ComputedStyles) -> layout
-//! (LayoutBoxes) -> compose (DisplayList)`. The assertions read the *actual*
-//! [`DisplayList`] the pipeline published (`result.snapshot().display_list()`),
-//! never a hand-built scene, so a regression anywhere from the CSS `border`
-//! shorthand through the computed-value step to the scene coordinator fails the
-//! run.
+#![doc = include_str!("visual_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -25,32 +13,30 @@ use obscur_kit::scene::paint::Brush;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under, so geometry is deterministic.
+#[doc = include_str!("visual_css.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 300.0;
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`] through the
-/// real CSS frontend (`source -> parse -> compile`).
+#[doc = include_str!("visual_css.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A single element classed `.box`, the border target.
+#[doc = include_str!("visual_css.doc/one_box_view.md")]
 fn one_box_view() -> View {
     let node = ViewNode::element(ComponentId::from_raw(30))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())));
     View::from_fragment(ViewFragment::from_nodes(vec![node]))
 }
 
-/// The `.box` element [`NodeId`] after a frame.
+#[doc = include_str!("visual_css.doc/box_node.md")]
 fn box_node(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
     rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
-/// The solid-fill `DrawPath` rectangles of `rt`'s last frame whose color equals
-/// `want` (within a small tolerance), in paint order.
+#[doc = include_str!("visual_css.doc/fills_colored.md")]
 fn fills_colored(commands: &[PaintCommand], want: Color) -> Vec<Rect> {
     commands
         .iter()
@@ -664,10 +650,7 @@ fn authored_opacity_brackets_group_layer_and_composites_on_cpu() {
 // CSS border-triangle direction (the `width:0; height:0` trick)
 // ---------------------------------------------------------------------------
 
-/// Builds a flex-row host containing a single `width:0; height:0` `content-box`
-/// element carrying `tri_class`, so the classic CSS border-triangle trick lays
-/// out through the *real* path (a flex parent sizes the collapsed child; only its
-/// border widths give it extent).
+#[doc = include_str!("visual_css.doc/host_with_tri.md")]
 fn host_with_tri(tri_class: &str) -> View {
     let tri = ViewNode::element(ComponentId::from_raw(41))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(tri_class.into())));
@@ -677,8 +660,7 @@ fn host_with_tri(tri_class: &str) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![host]))
 }
 
-/// The vertices (in segment order) of the single solid triangle fill of color
-/// `want`, i.e. the one inked border side of the collapsed box.
+#[doc = include_str!("visual_css.doc/triangle_pts.md")]
 fn triangle_pts(commands: &[PaintCommand], want: Color) -> Vec<(f32, f32)> {
     use obscur_kit::scene::path::PathSegment;
     for c in commands {
@@ -705,7 +687,7 @@ fn triangle_pts(commands: &[PaintCommand], want: Color) -> Vec<(f32, f32)> {
     Vec::new()
 }
 
-/// The distinct y-coordinates of a triangle's vertices (deduped within 1e-3).
+#[doc = include_str!("visual_css.doc/distinct_ys.md")]
 fn distinct_ys(pts: &[(f32, f32)]) -> Vec<f32> {
     let mut ys: Vec<f32> = Vec::new();
     for &(_, y) in pts {
@@ -716,7 +698,7 @@ fn distinct_ys(pts: &[(f32, f32)]) -> Vec<f32> {
     ys
 }
 
-/// The distinct x-coordinates of a triangle's vertices (deduped within 1e-3).
+#[doc = include_str!("visual_css.doc/distinct_xs.md")]
 fn distinct_xs(pts: &[(f32, f32)]) -> Vec<f32> {
     let mut xs: Vec<f32> = Vec::new();
     for &(x, _) in pts {
@@ -727,9 +709,7 @@ fn distinct_xs(pts: &[(f32, f32)]) -> Vec<f32> {
     xs
 }
 
-/// The CSS border-triangle sheet: a flex host over a 0×0 `content-box` box whose
-/// one inked side (a distinct color) makes a triangle. The border widths are the
-/// classic 5/6px arrow proportions; each class inks exactly one side.
+#[doc = include_str!("visual_css.doc/TRI_SHEET.md")]
 const TRI_SHEET: &str = "
 .tri-host { display: flex; flex-direction: row; }
 .tri { box-sizing: content-box; width: 0; height: 0; border-style: solid; }

@@ -1,4 +1,4 @@
-//! Deterministic replay of an [`EventRecording`] against test infrastructure (spec §7.13).
+#![doc = include_str!("replay_session.doc/_module.md")]
 
 use crate::input::SyntheticInput;
 use crate::replay::event_recording::{
@@ -6,73 +6,47 @@ use crate::replay::event_recording::{
 };
 use crate::replay::replay_result::{ReplayResult, ReplayStatus};
 
-/// The sink a [`ReplaySession`] drives while replaying a recording.
-///
-/// The caller implements this over their deterministic infrastructure
-/// (a [`DeterministicClock`](crate::deterministic::DeterministicClock),
-/// executor, and completion queue). Replay walks the recorded steps in order and
-/// dispatches each to the matching method, so replay runs entirely against
-/// deterministic clocks/executors (spec §7.13).
-///
-/// Only [`apply_input`](Self::apply_input), [`advance_clock`](Self::advance_clock),
-/// and [`complete_async`](Self::complete_async) must be implemented. The
-/// scheduler-decision, resource-version, and environment-change hooks default to
-/// no-ops so a target that does not care about them stays minimal.
+#[doc = include_str!("replay_session.doc/ReplayTarget.md")]
 pub trait ReplayTarget {
-    /// Applies one normalized platform input event.
+    #[doc = include_str!("replay_session.doc/apply_input.md")]
     fn apply_input(&mut self, input: &SyntheticInput);
 
-    /// Advances the deterministic clock by `nanos` nanoseconds.
+    #[doc = include_str!("replay_session.doc/advance_clock.md")]
     fn advance_clock(&mut self, nanos: u64);
 
-    /// Delivers an async completion for the given raw `operation` id.
+    #[doc = include_str!("replay_session.doc/complete_async.md")]
     fn complete_async(&mut self, operation: u64);
 
-    /// Observes a recorded scheduler decision. Defaults to a no-op.
+    #[doc = include_str!("replay_session.doc/scheduler_decision.md")]
     fn scheduler_decision(&mut self, _reason: SchedulerReason, _accepted: bool) {}
 
-    /// Observes a recorded resource version change. Defaults to a no-op.
+    #[doc = include_str!("replay_session.doc/resource_version.md")]
     fn resource_version(&mut self, _resource: u64, _version: u64) {}
 
-    /// Observes a recorded window/environment change. Defaults to a no-op.
+    #[doc = include_str!("replay_session.doc/environment_change.md")]
     fn environment_change(&mut self, _change: EnvironmentChange) {}
 }
 
-/// A deterministic replayer for an [`EventRecording`].
-///
-/// [`replay`](Self::replay) walks the recording's fixed step list in order and
-/// dispatches each step to a [`ReplayTarget`]. Because the step list is fixed and
-/// dispatch is a pure walk, replaying the same recording into equivalent targets
-/// always produces the same sequence of calls — the determinism record-replay
-/// relies on (spec §7.13). Redaction markers carry no payload and are skipped
-/// (but counted).
+#[doc = include_str!("replay_session.doc/ReplaySession.md")]
 #[derive(Debug, Clone)]
 pub struct ReplaySession {
     recording: EventRecording,
 }
 
 impl ReplaySession {
-    /// Creates a session that will replay `recording`.
+    #[doc = include_str!("replay_session.doc/new.md")]
     #[must_use]
     pub fn new(recording: EventRecording) -> Self {
         Self { recording }
     }
 
-    /// Returns the recording this session replays.
+    #[doc = include_str!("replay_session.doc/recording.md")]
     #[must_use]
     pub fn recording(&self) -> &EventRecording {
         &self.recording
     }
 
-    /// Replays every recorded step in order into `target`, returning a tally.
-    ///
-    /// Each step is dispatched to the matching [`ReplayTarget`] method;
-    /// [`Redacted`](RecordedEvent::Redacted) markers are skipped and counted
-    /// (their payloads were dropped at record time, spec §7.13). The returned
-    /// [`ReplayResult`] always has [`ReplayStatus::Completed`] — a plain replay
-    /// of a fixed step list cannot diverge; use
-    /// [`replay_checked`](Self::replay_checked) to detect divergence against an
-    /// expected recording.
+    #[doc = include_str!("replay_session.doc/replay.md")]
     pub fn replay<T: ReplayTarget>(&self, target: &mut T) -> ReplayResult {
         let mut inputs_applied = 0usize;
         let mut redactions_skipped = 0usize;
@@ -100,14 +74,7 @@ impl ReplaySession {
         )
     }
 
-    /// Replays into `target` while checking each step against an `expected`
-    /// recording, flagging the first step whose recorded event differs.
-    ///
-    /// Dispatch is identical to [`replay`](Self::replay); additionally, before
-    /// dispatching each step its event is compared to the event at the same
-    /// index in `expected`. The first mismatch (including a length mismatch)
-    /// sets the status to [`ReplayStatus::Diverged`] with that step index, but
-    /// replay still runs to the end so the tallies are complete.
+    #[doc = include_str!("replay_session.doc/replay_checked.md")]
     pub fn replay_checked<T: ReplayTarget>(
         &self,
         target: &mut T,
@@ -158,7 +125,7 @@ impl ReplaySession {
         )
     }
 
-    /// Dispatches a single event to `target`, updating the running tallies.
+    #[doc = include_str!("replay_session.doc/dispatch.md")]
     fn dispatch<T: ReplayTarget>(
         target: &mut T,
         event: &RecordedEvent,
@@ -197,26 +164,25 @@ impl ReplaySession {
     }
 }
 
-/// A [`ReplayTarget`] test double that records every dispatched effect, so tests
-/// can assert on the exact sequence a replay produced.
+#[doc = include_str!("replay_session.doc/CollectingReplayTarget.md")]
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct CollectingReplayTarget {
-    /// Inputs applied, in dispatch order.
+    #[doc = include_str!("replay_session.doc/inputs.md")]
     pub inputs: Vec<SyntheticInput>,
-    /// Async completion operation ids, in dispatch order.
+    #[doc = include_str!("replay_session.doc/completions.md")]
     pub completions: Vec<u64>,
-    /// Scheduler decisions observed, in dispatch order.
+    #[doc = include_str!("replay_session.doc/scheduler_decisions.md")]
     pub scheduler_decisions: Vec<(SchedulerReason, bool)>,
-    /// Resource version changes observed, in dispatch order.
+    #[doc = include_str!("replay_session.doc/resource_versions.md")]
     pub resource_versions: Vec<(u64, u64)>,
-    /// Environment changes observed, in dispatch order.
+    #[doc = include_str!("replay_session.doc/environment_changes.md")]
     pub environment_changes: Vec<EnvironmentChange>,
-    /// The running total the clock was advanced by.
+    #[doc = include_str!("replay_session.doc/clock_nanos.md")]
     pub clock_nanos: u64,
 }
 
 impl CollectingReplayTarget {
-    /// Creates an empty collecting target.
+    #[doc = include_str!("replay_session.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()

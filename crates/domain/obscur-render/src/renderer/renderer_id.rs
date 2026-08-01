@@ -1,24 +1,17 @@
-//! A stable identity for a renderer backend instance (spec §5.2).
+#![doc = include_str!("renderer_id.doc/_module.md")]
 
-/// Identifies a [`Renderer`](crate::renderer::Renderer) backend instance
-/// (spec §5.2).
-///
-/// The renderer abstraction of spec §5.2 hides the base 2D backend (Vello) and
-/// admits alternates — software/headless, platform, WASM/WebGPU, and test
-/// renderers. When several backends coexist, this local newtype gives each a
-/// stable identity for diagnostics and for routing frames to a chosen backend.
-/// It is opaque data carrying no GPU or OS handle.
+#[doc = include_str!("renderer_id.doc/RendererId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RendererId(u64);
 
 impl RendererId {
-    /// Wraps a raw renderer identity value.
+    #[doc = include_str!("renderer_id.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw renderer identity value.
+    #[doc = include_str!("renderer_id.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

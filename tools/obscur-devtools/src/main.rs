@@ -1,13 +1,4 @@
-//! The `obscur-devtools` CLI entry point (spec §7.6): a thin argument parser over
-//! [`obscur_devtools::cli`] (the client interface) and [`obscur_devtools::host`]
-//! (a self-contained demo host to attach to).
-//!
-//! ```text
-//! obscur-devtools serve [--tcp | --unix <path>] [--token <t>] [--scopes <list>]
-//! obscur-devtools inspect <target|all> --tcp <addr> | --unix <path> [--token <t>]
-//! obscur-devtools subscribe <topic>    --tcp <addr> | --unix <path> [--token <t>]
-//! obscur-devtools ping                 --tcp <addr> | --unix <path> [--token <t>]
-//! ```
+#![doc = include_str!("main.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
@@ -31,7 +22,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// Parses `args` and runs the selected command, returning a human error string.
+#[doc = include_str!("main.doc/run.md")]
 fn run(args: &[String]) -> Result<(), String> {
     let Some((command, rest)) = args.split_first() else {
         print_usage();
@@ -51,15 +42,15 @@ fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
-/// Where a connection binds/attaches: a loopback TCP address or a Unix path.
+#[doc = include_str!("main.doc/Endpoint.md")]
 enum Endpoint {
-    /// Loopback TCP. For `serve`, `None` binds an ephemeral port.
+    #[doc = include_str!("main.doc/Tcp.md")]
     Tcp(Option<String>),
-    /// A Unix domain socket path.
+    #[doc = include_str!("main.doc/Unix.md")]
     Unix(String),
 }
 
-/// The connection + auth options common to every client command.
+#[doc = include_str!("main.doc/Options.md")]
 struct Options {
     endpoint: Endpoint,
     token: String,
@@ -67,7 +58,7 @@ struct Options {
     positionals: Vec<String>,
 }
 
-/// Parses `--tcp`/`--unix`/`--token`/`--scopes` plus one optional positional.
+#[doc = include_str!("main.doc/parse_options.md")]
 fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut endpoint = Endpoint::Tcp(None);
     let mut token = "dev".to_owned();
@@ -114,7 +105,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
     })
 }
 
-/// Parses a comma-separated scope list (`read,subscribe`, `all`, `observer`).
+#[doc = include_str!("main.doc/parse_scopes.md")]
 fn parse_scopes(spec: &str) -> Result<ScopeSet, String> {
     match spec {
         "all" => return Ok(ScopeSet::all()),
@@ -135,7 +126,7 @@ fn parse_scopes(spec: &str) -> Result<ScopeSet, String> {
     Ok(set)
 }
 
-/// Connects a [`SocketClient`] to the resolved endpoint.
+#[doc = include_str!("main.doc/connect.md")]
 fn connect(endpoint: &Endpoint) -> Result<SocketClient, String> {
     match endpoint {
         Endpoint::Tcp(Some(addr)) => {
@@ -156,8 +147,7 @@ fn connect(endpoint: &Endpoint) -> Result<SocketClient, String> {
     }
 }
 
-/// Connects and handshakes, returning the client on acceptance or a rejection
-/// error message.
+#[doc = include_str!("main.doc/connect_and_handshake.md")]
 fn connect_and_handshake(options: &Options) -> Result<SocketClient, String> {
     let mut client = connect(&options.endpoint)?;
     let response = cli::handshake(&mut client, &options.token).map_err(|e| e.to_string())?;
@@ -168,7 +158,7 @@ fn connect_and_handshake(options: &Options) -> Result<SocketClient, String> {
     }
 }
 
-/// `inspect <target|all>`: connect, handshake, and print each target's snapshot.
+#[doc = include_str!("main.doc/run_inspect.md")]
 fn run_inspect(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let target_arg = options
@@ -194,7 +184,7 @@ fn run_inspect(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `subscribe <topic>`: connect, handshake, and print the subscription grant.
+#[doc = include_str!("main.doc/run_subscribe.md")]
 fn run_subscribe(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let topic_arg = options
@@ -226,8 +216,7 @@ fn run_subscribe(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Streams pushed events to stdout until the connection ends or the user
-/// interrupts — a granted subscription now delivers, so print what arrives.
+#[doc = include_str!("main.doc/print_pushed_events.md")]
 fn print_pushed_events(client: &mut SocketClient) {
     println!("subscribed · streaming events (^C to stop)");
     loop {
@@ -243,8 +232,7 @@ fn print_pushed_events(client: &mut SocketClient) {
     }
 }
 
-/// `inject <down|up|click> <x> <y>`: connect, handshake, and inject synthetic
-/// pointer events at logical `(x, y)` — the write half of the agent loop.
+#[doc = include_str!("main.doc/run_inject.md")]
 fn run_inject(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let kind = options
@@ -295,14 +283,14 @@ fn run_inject(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `ping`: connect and handshake only.
+#[doc = include_str!("main.doc/run_ping.md")]
 fn run_ping(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     connect_and_handshake(&options)?;
     Ok(())
 }
 
-/// `serve`: stand up the demo host and serve client sessions.
+#[doc = include_str!("main.doc/run_serve.md")]
 fn run_serve(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let listener = match &options.endpoint {
@@ -334,7 +322,7 @@ fn run_serve(args: &[String]) -> Result<(), String> {
     host::serve_forever(&listener, &options.token, options.scopes).map_err(|e| e.to_string())
 }
 
-/// Prints the command summary.
+#[doc = include_str!("main.doc/print_usage.md")]
 fn print_usage() {
     println!(
         "obscur-devtools — external DevTools client (spec §7.6)\n\n\

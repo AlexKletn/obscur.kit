@@ -1,84 +1,59 @@
-//! Structural / behavioural flags for a retained node.
+#![doc = include_str!("node_flags.doc/_module.md")]
 
-/// A small bitset of structural and behavioural properties of a retained node.
-///
-/// These describe *what the node is or does* in the tree, not invalidation
-/// state: per-node dirty / needs-layout flags are deliberately **not** modelled
-/// here, because invalidation is a dependency-graph concern handled in later
-/// crates (spec §4.3).
-///
-/// The bitset is a plain `u32` newtype with associated `const` flag values; no
-/// external bitflags crate is used.
+#[doc = include_str!("node_flags.doc/NodeFlags.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeFlags(u32);
 
 impl NodeFlags {
-    /// Present in the tree but not visible / not painted.
+    #[doc = include_str!("node_flags.doc/HIDDEN.md")]
     pub const HIDDEN: Self = Self(1 << 0);
-    /// Hosts a portal: descendants may be painted under a different visual
-    /// parent (spec §4.14).
+    #[doc = include_str!("node_flags.doc/PORTAL_HOST.md")]
     pub const PORTAL_HOST: Self = Self(1 << 1);
-    /// Establishes a stacking context / compositing layer.
+    #[doc = include_str!("node_flags.doc/LAYER_ROOT.md")]
     pub const LAYER_ROOT: Self = Self(1 << 2);
-    /// System-generated node, hidden from the component tree (spec §4.16).
+    #[doc = include_str!("node_flags.doc/SYNTHETIC.md")]
     pub const SYNTHETIC: Self = Self(1 << 3);
-    /// Hosts a mounted component: this node's children are produced by that
-    /// component's `render`, **not** by the desired tree (spec §2.1, §2.2).
-    ///
-    /// Reconciliation therefore does not recurse into this node's children — the
-    /// desired node names the component and carries its props, but says nothing
-    /// about what it renders, so descending would delete the component's output
-    /// on every frame. The runtime sets this when it mounts an instance and
-    /// clears it when it unmounts one.
+    #[doc = include_str!("node_flags.doc/COMPONENT_HOST.md")]
     pub const COMPONENT_HOST: Self = Self(1 << 4);
-    /// Set alongside [`COMPONENT_HOST`](Self::COMPONENT_HOST) when the mounted
-    /// component declared an **open** style scope (spec §4.15 "explicitly
-    /// open/global scopes are possible").
-    ///
-    /// Style scoping is decided by walking a node's ancestors for the nearest
-    /// component host, and an open host is transparent to that walk: the
-    /// elements it rendered are matched by the document's ordinary selectors
-    /// exactly as authored elements are. Meaningless on a node that is not a
-    /// component host; the runtime sets it from the contract at mount and
-    /// clears it at unmount, together with `COMPONENT_HOST`.
+    #[doc = include_str!("node_flags.doc/OPEN_STYLE_SCOPE.md")]
     pub const OPEN_STYLE_SCOPE: Self = Self(1 << 5);
 
-    /// Returns an empty flag set.
+    #[doc = include_str!("node_flags.doc/empty.md")]
     #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
-    /// Returns the raw bit pattern.
+    #[doc = include_str!("node_flags.doc/bits.md")]
     #[must_use]
     pub const fn bits(self) -> u32 {
         self.0
     }
 
-    /// Returns `true` if no flags are set.
+    #[doc = include_str!("node_flags.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
-    /// Returns `true` if every flag in `other` is set in `self`.
+    #[doc = include_str!("node_flags.doc/contains.md")]
     #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
 
-    /// Returns the union of `self` and `other`.
+    #[doc = include_str!("node_flags.doc/union.md")]
     #[must_use]
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
-    /// Adds every flag in `other` to `self`.
+    #[doc = include_str!("node_flags.doc/insert.md")]
     pub fn insert(&mut self, other: Self) {
         self.0 |= other.0;
     }
 
-    /// Removes every flag in `other` from `self`.
+    #[doc = include_str!("node_flags.doc/remove.md")]
     pub fn remove(&mut self, other: Self) {
         self.0 &= !other.0;
     }

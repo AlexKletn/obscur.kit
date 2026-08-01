@@ -1,31 +1,25 @@
-//! `TextDocument`: an in-memory open document, and [`LineIndex`], its
-//! precomputed line-offset table for byte-offset ↔ [`Position`] mapping.
+#![doc = include_str!("text_document.doc/_module.md")]
 
 use crate::diagnostics::Position;
 
-/// Converts a `usize` byte length/offset to `u32`, saturating at
-/// [`u32::MAX`]. Documents larger than 4 GiB are out of scope for this core.
+#[doc = include_str!("text_document.doc/to_u32.md")]
 fn to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-/// A single text document held open by the language server.
-///
-/// It pairs the document `uri`, the client's monotonically increasing `version`
-/// and the full `text`. Full-text synchronization is used (the whole `text` is
-/// replaced on every change), which is the simplest correct LSP sync model.
+#[doc = include_str!("text_document.doc/TextDocument.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextDocument {
-    /// The document's URI (an opaque client-supplied identifier).
+    #[doc = include_str!("text_document.doc/uri.md")]
     pub uri: Box<str>,
-    /// The document version, as supplied by the client.
+    #[doc = include_str!("text_document.doc/version.md")]
     pub version: i32,
-    /// The full document text.
+    #[doc = include_str!("text_document.doc/text.md")]
     pub text: String,
 }
 
 impl TextDocument {
-    /// Creates a document for `uri` at `version` holding `text`.
+    #[doc = include_str!("text_document.doc/new.md")]
     #[must_use]
     pub fn new(uri: impl Into<Box<str>>, version: i32, text: impl Into<String>) -> Self {
         Self {
@@ -35,30 +29,24 @@ impl TextDocument {
         }
     }
 
-    /// Builds a fresh [`LineIndex`] over this document's current text.
+    #[doc = include_str!("text_document.doc/line_index.md")]
     #[must_use]
     pub fn line_index(&self) -> LineIndex {
         LineIndex::new(&self.text)
     }
 }
 
-/// A precomputed table of line-start byte offsets, enabling O(log n) conversion
-/// between absolute byte offsets and zero-based [`Position`]s.
-///
-/// Line breaks are `\n`; a `\r` is treated as an ordinary byte belonging to the
-/// line it precedes (so `\r\n` documents still map sensibly, with the `\r` as
-/// the last byte of the line). `line_starts[0]` is always `0`, and there is one
-/// entry per line; the final line has no trailing entry.
+#[doc = include_str!("text_document.doc/LineIndex.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineIndex {
-    /// Byte offset of the first character of each line. Always starts with `0`.
+    #[doc = include_str!("text_document.doc/line_starts.md")]
     line_starts: Vec<u32>,
-    /// Total length of the indexed text in bytes.
+    #[doc = include_str!("text_document.doc/text_len.md")]
     text_len: u32,
 }
 
 impl LineIndex {
-    /// Builds a line index over `text`.
+    #[doc = include_str!("text_document.doc/new_2.md")]
     #[must_use]
     pub fn new(text: &str) -> Self {
         let mut line_starts = vec![0u32];
@@ -73,16 +61,13 @@ impl LineIndex {
         }
     }
 
-    /// Returns the number of lines in the indexed text (always at least one).
+    #[doc = include_str!("text_document.doc/line_count.md")]
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.line_starts.len()
     }
 
-    /// Maps an absolute byte `offset` to a zero-based [`Position`].
-    ///
-    /// Offsets past the end of the text are clamped to the end. The returned
-    /// `character` is a UTF-8 byte offset within the line (see [`Position`]).
+    #[doc = include_str!("text_document.doc/offset_to_position.md")]
     #[must_use]
     pub fn offset_to_position(&self, offset: u32) -> Position {
         let offset = offset.min(self.text_len);
@@ -96,11 +81,7 @@ impl LineIndex {
         }
     }
 
-    /// Maps a zero-based [`Position`] to an absolute byte offset.
-    ///
-    /// The line is clamped to the last line and the character is clamped to the
-    /// end of its line (including any trailing newline byte), so the result is
-    /// always a valid offset in `0..=text_len`.
+    #[doc = include_str!("text_document.doc/position_to_offset.md")]
     #[must_use]
     pub fn position_to_offset(&self, position: Position) -> usize {
         let last_line = self.line_starts.len() - 1;

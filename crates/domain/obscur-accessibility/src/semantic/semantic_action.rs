@@ -1,51 +1,41 @@
-//! An action an accessibility node supports or can receive (spec §7.1).
+#![doc = include_str!("semantic_action.doc/_module.md")]
 
-/// An accessibility action a node supports or can receive (spec §7.1 actions).
-///
-/// Accessibility actions enter the same command/event model as ordinary input:
-/// an assistive technology requesting one produces the same kind of command an
-/// ordinary pointer or key press would. This enumerates the common cross-platform
-/// set that platform adapters map onto native action APIs.
-///
-/// [`is_value_change`](Self::is_value_change) groups the actions that mutate a
-/// node's value.
+#[doc = include_str!("semantic_action.doc/SemanticAction.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SemanticAction {
-    /// Activate the node (click or press). The default.
+    #[doc = include_str!("semantic_action.doc/Activate.md")]
     #[default]
     Activate,
-    /// Give the node keyboard focus.
+    #[doc = include_str!("semantic_action.doc/Focus.md")]
     Focus,
-    /// Increase the node's value by one step.
+    #[doc = include_str!("semantic_action.doc/Increment.md")]
     Increment,
-    /// Decrease the node's value by one step.
+    #[doc = include_str!("semantic_action.doc/Decrement.md")]
     Decrement,
-    /// Expand the node to reveal its content.
+    #[doc = include_str!("semantic_action.doc/Expand.md")]
     Expand,
-    /// Collapse the node to hide its content.
+    #[doc = include_str!("semantic_action.doc/Collapse.md")]
     Collapse,
-    /// Scroll the node into the visible viewport.
+    #[doc = include_str!("semantic_action.doc/ScrollIntoView.md")]
     ScrollIntoView,
-    /// Dismiss the node (e.g. close a dialog or tooltip).
+    #[doc = include_str!("semantic_action.doc/Dismiss.md")]
     Dismiss,
-    /// Show the node's context menu.
+    #[doc = include_str!("semantic_action.doc/ShowContextMenu.md")]
     ShowContextMenu,
-    /// Set the node's value directly.
+    #[doc = include_str!("semantic_action.doc/SetValue.md")]
     SetValue,
-    /// Select the node within its container.
+    #[doc = include_str!("semantic_action.doc/Select.md")]
     Select,
-    /// Copy the node's content to the clipboard.
+    #[doc = include_str!("semantic_action.doc/Copy.md")]
     Copy,
-    /// Paste clipboard content into the node.
+    #[doc = include_str!("semantic_action.doc/Paste.md")]
     Paste,
-    /// Cut the node's content to the clipboard.
+    #[doc = include_str!("semantic_action.doc/Cut.md")]
     Cut,
 }
 
 impl SemanticAction {
-    /// Returns whether this action mutates the node's value (spec §7.1):
-    /// [`Increment`](Self::Increment), [`Decrement`](Self::Decrement), and
-    /// [`SetValue`](Self::SetValue).
+    #[doc = include_str!("semantic_action.doc/is_value_change.md")]
     #[must_use]
     pub const fn is_value_change(&self) -> bool {
         matches!(self, Self::Increment | Self::Decrement | Self::SetValue)

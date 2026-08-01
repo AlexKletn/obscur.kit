@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** sizing and unit cases for obscur.kit §4.1
-//! ("intrinsic sizing") and §4.13 ("dimensions and spacing", "typography",
-//! "`calc`, `min`, `max`, `clamp`", "container queries").
-//!
-//! Every expected number below was produced by an agent reading the
-//! specification — obscur.kit §4 and the W3C css-sizing-3 / css-values-4 /
-//! css-contain-3 text it normatively cites — with **no access to this
-//! repository's source**. A failure here is a defect report about the engine,
-//! and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch4_sizing_units.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch4_support/mod.rs"]
@@ -18,15 +10,12 @@ use support::{approx, at, compile, drive, drive_sheets, el, geom, runtime, txt, 
 
 const VW: f32 = 1000.0;
 
-/// A `.p` page box holding one `.a` box.
+#[doc = include_str!("spec_ch4_sizing_units.doc/page.md")]
 fn page(kids: Vec<obscur_kit::view::view::ViewNode>) -> View {
     view(vec![el(10, "p", vec![el(100, "a", kids)])])
 }
 
-/// css-sizing-3 §3.3: "The content width and height are calculated by subtracting
-/// the border and padding widths of the respective sides from the specified
-/// <length-percentage>. As the content width and height cannot be negative, this
-/// computation is floored at zero."
+#[doc = include_str!("spec_ch4_sizing_units.doc/a_border_box_width_floors_its_content_at_zero.md")]
 #[test]
 fn a_border_box_width_floors_its_content_at_zero() {
     let rt = drive(
@@ -45,13 +34,7 @@ fn a_border_box_width_floors_its_content_at_zero() {
     approx(iw, 0.0, "the content width floored at zero");
 }
 
-/// css-sizing-3 §2: the fit-content size is "equal to clamp(min-content size,
-/// stretch-fit size, max-content size) (i.e. max(min-content size,
-/// min(max-content size, stretch-fit size)))."
-///
-/// The text below is thirty characters in a face whose advance is exactly 10px at
-/// this size, with a longest word of five characters: min-content 50px,
-/// max-content 300px.
+#[doc = include_str!("spec_ch4_sizing_units.doc/the_fit_content_formula_floors_at_the_min_content_size.md")]
 #[test]
 fn the_fit_content_formula_floors_at_the_min_content_size() {
     const TEXT: &str = "aaaaa aaaa aaaa aaaa aaaa aaaa";
@@ -72,10 +55,7 @@ fn the_fit_content_formula_floors_at_the_min_content_size() {
     approx(sized(400.0), 300.0, "never above the max-content size");
 }
 
-/// css-values-4 §10.2: "(That is, given clamp(MIN, VAL, MAX), it represents
-/// exactly the same value as max(MIN, min(VAL, MAX)))." and "That is,
-/// clamp(100px, ..., 50px) will resolve to 100px, exceeding its stated 'max'
-/// value."
+#[doc = include_str!("spec_ch4_sizing_units.doc/clamp_lets_the_minimum_win_over_an_inverted_maximum.md")]
 #[test]
 fn clamp_lets_the_minimum_win_over_an_inverted_maximum() {
     let rt = drive(
@@ -98,8 +78,7 @@ fn clamp_lets_the_minimum_win_over_an_inverted_maximum() {
     approx(geom(&rt, at(&rt, &[0, 1])).2, 20.0, "clamp(none,30px,20px)");
 }
 
-/// css-values-4 §6.2: "1cm = 96px/2.54" and "1in = 2.54cm = 96px" (and 1pt is
-/// 1/72nd of 1in).
+#[doc = include_str!("spec_ch4_sizing_units.doc/absolute_length_units_are_anchored_to_the_css_pixel.md")]
 #[test]
 fn absolute_length_units_are_anchored_to_the_css_pixel() {
     let rt = drive(
@@ -122,15 +101,7 @@ fn absolute_length_units_are_anchored_to_the_css_pixel() {
     approx(geom(&rt, at(&rt, &[0, 2])).2, 16.0, "12pt");
 }
 
-/// css-values-4 §6.1.1: "Represents the typical advance measure of European
-/// alphanumeric characters, and measured as the used advance measure of the '0'
-/// (ZERO, U+0030) glyph in the font used to render it." and "In the cases where it
-/// is impossible or impractical to determine the measure of the '0' glyph, it must
-/// be assumed to be 0.5em wide by 1em tall."
-///
-/// Case (b) — "a font with no '0' glyph available" — is expressed by installing a
-/// [`MockFontResolver`] with nothing registered, so no face resolves and the `0`
-/// advance is unmeasurable.
+#[doc = include_str!("spec_ch4_sizing_units.doc/the_ch_unit_measures_zero_and_falls_back_to_half_an_em.md")]
 #[test]
 fn the_ch_unit_measures_zero_and_falls_back_to_half_an_em() {
     let css = ".p{width:500px;height:200px} .a{font-size:20px;width:10ch;height:10px}";
@@ -157,9 +128,7 @@ fn the_ch_unit_measures_zero_and_falls_back_to_half_an_em() {
     );
 }
 
-/// css-contain-3 §6: "The query container for each axis is the nearest ancestor
-/// container that accepts container size queries on that axis. If no eligible
-/// query container is available, then use the small viewport size for that axis."
+#[doc = include_str!("spec_ch4_sizing_units.doc/container_query_units_fall_back_to_the_small_viewport.md")]
 #[test]
 fn container_query_units_fall_back_to_the_small_viewport() {
     let rt = drive(

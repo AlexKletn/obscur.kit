@@ -1,14 +1,23 @@
-//! Layout module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod break_mode;
 pub use break_mode::{OverflowWrap, WordBreak};
+mod break_offsets;
 mod hyphenator;
 pub use hyphenator::{Hyphenator, NullHyphenator};
 mod line_break;
 pub use line_break::{BreakKind, DefaultLineBreaker, LineBreak, LineBreaker};
+mod line_justification;
+mod line_segments;
+mod line_strut;
+pub use line_strut::LineStrut;
+mod line_truncation;
+mod packed_line;
 mod paragraph_layout;
-pub use paragraph_layout::{LineStrut, ParagraphLayout};
+pub use paragraph_layout::ParagraphLayout;
 mod paragraph_line;
 pub use paragraph_line::ParagraphLine;
+mod paragraph_word;
+mod tagged_glyph;
 mod text_alignment;
 pub use text_alignment::TextAlignment;
 mod text_hit_test;

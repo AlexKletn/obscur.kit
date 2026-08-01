@@ -1,224 +1,166 @@
-//! The §2.13/§2.12 contract rule itself, stated over plain data so **both**
-//! front ends decide a document's legality the same way.
-//!
-//! # Why the rule is not stated over the AST
-//!
-//! There are two authoring surfaces and only one of them has a `.okui` syntax
-//! tree. The file path parses to [`Element`](obscur_okui_syntax::ast::Element)
-//! nodes; the `okui!` macro parses `TokenStream`s with `syn` and never builds
-//! one. A rule written against either input can only ever check that input —
-//! which is exactly how the macro came to run **no** contract validation at all
-//! while the file path ran this one over every element it parsed.
-//!
-//! So the rule takes an [`ElementUse`]: the tag, the attribute names, and the
-//! members, with no syntax in it. Each front end describes its own instance and
-//! attaches its own location to the resulting [`ContractViolation`]s — a byte
-//! offset for the file path, a `Span` for the macro. One rule, two adapters:
-//! the same shape `check_expression` already gave §2.10.
-//!
-//! # Members, not children
-//!
-//! A component's *members* are the nodes that actually land in its child list,
-//! which is not the same as its direct children: `<If>` and `<For>` splice their
-//! bodies into the enclosing sink (see `ViewCodegen::emit_into`), so
-//! `<Card><If cond={x}><h1 slot="header"/></If></Card>` puts the `h1` in Card's
-//! children, not the `If`'s. The rule therefore looks through control flow — and
-//! records what that costs it: a member behind an `<If>` may not be there, and a
-//! member inside a `<For>` may be there many times. [`MemberArity`] carries that,
-//! and cardinality reports only what is *certainly* wrong.
+#![doc = include_str!("contract_rule.doc/_module.md")]
 
 use obscur_view::contract::SlotCardinality;
 
 use crate::validation::{ChildPolicy, ComponentContract, SlotRule};
 
-/// How many nodes one member of an [`ElementUse`] contributes to its parent's
-/// child list.
-///
-/// A static check cannot count a conditional, so it does not pretend to: the
-/// arity is the honest bound, and [`check_contract`] only reports a cardinality
-/// violation that holds for *every* value the bound admits.
+#[doc = include_str!("contract_rule.doc/MemberArity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemberArity {
-    /// Exactly one node: an unconditional child.
+    #[doc = include_str!("contract_rule.doc/Once.md")]
     Once,
-    /// Zero or one node: the member sits under an `<If>`/`<ElseIf>`/`<Else>`.
+    #[doc = include_str!("contract_rule.doc/AtMostOnce.md")]
     AtMostOnce,
-    /// Any number of nodes: the member sits inside a `<For>` body.
+    #[doc = include_str!("contract_rule.doc/Any.md")]
     Any,
 }
 
-/// One attribute written on an element instance.
+#[doc = include_str!("contract_rule.doc/AttributeUse.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AttributeUse<'a> {
-    /// The attribute's name — for an event, the local name after `on:`.
+    #[doc = include_str!("contract_rule.doc/name.md")]
     pub name: &'a str,
-    /// Whether this is an `on:<event>` binding rather than a prop.
+    #[doc = include_str!("contract_rule.doc/event.md")]
     pub event: bool,
 }
 
-/// What a member's `slot="…"` attribute assigns it to.
+#[doc = include_str!("contract_rule.doc/SlotUse.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotUse<'a> {
-    /// A literal slot name, which is the only kind a contract can be checked
-    /// against.
+    #[doc = include_str!("contract_rule.doc/Named.md")]
     Named(&'a str),
-    /// `slot={expr}`. A slot is matched against a declaration at *compile* time,
-    /// so a name that only exists at runtime cannot be checked against one — and
-    /// nothing downstream would route it either.
+    #[doc = include_str!("contract_rule.doc/Dynamic.md")]
     Dynamic,
 }
 
-/// One member of an element instance's child list.
+#[doc = include_str!("contract_rule.doc/MemberUse.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemberUse<'a> {
-    /// The member's tag name.
+    #[doc = include_str!("contract_rule.doc/tag.md")]
     pub tag: &'a str,
-    /// The slot the member was assigned to, from its `slot="…"` attribute.
+    #[doc = include_str!("contract_rule.doc/slot.md")]
     pub slot: Option<SlotUse<'a>>,
-    /// How many nodes this member contributes (see [`MemberArity`]).
+    #[doc = include_str!("contract_rule.doc/arity.md")]
     pub arity: MemberArity,
 }
 
-/// One element instance, described with no syntax in it, ready to be checked
-/// against a [`ComponentContract`].
+#[doc = include_str!("contract_rule.doc/ElementUse.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElementUse<'a> {
-    /// The instance's tag name.
+    #[doc = include_str!("contract_rule.doc/tag_2.md")]
     pub tag: &'a str,
-    /// The attributes written on it, in source order.
+    #[doc = include_str!("contract_rule.doc/attributes.md")]
     pub attributes: Vec<AttributeUse<'a>>,
-    /// Its members, in source order (see the module docs).
+    #[doc = include_str!("contract_rule.doc/members.md")]
     pub members: Vec<MemberUse<'a>>,
-    /// Whether the instance holds **content** that is not a member: a text child
-    /// or an `{expr}` interpolation.
-    ///
-    /// Not a [`MemberUse`], because content has no tag — and the allowed-children
-    /// surface is a list of tags. It is recorded at all because
-    /// [`ChildPolicy::None`](crate::validation::ChildPolicy::None) is a claim about
-    /// the *position* rather than about names: `<Button>OK</Button>`, the case that
-    /// made "no children" worth expressing, has no element child to catch it by.
-    /// Collected through the same look-through as the members, so text inside an
-    /// `<If>` counts for the component the `<If>` splices into.
+    #[doc = include_str!("contract_rule.doc/content.md")]
     pub content: bool,
 }
 
-/// Where a [`ContractViolation`] should be reported, as an index into the
-/// [`ElementUse`] that produced it.
-///
-/// The rule does not know what a location *is* — the file path has byte offsets
-/// and the macro has spans — so it names the offending part and lets the caller
-/// resolve it.
+#[doc = include_str!("contract_rule.doc/ViolationAnchor.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViolationAnchor {
-    /// The element instance as a whole.
+    #[doc = include_str!("contract_rule.doc/Element.md")]
     Element,
-    /// The attribute at this index of [`ElementUse::attributes`].
+    #[doc = include_str!("contract_rule.doc/Attribute.md")]
     Attribute(usize),
-    /// The member at this index of [`ElementUse::members`].
+    #[doc = include_str!("contract_rule.doc/Member.md")]
     Member(usize),
 }
 
-/// One way an element instance breaks its component's contract (spec §2.12,
-/// §2.13).
+#[doc = include_str!("contract_rule.doc/ContractViolation.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractViolation {
-    /// A required prop is not set.
+    #[doc = include_str!("contract_rule.doc/MissingProp.md")]
     MissingProp {
-        /// The absent prop's name.
+        #[doc = include_str!("contract_rule.doc/prop.md")]
         prop: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor.md")]
         anchor: ViolationAnchor,
     },
-    /// An attribute the contract's closed prop surface does not declare.
+    #[doc = include_str!("contract_rule.doc/UnknownAttribute.md")]
     UnknownAttribute {
-        /// The offending attribute's name.
+        #[doc = include_str!("contract_rule.doc/name_2.md")]
         name: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_2.md")]
         anchor: ViolationAnchor,
     },
-    /// An `on:<event>` the contract's closed event surface does not declare.
+    #[doc = include_str!("contract_rule.doc/UnknownEvent.md")]
     UnknownEvent {
-        /// The offending event's name.
+        #[doc = include_str!("contract_rule.doc/event_2.md")]
         event: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_3.md")]
         anchor: ViolationAnchor,
     },
-    /// A child tag the contract's child restriction does not allow.
+    #[doc = include_str!("contract_rule.doc/DisallowedChild.md")]
     DisallowedChild {
-        /// The offending child's tag.
+        #[doc = include_str!("contract_rule.doc/tag_3.md")]
         tag: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_4.md")]
         anchor: ViolationAnchor,
     },
-    /// A child element written inside a component that admits **no** children
-    /// ([`ChildPolicy::None`](crate::validation::ChildPolicy::None)).
-    ///
-    /// Distinct from [`DisallowedChild`](Self::DisallowedChild) because the fault
-    /// is different and so is the fix: there is no allowed tag to reach for, and
-    /// the diagnostic must say so instead of implying a list the author could
-    /// consult.
+    #[doc = include_str!("contract_rule.doc/ForbiddenChild.md")]
     ForbiddenChild {
-        /// The offending child's tag.
+        #[doc = include_str!("contract_rule.doc/tag_4.md")]
         tag: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_5.md")]
         anchor: ViolationAnchor,
     },
-    /// Text or `{expr}` content written inside a component that admits **no**
-    /// children.
+    #[doc = include_str!("contract_rule.doc/ForbiddenContent.md")]
     ForbiddenContent {
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_6.md")]
         anchor: ViolationAnchor,
     },
-    /// A `slot="…"` on a child of a component that declares no slots at all.
+    #[doc = include_str!("contract_rule.doc/NoSuchSlotSurface.md")]
     NoSuchSlotSurface {
-        /// The name the child asked for.
+        #[doc = include_str!("contract_rule.doc/slot_2.md")]
         slot: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_7.md")]
         anchor: ViolationAnchor,
     },
-    /// A `slot="…"` naming a slot the component does not declare.
+    #[doc = include_str!("contract_rule.doc/UnknownSlot.md")]
     UnknownSlot {
-        /// The name the child asked for.
+        #[doc = include_str!("contract_rule.doc/slot_3.md")]
         slot: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_8.md")]
         anchor: ViolationAnchor,
     },
-    /// A child tag the slot's own child restriction does not allow.
+    #[doc = include_str!("contract_rule.doc/DisallowedSlotChild.md")]
     DisallowedSlotChild {
-        /// The slot the child was assigned to.
+        #[doc = include_str!("contract_rule.doc/slot_4.md")]
         slot: Box<str>,
-        /// The offending child's tag.
+        #[doc = include_str!("contract_rule.doc/tag_5.md")]
         tag: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_9.md")]
         anchor: ViolationAnchor,
     },
-    /// More children are assigned to a slot than its cardinality accepts.
+    #[doc = include_str!("contract_rule.doc/SlotOverfull.md")]
     SlotOverfull {
-        /// The over-subscribed slot.
+        #[doc = include_str!("contract_rule.doc/slot_5.md")]
         slot: Box<str>,
-        /// The cardinality it declared.
+        #[doc = include_str!("contract_rule.doc/cardinality.md")]
         cardinality: SlotCardinality,
-        /// How many children are certainly in it.
+        #[doc = include_str!("contract_rule.doc/found.md")]
         found: usize,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_10.md")]
         anchor: ViolationAnchor,
     },
-    /// A slot declaring [`SlotCardinality::ExactlyOne`] has no child at all.
+    #[doc = include_str!("contract_rule.doc/SlotEmpty.md")]
     SlotEmpty {
-        /// The unfilled slot.
+        #[doc = include_str!("contract_rule.doc/slot_6.md")]
         slot: Box<str>,
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_11.md")]
         anchor: ViolationAnchor,
     },
-    /// A `slot={expr}` — a slot name that does not exist until runtime.
+    #[doc = include_str!("contract_rule.doc/DynamicSlot.md")]
     DynamicSlot {
-        /// Where to report it.
+        #[doc = include_str!("contract_rule.doc/anchor_12.md")]
         anchor: ViolationAnchor,
     },
 }
 
 impl ContractViolation {
-    /// Returns where this violation should be reported.
+    #[doc = include_str!("contract_rule.doc/anchor_13.md")]
     #[must_use]
     pub const fn anchor(&self) -> ViolationAnchor {
         match self {
@@ -237,7 +179,7 @@ impl ContractViolation {
         }
     }
 
-    /// Renders the diagnostic message for this violation on `component`.
+    #[doc = include_str!("contract_rule.doc/message.md")]
     #[must_use]
     pub fn message(&self, component: &str) -> String {
         match self {
@@ -297,34 +239,16 @@ impl ContractViolation {
     }
 }
 
-/// Attribute names always permitted on any element whatever its contract's
-/// declared prop surface: the structural keys, the `requires="cap"` capability
-/// declaration (§2.13), and `slot` — a child's slot assignment (§2.12), which is
-/// addressed to its *parent*'s contract and so is never the child's own prop.
+#[doc = include_str!("contract_rule.doc/RESERVED_ATTRIBUTES.md")]
 const RESERVED_ATTRIBUTES: [&str; 5] = ["key", "class", "id", "requires", "slot"];
 
-/// Returns whether `name` is a reserved structural attribute rather than a prop.
+#[doc = include_str!("contract_rule.doc/is_reserved_attribute.md")]
 #[must_use]
 pub fn is_reserved_attribute(name: &str) -> bool {
     RESERVED_ATTRIBUTES.contains(&name)
 }
 
-/// Checks one element instance against `contract`, returning every violation it
-/// commits (spec §2.12, §2.13).
-///
-/// The checks, in order:
-///
-/// - **required props** — every required prop must appear as an attribute;
-/// - **unknown attributes** — when the prop surface is closed, every non-event
-///   attribute must be declared or [reserved](is_reserved_attribute);
-/// - **unknown events** — when the event surface is closed, every `on:<event>`
-///   must be declared;
-/// - **allowed children** — when the contract restricts children, every member's
-///   tag must be listed, and a contract declaring [`ChildPolicy::None`] refuses
-///   members and content alike;
-/// - **slots** (§2.12) — every member's `slot="…"` must name a declared slot and
-///   satisfy that slot's own child restriction, and each slot's
-///   [`SlotCardinality`] must hold.
+#[doc = include_str!("contract_rule.doc/check_contract.md")]
 #[must_use]
 pub fn check_contract(
     element: &ElementUse<'_>,
@@ -337,7 +261,7 @@ pub fn check_contract(
     violations
 }
 
-/// Appends the required-prop, unknown-attribute and unknown-event violations.
+#[doc = include_str!("contract_rule.doc/check_props.md")]
 fn check_props(
     element: &ElementUse<'_>,
     contract: &ComponentContract,
@@ -377,25 +301,7 @@ fn check_props(
     }
 }
 
-/// Appends the allowed-children violations (spec §2.13).
-///
-/// The three [`ChildPolicy`] states are three different verdicts, which is why
-/// the policy is an enum rather than a list whose emptiness had to mean two
-/// things:
-///
-/// - [`Any`](ChildPolicy::Any) — nothing to check;
-/// - [`Only`](ChildPolicy::Only) — each member's tag must be listed; content is
-///   left alone, since a list of tags says nothing about a text run;
-/// - [`None`](ChildPolicy::None) — every member *and* any content is refused,
-///   because the component's own `view()` builds its children and an authored one
-///   reaches no tree.
-///
-/// A member's [`MemberArity`] is deliberately not consulted, exactly as it is not
-/// for [`DisallowedChild`](ContractViolation::DisallowedChild). Arity exists so a
-/// *count* is never asserted beyond what is certain (see
-/// [`check_cardinality`]); a forbidden child is not a count. `<Button><If
-/// cond={x}><span/></If></Button>` may contribute zero nodes at runtime, and is
-/// still markup whose only possible effect is nothing.
+#[doc = include_str!("contract_rule.doc/check_children.md")]
 fn check_children(
     element: &ElementUse<'_>,
     contract: &ComponentContract,
@@ -427,7 +333,7 @@ fn check_children(
     }
 }
 
-/// Appends the §2.12 slot violations: assignment, membership and cardinality.
+#[doc = include_str!("contract_rule.doc/check_slots.md")]
 fn check_slots(
     element: &ElementUse<'_>,
     contract: &ComponentContract,
@@ -470,17 +376,7 @@ fn check_slots(
     }
 }
 
-/// Appends the cardinality violation for one slot, if the bound proves one.
-///
-/// The number of children a slot ends up with is not a number but a **range**:
-/// `certain` (the members that are definitely there) up to `max` (all of them,
-/// or unbounded once a `<For>` body is among them). A violation exists only when
-/// [`SlotCardinality::accepts`] rejects *every* count in that range — otherwise
-/// the author has written something that may well be right, and a compile error
-/// would be a lie.
-///
-/// The range is probed up to 2 because that is all a cardinality distinguishes:
-/// none, one, more than one.
+#[doc = include_str!("contract_rule.doc/check_cardinality.md")]
 fn check_cardinality(
     element: &ElementUse<'_>,
     slot: &SlotRule,

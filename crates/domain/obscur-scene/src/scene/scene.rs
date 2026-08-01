@@ -1,17 +1,9 @@
-//! The mutable scene the runtime builds up each frame.
+#![doc = include_str!("scene.doc/_module.md")]
 
 use crate::command::DisplayList;
 use crate::scene::{SceneGeneration, SceneSnapshot, SceneStatistics};
 
-/// The **mutable** Scene/Paint model: a root [`DisplayList`] paired with the
-/// [`SceneGeneration`] stamping its content (spec §1.6, §5.2).
-///
-/// The runtime owns a `Scene` and mutates it while building a frame — for
-/// example by replacing the root with [`Scene::set_root`], which advances the
-/// generation to record that the content changed. When the frame is ready, the
-/// runtime publishes an immutable [`SceneSnapshot`] via [`Scene::snapshot`] and
-/// hands it to a renderer. The renderer only ever sees the snapshot, never this
-/// mutable scene.
+#[doc = include_str!("scene.doc/Scene.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Scene {
     root: DisplayList,
@@ -19,8 +11,7 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// Creates an empty scene: an empty root display list at
-    /// [`SceneGeneration::FIRST`].
+    #[doc = include_str!("scene.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -29,45 +20,37 @@ impl Scene {
         }
     }
 
-    /// The root display list the scene is currently composed of.
+    #[doc = include_str!("scene.doc/root.md")]
     #[must_use]
     pub fn root(&self) -> &DisplayList {
         &self.root
     }
 
-    /// Replaces the root display list and **advances the generation**.
-    ///
-    /// Replacing the root is a content change, so the generation moves to
-    /// [`SceneGeneration::next`]; any [`SceneSnapshot`] taken before this call
-    /// now reports stale against the new generation.
+    #[doc = include_str!("scene.doc/set_root.md")]
     pub fn set_root(&mut self, list: DisplayList) {
         self.root = list;
         self.generation = self.generation.next();
     }
 
-    /// The current generation stamping the scene's content.
+    #[doc = include_str!("scene.doc/generation.md")]
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.generation
     }
 
-    /// Whether the scene has no content, i.e. its root display list is empty.
+    #[doc = include_str!("scene.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.root.is_empty()
     }
 
-    /// Computes the diagnostic [`SceneStatistics`] for the current root.
+    #[doc = include_str!("scene.doc/statistics.md")]
     #[must_use]
     pub fn statistics(&self) -> SceneStatistics {
         SceneStatistics::from_display_list(&self.root)
     }
 
-    /// Produces an immutable [`SceneSnapshot`] of the current state.
-    ///
-    /// The snapshot clones the root display list, captures the current
-    /// generation, and computes the statistics; it is thereafter independent of
-    /// this scene and unaffected by later mutation.
+    #[doc = include_str!("scene.doc/snapshot.md")]
     #[must_use]
     pub fn snapshot(&self) -> SceneSnapshot {
         SceneSnapshot::from_scene(self)

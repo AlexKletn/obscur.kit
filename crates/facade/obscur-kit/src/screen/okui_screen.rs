@@ -1,4 +1,4 @@
-//! [`OkuiScreen`] — a compiled `.okui` document, re-lowered to a [`View`] per frame.
+#![doc = include_str!("okui_screen.doc/_module.md")]
 
 use std::collections::HashSet;
 
@@ -13,107 +13,29 @@ use crate::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 use super::{ScreenData, ScreenError};
 
-/// The logical name compile diagnostics are reported against. A screen handed over
-/// as a string has no path, and inventing one would put a file that does not exist
-/// in an error message.
+#[doc = include_str!("okui_screen.doc/SCREEN_NAME.md")]
 const SCREEN_NAME: &str = "screen.okui";
 
-/// The control tag whose body is a **row template**, not content: a
-/// `<VirtualFor>`. See [`OkuiScreen::view`] for why a binding inside one is left
-/// alone.
+#[doc = include_str!("okui_screen.doc/VIRTUAL_FOR.md")]
 const VIRTUAL_FOR: &str = "VirtualFor";
 
-/// A `.okui` source compiled **once** to UI IR and lowered to a [`View`] on every
-/// frame, resolving its `{bindings}` against a [`ScreenData`] table (spec §2.9).
-///
-/// # What this replaces
-///
-/// `App::screen` used to compile the source in `run` and
-/// hand the runtime a builder that returned that one pre-built `View` for the
-/// application's whole life:
-///
-/// ```ignore
-/// let view = compile_screen(&src)?;
-/// Box::new(move || view.clone())      // "static v1 materialization"
-/// ```
-///
-/// so no state change could reach the screen — §2.9 defines `.okui` as a front end
-/// "compiled into the same UI IR as the Rust DSL", a *peer* of the Rust DSL rather
-/// than a static subset of it. Holding the IR instead of the `View` costs one
-/// lowering per frame and no parsing at all, and gives the lowering somewhere to
-/// read state from.
-///
-/// # What the two `.okui` routes now do
-///
-/// - **Build time** (`build.rs` +
-///   [`ViewCodegen`](crate::okui_compiler::codegen::ViewCodegen) with
-///   [`CodegenRoot::facade`](crate::okui_compiler::codegen::CodegenRoot::facade)):
-///   the document becomes ordinary Rust, `{count}` becomes a read of the
-///   application's own `count`, and §2.13's contract validation happens while the
-///   crate compiles. This is the route §2.9's "compile-time contract validation"
-///   describes, and it is the one to use for anything with real data behind it.
-/// - **Run time** (this type): the source is text until `run`, so its contract
-///   errors are a [`ScreenError`] at startup rather than a compile error, and its
-///   bindings resolve against [`ScreenData`] instead of Rust locals. Structure is
-///   fixed at compile time — a `<If>`/`<For>` is statically materialised by the
-///   bridge — so this route reaches *values*, not shape.
-///
-/// # Cost
-///
-/// Lowering is O(nodes) and allocates the frame's `View`; nothing re-parses and
-/// nothing re-compiles. Subtrees that contain neither a bound property nor a body
-/// `{…}` are handed to [`UiIrViewBridge`] whole and never walked twice, so a mostly
-/// static screen costs exactly one bridge lowering — see
-/// [`dynamic_node_count`](Self::dynamic_node_count).
+#[doc = include_str!("okui_screen.doc/OkuiScreen.md")]
 pub struct OkuiScreen {
-    /// The compiled IR — the artefact §2.9 calls the shared representation. Kept
-    /// instead of the lowered `View` so a frame can be rebuilt from it.
+    #[doc = include_str!("okui_screen.doc/document.md")]
     document: UiIrDocument,
-    /// The values this screen's bindings read.
+    #[doc = include_str!("okui_screen.doc/data.md")]
     data: ScreenData,
-    /// The ids of the IR nodes whose lowering the data can change: a node with a
-    /// bound property or a body interpolation, and every ancestor of one. A node
-    /// outside this set lowers identically on every frame, so the bridge's own
-    /// result for it is reused verbatim.
+    #[doc = include_str!("okui_screen.doc/dynamic.md")]
     dynamic: HashSet<u64>,
 }
 
 impl OkuiScreen {
-    /// Parses and compiles `source` with no state declared — for a screen whose only
-    /// bindings are in element bodies.
-    ///
-    /// An **attribute** binding (`class={theme}`) references a name, and §2.13 makes
-    /// an unknown name a compile error, so a screen that binds an attribute must
-    /// declare it: use [`compile_with`](Self::compile_with) and bind the name in the
-    /// table first.
-    ///
-    /// # Errors
-    ///
-    /// See [`compile_with`](Self::compile_with).
+    #[doc = include_str!("okui_screen.doc/compile.md")]
     pub fn compile(source: &str) -> Result<Self, ScreenError> {
         Self::compile_with(source, ScreenData::new())
     }
 
-    /// Parses and compiles `source` against `data`, keeping the IR and the table.
-    ///
-    /// Every name **currently bound** in `data` is declared to the compiler as the
-    /// screen's state, which is what lets an attribute binding reference it — and what
-    /// makes a reference to anything else a §2.13 compile error ("unknown attributes,
-    /// events and string method names are compile errors") instead of a value that
-    /// silently never arrives. So bind a name to its initial value *before* compiling;
-    /// for `App` that means writing
-    /// `screen_data` before `run`.
-    ///
-    /// Body interpolations are not name-checked on this route — an unbound `{count}`
-    /// renders its own path, visibly — which is a gap in the front end's resolution
-    /// pass rather than a decision made here.
-    ///
-    /// # Errors
-    ///
-    /// [`ScreenError::Parse`] when the source does not parse, and
-    /// [`ScreenError::Compile`] when it parses but fails §2.13/§2.12 validation —
-    /// each carrying the diagnostics, because a screen that failed to compile must
-    /// not render as a silently empty document.
+    #[doc = include_str!("okui_screen.doc/compile_with.md")]
     pub fn compile_with(source: &str, data: ScreenData) -> Result<Self, ScreenError> {
         let parsed = Parser::new().parse(source);
         if !parsed.errors().is_empty() {
@@ -150,66 +72,31 @@ impl OkuiScreen {
         })
     }
 
-    /// The table this screen's bindings resolve against.
+    #[doc = include_str!("okui_screen.doc/data_2.md")]
     #[must_use]
     pub const fn data(&self) -> &ScreenData {
         &self.data
     }
 
-    /// The compiled IR, for a host that wants to inspect or re-lower it itself.
+    #[doc = include_str!("okui_screen.doc/document_2.md")]
     #[must_use]
     pub const fn document(&self) -> &UiIrDocument {
         &self.document
     }
 
-    /// How many IR nodes the data can change — the size of the per-frame walk that
-    /// is *not* a plain [`UiIrViewBridge`] call. `0` means this screen is entirely
-    /// static and its lowering is the bridge's, node for node.
+    #[doc = include_str!("okui_screen.doc/dynamic_node_count.md")]
     #[must_use]
     pub fn dynamic_node_count(&self) -> usize {
         self.dynamic.len()
     }
 
-    /// Lowers the compiled document to this frame's [`View`].
-    ///
-    /// Call once per frame — this is the body of the builder
-    /// `App::screen` hands
-    /// [`UiRuntime::set_root_view`](crate::runtime::UiRuntime::set_root_view).
-    ///
-    /// # What the lowering adds to the bridge
-    ///
-    /// [`UiIrViewBridge`] owns every naming decision (tags → `ComponentId`s,
-    /// reserved attributes, events, keys, `<VirtualFor>` markers) and this does not
-    /// re-implement any of it: each node's lowering *is* the bridge's. Two things
-    /// the bridge cannot know are repaired afterwards, because it has no values to
-    /// resolve a binding with:
-    ///
-    /// - a body `{expr}` — which the bridge lowers to an anonymous box that draws
-    ///   nothing — becomes a text node carrying the bound value;
-    /// - a bound property (`class={theme}`), which the bridge lowers to its *path*
-    ///   as placeholder text, takes the bound value verbatim. Verbatim means a
-    ///   `class` wants a [`Text`](ViewValue::Text): the value is not stringified,
-    ///   because a property is typed data and an `Int` bound to a numeric attribute
-    ///   should stay an `Int`.
-    ///
-    /// An unbound path keeps the bridge's placeholder — the path itself — so a
-    /// misspelled binding is visible on screen instead of blanking silently.
-    ///
-    /// # `<VirtualFor>` is deliberately left alone
-    ///
-    /// A `<VirtualFor>` lowers to one row *template* that the runtime clones per
-    /// realized row, so a value substituted into it would render identically in
-    /// every row — the one thing a list must not do. Per-row data comes from
-    /// `App::virtual_list`'s Rust row builder,
-    /// which is called with the row's model index; a `{binding}` inside a
-    /// `<VirtualFor>` therefore keeps its placeholder.
+    #[doc = include_str!("okui_screen.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         View::from_fragment(ViewFragment::from_nodes(self.lower(self.document.root())))
     }
 
-    /// Lowers one IR node, substituting what the data supplies. Returns a `Vec`
-    /// for the same reason the bridge does: a transparent node splices.
+    #[doc = include_str!("okui_screen.doc/lower.md")]
     fn lower(&self, node: &UiIrNode) -> Vec<ViewNode> {
         // A body `{expr}`: the IR carries the expression, and the bridge — which
         // has nothing to evaluate it with — lowers it to an anonymous element with
@@ -248,7 +135,7 @@ impl OkuiScreen {
         }
     }
 
-    /// Every child of `node`, lowered through [`lower`](Self::lower) and spliced.
+    #[doc = include_str!("okui_screen.doc/lower_children.md")]
     fn lower_children(&self, node: &UiIrNode) -> Vec<ViewNode> {
         node.children()
             .iter()
@@ -256,8 +143,7 @@ impl OkuiScreen {
             .collect()
     }
 
-    /// Replaces `view`'s bound property values and its children with the data-aware
-    /// versions. A no-op for a text node, which has neither.
+    #[doc = include_str!("okui_screen.doc/substitute.md")]
     fn substitute(&self, node: &UiIrNode, view: &mut ViewNode) {
         let ViewNode::Element {
             props, children, ..
@@ -290,7 +176,7 @@ impl OkuiScreen {
         *children = ViewFragment::from_nodes(self.lower_children(node));
     }
 
-    /// What a body `{expr}` renders this frame.
+    #[doc = include_str!("okui_screen.doc/render.md")]
     fn render(&self, expression: &UiIrExpression) -> Box<str> {
         match expression {
             UiIrExpression::Binding(path) => match self.data.get(path) {
@@ -321,18 +207,7 @@ impl std::fmt::Debug for OkuiScreen {
     }
 }
 
-/// Records every IR node whose lowering the data can change — one with a bound
-/// property or a body interpolation, and every ancestor of one — returning whether
-/// `node`'s own subtree is such a node.
-///
-/// An interpolation counts whatever its expression is (a literal `{7}` included),
-/// so a body `{…}` renders its value consistently rather than depending on whether
-/// a sibling happened to be bound.
-///
-/// A bound `key={…}` deliberately does **not** count: a key is reconciliation
-/// identity, and this route materialises a loop statically, so there is nothing
-/// per-item to key and substituting one would change node identity between frames
-/// for no gain.
+#[doc = include_str!("okui_screen.doc/mark_dynamic.md")]
 fn mark_dynamic(node: &UiIrNode, out: &mut HashSet<u64>) -> bool {
     // A `<VirtualFor>` row template is shared by every realized row, so a value
     // substituted into it would appear in all of them; stop the walk here.
@@ -355,12 +230,7 @@ fn mark_dynamic(node: &UiIrNode, out: &mut HashSet<u64>) -> bool {
     dynamic
 }
 
-/// The [`ViewValue`] a **non-text** IR literal is worth — the same mapping the
-/// bridge makes for a property, needed here because rendering goes through
-/// [`ScreenData::render`].
-///
-/// Text is handled by the caller: cloning a `Box<str>` is not possible in a `const
-/// fn`, and a literal string needs no mapping to read as itself.
+#[doc = include_str!("okui_screen.doc/view_value.md")]
 const fn view_value(value: &UiIrValue) -> ViewValue {
     match value {
         // Text is unreachable here — the caller matches it first (see the note

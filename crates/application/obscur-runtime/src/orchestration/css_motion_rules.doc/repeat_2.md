@@ -1,0 +1,1 @@
+Returns `animation-iteration-count`.

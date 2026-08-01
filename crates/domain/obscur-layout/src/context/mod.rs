@@ -1,4 +1,4 @@
-//! Context module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod layout_containment;
 pub use layout_containment::LayoutContainment;
 mod layout_context;

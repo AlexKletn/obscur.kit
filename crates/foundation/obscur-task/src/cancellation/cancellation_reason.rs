@@ -1,12 +1,12 @@
-//! Why a task was cancelled.
+#![doc = include_str!("cancellation_reason.doc/_module.md")]
 
-/// The reason a cancellation was requested (spec §3.3).
+#[doc = include_str!("cancellation_reason.doc/CancellationReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancellationReason {
-    /// The owning scope was dropped.
+    #[doc = include_str!("cancellation_reason.doc/ScopeEnded.md")]
     ScopeEnded,
-    /// The work became stale and its result would be discarded.
+    #[doc = include_str!("cancellation_reason.doc/Superseded.md")]
     Superseded,
-    /// The runtime is shutting down.
+    #[doc = include_str!("cancellation_reason.doc/Shutdown.md")]
     Shutdown,
 }

@@ -1,8 +1,4 @@
-//! **SPECIFICATION-DERIVED** font-provider and cache cases for obscur.kit §5.18
-//! ("Fonts"), §5.19 ("Caches") and §5.20 ("Persistent derived cache").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §5 with
-//! **no access to this repository's source**.
+#![doc = include_str!("spec_ch5_fonts_caches.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(feature = "render-cpu")]
 
@@ -20,10 +16,10 @@ use obscur_kit::text::font::{
 
 use support::{commands, compile, describe, el, runtime, txt, view};
 
-/// The viewport every case renders under.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/VW.md")]
 const VW: f32 = 400.0;
 
-/// A [`FontResolver`] that always answers with one face and counts its calls.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/OneFace.md")]
 struct OneFace {
     id: FontId,
     face: FontFace,
@@ -37,7 +33,7 @@ impl FontResolver for OneFace {
     }
 }
 
-/// A named face with idealized metrics.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/face.md")]
 fn face(name: &str) -> FontFace {
     FontFace::new(
         FontFamily::named(name),
@@ -47,7 +43,7 @@ fn face(name: &str) -> FontFace {
     )
 }
 
-/// Every `DrawText` run's font handle in the last frame, in paint order.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/run_fonts.md")]
 fn run_fonts(rt: &obscur_kit::runtime::UiRuntime) -> Vec<u32> {
     commands(rt)
         .iter()
@@ -58,12 +54,7 @@ fn run_fonts(rt: &obscur_kit::runtime::UiRuntime) -> Vec<u32> {
         .collect()
 }
 
-/// §5.18 "Default font provider: - system fonts on native platforms; - bundled
-/// fallback set for WASM/isolated environments; … - usable rendering out of the
-/// box."
-///
-/// The isolated case: system font enumeration returns nothing. Text must still
-/// render, from the bundled set.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/ft_01_the_default_provider_renders_in_an_isolated_environment.md")]
 #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
 #[test]
 fn ft_01_the_default_provider_renders_in_an_isolated_environment() {
@@ -108,12 +99,7 @@ fn ft_01_the_default_provider_renders_in_an_isolated_environment() {
     assert_eq!(notdefs, 0, "zero .notdef / missing glyphs");
 }
 
-/// §5.18 "The provider is replaceable." With §5.19 "- glyphs;" and
-/// "- correctness transparency;".
-///
-/// The failure this pins is a real one the suite already suffered: a font stack
-/// can be swapped out and the tests keep passing because shaped runs are served
-/// from caches keyed on text and size but **not** on the provider identity.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/ft_02_replacing_the_provider_invalidates_the_shaping_caches.md")]
 #[test]
 fn ft_02_replacing_the_provider_invalidates_the_shaping_caches() {
     let sheet = compile(".t{position:absolute;left:0;top:0;font-size:16px}");
@@ -155,11 +141,7 @@ fn ft_02_replacing_the_provider_invalidates_the_shaping_caches() {
     );
 }
 
-/// §5.19 "Requirements: … - correctness transparency;".
-///
-/// A cache keyed on too little state leaves stale paint behind. The
-/// mutate-and-restore cycle is exactly the sequence a straight-line test never
-/// performs.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/ca_01_a_mutate_and_restore_cycle_reproduces_the_original_scene.md")]
 #[test]
 fn ca_01_a_mutate_and_restore_cycle_reproduces_the_original_scene() {
     // A tree exercising text, a gradient and a rounded clip.
@@ -217,8 +199,7 @@ fn ca_01_a_mutate_and_restore_cycle_reproduces_the_original_scene() {
     }
 }
 
-/// §5.20 "Requirements: - versioned; - content-addressed where useful;
-/// - compatibility-aware; - disposable; - safe to delete."
+#[doc = include_str!("spec_ch5_fonts_caches.doc/ca_03_the_persistent_store_is_disposable_and_version_gated.md")]
 #[cfg(feature = "cache-fs")]
 #[test]
 fn ca_03_the_persistent_store_is_disposable_and_version_gated() {
@@ -288,7 +269,7 @@ fn ca_03_the_persistent_store_is_disposable_and_version_gated() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// Overwrites the bytes of every regular file under `root`.
+#[doc = include_str!("spec_ch5_fonts_caches.doc/corrupt_every_file.md")]
 #[cfg(feature = "cache-fs")]
 fn corrupt_every_file(root: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(root) else {

@@ -1,66 +1,57 @@
-//! The current value of an accessibility node (spec §7.1).
+#![doc = include_str!("semantic_value.doc/_module.md")]
 
-/// The value carried by an accessibility node (spec §7.1 value).
-///
-/// Different roles expose different value shapes: a text field carries
-/// [`Text`](Self::Text), a toggle carries a [`Bool`](Self::Bool), and a range
-/// control such as a slider or progress bar carries a bounded
-/// [`Number`](Self::Number). [`None`](Self::None) is the absence of any value.
-///
-/// [`Number`](Self::Number) keeps its `min` and `max` alongside the value so a
-/// platform adapter can report the range; [`ratio`](Self::ratio) normalises the
-/// value into `[0, 1]`.
+#[doc = include_str!("semantic_value.doc/SemanticValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SemanticValue {
-    /// The node has no value.
+    #[doc = include_str!("semantic_value.doc/None.md")]
     None,
-    /// Textual content, e.g. a text field's current string.
+    #[doc = include_str!("semantic_value.doc/Text.md")]
     Text(Box<str>),
-    /// A boolean toggle value.
+    #[doc = include_str!("semantic_value.doc/Bool.md")]
     Bool(bool),
-    /// A numeric value bounded by an inclusive `[min, max]` range.
+    #[doc = include_str!("semantic_value.doc/Number.md")]
     Number {
-        /// The current value.
+        #[doc = include_str!("semantic_value.doc/value.md")]
         value: f32,
-        /// The inclusive lower bound.
+        #[doc = include_str!("semantic_value.doc/min.md")]
         min: f32,
-        /// The inclusive upper bound.
+        #[doc = include_str!("semantic_value.doc/max.md")]
         max: f32,
     },
 }
 
 impl SemanticValue {
-    /// Creates the absent value, [`None`](Self::None).
+    #[doc = include_str!("semantic_value.doc/none.md")]
     #[must_use]
     pub const fn none() -> Self {
         Self::None
     }
 
-    /// Creates a textual value from anything convertible into a boxed string.
+    #[doc = include_str!("semantic_value.doc/text.md")]
     #[must_use]
     pub fn text(text: impl Into<Box<str>>) -> Self {
         Self::Text(text.into())
     }
 
-    /// Creates a boolean toggle value.
+    #[doc = include_str!("semantic_value.doc/bool.md")]
     #[must_use]
     pub const fn bool(value: bool) -> Self {
         Self::Bool(value)
     }
 
-    /// Creates a bounded numeric value.
+    #[doc = include_str!("semantic_value.doc/number.md")]
     #[must_use]
     pub const fn number(value: f32, min: f32, max: f32) -> Self {
         Self::Number { value, min, max }
     }
 
-    /// Returns whether this is the absent value, [`None`](Self::None).
+    #[doc = include_str!("semantic_value.doc/is_none.md")]
     #[must_use]
     pub const fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
 
-    /// Returns the textual content if this is a [`Text`](Self::Text) value.
+    #[doc = include_str!("semantic_value.doc/as_text.md")]
     #[must_use]
     pub fn as_text(&self) -> Option<&str> {
         match self {
@@ -69,7 +60,7 @@ impl SemanticValue {
         }
     }
 
-    /// Returns the numeric value if this is a [`Number`](Self::Number).
+    #[doc = include_str!("semantic_value.doc/as_number.md")]
     #[must_use]
     pub const fn as_number(&self) -> Option<f32> {
         match self {
@@ -78,11 +69,7 @@ impl SemanticValue {
         }
     }
 
-    /// Returns the [`Number`](Self::Number) value normalised into `[0, 1]`.
-    ///
-    /// The value is clamped to `[min, max]` before normalising. A degenerate
-    /// range (`min == max`) yields `0.0` rather than dividing by zero. Non-numeric
-    /// variants return `0.0`.
+    #[doc = include_str!("semantic_value.doc/ratio.md")]
     #[must_use]
     pub fn ratio(&self) -> f32 {
         match self {

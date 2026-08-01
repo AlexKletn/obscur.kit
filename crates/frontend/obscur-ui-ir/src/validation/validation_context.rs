@@ -1,18 +1,10 @@
-//! `ValidationContext`: mutable state threaded through a validation pass
-//! (spec §2.5 validation).
+#![doc = include_str!("validation_context.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
 use obscur_capability::CapabilityId;
 
-/// The mutable bookkeeping threaded through a single validation pass
-/// (spec §2.5).
-///
-/// A context tracks the two pieces of cross-node state a walk needs: the set of
-/// node ids [`record_id`](ValidationContext::record_id) has already seen (so
-/// duplicates can be detected), and the set of capability ids the host grants.
-/// When the granted set is empty the validator does not enforce capabilities —
-/// [`checks_capabilities`](ValidationContext::checks_capabilities) reports that.
+#[doc = include_str!("validation_context.doc/ValidationContext.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ValidationContext {
     seen_ids: BTreeSet<u64>,
@@ -20,14 +12,13 @@ pub struct ValidationContext {
 }
 
 impl ValidationContext {
-    /// Creates an empty context: no ids seen and no capabilities granted (so
-    /// capability checking is off).
+    #[doc = include_str!("validation_context.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Creates a context whose granted capability set is populated from `caps`.
+    #[doc = include_str!("validation_context.doc/with_capabilities.md")]
     #[must_use]
     pub fn with_capabilities(caps: impl IntoIterator<Item = CapabilityId>) -> Self {
         Self {
@@ -39,29 +30,24 @@ impl ValidationContext {
         }
     }
 
-    /// Records that node `id` was encountered.
-    ///
-    /// Returns `false` if the id was **already** present — i.e. this is a
-    /// duplicate — and `true` if it was newly inserted.
+    #[doc = include_str!("validation_context.doc/record_id.md")]
     pub fn record_id(&mut self, id: u64) -> bool {
         self.seen_ids.insert(id)
     }
 
-    /// Returns whether capability `id` is in the granted set.
+    #[doc = include_str!("validation_context.doc/has_capability.md")]
     #[must_use]
     pub fn has_capability(&self, id: &str) -> bool {
         self.available_capabilities.contains(id)
     }
 
-    /// Returns whether capability checking is active — i.e. the granted set is
-    /// non-empty.
+    #[doc = include_str!("validation_context.doc/checks_capabilities.md")]
     #[must_use]
     pub fn checks_capabilities(&self) -> bool {
         !self.available_capabilities.is_empty()
     }
 
-    /// Clears the seen-id bookkeeping so the context can drive a fresh walk.
-    /// The granted capability set is preserved.
+    #[doc = include_str!("validation_context.doc/reset.md")]
     pub fn reset(&mut self) {
         self.seen_ids.clear();
     }

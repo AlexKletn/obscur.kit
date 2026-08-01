@@ -1,69 +1,45 @@
-//! CSS selector specificity: the ordered `(a, b, c)` triple.
+#![doc = include_str!("selector_specificity.doc/_module.md")]
 
-/// The standard CSS specificity triple used to resolve cascade conflicts.
-///
-/// A selector's specificity is the ordered triple `(a, b, c)` where:
-///
-/// - `a` counts ID selectors (e.g. `#main`),
-/// - `b` counts class selectors, attribute selectors, and pseudo-classes
-///   (e.g. `.item`, `[type="text"]`, `:hover`),
-/// - `c` counts type selectors and pseudo-elements (e.g. `div`, `::before`).
-///
-/// Specificity is compared **lexicographically**: `a` dominates, then `b`,
-/// then `c`. This type derives [`Ord`] so that ordering is exactly CSS
-/// specificity ordering — a single ID selector `(1, 0, 0)` outranks any number
-/// of class selectors `(0, N, 0)`. When two declarations have equal
-/// specificity, the cascade falls back to source order (handled elsewhere).
-///
-/// The concrete selector syntax and the matching engine live in `obscur-css`;
-/// this crate only models the typed specificity value the cascade consumes.
+#[doc = include_str!("selector_specificity.doc/SelectorSpecificity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SelectorSpecificity {
-    /// Number of ID selectors (most significant component).
+    #[doc = include_str!("selector_specificity.doc/a.md")]
     a: u16,
-    /// Number of class / attribute / pseudo-class selectors.
+    #[doc = include_str!("selector_specificity.doc/b.md")]
     b: u16,
-    /// Number of type / pseudo-element selectors (least significant component).
+    #[doc = include_str!("selector_specificity.doc/c.md")]
     c: u16,
 }
 
 impl SelectorSpecificity {
-    /// The zero specificity `(0, 0, 0)`, the identity for [`add`](Self::add).
-    ///
-    /// Useful as the starting accumulator when summing the components of a
-    /// compound or complex selector.
+    #[doc = include_str!("selector_specificity.doc/ZERO.md")]
     pub const ZERO: Self = Self { a: 0, b: 0, c: 0 };
 
-    /// Creates a specificity from its three components `(a, b, c)`.
+    #[doc = include_str!("selector_specificity.doc/new.md")]
     #[must_use]
     pub const fn new(a: u16, b: u16, c: u16) -> Self {
         Self { a, b, c }
     }
 
-    /// Returns the `a` component: the number of ID selectors.
+    #[doc = include_str!("selector_specificity.doc/a_2.md")]
     #[must_use]
     pub const fn a(self) -> u16 {
         self.a
     }
 
-    /// Returns the `b` component: class / attribute / pseudo-class count.
+    #[doc = include_str!("selector_specificity.doc/b_2.md")]
     #[must_use]
     pub const fn b(self) -> u16 {
         self.b
     }
 
-    /// Returns the `c` component: type / pseudo-element count.
+    #[doc = include_str!("selector_specificity.doc/c_2.md")]
     #[must_use]
     pub const fn c(self) -> u16 {
         self.c
     }
 
-    /// Combines two specificities component-wise, saturating on overflow.
-    ///
-    /// Used to accumulate the specificity of a compound or complex selector
-    /// from the specificities of its parts. Saturation means a pathologically
-    /// long selector clamps at [`u16::MAX`] per component rather than wrapping,
-    /// preserving the "more is never less" ordering guarantee.
+    #[doc = include_str!("selector_specificity.doc/add.md")]
     #[must_use]
     pub const fn add(self, other: Self) -> Self {
         Self {

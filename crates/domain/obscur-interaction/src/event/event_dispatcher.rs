@@ -1,61 +1,38 @@
-//! Computes the ordered capture → target → bubble propagation path (spec §4.7).
+#![doc = include_str!("event_dispatcher.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use super::{DispatchResult, EventPhase, UiEvent};
 
-/// One node visited in one phase along an event's propagation path (spec §4.7).
-///
-/// A [`DispatchStep`] pairs the [`node`](Self::node) reached with the
-/// [`phase`](Self::phase) it is reached in, so an ordered list of steps fully
-/// describes how an event threads the logical tree.
+#[doc = include_str!("event_dispatcher.doc/DispatchStep.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchStep {
-    /// The node visited at this step.
+    #[doc = include_str!("event_dispatcher.doc/node.md")]
     pub node: NodeId,
-    /// The propagation phase this node is visited in.
+    #[doc = include_str!("event_dispatcher.doc/phase.md")]
     pub phase: EventPhase,
 }
 
 impl DispatchStep {
-    /// Creates a step visiting `node` during `phase`.
+    #[doc = include_str!("event_dispatcher.doc/new.md")]
     #[must_use]
     pub const fn new(node: NodeId, phase: EventPhase) -> Self {
         Self { node, phase }
     }
 }
 
-/// The stateless helper that maps a hit chain to a logical propagation path
-/// (spec §4.7 hit testing → event routing).
-///
-/// Given the ancestor chain from the root down to a hit-test target,
-/// [`EventDispatcher`] produces the ordered capture → target → bubble sequence an
-/// event travels, and can [`dispatch`](Self::dispatch) an event along it. The
-/// dispatcher carries no state and reads no clock: it is a pure, deterministic
-/// function of its inputs. Running the handlers attached to each node is the
-/// runtime's concern, not this crate's — here [`dispatch`](Self::dispatch) only
-/// computes and validates the path and honors any pre-set propagation control.
+#[doc = include_str!("event_dispatcher.doc/EventDispatcher.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EventDispatcher;
 
 impl EventDispatcher {
-    /// Creates a dispatcher.
+    #[doc = include_str!("event_dispatcher.doc/new_2.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Computes the ordered propagation path from a root → target ancestor chain.
-    ///
-    /// `ancestors_root_to_target` is the path from the ROOT down to and
-    /// INCLUDING the target as its last element. The result is: a
-    /// [`Capture`](EventPhase::Capture) step for each ancestor above the target
-    /// (root → …), then a single [`Target`](EventPhase::Target) step for the
-    /// target, then a [`Bubble`](EventPhase::Bubble) step for each of those
-    /// ancestors in REVERSE (… → root).
-    ///
-    /// An empty input yields an empty path; a single element (the target alone)
-    /// yields just `[Target]`.
+    #[doc = include_str!("event_dispatcher.doc/path.md")]
     #[must_use]
     pub fn path(&self, ancestors_root_to_target: &[NodeId]) -> Vec<DispatchStep> {
         let mut steps = Vec::new();
@@ -72,19 +49,7 @@ impl EventDispatcher {
         steps
     }
 
-    /// Walks [`path`](Self::path), advancing `event` through each step.
-    ///
-    /// This is a pure simulation of routing *without* handlers — dispatching
-    /// handlers is the runtime's job. For each step, if the event's propagation
-    /// is already stopped, the walk halts: `stopped_at` records the previously
-    /// visited node, or, if the event was stopped before any step ran, the node
-    /// of the halting step. Otherwise the event's [`phase`](UiEvent::phase) is
-    /// advanced to the step's phase. Because there are no handlers, nothing is
-    /// consumed, so [`handled`](DispatchResult::handled) stays `false` and the
-    /// walk only stops when the caller pre-set propagation control.
-    ///
-    /// The returned [`DispatchResult`] carries the event's final
-    /// default-prevented state.
+    #[doc = include_str!("event_dispatcher.doc/dispatch.md")]
     #[must_use]
     pub fn dispatch(
         &self,

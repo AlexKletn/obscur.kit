@@ -1,28 +1,17 @@
-//! [`TransactionError`]: typed validation failure for UI transactions (spec §3.2).
+#![doc = include_str!("transaction_error.doc/_module.md")]
 
 use core::error::Error;
 use core::fmt;
 
 use obscur_identity::NodeId;
 
-/// A typed error produced when a [`UiTransaction`] fails validation.
-///
-/// Per spec §3.2, normal UI commits are *validated before application*: a batch
-/// that is not well-formed is rejected and nothing is applied. These errors are
-/// returned (never panicked) so the caller can decide how to recover.
-///
-/// This enum is `#[non_exhaustive]`: later phases may add validation rules and
-/// corresponding variants without a breaking change.
-///
-/// [`UiTransaction`]: crate::transaction::UiTransaction
+#[doc = include_str!("transaction_error.doc/TransactionError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TransactionError {
-    /// The batch contains more than one root replacement, which is ambiguous:
-    /// a single frame can reconcile at most one new root.
+    #[doc = include_str!("transaction_error.doc/ConflictingRootReplacement.md")]
     ConflictingRootReplacement,
-    /// The same node is targeted by two conflicting operations of the same kind
-    /// within one batch. Carries the offending node.
+    #[doc = include_str!("transaction_error.doc/DuplicateNodeOperation.md")]
     DuplicateNodeOperation(NodeId),
 }
 

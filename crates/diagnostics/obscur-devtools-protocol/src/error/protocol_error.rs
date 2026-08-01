@@ -1,43 +1,31 @@
-//! `ProtocolError`: typed protocol-level failures (spec §7.7).
+#![doc = include_str!("protocol_error.doc/_module.md")]
 
 use core::fmt;
 
 use crate::message::PermissionScope;
 
-/// A protocol-level error surfaced to a DevTools client.
-///
-/// These cover the failure modes the endpoint-security rules call out (§7.7):
-/// unsupported versions, missing capability scope, exceeded limits, malformed or
-/// unknown commands, and control being disabled entirely in production builds.
+#[doc = include_str!("protocol_error.doc/ProtocolError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtocolError {
-    /// No mutually supported protocol version could be negotiated.
+    #[doc = include_str!("protocol_error.doc/VersionUnsupported.md")]
     VersionUnsupported,
-    /// The endpoint lacks the scope required for the attempted operation.
+    #[doc = include_str!("protocol_error.doc/Unauthorized.md")]
     Unauthorized {
-        /// The scope that would have been required.
+        #[doc = include_str!("protocol_error.doc/required.md")]
         required: PermissionScope,
     },
-    /// A message, subscription, or rate limit was exceeded.
+    #[doc = include_str!("protocol_error.doc/LimitExceeded.md")]
     LimitExceeded {
-        /// The limit value that was exceeded.
+        #[doc = include_str!("protocol_error.doc/limit.md")]
         limit: usize,
     },
-    /// The command referenced an unknown/unsupported operation.
+    #[doc = include_str!("protocol_error.doc/UnknownCommand.md")]
     UnknownCommand,
-    /// A message could not be decoded into a well-formed command.
+    #[doc = include_str!("protocol_error.doc/MalformedMessage.md")]
     MalformedMessage,
-    /// Control operations are disabled in this (production) build (spec §7.7).
+    #[doc = include_str!("protocol_error.doc/ControlDisabled.md")]
     ControlDisabled,
-    /// The command was authorized, but this host has nothing that can receive an
-    /// injected event, so it will not pretend to have delivered one (spec §7.6).
-    ///
-    /// Distinct from [`Unauthorized`](Self::Unauthorized) on purpose: the client
-    /// holds the `Inject` scope and the endpoint says so. What is missing is a
-    /// runtime on the other side — a host serving inspect-only state (the
-    /// `obscur-devtools serve` demo host has no runtime at all) has nowhere to
-    /// put a synthetic click. Telling the client "unauthorized" would send it
-    /// hunting for a token it already has.
+    #[doc = include_str!("protocol_error.doc/InjectionUnavailable.md")]
     InjectionUnavailable,
 }
 

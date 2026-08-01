@@ -1,26 +1,21 @@
-//! A named performance span.
+#![doc = include_str!("performance_span.doc/_module.md")]
 
 use crate::diagnostic::DiagnosticSubsystem;
 use crate::performance::SpanAttribution;
 
-/// A named span describing a measured region of work, attributed to a
-/// subsystem (spec §7.9).
+#[doc = include_str!("performance_span.doc/PerformanceSpan.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PerformanceSpan {
-    /// Stable span name.
+    #[doc = include_str!("performance_span.doc/name.md")]
     pub name: &'static str,
-    /// Subsystem the span is attributed to.
+    #[doc = include_str!("performance_span.doc/subsystem.md")]
     pub subsystem: DiagnosticSubsystem,
-    /// What else the span is about — frame, window, node, resource (spec §7.9).
-    ///
-    /// Empty by default: an emitter states only what it knows. A span that named
-    /// its subsystem and nothing else was untraceable — you could see that layout
-    /// ran, but not which frame's layout.
+    #[doc = include_str!("performance_span.doc/attribution.md")]
     pub attribution: SpanAttribution,
 }
 
 impl PerformanceSpan {
-    /// Creates a performance span.
+    #[doc = include_str!("performance_span.doc/new.md")]
     #[must_use]
     pub const fn new(name: &'static str, subsystem: DiagnosticSubsystem) -> Self {
         Self {
@@ -30,7 +25,7 @@ impl PerformanceSpan {
         }
     }
 
-    /// Returns this span attributed to `attribution` (fluent).
+    #[doc = include_str!("performance_span.doc/with_attribution.md")]
     #[must_use]
     pub const fn with_attribution(mut self, attribution: SpanAttribution) -> Self {
         self.attribution = attribution;

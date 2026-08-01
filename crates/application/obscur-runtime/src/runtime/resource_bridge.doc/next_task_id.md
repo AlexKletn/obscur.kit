@@ -1,0 +1,1 @@
+Mints the next [`TaskId`].

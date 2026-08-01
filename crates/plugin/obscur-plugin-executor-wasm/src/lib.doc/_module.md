@@ -1,0 +1,1 @@
+Wasmtime `PluginExecutor` adapter.

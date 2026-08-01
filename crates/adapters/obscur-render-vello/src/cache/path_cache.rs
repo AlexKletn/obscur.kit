@@ -1,28 +1,17 @@
-//! An unbounded map of converted Bézier paths. See the module docs: this is
-//! not a §5.19 cache and has no callers.
+#![doc = include_str!("path_cache.doc/_module.md")]
 
 use std::collections::HashMap;
 
 use vello::kurbo::BezPath;
 
-/// An in-memory map of converted [`BezPath`]s keyed by a content hash.
-///
-/// Path conversion (obscur-scene → kurbo) is pure but not free; a scene that
-/// re-draws the same geometry every frame would otherwise re-run the conversion
-/// each time. This cache stores the converted [`BezPath`] under a caller-computed
-/// `u64` content hash so a repeat draw is a hash-map lookup. It holds no GPU
-/// resources and is fully testable without a device.
-///
-/// The key is opaque: callers are responsible for hashing the source path's
-/// geometry into a stable `u64`. Two different paths that collide on a hash would
-/// alias — callers must use a hash wide enough to make that negligible.
+#[doc = include_str!("path_cache.doc/PathCache.md")]
 #[derive(Debug, Default, Clone)]
 pub struct PathCache {
     entries: HashMap<u64, BezPath>,
 }
 
 impl PathCache {
-    /// Creates an empty path cache.
+    #[doc = include_str!("path_cache.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -30,40 +19,40 @@ impl PathCache {
         }
     }
 
-    /// Inserts a converted `path` under `key`, returning any previous entry.
+    #[doc = include_str!("path_cache.doc/insert.md")]
     pub fn insert(&mut self, key: u64, path: BezPath) -> Option<BezPath> {
         self.entries.insert(key, path)
     }
 
-    /// The cached path for `key`, if present.
+    #[doc = include_str!("path_cache.doc/get.md")]
     #[must_use]
     pub fn get(&self, key: u64) -> Option<&BezPath> {
         self.entries.get(&key)
     }
 
-    /// Whether a path is cached under `key`.
+    #[doc = include_str!("path_cache.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, key: u64) -> bool {
         self.entries.contains_key(&key)
     }
 
-    /// Removes the entry for `key`, returning `true` if one was present.
+    #[doc = include_str!("path_cache.doc/remove.md")]
     pub fn remove(&mut self, key: u64) -> bool {
         self.entries.remove(&key).is_some()
     }
 
-    /// Clears every cached path.
+    #[doc = include_str!("path_cache.doc/clear.md")]
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    /// The number of cached paths.
+    #[doc = include_str!("path_cache.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Whether the cache is empty.
+    #[doc = include_str!("path_cache.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

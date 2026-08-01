@@ -1,44 +1,28 @@
-//! A monotonic generation stamping a scene's content.
+#![doc = include_str!("scene_generation.doc/_module.md")]
 
 use obscur_identity::VersionStamp;
 
-/// A monotonic generation counter stamping the content of a
-/// [`Scene`](crate::scene::Scene) (spec §1.6).
-///
-/// Each content change advances the generation via [`SceneGeneration::next`],
-/// so a published [`SceneSnapshot`](crate::scene::SceneSnapshot) can be checked
-/// for staleness against the live scene: a **newer** generation (a greater
-/// value) means the scene changed after the snapshot was taken, and the
-/// snapshot may be discarded as stale.
-///
-/// This is a newtype over [`VersionStamp`]; ordering follows the underlying
-/// stamp, so `a < b` means generation `a` is older than `b`.
+#[doc = include_str!("scene_generation.doc/SceneGeneration.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct SceneGeneration(VersionStamp);
 
 impl SceneGeneration {
-    /// The first generation of any scene, with raw value `0`.
-    ///
-    /// This is also the [`Default`] value.
+    #[doc = include_str!("scene_generation.doc/FIRST.md")]
     pub const FIRST: Self = Self(VersionStamp::from_raw(0));
 
-    /// Wraps a raw generation value.
+    #[doc = include_str!("scene_generation.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(VersionStamp::from_raw(raw))
     }
 
-    /// Returns the raw generation value.
+    #[doc = include_str!("scene_generation.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0.raw()
     }
 
-    /// Returns the next generation, advancing past this one.
-    ///
-    /// The returned generation compares strictly greater than `self` (barring
-    /// the extreme wraparound of the underlying [`VersionStamp::bump`]), marking
-    /// that the scene's content changed.
+    #[doc = include_str!("scene_generation.doc/next.md")]
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0.bump())

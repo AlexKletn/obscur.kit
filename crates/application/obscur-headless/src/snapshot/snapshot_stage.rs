@@ -1,69 +1,28 @@
-//! Identifies which pipeline stage a snapshot captures: [`SnapshotStage`].
+#![doc = include_str!("snapshot_stage.doc/_module.md")]
 
-/// The pipeline stage a snapshot captures (spec §7.4).
-///
-/// Headless mode can output every stage of the frame pipeline for inspection
-/// and golden testing (spec §7.4). §7.4 enumerates eight stages, and this enum
-/// names all of them so a snapshot, a diff, or a diagnostic can refer to a stage
-/// without string dispatch:
-///
-/// 1. the reconciled retained tree;
-/// 2. the computed styles;
-/// 3. the layout boxes;
-/// 4. the composed scene;
-/// 5. the paint-command stream;
-/// 6. the accessibility (semantic) tree;
-/// 7. the render graph;
-/// 8. the rendered image.
-///
-/// # Ordering
-///
-/// The variants are declared in **pipeline order** — the exact order §7.4 lists
-/// them — and the derived [`Ord`]/[`PartialOrd`] follow that declaration order.
-/// Comparing two stages therefore tells you which one runs earlier in the frame.
-///
-/// # Backend dependence
-///
-/// The first seven stages are backend-independent and are captured
-/// deterministically without a GPU (see
-/// [`PipelineSnapshot`](super::PipelineSnapshot)). Only [`Image`](Self::Image) is
-/// backend-dependent: a raster is produced by a concrete renderer (e.g. the
-/// software `obscur-render-cpu` backend), so the headless pipeline models it as
-/// an optional stage carried by
-/// [`ImageSnapshot`](super::ImageSnapshot) rather than deriving it in
-/// [`capture`](super::PipelineSnapshot::capture).
+#[doc = include_str!("snapshot_stage.doc/SnapshotStage.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SnapshotStage {
-    /// The reconciled retained tree — the structural result of
-    /// `View → reconcile` (spec §5.13).
+    #[doc = include_str!("snapshot_stage.doc/RetainedTree.md")]
     RetainedTree,
-    /// The per-node computed styles resolved from the tree (spec §4.14).
+    #[doc = include_str!("snapshot_stage.doc/ComputedStyle.md")]
     ComputedStyle,
-    /// The per-node absolute layout boxes arranged under the viewport
-    /// (spec §4.2).
+    #[doc = include_str!("snapshot_stage.doc/Layout.md")]
     Layout,
-    /// The composed, paint-ordered scene display list (spec §5.1).
+    #[doc = include_str!("snapshot_stage.doc/Scene.md")]
     Scene,
-    /// The flat paint-command stream a rasterizer consumes, in paint order
-    /// (spec §5.1, §7.4).
+    #[doc = include_str!("snapshot_stage.doc/Paint.md")]
     Paint,
-    /// The semantic accessibility tree linked to the retained tree
-    /// (spec §7.1, §7.4).
+    #[doc = include_str!("snapshot_stage.doc/Accessibility.md")]
     Accessibility,
-    /// The backend-neutral render-graph description: the ordered render passes
-    /// and their target (spec §7.4).
+    #[doc = include_str!("snapshot_stage.doc/RenderGraph.md")]
     RenderGraph,
-    /// The rendered raster image — the one backend-dependent stage, produced by
-    /// a concrete renderer (spec §7.4).
+    #[doc = include_str!("snapshot_stage.doc/Image.md")]
     Image,
 }
 
 impl SnapshotStage {
-    /// Returns a stable, human-readable name for this stage, suitable for
-    /// diagnostics and golden-file headers.
-    ///
-    /// The strings are part of the type's stable contract: they do not change
-    /// with build configuration and are safe to embed in reproducible output.
+    #[doc = include_str!("snapshot_stage.doc/name.md")]
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -78,12 +37,7 @@ impl SnapshotStage {
         }
     }
 
-    /// Returns whether this stage is backend-dependent, i.e. it can only be
-    /// produced by a concrete renderer (spec §7.4).
-    ///
-    /// Every stage except [`Image`](Self::Image) is derived deterministically
-    /// from the retained tree with no GPU; the rendered image requires a
-    /// rasterizing backend.
+    #[doc = include_str!("snapshot_stage.doc/is_backend_dependent.md")]
     #[must_use]
     pub const fn is_backend_dependent(self) -> bool {
         matches!(self, Self::Image)

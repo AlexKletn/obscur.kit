@@ -1,47 +1,22 @@
-//! One layer of a multi-layer `background-image` list: [`BackgroundLayer`].
-//!
-//! CSS `background-image` accepts a **comma-separated list** of image layers,
-//! painted back-to-front (the first-listed layer is the topmost, the last-listed
-//! the bottommost). Each layer is one gradient (`linear-gradient(...)`,
-//! `radial-gradient(...)`, `conic-gradient(...)`, including the `repeating-` forms)
-//! or a `url(...)` reference.
-//!
-//! The single-layer case keeps the flat
-//! [`PropertyValue::LinearGradient`](crate::property::PropertyValue::LinearGradient)
-//! / [`RadialGradient`](crate::property::PropertyValue::RadialGradient) /
-//! [`ConicGradient`](crate::property::PropertyValue::ConicGradient) /
-//! [`BackgroundImageUrl`](crate::property::PropertyValue::BackgroundImageUrl)
-//! variants (byte-identical to before this type existed); a list of two or more
-//! layers is carried as
-//! [`PropertyValue::BackgroundLayers`](crate::property::PropertyValue::BackgroundLayers)
-//! holding an ordered slice of these layers, in author (top→bottom) order.
+#![doc = include_str!("background_layer.doc/_module.md")]
 
 use crate::property::{ConicGradient, LinearGradient, PropertyValue, RadialGradient};
 
-/// A single `background-image` layer: a gradient or a `url(...)` reference.
-///
-/// Layers are stored in CSS author order (first = top). The scene coordinator
-/// paints them back-to-front (last first) so the first-listed layer ends up on
-/// top (spec §5.2).
+#[doc = include_str!("background_layer.doc/BackgroundLayer.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackgroundLayer {
-    /// A `linear-gradient(...)` / `repeating-linear-gradient(...)` layer.
+    #[doc = include_str!("background_layer.doc/Linear.md")]
     Linear(LinearGradient),
-    /// A `radial-gradient(...)` layer.
+    #[doc = include_str!("background_layer.doc/Radial.md")]
     Radial(RadialGradient),
-    /// A `conic-gradient(...)` layer.
+    #[doc = include_str!("background_layer.doc/Conic.md")]
     Conic(ConicGradient),
-    /// A `url(...)` image layer, carrying the **raw** authored URL/path string
-    /// (unresolved), exactly as the single
-    /// [`PropertyValue::BackgroundImageUrl`](crate::property::PropertyValue::BackgroundImageUrl)
-    /// variant does.
+    #[doc = include_str!("background_layer.doc/Url.md")]
     Url(Box<str>),
 }
 
 impl BackgroundLayer {
-    /// Whether this layer carries a `ch` term.
-    ///
-    /// Mirrors `absolutize_layer`: only the radial and conic forms carry lengths.
+    #[doc = include_str!("background_layer.doc/uses_ch.md")]
     #[must_use]
     pub const fn uses_ch(&self) -> bool {
         match self {
@@ -51,13 +26,7 @@ impl BackgroundLayer {
         }
     }
 
-    /// Collapses a single layer back to the flat one-value
-    /// [`PropertyValue`] it corresponds to.
-    ///
-    /// This is how a one-element layer list stays **byte-identical** to the
-    /// historical single-value `background-image` result: the CSS lowering keeps
-    /// the flat variant for one layer and only emits
-    /// [`PropertyValue::BackgroundLayers`] for two or more.
+    #[doc = include_str!("background_layer.doc/into_property_value.md")]
     #[must_use]
     pub fn into_property_value(self) -> PropertyValue {
         match self {

@@ -1,30 +1,16 @@
-//! Monotonic version of a resource's content (spec §5.15 versioning).
+#![doc = include_str!("resource_version.doc/_module.md")]
 
 use obscur_identity::VersionStamp;
 
-/// The monotonically increasing version of a resource's content (spec §5.15).
-///
-/// Every time a resource is (re)loaded, its version advances. Versioning enables
-/// hot reload and **stale-job rejection**: a load job carries the version it was
-/// issued for, and when it completes the [`crate::hub`] compares that version
-/// against the resource's current version. A job whose version is older than the
-/// resource's current version is rejected as stale, so a superseded reload can
-/// never overwrite a newer result.
-///
-/// This composes [`VersionStamp`] rather than reimplementing it. Version `0` is
-/// reserved to mean *unversioned*; the first real version is
-/// [`ResourceVersion::initial`], which starts at `1`.
+#[doc = include_str!("resource_version.doc/ResourceVersion.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ResourceVersion {
-    /// The underlying version stamp.
+    #[doc = include_str!("resource_version.doc/stamp.md")]
     pub stamp: VersionStamp,
 }
 
 impl ResourceVersion {
-    /// The initial version for a freshly tracked resource: raw `1`.
-    ///
-    /// Raw `0` is reserved to denote an *unversioned* stamp, so real content
-    /// versions begin at `1`.
+    #[doc = include_str!("resource_version.doc/initial.md")]
     #[must_use]
     pub const fn initial() -> Self {
         Self {
@@ -32,8 +18,7 @@ impl ResourceVersion {
         }
     }
 
-    /// Returns the next version, advancing the content version by one (spec
-    /// §5.15). Used when a resource is reloaded.
+    #[doc = include_str!("resource_version.doc/next.md")]
     #[must_use]
     pub const fn next(self) -> Self {
         Self {
@@ -41,14 +26,13 @@ impl ResourceVersion {
         }
     }
 
-    /// Returns the underlying [`VersionStamp`].
+    #[doc = include_str!("resource_version.doc/stamp_2.md")]
     #[must_use]
     pub const fn stamp(self) -> VersionStamp {
         self.stamp
     }
 
-    /// Returns whether this version is strictly newer than `other` (spec §5.15
-    /// stale-job rejection: a job older than the current version is rejected).
+    #[doc = include_str!("resource_version.doc/is_newer_than.md")]
     #[must_use]
     pub fn is_newer_than(self, other: Self) -> bool {
         self.stamp > other.stamp
@@ -56,7 +40,7 @@ impl ResourceVersion {
 }
 
 impl Default for ResourceVersion {
-    /// The default version is [`ResourceVersion::initial`].
+    #[doc = include_str!("resource_version.doc/default.md")]
     fn default() -> Self {
         Self::initial()
     }

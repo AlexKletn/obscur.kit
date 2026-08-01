@@ -1,16 +1,4 @@
-//! End-to-end verification that **authored `background-image: url(...)` CSS**
-//! reaches paint through the *real* live pipeline: a real PNG on disk is loaded by
-//! a sandbox-rooted `FsResourceLoader`, decoded by the `image`-crate `ImageDecoder`,
-//! cached as a `SceneImage`, and painted as a `DrawImage` over the element's box
-//! (spec §5.15 load, §5.16 decode, §5.2 paint) — closing audit finding V6 for
-//! images ("loaded bytes never become a usable image").
-//!
-//! The test authors CSS text, compiles it through the real `obscur-css` frontend,
-//! renders one frame on a [`UiRuntime`] wired with the facade's real filesystem
-//! loader + image decoder (via [`KitBootstrap::install_image_resources`]), and
-//! asserts both that the published [`DisplayList`] carries a
-//! [`PaintCommand::DrawImage`] and that the CPU (tiny-skia) backend paints the
-//! image's pixels inside the element box (not the transparent background).
+#![doc = include_str!("image_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(
     feature = "resource-fs",
@@ -36,23 +24,20 @@ use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under, so geometry is deterministic.
+#[doc = include_str!("image_css.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 64.0;
 
-/// A real 2×2 opaque-red PNG (RGB, generated with `zlib`/`crc32`), embedded so the
-/// test needs no image-encoding dependency: the fs loader reads these exact bytes
-/// off disk and the `image`-crate decoder turns them into RGBA8.
+#[doc = include_str!("image_css.doc/RED_2X2_PNG.md")]
 const RED_2X2_PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
     0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 218, 99, 248, 207, 192, 0, 68, 12,
     16, 10, 0, 31, 238, 3, 253, 99, 94, 187, 91, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
 
-/// Process-unique counter so concurrent tests never collide on a temp name.
+#[doc = include_str!("image_css.doc/COUNTER.md")]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Creates a fresh temp directory holding `logo.png` (the embedded red PNG), and
-/// returns the directory path (the loader's sandbox root).
+#[doc = include_str!("image_css.doc/temp_asset_dir.md")]
 fn temp_asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-image-css-{}-{n}", std::process::id()));
@@ -61,14 +46,14 @@ fn temp_asset_dir() -> PathBuf {
     dir
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("image_css.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A single element classed `.img`, the image-background target.
+#[doc = include_str!("image_css.doc/img_view.md")]
 fn img_view() -> View {
     let node = ViewNode::element(ComponentId::from_raw(40))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("img".into())));

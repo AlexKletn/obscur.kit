@@ -1,4 +1,4 @@
-//! Transaction module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod staged_ref;
 pub use staged_ref::StagedRef;
 mod tree_change;

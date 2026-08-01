@@ -1,92 +1,29 @@
-//! 2D transform interpolation via matrix decomposition (CSS Transforms Level 1
-//! §14).
-//!
-//! `transform`s are authored as a `<transform-function>+` list but reach this
-//! crate already lowered into a single 2D affine `[a, b, c, d, e, f]` (the six
-//! coefficients of `matrix(a, b, c, d, e, f)`). Because the primitive list is
-//! not retained, the per-function "matching transform lists" fast path of
-//! [CSS Transforms §14.4] is unavailable, so this module implements the general
-//! **matrix** fallback: interpolate two opaque affines by
-//! **decompose → interpolate → recompose**.
-//!
-//! * [`decompose`] implements [§14.5.1 "Decomposing a 2D matrix"][decomp] (the
-//!   Graphics Gems `unmatrix` of Spencer W. Thomas): peel `translate`, `scale`,
-//!   the XY `skew` (shear) and the rotation `angle` off the affine.
-//! * [`interpolate`] blends two decompositions per [§14.4]: `translate`,
-//!   `scale` and `skew` lerp linearly while `angle` takes the **shortest arc**
-//!   (never the long way around).
-//! * [`recompose`] rebuilds an affine in the spec order
-//!   **translate · rotate · skew · scale**, the exact inverse of [`decompose`]
-//!   so the pair round-trips within epsilon.
-//!
-//! Only the **2D** path is implemented: the engine's `transform` is a 2D
-//! `[f32; 6]` with no 4×4 matrix type, so the 3D `unmatrix` + quaternion Slerp
-//! of [§14.5.2] is out of scope (a follow-up gated on a 4×4/quaternion type).
-//!
-//! [CSS Transforms §14.4]: https://www.w3.org/TR/css-transforms-1/#interpolation-of-transforms
-//! [§14.4]: https://www.w3.org/TR/css-transforms-1/#interpolation-of-transforms
-//! [decomp]: https://www.w3.org/TR/css-transforms-1/#decomposing-a-2d-matrix
-//! [§14.5.1]: https://www.w3.org/TR/css-transforms-1/#decomposing-a-2d-matrix
-//! [§14.5.2]: https://www.w3.org/TR/css-transforms-1/#decomposing-a-3d-matrix
+#![doc = include_str!("transform_interp.doc/_module.md")]
 
 use core::f32::consts::PI;
 
 use super::lerp_f32;
 
-/// Below this magnitude a scale factor is treated as degenerate (a collapsed
-/// axis), so normalization substitutes a safe unit basis instead of dividing by
-/// ~zero. Kept generous relative to `f32::EPSILON` so ordinary sub-pixel scales
-/// still decompose exactly.
+#[doc = include_str!("transform_interp.doc/DEGENERATE_SCALE.md")]
 const DEGENERATE_SCALE: f32 = 1e-6;
 
-/// A 2D affine matrix `[a, b, c, d, e, f]` mapping `(x, y)` to
-/// `(a·x + c·y + e, b·x + d·y + f)` — the `matrix(a, b, c, d, e, f)` layout the
-/// style/geometry crates use. Column 0 is `(a, b)`, column 1 is `(c, d)`, and
-/// `(e, f)` is the translation.
+#[doc = include_str!("transform_interp.doc/Matrix2D.md")]
 pub type Matrix2D = [f32; 6];
 
-/// A 2D affine decomposed into its animatable components (CSS Transforms
-/// §14.5.1).
-///
-/// This is the intermediate representation transforms are interpolated through:
-/// linear factors (`translate`, `scale`, `skew`) that lerp directly and a
-/// rotation `angle` that must be blended along the shortest arc. Recomposing in
-/// the order **translate · rotate · skew · scale** ([`recompose`]) inverts
-/// [`decompose`] exactly, so `decompose(recompose(d)) ≈ d` and
-/// `recompose(decompose(m)) ≈ m` round-trip within epsilon.
+#[doc = include_str!("transform_interp.doc/Decomposed2D.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Decomposed2D {
-    /// The translation `(tx, ty)` (`matrix` coefficients `e`, `f`).
+    #[doc = include_str!("transform_interp.doc/translate.md")]
     pub translate: (f32, f32),
-    /// The scale `(sx, sy)`. `sx` carries the reflection: it is negated when the
-    /// affine's determinant is negative (a flip).
+    #[doc = include_str!("transform_interp.doc/scale.md")]
     pub scale: (f32, f32),
-    /// The normalized XY shear term (the residual of making column 1 orthogonal
-    /// to column 0, divided by `sy`). Used directly as the shear coefficient by
-    /// [`recompose`] so the pair round-trips.
+    #[doc = include_str!("transform_interp.doc/skew.md")]
     pub skew: f32,
-    /// The rotation angle in radians (`atan2` of the normalized first column).
+    #[doc = include_str!("transform_interp.doc/angle.md")]
     pub angle: f32,
 }
 
-/// Decomposes a 2D affine into translation, scale, shear and rotation
-/// (CSS Transforms §14.5.1 "Decomposing a 2D matrix"; Graphics Gems `unmatrix`).
-///
-/// Given `[a, b, c, d, e, f]`:
-/// 1. `translate = (e, f)`.
-/// 2. `scaleX = hypot(a, b)`; normalize column 0 `(a, b) /= scaleX`.
-/// 3. `skew = a·c + b·d` (XY shear); make column 1 orthogonal to column 0:
-///    `c -= a·skew; d -= b·skew`.
-/// 4. `scaleY = hypot(c, d)`; normalize column 1 `(c, d) /= scaleY`;
-///    `skew /= scaleY`.
-/// 5. If the (normalized) determinant `a·d - b·c < 0` the affine includes a
-///    reflection: negate `scaleX` and column 0 `(a, b)` so the remaining basis
-///    is a pure rotation.
-/// 6. `angle = atan2(b, a)`.
-///
-/// Degenerate (collapsed) axes — `scaleX` or `scaleY` at or below
-/// [`DEGENERATE_SCALE`] — are guarded: normalization substitutes a unit basis
-/// rather than dividing by ~zero, keeping the result finite.
+#[doc = include_str!("transform_interp.doc/decompose.md")]
 // `a, b, c, d, e, f` are the canonical CSS `matrix()` coefficient names.
 #[allow(clippy::many_single_char_names)]
 #[must_use]
@@ -141,17 +78,7 @@ pub fn decompose(matrix: Matrix2D) -> Decomposed2D {
     }
 }
 
-/// Interpolates two 2D decompositions at progress `t` (CSS Transforms §14.4).
-///
-/// `translate`, `scale` and `skew` lerp component-wise. The rotation `angle`
-/// takes the **shortest arc**: if the endpoints differ by more than `π` the
-/// smaller is shifted by `+2π` so the blend rotates the short way (never the
-/// long way around), matching the spec's "the rotation is interpolated along
-/// the shortest path" requirement — e.g. `10°→350°` sweeps `−20°` through `0°`
-/// rather than `+340°`.
-///
-/// `t` follows the crate's [`Interpolatable`](super::Interpolatable) contract:
-/// normalized progress, **not** clamped, so easing/spring overshoot extrapolates.
+#[doc = include_str!("transform_interp.doc/interpolate.md")]
 #[must_use]
 pub fn interpolate(from: &Decomposed2D, to: &Decomposed2D, t: f32) -> Decomposed2D {
     // Shortest-arc angle blend: bring the endpoints within π of each other.
@@ -179,23 +106,7 @@ pub fn interpolate(from: &Decomposed2D, to: &Decomposed2D, t: f32) -> Decomposed
     }
 }
 
-/// Recomposes a 2D affine from its decomposition (CSS Transforms §14, inverse of
-/// [`decompose`]).
-///
-/// Rebuilds the matrix in the spec order **translate · rotate · skew · scale**:
-/// start from the rotation `[cosθ, sinθ, −sinθ, cosθ, 0, 0]`, right-multiply the
-/// shear `[1, 0, skew, 1, 0, 0]` and the scale `(sx, sy)`, then set the
-/// translation `(tx, ty)`. Combining shear·scale into the single 2×2
-/// `[[sx, skew·sy], [0, sy]]` and premultiplying by the rotation yields:
-///
-/// ```text
-/// a = sx·cosθ                     c = sy·(skew·cosθ − sinθ)
-/// b = sx·sinθ                     d = sy·(skew·sinθ + cosθ)
-/// e = tx                          f = ty
-/// ```
-///
-/// This is the exact algebraic inverse of [`decompose`], so the pair round-trips
-/// within epsilon.
+#[doc = include_str!("transform_interp.doc/recompose.md")]
 #[must_use]
 pub fn recompose(d: &Decomposed2D) -> Matrix2D {
     let (cos, sin) = (d.angle.cos(), d.angle.sin());
@@ -209,18 +120,7 @@ pub fn recompose(d: &Decomposed2D) -> Matrix2D {
     [a, b, c, dd, d.translate.0, d.translate.1]
 }
 
-/// Interpolates two 2D affines at progress `t` by decompose → interpolate →
-/// recompose (CSS Transforms §14).
-///
-/// This is the transform-aware blend the motion engine uses instead of a naive
-/// component-wise matrix lerp: e.g. `rotate(0°)` → `rotate(90°)` at `t = 0.5`
-/// yields `rotate(45°)` with scale preserved (`hypot(a, b) == 1`), whereas a raw
-/// lerp of `[1,0,0,1]`/`[0,1,−1,0]` gives `[0.5,0.5,−0.5,0.5]` — a spurious
-/// `hypot(0.5, 0.5) ≈ 0.707` shrink and shear.
-///
-/// Interpolating a matrix with itself at any `t` returns it within epsilon
-/// (decompose then recompose is identity), and `identity → identity` stays
-/// identity.
+#[doc = include_str!("transform_interp.doc/interpolate_matrix.md")]
 #[must_use]
 pub fn interpolate_matrix(from: Matrix2D, to: Matrix2D, t: f32) -> Matrix2D {
     let a = decompose(from);

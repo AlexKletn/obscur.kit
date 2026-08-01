@@ -1,52 +1,37 @@
-//! One node of the semantic accessibility tree (spec §7.1).
+#![doc = include_str!("semantic_node.doc/_module.md")]
 
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
 use super::{SemanticAction, SemanticRelation, SemanticRole, SemanticState, SemanticValue};
 
-/// One node of the semantic accessibility tree (spec §7.1).
-///
-/// A semantic node describes a single retained-tree node — identified by its
-/// [`node`](Self::node) [`NodeId`] — for assistive technology. It bundles the
-/// node's [`role`](Self::role), accessible [`name`](Self::name) and
-/// [`description`](Self::description), [`state`](Self::state),
-/// [`value`](Self::value), supported [`actions`](Self::actions), typed
-/// [`relations`](Self::relations) to other nodes, on-screen
-/// [`bounds`](Self::bounds) for hit-testing and highlighting, and a
-/// [`decorative`](Self::decorative) flag.
-///
-/// Platform adapters project this data onto UI Automation, AX, AT-SPI, or web
-/// accessibility APIs. A node that [`is_ignored`](Self::is_ignored) is not
-/// exposed to assistive technology at all.
+#[doc = include_str!("semantic_node.doc/SemanticNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticNode {
-    /// The retained-tree node this semantic node describes.
+    #[doc = include_str!("semantic_node.doc/node.md")]
     pub node: NodeId,
-    /// The node's semantic role.
+    #[doc = include_str!("semantic_node.doc/role.md")]
     pub role: SemanticRole,
-    /// The accessible name, if any.
+    #[doc = include_str!("semantic_node.doc/name.md")]
     pub name: Option<Box<str>>,
-    /// The accessible description, if any.
+    #[doc = include_str!("semantic_node.doc/description.md")]
     pub description: Option<Box<str>>,
-    /// The node's state flags.
+    #[doc = include_str!("semantic_node.doc/state.md")]
     pub state: SemanticState,
-    /// The node's current value.
+    #[doc = include_str!("semantic_node.doc/value.md")]
     pub value: SemanticValue,
-    /// The actions the node supports or can receive.
+    #[doc = include_str!("semantic_node.doc/actions.md")]
     pub actions: Vec<SemanticAction>,
-    /// Typed relations from this node to others.
+    #[doc = include_str!("semantic_node.doc/relations.md")]
     pub relations: Vec<SemanticRelation>,
-    /// On-screen bounds for hit-testing and highlighting, if known.
+    #[doc = include_str!("semantic_node.doc/bounds.md")]
     pub bounds: Option<Rect>,
-    /// Whether the node is purely decorative and hidden from assistive tech
-    /// entirely (spec §7.1 decorative hiding).
+    #[doc = include_str!("semantic_node.doc/decorative.md")]
     pub decorative: bool,
 }
 
 impl SemanticNode {
-    /// Creates a node for the retained [`NodeId`] with the given role and every
-    /// other field defaulted or empty (spec §7.1).
+    #[doc = include_str!("semantic_node.doc/new.md")]
     #[must_use]
     pub fn new(node: NodeId, role: SemanticRole) -> Self {
         Self {
@@ -63,138 +48,133 @@ impl SemanticNode {
         }
     }
 
-    /// Returns a copy with the accessible [`name`](Self::name) set.
+    #[doc = include_str!("semantic_node.doc/with_name.md")]
     #[must_use]
     pub fn with_name(mut self, name: impl Into<Box<str>>) -> Self {
         self.name = Some(name.into());
         self
     }
 
-    /// Returns a copy with the accessible [`description`](Self::description) set.
+    #[doc = include_str!("semantic_node.doc/with_description.md")]
     #[must_use]
     pub fn with_description(mut self, description: impl Into<Box<str>>) -> Self {
         self.description = Some(description.into());
         self
     }
 
-    /// Returns a copy with the [`state`](Self::state) replaced.
+    #[doc = include_str!("semantic_node.doc/with_state.md")]
     #[must_use]
     pub fn with_state(mut self, state: SemanticState) -> Self {
         self.state = state;
         self
     }
 
-    /// Returns a copy with the [`value`](Self::value) replaced.
+    #[doc = include_str!("semantic_node.doc/with_value.md")]
     #[must_use]
     pub fn with_value(mut self, value: SemanticValue) -> Self {
         self.value = value;
         self
     }
 
-    /// Returns a copy with the on-screen [`bounds`](Self::bounds) set.
+    #[doc = include_str!("semantic_node.doc/with_bounds.md")]
     #[must_use]
     pub fn with_bounds(mut self, bounds: Rect) -> Self {
         self.bounds = Some(bounds);
         self
     }
 
-    /// Returns a copy with the [`decorative`](Self::decorative) flag set.
+    #[doc = include_str!("semantic_node.doc/decorative_2.md")]
     #[must_use]
     pub fn decorative(mut self, decorative: bool) -> Self {
         self.decorative = decorative;
         self
     }
 
-    /// Appends a supported [`SemanticAction`] to this node.
+    #[doc = include_str!("semantic_node.doc/add_action.md")]
     pub fn add_action(&mut self, action: SemanticAction) {
         self.actions.push(action);
     }
 
-    /// Returns a copy with `action` appended to [`actions`](Self::actions).
+    #[doc = include_str!("semantic_node.doc/with_action.md")]
     #[must_use]
     pub fn with_action(mut self, action: SemanticAction) -> Self {
         self.add_action(action);
         self
     }
 
-    /// Appends a [`SemanticRelation`] to this node.
+    #[doc = include_str!("semantic_node.doc/add_relation.md")]
     pub fn add_relation(&mut self, relation: SemanticRelation) {
         self.relations.push(relation);
     }
 
-    /// Returns a copy with `relation` appended to
-    /// [`relations`](Self::relations).
+    #[doc = include_str!("semantic_node.doc/with_relation.md")]
     #[must_use]
     pub fn with_relation(mut self, relation: SemanticRelation) -> Self {
         self.add_relation(relation);
         self
     }
 
-    /// Returns the retained-tree [`NodeId`] this node describes.
+    #[doc = include_str!("semantic_node.doc/node_2.md")]
     #[must_use]
     pub const fn node(&self) -> NodeId {
         self.node
     }
 
-    /// Returns the node's [`role`](Self::role).
+    #[doc = include_str!("semantic_node.doc/role_2.md")]
     #[must_use]
     pub const fn role(&self) -> SemanticRole {
         self.role
     }
 
-    /// Returns the accessible name, if any.
+    #[doc = include_str!("semantic_node.doc/name_2.md")]
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
-    /// Returns the accessible description, if any.
+    #[doc = include_str!("semantic_node.doc/description_2.md")]
     #[must_use]
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
     }
 
-    /// Returns the node's [`state`](Self::state).
+    #[doc = include_str!("semantic_node.doc/state_2.md")]
     #[must_use]
     pub const fn state(&self) -> &SemanticState {
         &self.state
     }
 
-    /// Returns the node's [`value`](Self::value).
+    #[doc = include_str!("semantic_node.doc/value_2.md")]
     #[must_use]
     pub const fn value(&self) -> &SemanticValue {
         &self.value
     }
 
-    /// Returns the node's supported actions.
+    #[doc = include_str!("semantic_node.doc/actions_2.md")]
     #[must_use]
     pub fn actions(&self) -> &[SemanticAction] {
         &self.actions
     }
 
-    /// Returns the node's relations.
+    #[doc = include_str!("semantic_node.doc/relations_2.md")]
     #[must_use]
     pub fn relations(&self) -> &[SemanticRelation] {
         &self.relations
     }
 
-    /// Returns the on-screen bounds, if known.
+    #[doc = include_str!("semantic_node.doc/bounds_2.md")]
     #[must_use]
     pub const fn bounds(&self) -> Option<Rect> {
         self.bounds
     }
 
-    /// Returns whether the node supports the given [`SemanticAction`].
+    #[doc = include_str!("semantic_node.doc/supports_action.md")]
     #[must_use]
     pub fn supports_action(&self, action: SemanticAction) -> bool {
         self.actions.contains(&action)
     }
 
-    /// Returns whether the node is not exposed to assistive technology.
-    ///
-    /// A node is ignored when it is [`decorative`](Self::decorative) or its
-    /// [`state.hidden`](SemanticState::hidden) flag is set (spec §7.1
-    /// decorative hiding). Adapters skip ignored nodes entirely.
+    #[doc = include_str!("semantic_node.doc/is_ignored.md")]
     #[must_use]
     pub const fn is_ignored(&self) -> bool {
         self.decorative || self.state.hidden

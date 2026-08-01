@@ -1,17 +1,11 @@
-//! The pending frame-request queue (spec §3.5 coalescing, §3.6 priority):
-//! [`SchedulerQueue`].
+#![doc = include_str!("scheduler_queue.doc/_module.md")]
 
 use std::collections::BTreeSet;
 
 use super::SchedulerPriority;
 use crate::frame::{FrameReason, FrameRequest};
 
-/// Every [`FrameReason`] in a fixed, deterministic order.
-///
-/// The index of a reason in this array is its tie-break ordinal (see
-/// [`reason_ord`]); the array also serves as the reverse lookup in
-/// [`reason_from_ord`]. Keeping it in one place ties the two directions
-/// together.
+#[doc = include_str!("scheduler_queue.doc/REASONS_IN_ORDER.md")]
 const REASONS_IN_ORDER: [FrameReason; 8] = [
     FrameReason::Input,
     FrameReason::UiCommit,
@@ -23,12 +17,7 @@ const REASONS_IN_ORDER: [FrameReason; 8] = [
     FrameReason::TextEdit,
 ];
 
-/// Returns the deterministic tie-break ordinal of a reason.
-///
-/// [`FrameReason`] deliberately does not implement [`Ord`], so the queue derives
-/// a stable ordinal here to break ties between reasons that share a priority
-/// band. This keeps ordering deterministic without imposing an ordering on the
-/// reason type itself.
+#[doc = include_str!("scheduler_queue.doc/reason_ord.md")]
 const fn reason_ord(reason: FrameReason) -> u8 {
     match reason {
         FrameReason::Input => 0,
@@ -42,30 +31,19 @@ const fn reason_ord(reason: FrameReason) -> u8 {
     }
 }
 
-/// Recovers the reason from a tie-break ordinal produced by [`reason_ord`].
+#[doc = include_str!("scheduler_queue.doc/reason_from_ord.md")]
 fn reason_from_ord(ord: u8) -> FrameReason {
     REASONS_IN_ORDER[ord as usize]
 }
 
-/// The queue of pending frame requests, coalesced by reason and ordered by
-/// priority (spec §3.5 coalescing, §3.6 priority).
-///
-/// A [`FrameRequest`] carries only a [`FrameReason`], so coalescing means
-/// deduplicating by reason: pushing two `Animation` requests collapses them into
-/// a single pending entry (§3.5 "updates are coalesced"). Requests are drained
-/// most-urgent-first using [`SchedulerPriority`] (§3.6), with ties broken
-/// deterministically by a stable per-reason ordinal.
-///
-/// The ordering is backed by a [`BTreeSet`] keyed on
-/// `(SchedulerPriority, reason ordinal)`, so iteration and popping are fully
-/// deterministic and free of wall-clock or randomness.
+#[doc = include_str!("scheduler_queue.doc/SchedulerQueue.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SchedulerQueue {
     entries: BTreeSet<(SchedulerPriority, u8)>,
 }
 
 impl SchedulerQueue {
-    /// Creates an empty queue.
+    #[doc = include_str!("scheduler_queue.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -73,25 +51,21 @@ impl SchedulerQueue {
         }
     }
 
-    /// Inserts a request, coalescing by reason.
-    ///
-    /// Returns `true` if the request was newly added, or `false` if an entry
-    /// with the same reason was already pending and this push was coalesced into
-    /// it.
+    #[doc = include_str!("scheduler_queue.doc/push.md")]
     pub fn push(&mut self, request: FrameRequest) -> bool {
         let reason = request.reason();
         let key = (SchedulerPriority::from_reason(reason), reason_ord(reason));
         self.entries.insert(key)
     }
 
-    /// Removes and returns the most-urgent pending request, if any.
+    #[doc = include_str!("scheduler_queue.doc/pop.md")]
     pub fn pop(&mut self) -> Option<FrameRequest> {
         self.entries
             .pop_first()
             .map(|(_, ord)| FrameRequest::new(reason_from_ord(ord)))
     }
 
-    /// Returns the most-urgent pending request without removing it, if any.
+    #[doc = include_str!("scheduler_queue.doc/peek.md")]
     #[must_use]
     pub fn peek(&self) -> Option<FrameRequest> {
         self.entries
@@ -100,35 +74,31 @@ impl SchedulerQueue {
             .map(|&(_, ord)| FrameRequest::new(reason_from_ord(ord)))
     }
 
-    /// Returns whether a request for `reason` is currently pending.
+    #[doc = include_str!("scheduler_queue.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, reason: FrameReason) -> bool {
         let key = (SchedulerPriority::from_reason(reason), reason_ord(reason));
         self.entries.contains(&key)
     }
 
-    /// Returns the number of pending (coalesced) requests.
+    #[doc = include_str!("scheduler_queue.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns whether the queue is empty.
+    #[doc = include_str!("scheduler_queue.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Removes all pending requests.
+    #[doc = include_str!("scheduler_queue.doc/clear.md")]
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    /// Drains every pending request most-urgent-first, emptying the queue.
-    ///
-    /// The returned order is deterministic: it matches successive [`pop`]s.
-    ///
-    /// [`pop`]: SchedulerQueue::pop
+    #[doc = include_str!("scheduler_queue.doc/drain_all.md")]
     #[must_use = "drained requests are removed from the queue and should be handled"]
     pub fn drain_all(&mut self) -> Vec<FrameRequest> {
         std::mem::take(&mut self.entries)

@@ -1,14 +1,4 @@
-//! **SPECIFICATION-DERIVED** transform, overflow, border-radius, logical-property
-//! and absolute-positioning cases for obscur.kit §4.1 ("overflow and clipping",
-//! "positioning"), §4.5, §4.8 and §4.13 ("transforms", "backgrounds", "logical
-//! properties").
-//!
-//! Every expected number below was produced by an agent reading the specification
-//! — obscur.kit §4 and the W3C css-transforms-1 / css-overflow-3 /
-//! css-backgrounds-3 / css-writing-modes-4 / css-position-3 text it normatively
-//! cites — with **no access to this repository's source**. A failure here is a
-//! defect report about the engine, and must not be "corrected" by editing the
-//! expected value.
+#![doc = include_str!("spec_ch4_visual.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch4_support/mod.rs"]
@@ -22,7 +12,7 @@ use support::{approx, at, clip_bounds, drive, el, geom, mapped_bounds, transform
 
 const VW: f32 = 1000.0;
 
-/// The per-corner radii of the first `DrawShadow` in the last frame.
+#[doc = include_str!("spec_ch4_visual.doc/shadow_radii.md")]
 fn shadow_radii(rt: &UiRuntime) -> obscur_kit::geometry::CornerRadii {
     rt.snapshot()
         .display_list()
@@ -35,10 +25,7 @@ fn shadow_radii(rt: &UiRuntime) -> obscur_kit::geometry::CornerRadii {
         .expect("the box emitted a shadow carrying its used corner radii")
 }
 
-/// css-transforms-1 §5 (transform-origin Initial value: "50% 50%") and §4:
-/// "Translate by the computed X and Y of transform-origin / Multiply by each of
-/// the transform functions in transform property from left to right / Translate by
-/// the negated computed X and Y values of transform-origin".
+#[doc = include_str!("spec_ch4_visual.doc/transform_origin_defaults_to_the_box_centre.md")]
 #[test]
 fn transform_origin_defaults_to_the_box_centre() {
     let rt = drive(
@@ -65,9 +52,7 @@ fn transform_origin_defaults_to_the_box_centre() {
     );
 }
 
-/// css-transforms-1 §4: "Multiply by each of the transform functions in transform
-/// property from left to right" and §2: "Term A post-multiplied by term B is equal
-/// to A · B."
+#[doc = include_str!("spec_ch4_visual.doc/transform_functions_compose_left_to_right.md")]
 #[test]
 fn transform_functions_compose_left_to_right() {
     let rt = drive(
@@ -86,10 +71,7 @@ fn transform_functions_compose_left_to_right() {
     approx(bounds.size.width, 100.0, "the scaled width");
 }
 
-/// css-transforms-1 §3: "any value other than none for the transform property also
-/// causes the element to establish a containing block for all descendants. Its
-/// padding box will be used to layout for all of its absolute-position descendants,
-/// fixed-position descendants, and descendant fixed background attachments."
+#[doc = include_str!("spec_ch4_visual.doc/a_transform_establishes_the_containing_block_for_fixed_descendants.md")]
 #[test]
 fn a_transform_establishes_the_containing_block_for_fixed_descendants() {
     // Border box at (190, 90) sized 320x220 with a 10px border ⇒ padding box at
@@ -120,9 +102,7 @@ fn a_transform_establishes_the_containing_block_for_fixed_descendants() {
     approx(h, 50.0, "explicit height");
 }
 
-/// css-transforms-1 §3: "Specifically, transforms can extend (but do not shrink)
-/// the size of the overflow area, which is computed as the union of the bounds of
-/// the elements before and after the application of transforms."
+#[doc = include_str!("spec_ch4_visual.doc/a_transform_extends_but_does_not_shrink_scrollable_overflow.md")]
 #[test]
 fn a_transform_extends_but_does_not_shrink_scrollable_overflow() {
     let mut rt = drive(
@@ -141,8 +121,7 @@ fn a_transform_extends_but_does_not_shrink_scrollable_overflow() {
     );
 }
 
-/// css-overflow-3 §3.3: "hidden / This value indicates that the box's content is
-/// clipped to its padding box".
+#[doc = include_str!("spec_ch4_visual.doc/overflow_hidden_clips_to_the_padding_box.md")]
 #[test]
 fn overflow_hidden_clips_to_the_padding_box() {
     let rt = drive(
@@ -175,10 +154,7 @@ fn overflow_hidden_clips_to_the_padding_box() {
     );
 }
 
-/// css-overflow-3 §3.3: "hidden […] However, the content must still be scrollable
-/// programmatically […] and the box is therefore still a scroll container." and
-/// "clip […] overflow: clip forbids scrolling entirely, through any mechanism, and
-/// therefore the box is not a scroll container."
+#[doc = include_str!("spec_ch4_visual.doc/overflow_clip_is_not_a_scroll_container_but_hidden_is.md")]
 #[test]
 fn overflow_clip_is_not_a_scroll_container_but_hidden_is() {
     let css = ".h,.c{width:100px;height:100px} .h{overflow:hidden} .c{overflow:clip} \
@@ -206,11 +182,7 @@ fn overflow_clip_is_not_a_scroll_container_but_hidden_is() {
     );
 }
 
-/// css-backgrounds-3 §4.5 Overlapping Curves: "Let f = min(Li/Si), where i ∈ {top,
-/// right, bottom, left}, Si is the sum of the two corresponding radii of the
-/// corners on side i, and Ltop = Lbottom = the width of the box, and Lleft = Lright
-/// = the height of the box. If f < 1, then all corner radii are reduced by
-/// multiplying them by f."
+#[doc = include_str!("spec_ch4_visual.doc/overlapping_corner_radii_are_reduced_uniformly.md")]
 #[test]
 fn overlapping_corner_radii_are_reduced_uniformly() {
     let rt = drive(
@@ -234,10 +206,7 @@ fn overlapping_corner_radii_are_reduced_uniformly() {
     approx(r.bottom_right.x, 7.5, "bottom-right reduced by f");
 }
 
-/// css-writing-modes-4 §6.2: "block-start / The side that comes earlier in the
-/// block flow direction, as determined by the writing-mode property: the physical
-/// top in horizontal-tb mode, the right in vertical-rl, and the left in
-/// vertical-lr."
+#[doc = include_str!("spec_ch4_visual.doc/logical_block_start_maps_by_writing_mode.md")]
 #[test]
 fn logical_block_start_maps_by_writing_mode() {
     let run = |mode: &str| -> (UiRuntime, (f32, f32, f32, f32), (f32, f32, f32, f32)) {
@@ -272,10 +241,7 @@ fn logical_block_start_maps_by_writing_mode() {
     approx(lr.1, 0.0, "vertical-lr: y");
 }
 
-/// css-writing-modes-4 §6.2: "inline-start / The side from which text of the inline
-/// base direction would start. For boxes with a used direction value of ltr, this
-/// means the line-left side. For boxes with a used direction value of rtl, this
-/// means the line-right side."
+#[doc = include_str!("spec_ch4_visual.doc/logical_inline_start_depends_on_direction.md")]
 #[test]
 fn logical_inline_start_depends_on_direction() {
     let run = |dir: &str| -> (f32, f32) {
@@ -303,9 +269,7 @@ fn logical_inline_start_depends_on_direction() {
     approx(r, 30.0, "rtl: padding-right");
 }
 
-/// css-position-3 §10.1: "If the ancestor is not an inline box, / the containing
-/// block is formed by the padding edge of the ancestor, unless otherwise
-/// specified."
+#[doc = include_str!("spec_ch4_visual.doc/an_absolute_containing_block_is_the_ancestors_padding_box.md")]
 #[test]
 fn an_absolute_containing_block_is_the_ancestors_padding_box() {
     let rt = drive(

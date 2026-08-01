@@ -1,23 +1,21 @@
-//! 2D affine transform.
+#![doc = include_str!("affine_transform.doc/_module.md")]
 
 use crate::primitive::Point;
 
-/// A 2D affine transform stored as the six coefficients of a 2x3 matrix.
-///
-/// Maps a point `p` to `(a*x + c*y + tx, b*x + d*y + ty)`.
+#[doc = include_str!("affine_transform.doc/AffineTransform.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AffineTransform {
-    /// Row-major coefficients `[a, b, c, d, tx, ty]`.
+    #[doc = include_str!("affine_transform.doc/coeffs.md")]
     pub coeffs: [f32; 6],
 }
 
 impl AffineTransform {
-    /// The identity transform.
+    #[doc = include_str!("affine_transform.doc/IDENTITY.md")]
     pub const IDENTITY: Self = Self {
         coeffs: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
     };
 
-    /// A pure translation.
+    #[doc = include_str!("affine_transform.doc/translate.md")]
     #[must_use]
     pub const fn translate(tx: f32, ty: f32) -> Self {
         Self {
@@ -25,8 +23,7 @@ impl AffineTransform {
         }
     }
 
-    /// An affine from the six coefficients of a CSS `matrix(a, b, c, d, e, f)`
-    /// (which use the identical `[a, b, c, d, tx, ty]` layout).
+    #[doc = include_str!("affine_transform.doc/from_matrix.md")]
     // The six single-letter names are the canonical CSS `matrix()` coefficients.
     #[allow(clippy::many_single_char_names)]
     #[must_use]
@@ -36,7 +33,7 @@ impl AffineTransform {
         }
     }
 
-    /// A pure scale `(sx, sy)` about the origin.
+    #[doc = include_str!("affine_transform.doc/scale.md")]
     #[must_use]
     pub const fn scale(sx: f32, sy: f32) -> Self {
         Self {
@@ -44,7 +41,7 @@ impl AffineTransform {
         }
     }
 
-    /// A rotation by `radians` (clockwise in the y-down screen space).
+    #[doc = include_str!("affine_transform.doc/rotate.md")]
     #[must_use]
     pub fn rotate(radians: f32) -> Self {
         let (sin, cos) = radians.sin_cos();
@@ -53,8 +50,7 @@ impl AffineTransform {
         }
     }
 
-    /// A skew by the two angles (in radians): `ax` shears x by the point's y,
-    /// `ay` shears y by the point's x (CSS `skew(ax, ay)`).
+    #[doc = include_str!("affine_transform.doc/skew.md")]
     #[must_use]
     pub fn skew(ax: f32, ay: f32) -> Self {
         Self {
@@ -62,9 +58,7 @@ impl AffineTransform {
         }
     }
 
-    /// Composes two transforms: `self.multiply(rhs)` is the transform that
-    /// applies `rhs` **first**, then `self` (standard matrix product
-    /// `self · rhs`).
+    #[doc = include_str!("affine_transform.doc/multiply.md")]
     #[must_use]
     pub fn multiply(self, rhs: Self) -> Self {
         let a = self.coeffs;
@@ -81,13 +75,13 @@ impl AffineTransform {
         }
     }
 
-    /// Whether this transform is (exactly) the identity.
+    #[doc = include_str!("affine_transform.doc/is_identity.md")]
     #[must_use]
     pub fn is_identity(self) -> bool {
         self.coeffs == Self::IDENTITY.coeffs
     }
 
-    /// Applies this transform to a point.
+    #[doc = include_str!("affine_transform.doc/apply.md")]
     #[must_use]
     pub fn apply(self, p: Point) -> Point {
         let m = self.coeffs;

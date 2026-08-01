@@ -1,109 +1,43 @@
-//! The §2.12 outlet rule: what may be written on an authored `<slot …/>`, stated
-//! over plain data so **both** front ends decide it the same way.
-//!
-//! # What an outlet is, and what that costs it
-//!
-//! `<slot name="header"/>` is a *position*, not an element:
-//! `project_slots` deletes it and splices in every authored child assigned
-//! `slot="header"`. Nothing an outlet carries survives that substitution — the
-//! node the author wrote is gone before style, layout or paint can see it.
-//!
-//! That is what makes every rule below a rule rather than a preference. A
-//! `class="banner"` on an outlet is not "ignored"; it is *deleted*, silently, and
-//! the author is left reading a stylesheet that never matched anything. §2.13 says
-//! unknown attributes are compile errors; on an outlet, *every* attribute but
-//! `name` is unknown, because there is no node left to carry it.
-//!
-//! # The rules
-//!
-//! - **`name` is required.** An outlet with no name names no slot, so
-//!   `project_slots` fills it with nothing and deletes it. It is a slot
-//!   declaration that can never be satisfied — exactly the "inert box" this
-//!   refuses at the tag instead of at the frame.
-//! - **`name` must be a literal.** `name={expr}` is refused for the reason
-//!   `slot={expr}` already is
-//!   ([`DynamicSlot`](crate::validation::ContractViolation::DynamicSlot)): a slot
-//!   is matched against a declaration at *compile* time, and a name that does not
-//!   exist until runtime cannot be. The two halves of one join must be decidable
-//!   in the same pass, or neither is.
-//! - **Nothing else may be written on it.** Not `class`, not `id`, not `on:click`,
-//!   not `key` — see above.
-//! - **It takes no children.** HTML's `<slot>` renders its children as fallback
-//!   content when nothing is assigned. §2.12 describes no fallback content, and
-//!   [`project_slots`] implements none: an unfilled outlet leaves *nothing*
-//!   behind. Accepting children would mean silently dropping them. Inventing
-//!   fallback semantics because HTML has them is the move `5e8e7fe` refused for
-//!   `<Loading>`; refusing the spelling is what this does instead.
-//!
-//! # One rule, two front ends
-//!
-//! The rule takes plain data and returns messages, with no syntax in it, for the
-//! same reason [`check_collection`](crate::validation::check_collection) and
-//! [`check_contract`](crate::validation::check_contract) do: there are two
-//! authoring surfaces and only one has a `.okui` syntax tree. Each front end
-//! attaches its own location — a byte offset for the file path, a `Span` for the
-//! `okui!` macro.
-//!
-//! # What this rule cannot decide
-//!
-//! Whether the outlet is in a **component's render at all**. A component's `render`
-//! returns a `View` and `okui!` produces a `View`, so the identical
-//! `okui! { <slot name="header"/> }` is correct inside `render` and stray one
-//! function away, and a proc-macro cannot see which of the two it was expanded in.
-//! Nor can it check the name against the component's declared slots: the
-//! declaration lives on `MyProps::contract_surface()`, a function that runs when
-//! the built crate runs, while this runs during that crate's compilation — the same
-//! wall that keeps an unregistered `<Crad/>` silent. The stray case is decided at
-//! runtime instead, where the answer is knowable: the reconciler refuses to
-//! materialize an outlet and `UiRuntime` reports it.
-//!
-//! [`project_slots`]: obscur_view::view::project_slots
+#![doc = include_str!("outlet_rule.doc/_module.md")]
 
 use obscur_ui_ir::name_binding::OUTLET_TAG;
 
-/// What an authored `<slot …/>` names its outlet — the value of its `name`
-/// attribute, classified (spec §2.12).
+#[doc = include_str!("outlet_rule.doc/OutletName.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutletName<'a> {
-    /// `name="header"` — a literal, and the only accepted form.
+    #[doc = include_str!("outlet_rule.doc/Literal.md")]
     Literal(&'a str),
-    /// `name={expr}` — a name that does not exist until runtime.
+    #[doc = include_str!("outlet_rule.doc/Dynamic.md")]
     Dynamic,
-    /// No `name` attribute at all.
+    #[doc = include_str!("outlet_rule.doc/Missing.md")]
     Missing,
 }
 
-/// One authored `<slot …/>`, described in the shape both front ends can build
-/// from their own syntax (spec §2.12).
+#[doc = include_str!("outlet_rule.doc/OutletUse.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OutletUse<'a> {
-    /// Every attribute name on the tag *except* `name`, in authored order —
-    /// including event bindings, spelled as the author wrote the event
-    /// (`on:click` → `"on:click"`), so the message quotes them back.
+    #[doc = include_str!("outlet_rule.doc/extra_attributes.md")]
     pub extra_attributes: Vec<&'a str>,
-    /// Whether the tag has any children (elements, text or interpolations).
+    #[doc = include_str!("outlet_rule.doc/has_children.md")]
     pub has_children: bool,
 }
 
-/// Whether `tag` names a §2.12 slot outlet.
-///
-/// One predicate over [`OUTLET_TAG`], so the rule below and the front ends that
-/// decide whether to run it cannot disagree about which tag it is.
+#[doc = include_str!("outlet_rule.doc/is_outlet_tag.md")]
 #[must_use]
 pub fn is_outlet_tag(tag: &str) -> bool {
     tag == OUTLET_TAG
 }
 
-/// The diagnostic for a `<slot/>` with no `name` (spec §2.12).
+#[doc = include_str!("outlet_rule.doc/MISSING_NAME_MESSAGE.md")]
 pub const MISSING_NAME_MESSAGE: &str = "`<slot>` requires a `name`: §2.12 declares *named* slots and projection matches an outlet to content by name and by nothing else, so an unnamed outlet is filled by nothing and deleted. Write `<slot name=\"…\"/>`";
 
-/// The diagnostic for a `<slot name={expr}/>` (spec §2.12).
+#[doc = include_str!("outlet_rule.doc/DYNAMIC_NAME_MESSAGE.md")]
 pub const DYNAMIC_NAME_MESSAGE: &str = "`<slot name={…}>` is refused: a slot is matched against its component's declaration at compile time, so an outlet's name must be a literal — the same rule that refuses `slot={…}` on the child side of the same join. Write `<slot name=\"…\"/>`";
 
-/// The diagnostic for children under a `<slot>` (spec §2.12).
+#[doc = include_str!("outlet_rule.doc/OUTLET_CHILDREN_MESSAGE.md")]
 pub const OUTLET_CHILDREN_MESSAGE: &str = "`<slot>` takes no children: an outlet is substituted away by projection and an unfilled one leaves nothing behind, so children here would be dropped without a trace. §2.12 describes no fallback content and none is implemented";
 
-/// The diagnostic for any attribute other than `name` on a `<slot>` (spec §2.12).
+#[doc = include_str!("outlet_rule.doc/extra_attribute_message.md")]
 #[must_use]
 pub fn extra_attribute_message(attribute: &str) -> String {
     format!(
@@ -111,13 +45,7 @@ pub fn extra_attribute_message(attribute: &str) -> String {
     )
 }
 
-/// Checks an authored `<slot …/>` against the §2.12 outlet rule, returning one
-/// message per violation.
-///
-/// Empty for every tag that is not an outlet, and for a well-formed
-/// `<slot name="…"/>`. Every violation is reported rather than just the first,
-/// the same report-them-all policy `Compiler::compile` and the `okui!` macro's
-/// `validate_element` follow.
+#[doc = include_str!("outlet_rule.doc/check_outlet.md")]
 #[must_use]
 pub fn check_outlet(tag: &str, name: OutletName<'_>, outlet: &OutletUse<'_>) -> Vec<String> {
     if !is_outlet_tag(tag) {

@@ -1,12 +1,4 @@
-//! The pending-restyle accumulator: [`StyleInvalidation`] (§4.3, §4.14).
-//!
-//! [`StyleInvalidation`] is a small map of `NodeId -> StyleInvalidationReason`
-//! recording which nodes must be restyled and why. The runtime feeds it changes
-//! and consults each node's [`StyleDependency`], so the invalidation engine is
-//! decoupled from the tree: this type never walks the tree itself, it only
-//! records and merges the resulting invalidations (§4.3). Confining recalculation
-//! to the recorded nodes is how invalidation stays limited to affected consumers
-//! (§4.14).
+#![doc = include_str!("style_invalidation.doc/_module.md")]
 
 use crate::computed::StyleDiff;
 use crate::invalidation::{StyleDependency, StyleInvalidationReason};
@@ -15,38 +7,14 @@ use obscur_identity::NodeId;
 use std::collections::HashMap;
 use std::collections::hash_map::Iter;
 
-/// An accumulator of pending node restyles keyed by [`NodeId`] (§4.3).
-///
-/// Each node maps to the typed [`StyleInvalidationReason`] that first put it in
-/// the set. When a node is invalidated more than once the first reason is kept
-/// (documented precedence: earliest wins); merging never panics and never loses a
-/// node.
-///
-/// # Who reads it
-///
-/// The runtime's style phase, on the interaction path: `RestyleScope` fills one of
-/// these from the nodes whose `:hover`/`:focus` state changed,
-/// `StyleMatchingCoordinator::rematch_into` iterates it to re-match exactly those
-/// elements, and `StyleCoordinator::resolve_incremental` reads
-/// [`is_invalidated`](Self::is_invalidated) to decide, per node, whether to
-/// recompute or keep the retained style. A frame whose style inputs moved for any
-/// *other* reason — a new stylesheet, a resize, a tree edit — builds no set and
-/// restyles in full, so this is consulted on one path, not all of them.
-///
-/// [`take`](Self::take)/[`drain`](Self::drain) are **not** on that path: the set is
-/// read, not consumed, because the same set gates both the re-match and the
-/// re-resolve. They have no production caller.
-///
-/// The tree walk — finding the children of a changed parent, or the node whose
-/// state toggled — is the runtime's job; this type only records and merges the
-/// invalidations that walk produces.
+#[doc = include_str!("style_invalidation.doc/StyleInvalidation.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleInvalidation {
     pending: HashMap<NodeId, StyleInvalidationReason>,
 }
 
 impl StyleInvalidation {
-    /// Creates an empty invalidation set.
+    #[doc = include_str!("style_invalidation.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -54,67 +22,54 @@ impl StyleInvalidation {
         }
     }
 
-    /// Records that `node` must be restyled for `reason`.
-    ///
-    /// If `node` was already invalidated the existing reason is kept (earliest
-    /// reason wins), so the record is deterministic regardless of call order.
+    #[doc = include_str!("style_invalidation.doc/invalidate.md")]
     pub fn invalidate(&mut self, node: NodeId, reason: StyleInvalidationReason) {
         self.pending.entry(node).or_insert(reason);
     }
 
-    /// Returns whether `node` is in the pending set.
+    #[doc = include_str!("style_invalidation.doc/is_invalidated.md")]
     #[must_use]
     pub fn is_invalidated(&self, node: NodeId) -> bool {
         self.pending.contains_key(&node)
     }
 
-    /// Returns the recorded reason for `node`, if it is invalidated.
+    #[doc = include_str!("style_invalidation.doc/reason.md")]
     #[must_use]
     pub fn reason(&self, node: NodeId) -> Option<StyleInvalidationReason> {
         self.pending.get(&node).copied()
     }
 
-    /// Returns the number of invalidated nodes.
+    #[doc = include_str!("style_invalidation.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.pending.len()
     }
 
-    /// Returns whether no nodes are invalidated.
+    #[doc = include_str!("style_invalidation.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
-    /// Iterates the pending `(NodeId, StyleInvalidationReason)` entries.
+    #[doc = include_str!("style_invalidation.doc/iter.md")]
     #[must_use]
     pub fn iter(&self) -> Iter<'_, NodeId, StyleInvalidationReason> {
         self.pending.iter()
     }
 
-    /// Removes and returns the entire pending set, leaving `self` empty.
-    ///
-    /// The runtime calls this once per style pass to consume the work.
+    #[doc = include_str!("style_invalidation.doc/take.md")]
     #[must_use]
     pub fn take(&mut self) -> HashMap<NodeId, StyleInvalidationReason> {
         std::mem::take(&mut self.pending)
     }
 
-    /// Alias for [`take`](Self::take): drains the pending set, leaving `self`
-    /// empty and returning what was pending.
+    #[doc = include_str!("style_invalidation.doc/drain.md")]
     #[must_use]
     pub fn drain(&mut self) -> HashMap<NodeId, StyleInvalidationReason> {
         self.take()
     }
 
-    /// Invalidates `child` if `dep` shows it consumed something the parent's
-    /// change (`parent_diff`) altered (§4.14).
-    ///
-    /// Consults [`StyleDependency::affected_by_parent_change`] and records the
-    /// returned reason; a node the parent change does not affect is left
-    /// untouched. Returns whether `child` was invalidated by this call. The caller
-    /// (the runtime) is responsible for having identified `child` as a child of
-    /// the changed parent.
+    #[doc = include_str!("style_invalidation.doc/note_parent_style_changed.md")]
     pub fn note_parent_style_changed(
         &mut self,
         child: NodeId,
@@ -129,12 +84,7 @@ impl StyleInvalidation {
         }
     }
 
-    /// Invalidates `node` if `dep` shows its matching depends on a pseudo-state
-    /// that `changed` toggled (§4.14).
-    ///
-    /// Consults [`StyleDependency::affected_by_pseudo_change`] and records
-    /// [`StyleInvalidationReason::PseudoStateChanged`] on a match. Returns whether
-    /// `node` was invalidated by this call.
+    #[doc = include_str!("style_invalidation.doc/note_pseudo_state_changed.md")]
     pub fn note_pseudo_state_changed(
         &mut self,
         node: NodeId,

@@ -1,37 +1,4 @@
-//! A touch-first calculator — the kit's gesture stack in something you can
-//! actually use with a thumb.
-//!
-//! It exists because a calculator is the smallest honest test of touch input:
-//! every interaction is a *tap on a small target*, which is where a pointer stack
-//! either works or is exhausting. Everything the kit grew for touch shows up here
-//! in the shape an application would really use it:
-//!
-//! - **Taps with feedback.** Keys are 80×68 (comfortably past a fingertip's ~9mm)
-//!   and light `:active` while held. The runtime's press state is per-pointer, so
-//!   resting one thumb on a key and pressing another with the other hand lights
-//!   both and fires both.
-//! - **A held key means something else.** `⌫` removes one digit on a tap and
-//!   clears everything when held — a touchscreen has one button and no
-//!   modifiers, so holding is the only "other" gesture a key has. It fires while
-//!   the finger is still down, and the lift is consumed rather than also
-//!   deleting a digit.
-//! - **A flickable tape.** The history is a kit-owned virtual list: drag it with
-//!   a finger, flick it and it coasts to a stop, catch it and it stops dead
-//!   without also recalling whatever line was sliding past. Tapping a line
-//!   recalls its result; holding a line deletes it.
-//! - **Insets.** The root pads itself by `env(safe-area-inset-*)`, so on a device
-//!   with a notch or a gesture bar the keys are not under them. On a desktop
-//!   every inset is zero and the padding costs nothing.
-//!
-//! Run it on a real machine (a display + a GPU adapter are required):
-//! `cargo run -p obscur-kit --example calculator --features full`
-//!
-//! It cannot run in the headless dev/CI environment (no display, no GPU), so
-//! there it is only compiled. The arithmetic is a plain state machine and *is*
-//! testable there — `cargo test -p obscur-kit --features full --example
-//! calculator` runs the cases at the bottom of this file. An example's tests do
-//! not run in the workspace sweep, so that command is the only thing that runs
-//! them.
+#![doc = include_str!("calculator.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -43,76 +10,16 @@ use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{EVENT_LONG_PRESS, View, ViewEventBinding, ViewNode};
 use obscur_kit::widgets::button::Button;
 
-/// The history tape's registered name.
+#[doc = include_str!("calculator.doc/TAPE.md")]
 const TAPE: InternedSymbol = InternedSymbol::named("tape");
 
-/// The tape's row height, matching `.tape-row` in the sheet. The runtime sizes
-/// its window and spacers from this.
+#[doc = include_str!("calculator.doc/TAPE_ROW.md")]
 const TAPE_ROW: f32 = 28.0;
 
-/// Held `⌫` clears everything; tapped, it deletes one digit.
-///
-/// The label is `U+232B`, which the bundled face does **not** carry — it draws
-/// only because the text stack now asks the host for a face covering it. On a
-/// system with no fontconfig the key would be blank again, which is the honest
-/// dependency and not a hidden one.
+#[doc = include_str!("calculator.doc/CMD_CLEAR_ALL.md")]
 const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 
-/// The styling.
-///
-/// Two rules it follows, both learned from what the kit actually does rather
-/// than from what CSS says:
-///
-/// - **No `width: 100%` on anything with padding.** A percentage width inside a
-///   percentage-width padded parent resolves against the parent's *border* box
-///   here, so each nesting level grows by its parent's padding and the content
-///   spills out of the window. Flex stretches a child across the cross axis
-///   anyway, so stating no width at all is both shorter and exact.
-/// - **Type is set with `clamp(min, vmin, max)`**, not in fixed pixels. Keys
-///   scale with the window and a fixed label does not, so it drifts visibly out
-///   of proportion — the label stays the size it was while its key grows around
-///   it. `min(<vmin>, <px>)` rather than `clamp`: a **floor** is what makes the
-///   text stop shrinking while the key carries on, so at a squeezed window the
-///   label ends up several times wider than the key it sits in. A ceiling alone
-///   keeps type sane on a wall-sized window and lets it vanish gracefully on a
-///   squeezed one; `overflow: hidden` on the key catches whatever is left.
-/// - **No fixed heights on the rows inside a panel.** The panels are `flex`-sized
-///   and shrink with the window; a row pinned to `52px` inside one does not, so
-///   past a certain size it is pushed out of the panel that is supposed to
-///   contain it — which reads as content drifting out of place. The rows size to
-///   their (already scaling) text instead. `.tape-row` is the one exception and
-///   must stay fixed: it is a virtual-list row, and the runtime sizes its window
-///   and spacers from exactly that number.
-/// - **A styled `button` resets the UA `padding` and `border`.** Every key here
-///   is a real [`Button`], so the kit's default sheet gives it `padding: 11px
-///   20px` — 40px of horizontal padding, which a 30px-wide key does not have.
-///   The content box collapses, `overflow: hidden` clips what is left, and the
-///   key renders as an empty pill. That is the browser contract (a `<button>`
-///   carries UA padding until an author says otherwise) and it bites exactly
-///   where a demo is least likely to look: on a small window, at a display scale
-///   of 2, where the *logical* viewport is half the pixels on screen.
-/// - **Corner radii scale like type does.** `border-radius: 14px` on a 30px key
-///   is a pill, not a rounded key. `min(3vmin, 14px)` keeps the intended shape at
-///   every size.
-///
-/// **Transparency is the root's alpha and nothing else.** The window is always
-/// created transparent with a premultiplied composite mode, so the bottom-most
-/// fill decides what the compositor sees: `.safe` at `0.62` lets a blurring
-/// compositor read the wallpaper through the whole app. There is deliberately no
-/// API for it — a flag would be a second source of truth about the same pixel.
-/// The panels and keys are translucent too, a little less so as they go up, so
-/// the blur stays visible through them while the text stays fully opaque and
-/// legible.
-///
-/// `env(safe-area-inset-*)` on `.safe` is this app's whole awareness of the
-/// device it is on: a notched phone pads itself, a desktop window does not.
-///
-/// The body is capped and centred rather than stretched. A tiling compositor
-/// hands this window whatever it likes — the owner's first run of it got roughly
-/// 1200×1500 — and a keypad that grew to fill that has 440px keys, which reads as
-/// a bug rather than as a design. Capped, it is a calculator sitting in the
-/// middle of the screen; on a phone-sized window the cap is never reached and it
-/// fills as before.
+#[doc = include_str!("calculator.doc/CSS.md")]
 const CSS: &str = "\
 .safe       { background-color: rgba(13, 16, 23, 0.62); width: 100%; height: 100%; \
               display: flex; flex-direction: column; \
@@ -163,8 +70,7 @@ const CSS: &str = "\
 .eq:active  { background-color: rgba(91, 134, 232, 0.97); }\n\
 ";
 
-/// What a key does. The label and the command name live beside it in [`KEYS`],
-/// so adding a key is one row of that table and one arm of [`Calc::press`].
+#[doc = include_str!("calculator.doc/Key.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Key {
     Digit(u8),
@@ -180,7 +86,7 @@ enum Key {
 }
 
 impl Key {
-    /// The operator's symbol as the tape writes it.
+    #[doc = include_str!("calculator.doc/symbol.md")]
     const fn symbol(self) -> &'static str {
         match self {
             Self::Add => "+",
@@ -191,11 +97,7 @@ impl Key {
         }
     }
 
-    /// Applies this operator to `a` and `b`.
-    ///
-    /// Division by zero yields infinity rather than an error state: this is a
-    /// demo of input handling, and an arithmetic error model would be the larger
-    /// half of it.
+    #[doc = include_str!("calculator.doc/apply.md")]
     fn apply(self, a: f64, b: f64) -> f64 {
         match self {
             Self::Add => a + b,
@@ -207,7 +109,7 @@ impl Key {
     }
 }
 
-/// Every key: `(command name, label, key, extra classes)`.
+#[doc = include_str!("calculator.doc/KEYS.md")]
 const KEYS: &[(&str, &str, Key, &str)] = &[
     ("back", "⌫", Key::Back, "fn"),
     ("sign", "±", Key::Sign, "fn"),
@@ -230,7 +132,7 @@ const KEYS: &[(&str, &str, Key, &str)] = &[
     ("eq", "=", Key::Equals, "eq"),
 ];
 
-/// The keypad, four keys per row — except the last, where `0` is double width.
+#[doc = include_str!("calculator.doc/ROWS.md")]
 const ROWS: &[&[usize]] = &[
     &[0, 1, 2, 3],
     &[4, 5, 6, 7],
@@ -239,23 +141,20 @@ const ROWS: &[&[usize]] = &[
     &[16, 17, 18],
 ];
 
-/// The most digits an entry accepts, so a thumb resting on `7` cannot grow the
-/// string without bound.
+#[doc = include_str!("calculator.doc/MAX_DIGITS.md")]
 const MAX_DIGITS: usize = 12;
 
-/// The calculator's whole state.
+#[doc = include_str!("calculator.doc/Calc.md")]
 struct Calc {
-    /// The number being typed, as text — kept as text so `1.` and `1.0` survive
-    /// while the user is still typing them.
+    #[doc = include_str!("calculator.doc/entry.md")]
     entry: String,
-    /// The left-hand side of a pending operation.
+    #[doc = include_str!("calculator.doc/acc.md")]
     acc: Option<f64>,
-    /// The pending operator.
+    #[doc = include_str!("calculator.doc/op.md")]
     op: Option<Key>,
-    /// Whether the next digit starts a fresh entry (the previous one was a
-    /// result, or an operator was just pressed).
+    #[doc = include_str!("calculator.doc/fresh.md")]
     fresh: bool,
-    /// The history, newest first — so the interesting end needs no scrolling.
+    #[doc = include_str!("calculator.doc/tape.md")]
     tape: Vec<String>,
 }
 
@@ -270,13 +169,12 @@ impl Calc {
         }
     }
 
-    /// The entry as a number.
+    #[doc = include_str!("calculator.doc/value.md")]
     fn value(&self) -> f64 {
         self.entry.parse().unwrap_or(0.0)
     }
 
-    /// What the tape and the display show for `value` — trimmed of the trailing
-    /// zeroes a `f64` format leaves behind.
+    #[doc = include_str!("calculator.doc/format.md")]
     fn format(value: f64) -> String {
         if value.is_finite() && value.fract() == 0.0 && value.abs() < 1e15 {
             format!("{value:.0}")
@@ -287,8 +185,7 @@ impl Calc {
         }
     }
 
-    /// The line under the display: the pending left-hand side and operator, if
-    /// any. Empty when nothing is pending.
+    #[doc = include_str!("calculator.doc/pending.md")]
     fn pending(&self) -> String {
         match (self.acc, self.op) {
             (Some(acc), Some(op)) => format!("{} {}", Self::format(acc), op.symbol()),
@@ -296,7 +193,7 @@ impl Calc {
         }
     }
 
-    /// Handles one key.
+    #[doc = include_str!("calculator.doc/press.md")]
     fn press(&mut self, key: Key) {
         match key {
             Key::Digit(d) => {
@@ -373,8 +270,7 @@ impl Calc {
         }
     }
 
-    /// Folds the pending operation into the accumulator, so chaining
-    /// `2 + 3 + 4` shows `5` when the second `+` is pressed.
+    #[doc = include_str!("calculator.doc/fold.md")]
     fn fold(&mut self) {
         let value = self.value();
         self.acc = Some(match (self.acc, self.op) {
@@ -384,7 +280,7 @@ impl Calc {
         });
     }
 
-    /// Held `⌫`: back to nothing at all.
+    #[doc = include_str!("calculator.doc/clear_all.md")]
     fn clear_all(&mut self) {
         "0".clone_into(&mut self.entry);
         self.acc = None;
@@ -392,7 +288,7 @@ impl Calc {
         self.fresh = true;
     }
 
-    /// A tapped tape line recalls its result as the current entry.
+    #[doc = include_str!("calculator.doc/recall.md")]
     fn recall(&mut self, index: usize) {
         let Some(line) = self.tape.get(index) else {
             return;
@@ -403,7 +299,7 @@ impl Calc {
         }
     }
 
-    /// A held tape line is deleted.
+    #[doc = include_str!("calculator.doc/forget.md")]
     fn forget(&mut self, index: usize) {
         if index < self.tape.len() {
             self.tape.remove(index);
@@ -447,12 +343,7 @@ fn main() -> Result<(), obscur_kit::AppError> {
     app.run()
 }
 
-/// The whole screen: tape, display, keypad — every band sized by `flex`, so the
-/// window's size is the only thing that decides how big anything is.
-///
-/// The outer `.safe` wrapper carries nothing but the `env()` padding. Keeping it
-/// separate from `.app`'s own 12px means the two do not have to be added
-/// together in CSS, which `padding` has no way to express.
+#[doc = include_str!("calculator.doc/build_view.md")]
 fn build_view(state: &Calc) -> View {
     let app = Container::new()
         .child(tape(state))
@@ -463,7 +354,7 @@ fn build_view(state: &Calc) -> View {
     View::single(Container::new().child(app).into_view_node().class("safe"))
 }
 
-/// The five key rows, in their own column so the keypad scales as one block.
+#[doc = include_str!("calculator.doc/keypad.md")]
 fn keypad() -> ViewNode {
     Container::new()
         .with_children(ROWS.iter().map(|row| key_row(row)).collect::<Vec<_>>())
@@ -471,8 +362,7 @@ fn keypad() -> ViewNode {
         .class("pad")
 }
 
-/// The scrolling history. Empty, it says so; otherwise it carries the virtual
-/// list marker and the runtime realizes only the rows that fit.
+#[doc = include_str!("calculator.doc/tape_2.md")]
 fn tape(state: &Calc) -> ViewNode {
     let child = if state.tape.is_empty() {
         Container::new()
@@ -489,8 +379,7 @@ fn tape(state: &Calc) -> ViewNode {
     Container::new().child(child).into_view_node().class("tape")
 }
 
-/// One realized tape row. Built per visible index by the runtime, never for the
-/// whole history.
+#[doc = include_str!("calculator.doc/tape_row.md")]
 fn tape_row(state: &Calc, index: usize) -> ViewNode {
     let text = state.tape.get(index).cloned().unwrap_or_default();
     Container::new()
@@ -499,12 +388,7 @@ fn tape_row(state: &Calc, index: usize) -> ViewNode {
         .class("tape-row")
 }
 
-/// The current entry, with the pending left-hand side above it.
-///
-/// Each line is a flex row that justifies its text to the end. `text-align: right`
-/// would do the same thing now that alignment resolves against the containing
-/// block rather than the shrink-wrapped text box; flex justification is kept
-/// because it also decides the vertical centring these rows need.
+#[doc = include_str!("calculator.doc/display.md")]
 fn display(state: &Calc) -> ViewNode {
     let line = |class: &str, row: &str, text: String| {
         Container::new()
@@ -519,7 +403,7 @@ fn display(state: &Calc) -> ViewNode {
         .class("display")
 }
 
-/// One row of the keypad.
+#[doc = include_str!("calculator.doc/key_row.md")]
 fn key_row(row: &[usize]) -> ViewNode {
     Container::new()
         .with_children(row.iter().map(|&i| key(i)).collect::<Vec<_>>())
@@ -527,11 +411,7 @@ fn key_row(row: &[usize]) -> ViewNode {
         .class("krow")
 }
 
-/// One key: a real [`Button`] bound to its command, with the sizing class on the
-/// button's own node so the tap resolves to it.
-///
-/// `⌫` additionally binds `EVENT_LONG_PRESS`, which is what makes a held key a
-/// different action rather than a slow tap.
+#[doc = include_str!("calculator.doc/key.md")]
 fn key(index: usize) -> ViewNode {
     let (name, label, key, extra) = KEYS[index];
     let node = Button::new(label, InternedSymbol::named(name))

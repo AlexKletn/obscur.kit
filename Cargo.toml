@@ -48,6 +48,7 @@ obscur-system = { path = "crates/domain/obscur-system" }
 # application
 obscur-runtime = { path = "crates/application/obscur-runtime" }
 obscur-headless = { path = "crates/application/obscur-headless" }
+obscur-testkit = { path = "crates/application/obscur-testkit" }
 # components
 obscur-theme-system = { path = "crates/components/obscur-theme-system" }
 obscur-primitives = { path = "crates/components/obscur-primitives" }

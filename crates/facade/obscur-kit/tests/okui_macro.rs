@@ -1,14 +1,4 @@
-//! End-to-end proof that the spec's §2.8 **primary** authoring surface — the
-//! `okui!` proc-macro — exists, expands, and compiles to ordinary code.
-//!
-//! The macro is the point at which "`.okui` compiles to ordinary Rust, not a
-//! runtime" has to hold for the *inline* path: `okui!` parses the TSX-like DSL,
-//! lowers it to UI IR **while the macro runs**, and emits the `View`-building
-//! Rust that `ViewCodegen` produces. Nothing here interprets an IR document at
-//! runtime — the assertions below inspect a plain `View`.
-//!
-//! These tests are the call site the audit found missing: previously
-//! `DslMacro::expand` was solid logic that no macro invoked.
+#![doc = include_str!("okui_macro.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::identity::{ComponentId, InternedSymbol};
@@ -17,21 +7,19 @@ use obscur_kit::ui_macros::okui;
 use obscur_kit::view::view::{AUTOMATION_ID, TEST_ID, View, ViewNode, ViewValue};
 use obscur_kit::widgets::button::Button;
 
-/// The `View`'s single root node.
+#[doc = include_str!("okui_macro.doc/root.md")]
 fn root(view: &View) -> &ViewNode {
     let nodes = view.root().nodes();
     assert_eq!(nodes.len(), 1, "expected exactly one root node");
     &nodes[0]
 }
 
-/// The named property's value on `node`.
+#[doc = include_str!("okui_macro.doc/prop.md")]
 fn prop<'a>(node: &'a ViewNode, name: &str) -> Option<&'a ViewValue> {
     by_symbol(node, obscur_kit::ui_ir::name_binding::attr_symbol(name))
 }
 
-/// The value `node` carries under `symbol`, asked for by handle rather than by
-/// spelling — the only way to tell a *reserved* binding from a hashed one, since
-/// both are just `InternedSymbol`s once a `View` exists.
+#[doc = include_str!("okui_macro.doc/by_symbol.md")]
 fn by_symbol(node: &ViewNode, symbol: InternedSymbol) -> Option<&ViewValue> {
     let ViewNode::Element { props, .. } = node else {
         return None;
@@ -42,9 +30,7 @@ fn by_symbol(node: &ViewNode, symbol: InternedSymbol) -> Option<&ViewValue> {
         .map(obscur_kit::view::view::ViewProperty::value)
 }
 
-/// Every property on `node` as (raw symbol, value), in authored order — the whole
-/// of what a front end decided about an element's attributes, comparable across
-/// the two front ends.
+#[doc = include_str!("okui_macro.doc/props_of.md")]
 fn props_of(node: &ViewNode) -> Vec<(u32, ViewValue)> {
     let ViewNode::Element { props, .. } = node else {
         panic!("expected an element node");

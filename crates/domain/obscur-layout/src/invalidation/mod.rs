@@ -1,4 +1,4 @@
-//! Invalidation module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod cache_entry;
 pub use cache_entry::CacheEntry;
 mod layout_cache;

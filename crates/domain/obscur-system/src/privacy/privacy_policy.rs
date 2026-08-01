@@ -1,35 +1,20 @@
-//! How [`PrivacyClass`] tags are enforced across capture and diagnostics
-//! (spec §6.17, §7.12).
-//!
-//! [`PrivacyPolicy`] is the safe-by-default configuration the runtime consults:
-//! sensitive data is redacted from diagnostic snapshots and capture-protected
-//! data is excluded from screen capture unless a caller explicitly opts out
-//! (spec §7.12). It answers two questions — should this class be redacted, and
-//! should it be excluded from capture — given a [`PrivacyClass`].
+#![doc = include_str!("privacy_policy.doc/_module.md")]
 
 use crate::privacy::PrivacyClass;
 
-/// How privacy classes are enforced across diagnostics and capture (spec §7.12).
-///
-/// Safe by default: [`new`](Self::new) / [`Default`] redact sensitive data from
-/// diagnostic snapshots and honour capture protection. Callers must explicitly
-/// disable a guard to turn it off.
+#[doc = include_str!("privacy_policy.doc/PrivacyPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrivacyPolicy {
-    /// Redact [`PrivacyClass::Sensitive`] and above from diagnostic snapshots
-    /// (spec §7.12).
+    #[doc = include_str!("privacy_policy.doc/redact_diagnostics.md")]
     redact_diagnostics: bool,
-    /// Honour [`PrivacyClass::CaptureProtected`] / [`PrivacyClass::Secret`] in
-    /// screen capture and sharing (spec §6.17).
+    #[doc = include_str!("privacy_policy.doc/enforce_capture_protection.md")]
     enforce_capture_protection: bool,
-    /// Hide protected windows from the task switcher and previews (spec §6.17).
+    #[doc = include_str!("privacy_policy.doc/hide_from_task_switcher.md")]
     hide_from_task_switcher: bool,
 }
 
 impl PrivacyPolicy {
-    /// Creates the safe-by-default policy: diagnostics are redacted and capture
-    /// protection is enforced, but windows are not hidden from the task switcher
-    /// (spec §7.12).
+    #[doc = include_str!("privacy_policy.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -39,46 +24,40 @@ impl PrivacyPolicy {
         }
     }
 
-    /// Sets whether sensitive data is redacted from diagnostic snapshots
-    /// (spec §7.12).
+    #[doc = include_str!("privacy_policy.doc/redact_diagnostics_2.md")]
     #[must_use]
     pub const fn redact_diagnostics(mut self, redact: bool) -> Self {
         self.redact_diagnostics = redact;
         self
     }
 
-    /// Sets whether capture protection is honoured in screen capture and sharing
-    /// (spec §6.17).
+    #[doc = include_str!("privacy_policy.doc/enforce_capture_protection_2.md")]
     #[must_use]
     pub const fn enforce_capture_protection(mut self, enforce: bool) -> Self {
         self.enforce_capture_protection = enforce;
         self
     }
 
-    /// Sets whether protected windows are hidden from the task switcher and
-    /// previews (spec §6.17).
+    #[doc = include_str!("privacy_policy.doc/hide_from_task_switcher_2.md")]
     #[must_use]
     pub const fn hide_from_task_switcher(mut self, hide: bool) -> Self {
         self.hide_from_task_switcher = hide;
         self
     }
 
-    /// Returns whether data of `class` must be redacted from a diagnostic
-    /// snapshot under this policy (spec §7.12).
+    #[doc = include_str!("privacy_policy.doc/should_redact.md")]
     #[must_use]
     pub const fn should_redact(&self, class: PrivacyClass) -> bool {
         self.redact_diagnostics && class.redact_in_diagnostics()
     }
 
-    /// Returns whether data of `class` must be excluded from screen capture and
-    /// sharing under this policy (spec §6.17).
+    #[doc = include_str!("privacy_policy.doc/should_exclude_from_capture.md")]
     #[must_use]
     pub const fn should_exclude_from_capture(&self, class: PrivacyClass) -> bool {
         self.enforce_capture_protection && class.exclude_from_capture()
     }
 
-    /// Returns whether protected windows are hidden from the task switcher and
-    /// previews (spec §6.17).
+    #[doc = include_str!("privacy_policy.doc/hides_from_task_switcher.md")]
     #[must_use]
     pub const fn hides_from_task_switcher(&self) -> bool {
         self.hide_from_task_switcher

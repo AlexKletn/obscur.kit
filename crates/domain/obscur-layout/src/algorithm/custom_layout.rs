@@ -1,4 +1,4 @@
-//! `CustomLayout`: the labeled extension-point formatting context.
+#![doc = include_str!("custom_layout.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
@@ -6,47 +6,21 @@ use crate::model::{LayoutBox, LayoutStyle};
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
-/// The custom / extension-point layout (spec §4.1, §4.2).
-///
-/// A real custom formatting context is user code: any type implementing
-/// [`LayoutAlgorithm`] *is* a custom layout. `CustomLayout` is not that
-/// mechanism — it is a **labeled fallback**: a named passthrough that lays its
-/// children out in a single vertical stack, serving as a sane default and a
-/// reference implementation for the extension point.
-///
-/// # Name
-///
-/// The `name` is a diagnostic identifier for the custom context (e.g. shown in
-/// layout traces); it does not affect the geometry.
-///
-/// # Algorithm (vertical-stack default)
-///
-/// Behaves like a minimal flow: each child is measured under the content width
-/// (`constraints.max.width` minus horizontal `padding`) with its natural height,
-/// stacked top-to-bottom starting at the content origin, and separated from the
-/// previous child by `style.gap`. The node size is the content width plus
-/// padding by the accumulated child height plus padding, clamped into
-/// `constraints`.
-///
-/// # Production custom layouts
-///
-/// Production code implements [`LayoutAlgorithm`] directly for its own type
-/// rather than configuring this one; `CustomLayout` exists so the extension
-/// point has a concrete, labeled default with defined behavior.
+#[doc = include_str!("custom_layout.doc/CustomLayout.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomLayout {
-    /// Diagnostic identifier for this custom context.
+    #[doc = include_str!("custom_layout.doc/name.md")]
     name: Box<str>,
 }
 
 impl CustomLayout {
-    /// Creates a custom layout labeled `name`.
+    #[doc = include_str!("custom_layout.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self { name: name.into() }
     }
 
-    /// The diagnostic name of this custom context.
+    #[doc = include_str!("custom_layout.doc/name_2.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -54,7 +28,7 @@ impl CustomLayout {
 }
 
 impl Default for CustomLayout {
-    /// A custom layout labeled `"custom"`.
+    #[doc = include_str!("custom_layout.doc/default.md")]
     fn default() -> Self {
         Self::new("custom")
     }

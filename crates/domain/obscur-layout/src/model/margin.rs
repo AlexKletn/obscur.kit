@@ -1,66 +1,27 @@
-//! One margin edge, which is a length or `auto`.
+#![doc = include_str!("margin.doc/_module.md")]
 
-/// A single margin edge (spec §4.2, CSS 2.1 §8.3).
-///
-/// A margin is a length in logical pixels or the `auto` keyword — and `auto` is
-/// not a number that can be substituted early: it means *"take what is left
-/// over"*, and how much that is depends on the box's resolved size, which is not
-/// known until it has been measured. `margin: 0 auto` centring is exactly that
-/// rule doing its job.
-///
-/// # Why this is not `Dimension`
-///
-/// [`Dimension`](super::Dimension) already models `Auto` / `Px` / `Percent`, and
-/// reusing it here would be a smaller diff. It would also let a caller *say*
-/// `margin-left: max-content`, which is not a thing: since intrinsic sizing landed,
-/// `Dimension` carries `MinContent` / `MaxContent` / `FitContent`, and a type that
-/// can express nonsense pushes the job of rejecting it onto every reader. This
-/// enum says exactly what a margin can be, so there is nothing to reject.
+#[doc = include_str!("margin.doc/Margin.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Margin {
-    /// An absolute margin, in logical pixels. May be negative.
+    #[doc = include_str!("margin.doc/Px.md")]
     Px(f32),
-    /// A percentage of the containing block's **inline** size, as a percentage
-    /// value (`50.0` for `50%`).
-    ///
-    /// The inline size for *every* edge, including `margin-top` and
-    /// `margin-bottom` — CSS 2.1 §8.3 resolves all four against the containing
-    /// block's *width*, not each edge's own axis. It reads like a bug and is not:
-    /// a block's height often depends on its content, so resolving a block-axis
-    /// percentage against it would be circular. One axis is chosen to break the
-    /// cycle, and CSS chose the inline one.
+    #[doc = include_str!("margin.doc/Percent.md")]
     Percent(f32),
-    /// The `auto` keyword: this edge absorbs leftover space in its axis.
+    #[doc = include_str!("margin.doc/Auto.md")]
     Auto,
 }
 
 impl Margin {
-    /// A zero margin — the initial value of every margin edge.
+    #[doc = include_str!("margin.doc/ZERO.md")]
     pub const ZERO: Self = Self::Px(0.0);
 
-    /// Returns `true` when this edge is `auto`.
+    #[doc = include_str!("margin.doc/is_auto.md")]
     #[must_use]
     pub const fn is_auto(self) -> bool {
         matches!(self, Self::Auto)
     }
 
-    /// This edge as a plain length, against a containing-block inline size of
-    /// `basis`.
-    ///
-    /// * `Px` is already a length.
-    /// * `Percent` is `basis × percent / 100`. An `basis` that is not finite —
-    ///   which is what a `max-content` probe offers — yields `0`: CSS Sizing 3
-    ///   §5.2 treats a percentage margin as zero when computing an intrinsic
-    ///   contribution, for the same reason it does for a percentage size (there is
-    ///   nothing definite to be a percentage *of*). Passing `0.0` as the basis is
-    ///   the honest way for a caller with no containing block to say so.
-    /// * `Auto` is `0` — its used value whenever there is no leftover space to
-    ///   absorb, which CSS 2.1 §10.3.3 makes the common case: a `width: auto` block
-    ///   already fills its container.
-    ///
-    /// Use this wherever an edge is *consumed* as a length; use
-    /// [`is_auto`](Self::is_auto) where the leftover actually gets distributed,
-    /// because this collapses that question to `0`.
+    #[doc = include_str!("margin.doc/resolve.md")]
     #[must_use]
     pub fn resolve(self, basis: f32) -> f32 {
         match self {

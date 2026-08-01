@@ -1,4 +1,4 @@
-//! `Server`: the JSON-RPC 2.0 dispatch loop over the LSP base protocol.
+#![doc = include_str!("server.doc/_module.md")]
 
 use std::io::{self, BufRead, Write};
 
@@ -10,29 +10,15 @@ use crate::document::LineIndex;
 use crate::json::{JsonValue, parse};
 use crate::transport::{read_message, write_message};
 
-/// JSON-RPC "method not found" error code.
+#[doc = include_str!("server.doc/METHOD_NOT_FOUND.md")]
 const METHOD_NOT_FOUND: i64 = -32601;
 
-/// Converts a `usize` byte offset to `u32`, saturating at [`u32::MAX`].
+#[doc = include_str!("server.doc/to_u32.md")]
 fn to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-/// A JSON-RPC/stdio language server for `.okui`.
-///
-/// The server owns an [`Analyzer`] (which owns the open-document
-/// [`DocumentStore`](crate::DocumentStore)) and drives it from LSP messages:
-/// `textDocument/didOpen`/`didChange`/`didClose` mutate the store and publish
-/// diagnostics; `textDocument/documentSymbol` and `textDocument/hover` are
-/// answered from the analyzer. All JSON is hand-rolled (see [`crate::json`]) —
-/// no `serde`.
-///
-/// # Position units
-///
-/// The analyzer works in UTF-8 byte columns; LSP clients speak UTF-16 code-unit
-/// columns. Incoming positions are converted to byte columns and outgoing ranges
-/// back to UTF-16 against the document's current text, so coordinates are exact
-/// even for non-ASCII source.
+#[doc = include_str!("server.doc/Server.md")]
 #[derive(Debug, Clone, Default)]
 pub struct Server {
     analyzer: Analyzer,
@@ -40,30 +26,20 @@ pub struct Server {
 }
 
 impl Server {
-    /// Creates a server with an empty document store and the built-in
-    /// primitive/widget contracts registered (whatever [`Analyzer::new`] seeds).
+    #[doc = include_str!("server.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the contract registry the analyzer's compiler consults (fluent),
-    /// **replacing** the built-in set [`new`](Self::new) seeded — see
-    /// [`Analyzer::with_registry`].
+    #[doc = include_str!("server.doc/with_registry.md")]
     #[must_use]
     pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
         self.analyzer = Analyzer::new().with_registry(registry);
         self
     }
 
-    /// Runs the message loop until an `exit` notification or end of stream.
-    ///
-    /// Reads `Content-Length`-framed JSON-RPC messages from `reader`, dispatches
-    /// each, and writes framed responses/notifications to `writer`.
-    ///
-    /// # Errors
-    ///
-    /// Propagates I/O errors from the transport.
+    #[doc = include_str!("server.doc/run.md")]
     pub fn run<R: BufRead, W: Write>(&mut self, reader: &mut R, writer: &mut W) -> io::Result<()> {
         while let Some(body) = read_message(reader)? {
             let Ok(message) = parse(&body) else {
@@ -93,8 +69,7 @@ impl Server {
         Ok(())
     }
 
-    /// Handles a request (a message carrying an `id`), returning its `result` or
-    /// a `(code, message)` JSON-RPC error.
+    #[doc = include_str!("server.doc/handle_request.md")]
     fn handle_request(
         &mut self,
         method: &str,
@@ -112,8 +87,7 @@ impl Server {
         }
     }
 
-    /// Handles a notification, returning any notifications to send back (e.g.
-    /// `textDocument/publishDiagnostics`).
+    #[doc = include_str!("server.doc/handle_notification.md")]
     fn handle_notification(&mut self, method: &str, message: &JsonValue) -> Vec<JsonValue> {
         match method {
             "textDocument/didOpen" => self.did_open(message),
@@ -234,8 +208,7 @@ impl Server {
         }
     }
 
-    /// Builds a `textDocument/publishDiagnostics` notification for `uri` from the
-    /// current analyzer state (empty diagnostics if the document is closed).
+    #[doc = include_str!("server.doc/publish_diagnostics.md")]
     fn publish_diagnostics(&self, uri: &str) -> JsonValue {
         let document = self.analyzer.store().get(uri);
         let text = document.map(|d| d.text.clone()).unwrap_or_default();
@@ -256,7 +229,7 @@ impl Server {
         notification("textDocument/publishDiagnostics", JsonValue::Object(params))
     }
 
-    /// Extracts `params.textDocument.uri` and clones the document's current text.
+    #[doc = include_str!("server.doc/uri_and_text.md")]
     fn uri_and_text(&self, message: &JsonValue) -> Option<(String, String)> {
         let uri = message
             .get("params")
@@ -273,7 +246,7 @@ impl Server {
     }
 }
 
-/// The `initialize` result: advertised server capabilities.
+#[doc = include_str!("server.doc/server_capabilities.md")]
 fn server_capabilities() -> JsonValue {
     JsonValue::object([
         (
@@ -295,7 +268,7 @@ fn server_capabilities() -> JsonValue {
     ])
 }
 
-/// Builds a JSON-RPC success response echoing `id`.
+#[doc = include_str!("server.doc/response.md")]
 fn response(id: JsonValue, result: JsonValue) -> JsonValue {
     JsonValue::object([
         ("jsonrpc", JsonValue::string("2.0")),
@@ -304,7 +277,7 @@ fn response(id: JsonValue, result: JsonValue) -> JsonValue {
     ])
 }
 
-/// Builds a JSON-RPC error response echoing `id`.
+#[doc = include_str!("server.doc/error_response.md")]
 fn error_response(id: JsonValue, code: i64, message: &str) -> JsonValue {
     JsonValue::object([
         ("jsonrpc", JsonValue::string("2.0")),
@@ -319,7 +292,7 @@ fn error_response(id: JsonValue, code: i64, message: &str) -> JsonValue {
     ])
 }
 
-/// Builds a JSON-RPC notification.
+#[doc = include_str!("server.doc/notification.md")]
 fn notification(method: &str, params: JsonValue) -> JsonValue {
     JsonValue::object([
         ("jsonrpc", JsonValue::string("2.0")),
@@ -328,7 +301,7 @@ fn notification(method: &str, params: JsonValue) -> JsonValue {
     ])
 }
 
-/// Serializes an [`LspDiagnostic`] into an LSP `Diagnostic` object.
+#[doc = include_str!("server.doc/diagnostic_to_json.md")]
 fn diagnostic_to_json(text: &str, index: &LineIndex, diagnostic: &LspDiagnostic) -> JsonValue {
     JsonValue::object([
         ("range", range_to_json(text, index, diagnostic.range)),
@@ -341,7 +314,7 @@ fn diagnostic_to_json(text: &str, index: &LineIndex, diagnostic: &LspDiagnostic)
     ])
 }
 
-/// Serializes a [`DocumentSymbol`] into an LSP `DocumentSymbol` object.
+#[doc = include_str!("server.doc/symbol_to_json.md")]
 fn symbol_to_json(text: &str, index: &LineIndex, symbol: &DocumentSymbol) -> JsonValue {
     let range = range_to_json(text, index, symbol.range);
     JsonValue::object([
@@ -366,8 +339,7 @@ fn symbol_to_json(text: &str, index: &LineIndex, symbol: &DocumentSymbol) -> Jso
     ])
 }
 
-/// Maps an okui [`SymbolKind`] to an LSP `SymbolKind` numeric code
-/// (`Class = 5`, `Field = 8`).
+#[doc = include_str!("server.doc/lsp_symbol_kind.md")]
 fn lsp_symbol_kind(kind: SymbolKind) -> u8 {
     match kind {
         SymbolKind::Component => 5,
@@ -375,8 +347,7 @@ fn lsp_symbol_kind(kind: SymbolKind) -> u8 {
     }
 }
 
-/// Serializes an analyzer [`Range`] into an LSP `Range`, re-encoding byte columns
-/// to UTF-16 code units.
+#[doc = include_str!("server.doc/range_to_json.md")]
 fn range_to_json(text: &str, index: &LineIndex, range: Range) -> JsonValue {
     JsonValue::object([
         ("start", position_to_json(text, index, range.start)),
@@ -384,8 +355,7 @@ fn range_to_json(text: &str, index: &LineIndex, range: Range) -> JsonValue {
     ])
 }
 
-/// Serializes an analyzer [`Position`] (byte column) into an LSP `Position`
-/// (UTF-16 code-unit column).
+#[doc = include_str!("server.doc/position_to_json.md")]
 fn position_to_json(text: &str, index: &LineIndex, position: Position) -> JsonValue {
     let (line, character) = analyzer_to_lsp_position(text, index, position);
     JsonValue::object([
@@ -394,7 +364,7 @@ fn position_to_json(text: &str, index: &LineIndex, position: Position) -> JsonVa
     ])
 }
 
-/// Converts an analyzer byte-column [`Position`] to an LSP `(line, utf16_char)`.
+#[doc = include_str!("server.doc/analyzer_to_lsp_position.md")]
 fn analyzer_to_lsp_position(text: &str, index: &LineIndex, position: Position) -> (u32, u32) {
     let line_start = index.position_to_offset(Position::new(position.line, 0));
     let target = line_start + position.character as usize;
@@ -410,8 +380,7 @@ fn analyzer_to_lsp_position(text: &str, index: &LineIndex, position: Position) -
     (position.line, utf16)
 }
 
-/// Converts an LSP `(line, utf16_char)` position to an analyzer byte-column
-/// [`Position`] via the document's [`LineIndex`].
+#[doc = include_str!("server.doc/lsp_to_analyzer_position.md")]
 fn lsp_to_analyzer_position(text: &str, index: &LineIndex, line: u32, character: u32) -> Position {
     let line_start = index.position_to_offset(Position::new(line, 0));
     let mut byte = line_start;

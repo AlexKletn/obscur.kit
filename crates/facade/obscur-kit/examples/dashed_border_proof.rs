@@ -1,17 +1,4 @@
-//! **Proof: `border-style: dashed` renders as REAL dashes (headless CPU).**
-//!
-//! Builds a display list of two boxes with a `2px dashed #2b2a27` border — one
-//! square, one rounded — exactly as the scene coordinator emits them: a single
-//! `DrawPath` that STROKES the border-box outline (inset by `width/2`) with a
-//! `Stroke::with_dash([k, k], 0.0)` pattern. It rasterizes through the software
-//! [`CpuRenderer`] (no GPU) and writes `target/dashed_border_proof.png`.
-//!
-//! Before writing, it scans the top border scanline of the square box and asserts
-//! the stroke actually alternates painted dashes and empty gaps (not a solid
-//! line), printing the run summary — a machine check that the dash took effect.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example dashed_border_proof --features render-cpu`
+#![doc = include_str!("dashed_border_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -27,9 +14,9 @@ use obscur_kit::scene::paint::{Brush, Stroke};
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// The output image extent.
+#[doc = include_str!("dashed_border_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 200.0);
-/// Border width in logical px (the CSS `2px`).
+#[doc = include_str!("dashed_border_proof.doc/BORDER.md")]
 const BORDER: f32 = 2.0;
 
 fn main() {
@@ -84,15 +71,13 @@ fn main() {
     );
 }
 
-/// The dashed border stroke: solid ink brush, `BORDER` wide, dashed
-/// `[3·w on, 3·w off]` — the same pattern the coordinator uses.
+#[doc = include_str!("dashed_border_proof.doc/border_stroke.md")]
 fn border_stroke(ink: Color) -> Stroke {
     let dash = 3.0 * BORDER;
     Stroke::new(Brush::solid(ink), BORDER).with_dash([dash, dash], 0.0)
 }
 
-/// Mirrors the coordinator's `dashed_border_path`: the border box inset by
-/// `width/2` (rounded when `has_radius`), so a centered stroke fills the band.
+#[doc = include_str!("dashed_border_proof.doc/dashed_border_path.md")]
 fn dashed_border_path(bounds: Rect, radii: CornerRadii, width: f32, has_radius: bool) -> Path {
     let half = width / 2.0;
     let center = Rect::new(
@@ -109,7 +94,7 @@ fn dashed_border_path(bounds: Rect, radii: CornerRadii, width: f32, has_radius: 
     }
 }
 
-/// Renders `list` through the software renderer into a pixmap at [`VIEWPORT`].
+#[doc = include_str!("dashed_border_proof.doc/render.md")]
 fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -122,8 +107,7 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Scans row `y` across the square's top edge and asserts the ink alternates
-/// between painted dashes and empty gaps (proving the dash, not a solid line).
+#[doc = include_str!("dashed_border_proof.doc/verify_dashes.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn verify_dashes(pixmap: &tiny_skia::Pixmap, y: u32, box_rect: Rect) {
     let x0 = box_rect.origin.x as u32;
@@ -148,7 +132,7 @@ fn verify_dashes(pixmap: &tiny_skia::Pixmap, y: u32, box_rect: Rect) {
     println!("[verify] OK — the border is dashed, not solid");
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("dashed_border_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

@@ -1,37 +1,22 @@
-//! The [`WinitBackendError`] failure type for the winit window backend
-//! (spec §6.1 windowing; §2.7 "Реализует `WindowBackend` и преобразует native
-//! events в доменные события").
+#![doc = include_str!("winit_backend_error.doc/_module.md")]
 
 use obscur_windowing::port::WindowError;
 
-/// A failure raised inside the winit window backend (spec §6.1).
-///
-/// This is the adapter-local error type for the platform boundary: it names the
-/// concrete winit-side failures (event-loop and window construction, a missing
-/// active event loop, and any other backend failure) while carrying only a
-/// human-readable message so it stays `Clone`/`Eq` and free of borrowed winit
-/// state. It is mapped into the domain's [`WindowError`] via
-/// [`WinitBackendError::into_window_error`] before crossing back into the pure
-/// windowing domain (§2.7).
+#[doc = include_str!("winit_backend_error.doc/WinitBackendError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WinitBackendError {
-    /// The winit event loop could not be created; carries the reason.
+    #[doc = include_str!("winit_backend_error.doc/EventLoopCreation.md")]
     EventLoopCreation(Box<str>),
-    /// A platform window could not be created; carries the reason.
+    #[doc = include_str!("winit_backend_error.doc/WindowCreation.md")]
     WindowCreation(Box<str>),
-    /// An operation required an active event loop, but none was available.
+    #[doc = include_str!("winit_backend_error.doc/NoActiveEventLoop.md")]
     NoActiveEventLoop,
-    /// Any other backend-side failure; carries the reason.
+    #[doc = include_str!("winit_backend_error.doc/Backend.md")]
     Backend(Box<str>),
 }
 
 impl WinitBackendError {
-    /// Maps this backend error into the domain's [`WindowError`] (spec §2.7).
-    ///
-    /// Every winit-side failure is a platform failure from the domain's point of
-    /// view, so each variant maps to [`WindowError::BackendFailure`] carrying the
-    /// human-readable reason; [`WinitBackendError::NoActiveEventLoop`] carries the
-    /// fixed message `"no active event loop"`.
+    #[doc = include_str!("winit_backend_error.doc/into_window_error.md")]
     #[must_use]
     pub fn into_window_error(self) -> WindowError {
         match self {

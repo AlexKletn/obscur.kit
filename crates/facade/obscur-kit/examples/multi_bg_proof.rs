@@ -1,29 +1,4 @@
-//! **Proof: multiple `background-image` layers (a comma list) via Vello.**
-//!
-//! Drives the *whole* slice end-to-end: authors one CSS rule whose
-//! `background-image` is a **two-layer** comma list — two crossing
-//! `repeating-linear-gradient()`s — over a solid `background-color`, compiles it
-//! through the real `obscur-css` frontend (which splits the top-level comma into
-//! two layers), runs one frame through [`UiRuntime`] (so the scene coordinator
-//! paints both layers back-to-front over the color fill), and renders it through
-//! headless Vello/wgpu into `target/multi_bg_proof.png`.
-//!
-//! The first layer (default `to bottom`) tiles 1px lines every 24px along the
-//! vertical axis → HORIZONTAL grid lines; the second (`90deg`) tiles the same 1px
-//! lines along the horizontal axis → VERTICAL grid lines. Because the lines sit on
-//! `transparent` gaps, the bottom layer shows through the top layer's gaps, so the
-//! read-back PNG shows a **crossing graph-paper grid** (both line sets), not just
-//! one — the multi-layer proof. On the CPU backend each repeating gradient would
-//! flatten to its first stop per the GPU-class-effect policy; the faithful grid is
-//! the Vello proof.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. With none it prints a diagnostic and exits cleanly
-//! (no panic); it never fabricates a device.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example multi_bg_proof --features render-vello`
+#![doc = include_str!("multi_bg_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -41,13 +16,10 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewProperty, ViewValue};
 
-/// The output image extent (and the box fills it).
+#[doc = include_str!("multi_bg_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(360.0, 360.0);
 
-/// The authored stylesheet: a full-viewport box whose `background-image` is a
-/// TWO-LAYER comma list — two crossing repeating gradients (24px pitch, 1px
-/// lines) — painted over a dark `background-color`. The two layers form a
-/// graph-paper grid.
+#[doc = include_str!("multi_bg_proof.doc/CSS.md")]
 const CSS: &str = r"
 .app {
     display: block;
@@ -122,7 +94,7 @@ fn main() {
     );
 }
 
-/// Builds the single `#app` box view carrying the two-layer `background-image`.
+#[doc = include_str!("multi_bg_proof.doc/build_view.md")]
 fn build_view() -> View {
     let app = Container::new()
         .into_view_node()
@@ -130,15 +102,14 @@ fn build_view() -> View {
     View::single(app)
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("multi_bg_proof.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Acquires a headless wgpu device + queue (no surface), or [`None`] when no
-/// adapter/device is available so the caller exits cleanly instead of panicking.
+#[doc = include_str!("multi_bg_proof.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -150,7 +121,7 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("multi_bg_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

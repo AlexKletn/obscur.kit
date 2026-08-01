@@ -1,53 +1,22 @@
-//! `NameResolver`: resolves the identifiers referenced by a document's
-//! expressions against a [`SymbolTable`] (spec §2.10).
+#![doc = include_str!("name_resolver.doc/_module.md")]
 
 use obscur_okui_syntax::ast::{Document, Element};
 
 use crate::resolution::ResolutionError;
 use crate::symbol::{Symbol, SymbolTable};
 
-/// Resolves the identifiers referenced by the expressions in a [`Document`]
-/// against a [`SymbolTable`] (spec §2.10).
-///
-/// The caller pre-seeds the table with the component's props and state (via
-/// [`SymbolTable::define`]); [`resolve`](Self::resolve) then walks the element
-/// tree, checking that every attribute expression's leading reference resolves
-/// to a defined symbol.
-///
-/// ## What is not a value reference
-///
-/// An `on:<event>` binding is skipped. Its value is a **handler name** that the
-/// lowering hashes into a command symbol, not an expression anything evaluates, so
-/// a symbol table of props and state has no opinion worth reporting about it — see
-/// the note in `resolve_element`. Those names are checked by
-/// [`CommandValidator`](crate::validation::CommandValidator) against the commands
-/// the caller declared (spec §2.13).
-///
-/// ## Scoping conventions
-///
-/// A `<For>` loop opens a child scope for its body and binds two loop-local
-/// symbols — `item` (the current element) and `index` (its position) — so
-/// expressions inside the body may read them (spec §2.11). A `<For>` must carry
-/// a `key` attribute for stable per-item identity; a missing key is reported as
-/// [`ResolutionError::missing_loop_key`]. Conditionals (`<If>`/`<ElseIf>`/
-/// `<Else>`) do not open a new scope — their body resolves in the enclosing
-/// scope.
+#[doc = include_str!("name_resolver.doc/NameResolver.md")]
 #[derive(Debug, Clone, Default)]
 pub struct NameResolver;
 
 impl NameResolver {
-    /// Creates a name resolver.
+    #[doc = include_str!("name_resolver.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Resolves every reference in `document` against `table`, returning the
-    /// accumulated errors (empty when the document is fully resolved).
-    ///
-    /// The table is used as a mutable cursor: loop bodies push and pop child
-    /// scopes as they are entered and left, so on return the cursor is back at
-    /// the scope it started in.
+    #[doc = include_str!("name_resolver.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, document: &Document, table: &mut SymbolTable) -> Vec<ResolutionError> {
         let mut errors = Vec::new();
@@ -57,8 +26,7 @@ impl NameResolver {
         errors
     }
 
-    /// Resolves a single element: checks its attribute references, then recurses
-    /// into its children, opening a loop-local scope for a `<For>`.
+    #[doc = include_str!("name_resolver.doc/resolve_element.md")]
     fn resolve_element(
         &self,
         element: &Element,
@@ -115,8 +83,7 @@ impl NameResolver {
         }
     }
 
-    /// Recurses into the element-shaped content children of `element`; non-element
-    /// children (text, bare expressions) are skipped.
+    #[doc = include_str!("name_resolver.doc/resolve_children.md")]
     fn resolve_children(
         &self,
         element: &Element,
@@ -130,12 +97,7 @@ impl NameResolver {
         }
     }
 
-    /// Extracts the root reference of an expression: its leading identifier.
-    ///
-    /// Leading whitespace is skipped, then characters are taken while they are
-    /// alphanumeric or `_`, stopping at the first `.`, space or operator. Returns
-    /// `None` when the identifier is empty or starts with a digit (so it is not a
-    /// valid reference, e.g. a numeric literal like `42`).
+    #[doc = include_str!("name_resolver.doc/root_reference.md")]
     fn root_reference(expression_text: &str) -> Option<&str> {
         let text = expression_text.trim_start();
         let mut end = 0;

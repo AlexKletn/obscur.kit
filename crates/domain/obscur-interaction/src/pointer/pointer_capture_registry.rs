@@ -1,5 +1,4 @@
-//! The [`PointerCaptureRegistry`] tracking which node captured each pointer
-//! (spec §4.7).
+#![doc = include_str!("pointer_capture_registry.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
@@ -7,19 +6,14 @@ use obscur_identity::NodeId;
 
 use super::{PointerCapture, PointerId};
 
-/// Tracks which node, if any, has captured each pointer (spec §4.7).
-///
-/// A captured pointer routes all its subsequent events to its capturing node
-/// instead of the hit-tested target: capture *overrides* hit-testing. The
-/// registry maps each captured [`PointerId`] to the [`NodeId`] holding it,
-/// backed by a [`BTreeMap`] for deterministic ordering.
+#[doc = include_str!("pointer_capture_registry.doc/PointerCaptureRegistry.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PointerCaptureRegistry {
     captures: BTreeMap<PointerId, NodeId>,
 }
 
 impl PointerCaptureRegistry {
-    /// Creates an empty registry.
+    #[doc = include_str!("pointer_capture_registry.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -27,40 +21,36 @@ impl PointerCaptureRegistry {
         }
     }
 
-    /// Captures `pointer` to `node`, setting or replacing any existing capture.
-    ///
-    /// Returns the node that was previously capturing `pointer`, if any.
+    #[doc = include_str!("pointer_capture_registry.doc/capture.md")]
     pub fn capture(&mut self, pointer: PointerId, node: NodeId) -> Option<NodeId> {
         self.captures.insert(pointer, node)
     }
 
-    /// Releases any capture on `pointer`, returning the node that held it.
+    #[doc = include_str!("pointer_capture_registry.doc/release.md")]
     pub fn release(&mut self, pointer: PointerId) -> Option<NodeId> {
         self.captures.remove(&pointer)
     }
 
-    /// Releases every pointer captured by `node` — for example when the node is
-    /// removed — and returns the number of captures released.
+    #[doc = include_str!("pointer_capture_registry.doc/release_node.md")]
     pub fn release_node(&mut self, node: NodeId) -> usize {
         let before = self.captures.len();
         self.captures.retain(|_, captor| *captor != node);
         before - self.captures.len()
     }
 
-    /// Returns the node capturing `pointer`, if any. A captured pointer routes
-    /// here instead of its hit-tested target.
+    #[doc = include_str!("pointer_capture_registry.doc/target.md")]
     #[must_use]
     pub fn target(&self, pointer: PointerId) -> Option<NodeId> {
         self.captures.get(&pointer).copied()
     }
 
-    /// Returns whether `pointer` is currently captured.
+    #[doc = include_str!("pointer_capture_registry.doc/is_captured.md")]
     #[must_use]
     pub fn is_captured(&self, pointer: PointerId) -> bool {
         self.captures.contains_key(&pointer)
     }
 
-    /// Returns the [`PointerCapture`] binding for `pointer`, if it is captured.
+    #[doc = include_str!("pointer_capture_registry.doc/capture_for.md")]
     #[must_use]
     pub fn capture_for(&self, pointer: PointerId) -> Option<PointerCapture> {
         self.captures
@@ -68,19 +58,19 @@ impl PointerCaptureRegistry {
             .map(|node| PointerCapture::new(pointer, *node))
     }
 
-    /// Returns the number of captured pointers.
+    #[doc = include_str!("pointer_capture_registry.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.captures.len()
     }
 
-    /// Returns whether no pointer is captured.
+    #[doc = include_str!("pointer_capture_registry.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.captures.is_empty()
     }
 
-    /// Releases all captures.
+    #[doc = include_str!("pointer_capture_registry.doc/clear.md")]
     pub fn clear(&mut self) {
         self.captures.clear();
     }

@@ -1,5 +1,4 @@
-//! The [`HitChain`] mapping visual geometry back to the logical tree
-//! (spec §4.7).
+#![doc = include_str!("hit_chain.doc/_module.md")]
 
 use std::slice::Iter;
 
@@ -7,80 +6,73 @@ use obscur_identity::NodeId;
 
 use super::HitTest;
 
-/// The ordered chain of hits from the topmost (target) node down to the root
-/// (spec §4.7).
-///
-/// A hit chain is the result of a hit-test query: it maps a point in visual
-/// geometry back to the logical event tree. Index `0` is the topmost node that
-/// was struck (the event target); the last element is the root. Events
-/// propagate along this chain (capture from root toward target, bubble back).
+#[doc = include_str!("hit_chain.doc/HitChain.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct HitChain {
     hits: Vec<HitTest>,
 }
 
 impl HitChain {
-    /// Creates an empty hit chain.
+    #[doc = include_str!("hit_chain.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { hits: Vec::new() }
     }
 
-    /// Builds a hit chain from an existing sequence of hits, ordered
-    /// topmost-first (index `0`) toward the root (last).
+    #[doc = include_str!("hit_chain.doc/from_hits.md")]
     #[must_use]
     pub fn from_hits(hits: Vec<HitTest>) -> Self {
         Self { hits }
     }
 
-    /// Appends `hit` toward the root end of the chain.
+    #[doc = include_str!("hit_chain.doc/push.md")]
     pub fn push(&mut self, hit: HitTest) {
         self.hits.push(hit);
     }
 
-    /// The topmost hit — the event target — or `None` if the chain is empty.
+    #[doc = include_str!("hit_chain.doc/target.md")]
     #[must_use]
     pub fn target(&self) -> Option<&HitTest> {
         self.hits.first()
     }
 
-    /// The root hit — the deepest ancestor — or `None` if the chain is empty.
+    #[doc = include_str!("hit_chain.doc/root.md")]
     #[must_use]
     pub fn root(&self) -> Option<&HitTest> {
         self.hits.last()
     }
 
-    /// The nodes along the chain, topmost-first through root.
+    #[doc = include_str!("hit_chain.doc/nodes.md")]
     #[must_use]
     pub fn nodes(&self) -> Vec<NodeId> {
         self.hits.iter().map(HitTest::node).collect()
     }
 
-    /// Returns whether `node` appears anywhere in the chain.
+    #[doc = include_str!("hit_chain.doc/contains_node.md")]
     #[must_use]
     pub fn contains_node(&self, node: NodeId) -> bool {
         self.hits.iter().any(|hit| hit.node() == node)
     }
 
-    /// The number of hits in the chain.
+    #[doc = include_str!("hit_chain.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.hits.len()
     }
 
-    /// Returns whether the chain is empty.
+    #[doc = include_str!("hit_chain.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.hits.is_empty()
     }
 
-    /// The hits as a slice, topmost-first through root.
+    #[doc = include_str!("hit_chain.doc/hits.md")]
     #[must_use]
     pub fn hits(&self) -> &[HitTest] {
         &self.hits
     }
 
-    /// Iterates over the hits, topmost-first through root.
+    #[doc = include_str!("hit_chain.doc/iter.md")]
     pub fn iter(&self) -> Iter<'_, HitTest> {
         self.hits.iter()
     }

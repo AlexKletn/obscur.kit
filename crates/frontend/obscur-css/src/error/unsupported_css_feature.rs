@@ -1,31 +1,26 @@
-//! A CSS feature the kit does not support, surfaced explicitly (spec §4.13).
+#![doc = include_str!("unsupported_css_feature.doc/_module.md")]
 
 use crate::source::SourceSpan;
 
-/// The category of an [`UnsupportedCssFeature`] (spec §4.13).
-///
-/// Names the kind of CSS construct that the kit recognises syntactically but
-/// does not implement, so the compiler can degrade gracefully rather than fail
-/// hard.
+#[doc = include_str!("unsupported_css_feature.doc/UnsupportedFeatureKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnsupportedFeatureKind {
-    /// An at-rule such as `@supports`.
+    #[doc = include_str!("unsupported_css_feature.doc/AtRule.md")]
     AtRule,
-    /// A property such as `grid-template-areas`.
+    #[doc = include_str!("unsupported_css_feature.doc/Property.md")]
     Property,
-    /// A selector construct.
+    #[doc = include_str!("unsupported_css_feature.doc/Selector.md")]
     Selector,
-    /// A value function such as `clip-path()`.
+    #[doc = include_str!("unsupported_css_feature.doc/Function.md")]
     Function,
-    /// A unit the kit does not model.
+    #[doc = include_str!("unsupported_css_feature.doc/Unit.md")]
     Unit,
-    /// A pseudo-element such as `::backdrop`.
+    #[doc = include_str!("unsupported_css_feature.doc/PseudoElement.md")]
     PseudoElement,
 }
 
 impl UnsupportedFeatureKind {
-    /// Returns a short, stable label for this kind, used in
-    /// [`UnsupportedCssFeature`]'s [`std::fmt::Display`] output.
+    #[doc = include_str!("unsupported_css_feature.doc/label.md")]
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -39,17 +34,7 @@ impl UnsupportedFeatureKind {
     }
 }
 
-/// A CSS feature the kit does not support, reported as an explicit diagnostic
-/// (spec §4.13).
-///
-/// Per §4.13, unsupported effects and fallbacks are made explicit rather than
-/// silently dropped: when the parser meets a construct the kit cannot lower, it
-/// emits one of these naming the offending token (for example `"@supports"`,
-/// `"grid-template-areas"`, or `":has"`) and the [`SourceSpan`] it occupies. The
-/// compiler can then continue, degrading gracefully instead of hard-failing.
-///
-/// It implements [`std::error::Error`] so it composes with the standard error
-/// ecosystem while remaining I/O-free.
+#[doc = include_str!("unsupported_css_feature.doc/UnsupportedCssFeature.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsupportedCssFeature {
     kind: UnsupportedFeatureKind,
@@ -58,8 +43,7 @@ pub struct UnsupportedCssFeature {
 }
 
 impl UnsupportedCssFeature {
-    /// Creates a diagnostic for an unsupported feature of `kind` named `name`
-    /// covering `span`.
+    #[doc = include_str!("unsupported_css_feature.doc/new.md")]
     #[must_use]
     pub fn new(kind: UnsupportedFeatureKind, name: impl Into<Box<str>>, span: SourceSpan) -> Self {
         Self {
@@ -69,19 +53,19 @@ impl UnsupportedCssFeature {
         }
     }
 
-    /// Returns the category of the unsupported feature.
+    #[doc = include_str!("unsupported_css_feature.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> UnsupportedFeatureKind {
         self.kind
     }
 
-    /// Returns the offending token (for example `"@supports"`).
+    #[doc = include_str!("unsupported_css_feature.doc/name.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the span the unsupported feature occupies.
+    #[doc = include_str!("unsupported_css_feature.doc/span.md")]
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span

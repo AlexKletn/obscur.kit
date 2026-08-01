@@ -1,33 +1,27 @@
-//! The main-axis direction of a flex container.
+#![doc = include_str!("flex_direction.doc/_module.md")]
 
-/// The direction along which a flex container lays out its items (spec §4.1).
-///
-/// The direction selects the main axis (row vs. column) and whether items are
-/// placed in forward or reverse order along it.
+#[doc = include_str!("flex_direction.doc/FlexDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FlexDirection {
-    /// Main axis is horizontal, items placed start-to-end (the default).
+    #[doc = include_str!("flex_direction.doc/Row.md")]
     #[default]
     Row,
-    /// Main axis is vertical, items placed start-to-end.
+    #[doc = include_str!("flex_direction.doc/Column.md")]
     Column,
-    /// Main axis is horizontal, items placed end-to-start.
+    #[doc = include_str!("flex_direction.doc/RowReverse.md")]
     RowReverse,
-    /// Main axis is vertical, items placed end-to-start.
+    #[doc = include_str!("flex_direction.doc/ColumnReverse.md")]
     ColumnReverse,
 }
 
 impl FlexDirection {
-    /// Returns `true` if the main axis is horizontal ([`Row`] or [`RowReverse`]).
-    ///
-    /// [`Row`]: FlexDirection::Row
-    /// [`RowReverse`]: FlexDirection::RowReverse
+    #[doc = include_str!("flex_direction.doc/is_row.md")]
     #[must_use]
     pub const fn is_row(self) -> bool {
         matches!(self, Self::Row | Self::RowReverse)
     }
 
-    /// Returns `true` if items are placed in reverse order along the main axis.
+    #[doc = include_str!("flex_direction.doc/is_reverse.md")]
     #[must_use]
     pub const fn is_reverse(self) -> bool {
         matches!(self, Self::RowReverse | Self::ColumnReverse)

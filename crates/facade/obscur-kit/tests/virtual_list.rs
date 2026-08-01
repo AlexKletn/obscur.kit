@@ -1,10 +1,4 @@
-//! A virtual list builds a screenful of nodes while keeping the full extent.
-//!
-//! Both halves matter, and only the runtime can hold them at once. Building just the
-//! window is what makes a 10,000-entry directory affordable; stating the true content
-//! height is what a scroll container needs to size a scrollbar. An app can do the
-//! first for itself — it cannot do the second, because to state the full height it
-//! would have to build the full list, which is the cost being avoided.
+#![doc = include_str!("virtual_list.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -19,11 +13,11 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The list's registered name.
+#[doc = include_str!("virtual_list.doc/LIST.md")]
 const LIST: InternedSymbol = InternedSymbol::from_raw(0x9001);
-/// Row height, matching the sheet.
+#[doc = include_str!("virtual_list.doc/ROW.md")]
 const ROW: f32 = 20.0;
-/// A deliberately large model: the point is that its size does not cost anything.
+#[doc = include_str!("virtual_list.doc/ITEMS.md")]
 const ITEMS: usize = 10_000;
 
 fn compile(css: &str) -> Stylesheet {
@@ -32,7 +26,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The scroller holding the virtual list.
+#[doc = include_str!("virtual_list.doc/view.md")]
 fn view() -> View {
     View::single(
         ViewNode::element(ComponentId::from_raw(0x9000))
@@ -43,12 +37,12 @@ fn view() -> View {
     )
 }
 
-/// Counts the retained descendants of the root.
+#[doc = include_str!("virtual_list.doc/node_count.md")]
 fn node_count(rt: &UiRuntime) -> usize {
     rt.tree().len()
 }
 
-/// A runtime with the list registered; `built` records which indices were asked for.
+#[doc = include_str!("virtual_list.doc/runtime.md")]
 fn runtime(built: &Rc<RefCell<Vec<usize>>>) -> UiRuntime {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 200.0));
     let seen = Rc::clone(built);

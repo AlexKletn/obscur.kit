@@ -1,33 +1,28 @@
-//! A compound selector: contiguous simple selectors ([`CompoundSelector`]).
+#![doc = include_str!("compound_selector.doc/_module.md")]
 
 use super::selector_specificity::SelectorSpecificity;
 use super::simple_selector::SimpleSelector;
 
-/// A compound selector — a run of simple selectors with no combinator between
-/// them, all of which must match the same element (`div.a#b:hover`).
-///
-/// The order of the simples is preserved from the source but is irrelevant to
-/// matching: an element matches iff it satisfies every simple.
+#[doc = include_str!("compound_selector.doc/CompoundSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompoundSelector {
     simples: Vec<SimpleSelector>,
 }
 
 impl CompoundSelector {
-    /// Creates a compound selector from its simple selectors.
+    #[doc = include_str!("compound_selector.doc/new.md")]
     #[must_use]
     pub const fn new(simples: Vec<SimpleSelector>) -> Self {
         Self { simples }
     }
 
-    /// Returns the simple selectors making up this compound.
+    #[doc = include_str!("compound_selector.doc/simples.md")]
     #[must_use]
     pub fn simples(&self) -> &[SimpleSelector] {
         &self.simples
     }
 
-    /// Returns the specificity of this compound: the sum of its simples'
-    /// contributions.
+    #[doc = include_str!("compound_selector.doc/specificity.md")]
     #[must_use]
     pub fn specificity(&self) -> SelectorSpecificity {
         self.simples

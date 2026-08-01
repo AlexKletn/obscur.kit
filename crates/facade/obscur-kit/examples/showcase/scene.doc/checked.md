@@ -1,0 +1,1 @@
+The [`Checkbox`] checked state.

@@ -1,36 +1,21 @@
-//! `CollectionValidator`: the **file** front end's adapter onto the §2.11
-//! collection rule.
+#![doc = include_str!("collection_validator.doc/_module.md")]
 
 use obscur_okui_syntax::ast::{Document, Element};
 
 use crate::validation::{ValidationDiagnostic, check_collection};
 
-/// Checks every collection construct in a `.okui` document against the §2.11
-/// collection rule (spec §2.11, §4.9).
-///
-/// The rule itself is [`check_collection`](crate::validation::check_collection) —
-/// the same function the `okui!` macro is checked with. This type only walks the
-/// syntax tree and attaches a byte offset to each verdict, the mirror of what
-/// [`ExpressionValidator`](crate::validation::ExpressionValidator) does for
-/// §2.10.
-///
-/// Both §2.11 constructs, `<For>` and `<VirtualFor>`, are honoured, so the walk
-/// reports nothing today; it is the seam a future collection constraint would
-/// live in. See the [`collection_rule`](crate::validation::collection_rule)
-/// module docs for how `<VirtualFor>` is realized as a viewport-bounded window
-/// rather than the silent `<For>` it used to compile to.
+#[doc = include_str!("collection_validator.doc/CollectionValidator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CollectionValidator;
 
 impl CollectionValidator {
-    /// Creates a validator.
+    #[doc = include_str!("collection_validator.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Validates every element in `doc`, recursively, reporting each collection
-    /// construct the pipeline does not honour at that element's byte offset.
+    #[doc = include_str!("collection_validator.doc/validate.md")]
     #[must_use]
     pub fn validate(&self, doc: &Document) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
@@ -40,10 +25,7 @@ impl CollectionValidator {
         diagnostics
     }
 
-    /// Checks one element's tag, then recurses into its element-shaped children.
-    ///
-    /// The walk does not stop at a diagnostic: it reports every offending
-    /// element, the same report-them-all policy `Compiler::compile` follows.
+    #[doc = include_str!("collection_validator.doc/validate_element.md")]
     fn validate_element(element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         if let Some(tag) = element.tag_name()
             && let Err(message) = check_collection(&tag)

@@ -1,89 +1,73 @@
-//! An effect applied to a layer's composited content.
+#![doc = include_str!("layer_effect.doc/_module.md")]
 
 use crate::paint::BlendMode;
 
-/// An effect applied to a layer's composited content (spec §5.1).
-///
-/// A `LayerEffect` is a backend-independent descriptor of a post-composition
-/// operation: uniform opacity, a Gaussian-style blur, a blend mode against
-/// the backdrop, or a color-matrix transform. It references no GPU or renderer
-/// types. Shadows are a later addition.
+#[doc = include_str!("layer_effect.doc/LayerEffect.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayerEffect {
-    /// Scales the layer's coverage by an opacity factor (nominally `0.0..=1.0`).
+    #[doc = include_str!("layer_effect.doc/Opacity.md")]
     Opacity(f32),
-    /// Blurs the layer's content with the given radius in logical pixels.
+    #[doc = include_str!("layer_effect.doc/Blur.md")]
     Blur {
-        /// The blur radius in logical pixels.
+        #[doc = include_str!("layer_effect.doc/radius.md")]
         radius: f32,
     },
-    /// Blends the layer against its backdrop with the given blend mode.
+    #[doc = include_str!("layer_effect.doc/Blend.md")]
     Blend(BlendMode),
-    /// Applies a 4×5 affine color matrix to the layer's composited RGBA content
-    /// (`rgba' = M · rgba + bias`, per-channel, then clamped to `0..1`).
-    ///
-    /// The 20 entries are the CSS Filter Effects color-matrix folded from an
-    /// element's color-op `filter` chain (`grayscale/brightness/contrast/
-    /// saturate/sepia/invert/hue-rotate/opacity`): a 4×4 linear part in **row
-    /// major** order (`m[row][col] == matrix[row * 4 + col]`, indices `0..16`)
-    /// followed by the 4-entry bias (`bias[row] == matrix[16 + row]`). The
-    /// coordinator composes the whole affine color-op chain into this single
-    /// matrix; the identity chain emits **no** effect (byte-identical no-filter).
+    #[doc = include_str!("layer_effect.doc/ColorMatrix.md")]
     ColorMatrix([f32; 20]),
 }
 
 impl LayerEffect {
-    /// Creates an opacity effect with the given factor.
+    #[doc = include_str!("layer_effect.doc/opacity.md")]
     #[must_use]
     pub const fn opacity(factor: f32) -> Self {
         Self::Opacity(factor)
     }
 
-    /// Creates a blur effect with the given radius in logical pixels.
+    #[doc = include_str!("layer_effect.doc/blur.md")]
     #[must_use]
     pub const fn blur(radius: f32) -> Self {
         Self::Blur { radius }
     }
 
-    /// Creates a blend effect with the given blend mode.
+    #[doc = include_str!("layer_effect.doc/blend.md")]
     #[must_use]
     pub const fn blend(mode: BlendMode) -> Self {
         Self::Blend(mode)
     }
 
-    /// Creates a color-matrix effect from a folded 4×5 affine color matrix (20
-    /// entries: a row-major 4×4 linear part followed by a 4-entry bias).
+    #[doc = include_str!("layer_effect.doc/color_matrix.md")]
     #[must_use]
     pub const fn color_matrix(matrix: [f32; 20]) -> Self {
         Self::ColorMatrix(matrix)
     }
 
-    /// Returns whether this is an [`LayerEffect::Opacity`] effect.
+    #[doc = include_str!("layer_effect.doc/is_opacity.md")]
     #[must_use]
     pub const fn is_opacity(self) -> bool {
         matches!(self, Self::Opacity(_))
     }
 
-    /// Returns whether this is a [`LayerEffect::Blur`] effect.
+    #[doc = include_str!("layer_effect.doc/is_blur.md")]
     #[must_use]
     pub const fn is_blur(self) -> bool {
         matches!(self, Self::Blur { .. })
     }
 
-    /// Returns whether this is a [`LayerEffect::Blend`] effect.
+    #[doc = include_str!("layer_effect.doc/is_blend.md")]
     #[must_use]
     pub const fn is_blend(self) -> bool {
         matches!(self, Self::Blend(_))
     }
 
-    /// Returns whether this is a [`LayerEffect::ColorMatrix`] effect.
+    #[doc = include_str!("layer_effect.doc/is_color_matrix.md")]
     #[must_use]
     pub const fn is_color_matrix(self) -> bool {
         matches!(self, Self::ColorMatrix(_))
     }
 
-    /// Returns the folded 4×5 color matrix if this is a
-    /// [`LayerEffect::ColorMatrix`] effect.
+    #[doc = include_str!("layer_effect.doc/as_color_matrix.md")]
     #[must_use]
     pub const fn as_color_matrix(self) -> Option<[f32; 20]> {
         match self {

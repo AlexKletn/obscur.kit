@@ -1,30 +1,23 @@
-//! The base (paragraph) writing direction of a text run (spec §5.10).
+#![doc = include_str!("text_direction.doc/_module.md")]
 
-/// The base — or paragraph — writing direction of a text run (spec §5.10).
-///
-/// This is the *base direction* only: it seeds bidirectional layout but does not
-/// itself encode per-character bidi levels. Full Unicode Bidirectional Algorithm
-/// level resolution — splitting mixed left-to-right and right-to-left text into
-/// runs and reordering them — is an adapter concern that happens during
-/// itemization, before an individual run reaches the shaper; by the time a run is
-/// shaped its direction is already uniform and known.
+#[doc = include_str!("text_direction.doc/TextDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextDirection {
-    /// Left-to-right base direction (e.g. Latin, Cyrillic); the default.
+    #[doc = include_str!("text_direction.doc/LeftToRight.md")]
     #[default]
     LeftToRight,
-    /// Right-to-left base direction (e.g. Arabic, Hebrew).
+    #[doc = include_str!("text_direction.doc/RightToLeft.md")]
     RightToLeft,
 }
 
 impl TextDirection {
-    /// Returns whether this is the [`RightToLeft`](Self::RightToLeft) direction.
+    #[doc = include_str!("text_direction.doc/is_rtl.md")]
     #[must_use]
     pub const fn is_rtl(&self) -> bool {
         matches!(self, Self::RightToLeft)
     }
 
-    /// Returns whether this is the [`LeftToRight`](Self::LeftToRight) direction.
+    #[doc = include_str!("text_direction.doc/is_ltr.md")]
     #[must_use]
     pub const fn is_ltr(&self) -> bool {
         matches!(self, Self::LeftToRight)

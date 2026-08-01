@@ -1,15 +1,4 @@
-//! A character outside the application's font chain is drawn, not dropped
-//! (spec §5.10 font fallback).
-//!
-//! The defect: an application's chain is the families it names plus the three
-//! generics a host installs — Latin, Cyrillic and Greek between them. Anything
-//! else (CJK, emoji, `⌫` on a key) resolved to no face, and an unresolved run
-//! paints **no glyphs at all** — a blank where a character should be, which
-//! reads as a broken control rather than as a missing font.
-//!
-//! These tests need a host with fontconfig and real system fonts. Where there is
-//! none they assert nothing, because there is nothing to ask — which is stated
-//! here rather than hidden, since a silently-skipping test is worse than none.
+#![doc = include_str!("system_font_fallback.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::sync::Arc;
@@ -23,9 +12,7 @@ use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::text::font::{FontAttributes, FontFamily, GenericFamily};
 use obscur_kit::view::view::{View, ViewFragment, ViewNode};
 
-/// The bundled last-resort face, and *only* it: a deliberately minimal chain, so
-/// a character outside its 2,468-codepoint subset has nowhere to go but the
-/// host lookup.
+#[doc = include_str!("system_font_fallback.doc/bundled_only.md")]
 fn bundled_only() -> FontSet {
     let mut set = FontSet::new();
     let bytes = std::fs::read(concat!(
@@ -48,7 +35,7 @@ fn view(text: &str) -> View {
     ]))
 }
 
-/// Renders `text` and reports how many glyph runs were painted.
+#[doc = include_str!("system_font_fallback.doc/painted_runs.md")]
 fn painted_runs(text: &str) -> usize {
     let boot = KitBootstrap::new();
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 200.0));
@@ -67,16 +54,13 @@ fn host_has_fontconfig() -> bool {
     FontconfigSource::new().is_available()
 }
 
-/// The control: Latin is inside the bundled subset, so it paints with or without
-/// a host. Without this, a fallback that quietly broke *all* text would still
-/// satisfy the case below.
+#[doc = include_str!("system_font_fallback.doc/text_the_bundled_face_covers_is_painted.md")]
 #[test]
 fn text_the_bundled_face_covers_is_painted() {
     assert!(painted_runs("abc") > 0, "Latin must paint");
 }
 
-/// `⌫` (U+232B) is not in the bundled face. Before the host lookup it painted
-/// nothing at all.
+#[doc = include_str!("system_font_fallback.doc/a_character_outside_the_chain_is_painted_via_the_host.md")]
 #[test]
 fn a_character_outside_the_chain_is_painted_via_the_host() {
     if !host_has_fontconfig() {
@@ -93,16 +77,7 @@ fn a_character_outside_the_chain_is_painted_via_the_host() {
     );
 }
 
-/// Fallback is chosen per **run**, not per character — so a run mixing covered
-/// and uncovered text is drawn entirely in the discovered face.
-///
-/// Worth pinning as the behaviour rather than leaving it to be discovered: the
-/// text is itemized by script, a face is chosen for each item, and one character
-/// the chain cannot draw therefore pulls its whole item into the host's face.
-/// `ab⌫cd` comes out in DejaVu rather than mixing Noto with DejaVu. That is a
-/// visible difference from a browser, and it is the price of choosing a face per
-/// run; splitting an item at coverage boundaries would be the fix, and is not
-/// built.
+#[doc = include_str!("system_font_fallback.doc/a_mixed_run_is_drawn_wholly_in_the_discovered_face.md")]
 #[test]
 fn a_mixed_run_is_drawn_wholly_in_the_discovered_face() {
     if !host_has_fontconfig() || FontconfigSource::new().match_char('⌫').is_none() {
@@ -114,9 +89,7 @@ fn a_mixed_run_is_drawn_wholly_in_the_discovered_face() {
     );
 }
 
-/// The host is asked only for what the chain cannot draw. A face pulled in for
-/// Latin would mean every application quietly loading a second font it does not
-/// need.
+#[doc = include_str!("system_font_fallback.doc/the_host_is_not_consulted_for_covered_text.md")]
 #[test]
 fn the_host_is_not_consulted_for_covered_text() {
     let boot = KitBootstrap::new();
@@ -130,9 +103,7 @@ fn the_host_is_not_consulted_for_covered_text() {
     );
 }
 
-/// A face discovered mid-frame has to reach the renderer, which rasterizes from
-/// its own id→bytes table: resolving a glyph the renderer cannot draw is the
-/// same blank, one layer down.
+#[doc = include_str!("system_font_fallback.doc/a_discovered_face_is_offered_to_the_renderer_once.md")]
 #[test]
 fn a_discovered_face_is_offered_to_the_renderer_once() {
     if !host_has_fontconfig() || FontconfigSource::new().match_char('⌫').is_none() {

@@ -1,0 +1,1 @@
+Next-sibling combinator (`+`).

@@ -1,4 +1,4 @@
-//! State module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod local_state;
 pub use local_state::LocalState;
 mod read_signal;

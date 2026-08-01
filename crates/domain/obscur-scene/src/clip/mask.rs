@@ -1,23 +1,15 @@
-//! A mask clip: coverage derived from separate source content.
+#![doc = include_str!("mask.doc/_module.md")]
 
 use super::MaskKind;
 
-/// A mask clip that modulates coverage from separate source content (spec §5.8).
-///
-/// A `Mask` records only *how* its coverage should be interpreted — from the
-/// source's alpha or its luminance (see [`MaskKind`]). It does **not** carry the
-/// source itself: the mask's source content — a rendered sub-scene or image that
-/// provides the coverage field — is supplied by the layer or command that
-/// applies the mask, and is attached at that use site (a forward reference to the
-/// scene/command model). Because the coverage generally comes from rendered
-/// content, applying a mask may require an offscreen pass.
+#[doc = include_str!("mask.doc/Mask.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Mask {
     kind: MaskKind,
 }
 
 impl Mask {
-    /// Creates a mask whose coverage comes from the source's alpha channel.
+    #[doc = include_str!("mask.doc/alpha.md")]
     #[must_use]
     pub const fn alpha() -> Self {
         Self {
@@ -25,7 +17,7 @@ impl Mask {
         }
     }
 
-    /// Creates a mask whose coverage comes from the source's luminance.
+    #[doc = include_str!("mask.doc/luminance.md")]
     #[must_use]
     pub const fn luminance() -> Self {
         Self {
@@ -33,7 +25,7 @@ impl Mask {
         }
     }
 
-    /// The mask kind: how the source's coverage is interpreted.
+    #[doc = include_str!("mask.doc/kind.md")]
     #[must_use]
     pub const fn kind(self) -> MaskKind {
         self.kind

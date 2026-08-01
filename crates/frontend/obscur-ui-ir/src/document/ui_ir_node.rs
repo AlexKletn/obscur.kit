@@ -1,33 +1,26 @@
-//! `UiIrNode`: one node of the IR tree, carrying a stable id (spec §2.5).
+#![doc = include_str!("ui_ir_node.doc/_module.md")]
 
 use crate::document::{UiIrEvent, UiIrExpression, UiIrProperty};
 
-/// The category of a [`UiIrNode`] (spec §2.5).
-///
-/// A node's kind fixes how it is interpreted: a raw element, a text leaf, a
-/// component instance, a transparent fragment, or the control-flow
-/// [`Conditional`](UiIrNodeKind::Conditional)/[`Loop`](UiIrNodeKind::Loop)
-/// forms. Every kind except [`Text`](UiIrNodeKind::Text) can hold children;
-/// [`is_container`](UiIrNodeKind::is_container) reports that.
+#[doc = include_str!("ui_ir_node.doc/UiIrNodeKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiIrNodeKind {
-    /// A raw element identified by tag.
+    #[doc = include_str!("ui_ir_node.doc/Element.md")]
     Element,
-    /// A text leaf carrying literal content.
+    #[doc = include_str!("ui_ir_node.doc/Text.md")]
     Text,
-    /// An instance of a named component.
+    #[doc = include_str!("ui_ir_node.doc/Component.md")]
     Component,
-    /// A transparent grouping of children with no element of its own.
+    #[doc = include_str!("ui_ir_node.doc/Fragment.md")]
     Fragment,
-    /// A node rendered conditionally.
+    #[doc = include_str!("ui_ir_node.doc/Conditional.md")]
     Conditional,
-    /// A node repeated over a collection.
+    #[doc = include_str!("ui_ir_node.doc/Loop.md")]
     Loop,
 }
 
 impl UiIrNodeKind {
-    /// Returns whether nodes of this kind can hold children — every kind except
-    /// [`Text`](UiIrNodeKind::Text).
+    #[doc = include_str!("ui_ir_node.doc/is_container.md")]
     #[must_use]
     pub const fn is_container(self) -> bool {
         matches!(
@@ -37,23 +30,13 @@ impl UiIrNodeKind {
     }
 }
 
-/// The tag of the synthetic element a body `{expr}` lowers to. Private: the
-/// convention is [`UiIrNode::interpolation`]/[`UiIrNode::interpolated_value`],
-/// not a string anyone may match on.
+#[doc = include_str!("ui_ir_node.doc/INTERPOLATION_TAG.md")]
 const INTERPOLATION_TAG: &str = "Expression";
 
-/// The property of that element holding the interpolated expression.
+#[doc = include_str!("ui_ir_node.doc/INTERPOLATION_VALUE.md")]
 const INTERPOLATION_VALUE: &str = "value";
 
-/// One node of the UI IR tree, carrying a compiler-assigned stable id
-/// (spec §2.5).
-///
-/// The IR tree mirrors the runtime view tree but is the serializable compile
-/// artifact: every node has a stable [`id`](UiIrNode::id) (used by source maps
-/// and diagnostics), a [`kind`](UiIrNode::kind), and — depending on kind — a
-/// tag, text content, an optional stable [`key`](UiIrNode::key) (mandatory on a
-/// [`Loop`](UiIrNodeKind::Loop) lowered from a `<For>`, spec §2.11), properties
-/// flowed down, event bindings flowing up, and recursively nested children.
+#[doc = include_str!("ui_ir_node.doc/UiIrNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiIrNode {
     id: u64,
@@ -67,61 +50,43 @@ pub struct UiIrNode {
 }
 
 impl UiIrNode {
-    /// Creates an element node with stable `id` and element `tag`.
+    #[doc = include_str!("ui_ir_node.doc/element.md")]
     #[must_use]
     pub fn element(id: u64, tag: impl Into<Box<str>>) -> Self {
         Self::bare(id, UiIrNodeKind::Element, tag.into(), Box::from(""))
     }
 
-    /// Creates a component-instance node with stable `id` and component `name`.
+    #[doc = include_str!("ui_ir_node.doc/component.md")]
     #[must_use]
     pub fn component(id: u64, name: impl Into<Box<str>>) -> Self {
         Self::bare(id, UiIrNodeKind::Component, name.into(), Box::from(""))
     }
 
-    /// Creates a text node with stable `id` holding `content`.
+    #[doc = include_str!("ui_ir_node.doc/text.md")]
     #[must_use]
     pub fn text(id: u64, content: impl Into<Box<str>>) -> Self {
         Self::bare(id, UiIrNodeKind::Text, Box::from(""), content.into())
     }
 
-    /// Creates a fragment node with stable `id` and no tag or text.
+    #[doc = include_str!("ui_ir_node.doc/fragment.md")]
     #[must_use]
     pub fn fragment(id: u64) -> Self {
         Self::bare(id, UiIrNodeKind::Fragment, Box::from(""), Box::from(""))
     }
 
-    /// Creates a [`Loop`](UiIrNodeKind::Loop) control-flow node with stable `id`
-    /// and control keyword `tag` (`"For"` or `"VirtualFor"`, spec §2.11).
-    ///
-    /// The loop's mandatory stable key is attached with [`with_key`](Self::with_key)
-    /// and its iterated collection flows in as an `each` property; the repeated
-    /// body is its children.
+    #[doc = include_str!("ui_ir_node.doc/loop_node.md")]
     #[must_use]
     pub fn loop_node(id: u64, tag: impl Into<Box<str>>) -> Self {
         Self::bare(id, UiIrNodeKind::Loop, tag.into(), Box::from(""))
     }
 
-    /// Creates a [`Conditional`](UiIrNodeKind::Conditional) control-flow node with
-    /// stable `id` and control keyword `tag` (`"If"`, `"ElseIf"` or `"Else"`,
-    /// spec §2.11).
-    ///
-    /// The branch condition flows in as a `cond` property (absent on a bare
-    /// `<Else>`); the guarded body is its children.
+    #[doc = include_str!("ui_ir_node.doc/conditional.md")]
     #[must_use]
     pub fn conditional(id: u64, tag: impl Into<Box<str>>) -> Self {
         Self::bare(id, UiIrNodeKind::Conditional, tag.into(), Box::from(""))
     }
 
-    /// Creates the node a body `{expr}` interpolation lowers to: a synthetic
-    /// element carrying `value` — the interpolated expression (spec §2.8).
-    ///
-    /// A [`Text`](UiIrNodeKind::Text) node holds literal content only, so an
-    /// interpolation cannot be one: its content is an expression, and only a
-    /// property can carry an expression. Hence a node of its own, paired with
-    /// [`interpolated_value`](Self::interpolated_value) — the constructor and the
-    /// reader of the same private convention, so the two front ends and the
-    /// emitter cannot disagree on the tag by spelling it separately.
+    #[doc = include_str!("ui_ir_node.doc/interpolation.md")]
     #[must_use]
     pub fn interpolation(id: u64, value: UiIrExpression) -> Self {
         Self::bare(
@@ -133,12 +98,7 @@ impl UiIrNode {
         .with_property(UiIrProperty::new(INTERPOLATION_VALUE, value))
     }
 
-    /// Returns the interpolated expression when this node is an
-    /// [`interpolation`](Self::interpolation), else `None`.
-    ///
-    /// An authored `<Expression/>` is a [`Component`](UiIrNodeKind::Component) —
-    /// both front ends classify an uppercase tag that way — so it never answers
-    /// here, and no document can spell its way into being an interpolation.
+    #[doc = include_str!("ui_ir_node.doc/interpolated_value.md")]
     #[must_use]
     pub fn interpolated_value(&self) -> Option<&UiIrExpression> {
         (self.kind == UiIrNodeKind::Element && &*self.tag == INTERPOLATION_TAG)
@@ -146,7 +106,7 @@ impl UiIrNode {
             .flatten()
     }
 
-    /// Builds a node with empty property/event/child collections and no key.
+    #[doc = include_str!("ui_ir_node.doc/bare.md")]
     fn bare(id: u64, kind: UiIrNodeKind, tag: Box<str>, text: Box<str>) -> Self {
         Self {
             id,
@@ -160,114 +120,102 @@ impl UiIrNode {
         }
     }
 
-    /// Attaches the stable key expression `key` to this node, returning the
-    /// updated node.
-    ///
-    /// A [`Loop`](UiIrNodeKind::Loop) carries the mandatory `key={…}` of a
-    /// `<For>` (spec §2.11) so reconciliation can preserve per-item identity; any
-    /// keyed node may carry one.
+    #[doc = include_str!("ui_ir_node.doc/with_key.md")]
     #[must_use]
     pub fn with_key(mut self, key: UiIrExpression) -> Self {
         self.key = Some(key);
         self
     }
 
-    /// Appends `property`, returning the updated node.
+    #[doc = include_str!("ui_ir_node.doc/with_property.md")]
     #[must_use]
     pub fn with_property(mut self, property: UiIrProperty) -> Self {
         self.properties.push(property);
         self
     }
 
-    /// Appends `event`, returning the updated node.
+    #[doc = include_str!("ui_ir_node.doc/with_event.md")]
     #[must_use]
     pub fn with_event(mut self, event: UiIrEvent) -> Self {
         self.events.push(event);
         self
     }
 
-    /// Appends `child`, returning the updated node.
+    #[doc = include_str!("ui_ir_node.doc/with_child.md")]
     #[must_use]
     pub fn with_child(mut self, child: UiIrNode) -> Self {
         self.children.push(child);
         self
     }
 
-    /// Appends all nodes from `children`, returning the updated node.
+    #[doc = include_str!("ui_ir_node.doc/with_children.md")]
     #[must_use]
     pub fn with_children(mut self, children: impl IntoIterator<Item = UiIrNode>) -> Self {
         self.children.extend(children);
         self
     }
 
-    /// Returns this node's stable id.
+    #[doc = include_str!("ui_ir_node.doc/id.md")]
     #[must_use]
     pub const fn id(&self) -> u64 {
         self.id
     }
 
-    /// Returns this node's kind.
+    #[doc = include_str!("ui_ir_node.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> UiIrNodeKind {
         self.kind
     }
 
-    /// Returns the element tag or component name (empty for text/fragment
-    /// nodes).
+    #[doc = include_str!("ui_ir_node.doc/tag.md")]
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
     }
 
-    /// Returns this node's stable key expression, if one is attached.
-    ///
-    /// A [`Loop`](UiIrNodeKind::Loop) lowered from a `<For key={…}>` carries the
-    /// key here (spec §2.11); most other nodes have none.
+    #[doc = include_str!("ui_ir_node.doc/key.md")]
     #[must_use]
     pub const fn key(&self) -> Option<&UiIrExpression> {
         self.key.as_ref()
     }
 
-    /// Returns the text content for text nodes (empty for non-text nodes).
-    ///
-    /// Named `content` rather than `text` because [`text`](UiIrNode::text) is
-    /// the text-node constructor; the two cannot share a name.
+    #[doc = include_str!("ui_ir_node.doc/content.md")]
     #[must_use]
     pub fn content(&self) -> &str {
         &self.text
     }
 
-    /// Returns the properties flowed down into this node.
+    #[doc = include_str!("ui_ir_node.doc/properties.md")]
     #[must_use]
     pub fn properties(&self) -> &[UiIrProperty] {
         &self.properties
     }
 
-    /// Returns the event bindings on this node.
+    #[doc = include_str!("ui_ir_node.doc/events.md")]
     #[must_use]
     pub fn events(&self) -> &[UiIrEvent] {
         &self.events
     }
 
-    /// Returns this node's direct children.
+    #[doc = include_str!("ui_ir_node.doc/children.md")]
     #[must_use]
     pub fn children(&self) -> &[UiIrNode] {
         &self.children
     }
 
-    /// Returns the number of direct children.
+    #[doc = include_str!("ui_ir_node.doc/child_count.md")]
     #[must_use]
     pub fn child_count(&self) -> usize {
         self.children.len()
     }
 
-    /// Returns whether this node has no children.
+    #[doc = include_str!("ui_ir_node.doc/is_leaf.md")]
     #[must_use]
     pub fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
 
-    /// Returns the value expression of the property named `name`, if present.
+    #[doc = include_str!("ui_ir_node.doc/property.md")]
     #[must_use]
     pub fn property(&self, name: &str) -> Option<&UiIrExpression> {
         self.properties
@@ -276,8 +224,7 @@ impl UiIrNode {
             .map(UiIrProperty::value)
     }
 
-    /// Returns the total number of nodes in the subtree rooted at this node —
-    /// this node plus every descendant.
+    #[doc = include_str!("ui_ir_node.doc/node_count.md")]
     #[must_use]
     pub fn node_count(&self) -> usize {
         1 + self
@@ -287,8 +234,7 @@ impl UiIrNode {
             .sum::<usize>()
     }
 
-    /// Finds the node with stable `id` in the subtree rooted here, searching
-    /// depth-first. Returns `None` if no node has that id.
+    #[doc = include_str!("ui_ir_node.doc/find.md")]
     #[must_use]
     pub fn find(&self, id: u64) -> Option<&UiIrNode> {
         if self.id == id {

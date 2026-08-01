@@ -1,0 +1,1 @@
+Removes all recorded references.

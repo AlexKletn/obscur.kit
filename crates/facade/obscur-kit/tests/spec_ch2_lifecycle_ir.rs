@@ -1,16 +1,4 @@
-//! **SPECIFICATION-DERIVED** component-lifecycle, registry and UI IR cases for
-//! obscur.kit §2.1 (*Component model*), §2.14 (*Component registry*) and §2.15
-//! (*UI IR*).
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expectation below was produced by an agent reading obscur.kit §2 with
-//! **no access to this repository's source**. The cases are a statement of what
-//! the implementation owes the spec, not a record of what it currently does. A
-//! failure here is a defect report about the engine (or, occasionally, about the
-//! spec) and must not be "corrected" by editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch2_lifecycle_ir.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch2_support/mod.rs"]
@@ -34,7 +22,7 @@ use obscur_kit::view::contract::{CapabilityContract, CapabilityRequirement};
 use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 use support::{all_text, commit, small_runtime};
 
-/// A sink that records every diagnostic it is handed.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/CollectingSink.md")]
 #[derive(Debug)]
 struct CollectingSink(Rc<RefCell<Vec<String>>>);
 
@@ -46,27 +34,7 @@ impl DiagnosticSink for CollectingSink {
 
 // ------------------------------------------------------------------- §2.1
 
-/// §2.1: "- default error-boundary behavior." (with §1.7 "is contained within
-/// the component subtree;" "replaces the subtree with fallback UI;")
-///
-/// SAMPLE POINT MOVED + WEAKENED 2026-07-19. Two things were wrong.
-///
-/// (a) The case read the tree one frame too early. §1.7's fourth consequence —
-/// which the case itself cites — is "- may be retried according to component or
-/// host policy.", and this runtime does retry: the failing frame is reported
-/// with `recovery: Retried` and the subtree is not replaced until the attempt
-/// after it. A second commit is now made before observing. The fallback
-/// assertion is unchanged.
-///
-/// (b) It originally demanded EXACTLY ONE diagnostic. §1.7 says a failure "is
-/// reported to diagnostics and DevTools" and separately that it "may be
-/// retried"; nothing says a retried failure is reported once rather than once
-/// per attempt, and §1.6 requires each diagnostic to carry a "recovery action"
-/// — which is precisely what distinguishes the two here (`Retried`, then
-/// `BoundaryReplaced`). The count is replaced by what the spec does require:
-/// every report is attributed to the failing component's node and none to its
-/// siblings. Candidate spec amendment: state whether a retried failure is
-/// reported per attempt or coalesced, since DevTools noise depends on it.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/an_error_boundary_isolates_the_failing_sibling_only.md")]
 #[test]
 fn an_error_boundary_isolates_the_failing_sibling_only() {
     let mut rt = small_runtime();
@@ -132,7 +100,7 @@ fn an_error_boundary_isolates_the_failing_sibling_only() {
     );
 }
 
-/// §2.1: "- scoped subscriptions;" and "- automatic cleanup;"
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/a_scoped_subscription_is_unsubscribed_when_its_component_unmounts.md")]
 #[test]
 fn a_scoped_subscription_is_unsubscribed_when_its_component_unmounts() {
     let source = obscur_kit::identity::SignalId::from_raw(0x2B01);
@@ -172,7 +140,7 @@ fn a_scoped_subscription_is_unsubscribed_when_its_component_unmounts() {
 
 // ------------------------------------------------------------------ §2.14
 
-/// §2.14: "`ComponentRegistry` stores:" / "- stable component ID;"
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/a_duplicate_component_id_is_refused_and_the_first_registration_wins.md")]
 #[test]
 fn a_duplicate_component_id_is_refused_and_the_first_registration_wins() {
     let id = ComponentId::from_raw(0x8000_0000_0000_2B02);
@@ -221,36 +189,7 @@ fn a_duplicate_component_id_is_refused_and_the_first_registration_wins() {
     );
 }
 
-/// §2.14: "- capability requirements;" (with §2.13 "- required capabilities;")
-///
-/// WEAKENED 2026-07-19: this originally asserted that instantiating a component
-/// whose required capability has not been granted is REFUSED — factory not
-/// invoked, no node created, and a diagnostic emitted. §2.14 says
-/// "`ComponentRegistry` stores: … - capability requirements;" — *stores* — and
-/// §2.13 likewise only lists "- required capabilities;" among what a contract
-/// exports. Neither sentence says a requirement is enforced at instantiation.
-///
-/// RESTORED 2026-07-19 by the owner's decision, and the reasoning is worth
-/// keeping. The literal reading above is defensible; the enforcement assertion
-/// comes back anyway, because there IS no enforcement — the audit records that
-/// `obscur-capability` is 189 lines and nothing consults a capability before
-/// acting. Weakening this test would convert a known access-control gap from
-/// visibly red to silently green, which is precisely what this suite exists to
-/// prevent. The general ruling that the spec outranks a test was given on
-/// examples about version-query APIs and template tags; it is not extended to a
-/// capability boundary.
-///
-/// Candidate spec amendment, now load-bearing: state whether an ungranted
-/// required capability blocks instantiation, which subsystem holds the grant
-/// set, and what is emitted. §9 lists "weaken host control over plugin
-/// capabilities" among the things the kit must not do, and §1.8 names
-/// capability-based services as a condition of running untrusted code, so the
-/// value is in the spec even where §2.13's enforcement sentence is not.
-///
-/// The observation moved to a bare `ComponentRegistry` — the subject §2.14 names
-/// — because `UiRuntime` exposes no accessor for a registered component's
-/// contract. Recorded as a finding; not fixed here, since implementation files
-/// are out of scope for this pass.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/an_ungranted_required_capability_refuses_instantiation.md")]
 #[test]
 fn an_ungranted_required_capability_refuses_instantiation() {
     let clipboard = CapabilityId::new("clipboard");
@@ -289,7 +228,7 @@ fn an_ungranted_required_capability_refuses_instantiation() {
 
 // ------------------------------------------------------------------ §2.15
 
-/// §2.15: "- precise diagnostics for newer unsupported IR."
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/a_newer_ir_version_is_refused_with_a_precise_diagnostic.md")]
 #[test]
 fn a_newer_ir_version_is_refused_with_a_precise_diagnostic() {
     // The loader's supported range tops out at the current version; the
@@ -323,19 +262,7 @@ fn a_newer_ir_version_is_refused_with_a_precise_diagnostic() {
     );
 }
 
-/// §2.15: "- versioned;" and "- validated;"
-///
-/// WEAKENED 2026-07-19: this originally required the rejection's message to
-/// contain the word "version". §2.15 says only "- versioned;" and "- validated;"
-/// and does not describe a document that omits its version — nor is such a
-/// document constructible in this codec, whose header is magic(4), format u16(2)
-/// and IR version(4) at fixed positions, so deleting the version bytes truncates
-/// the stream rather than producing a version-less one. The load correctly fails
-/// ("unexpected end of input"). What is kept is the assertion that carries the
-/// requirement: the decoder does not assume a version and load anyway. Candidate
-/// spec amendment: state whether a version is structurally mandatory in the IR
-/// encoding (making this case unconstructible by design) and, if a version-less
-/// document is representable at all, what diagnostic it must produce.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/an_ir_document_with_no_version_field_is_rejected.md")]
 #[test]
 fn an_ir_document_with_no_version_field_is_rejected() {
     // A stream that is structurally valid up to the point the version would be
@@ -353,8 +280,7 @@ fn an_ir_document_with_no_version_field_is_rejected() {
     let _ = format!("{error}");
 }
 
-/// §2.15: "- independent of direct Rust type names;" and "- based on stable
-/// component/resource/style IDs;"
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/ir_references_a_stable_id_and_never_a_rust_type_name.md")]
 #[test]
 fn ir_references_a_stable_id_and_never_a_rust_type_name() {
     // The component is implemented by a Rust type named `Button`; the IR
@@ -388,7 +314,7 @@ fn ir_references_a_stable_id_and_never_a_rust_type_name() {
 
 // ------------------------------------------------------------------ fixtures
 
-/// A view holding three sibling components; `fail` makes S2's props undecodable.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/siblings.md")]
 fn siblings(fail: bool) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(Sibling::id("S1")),
@@ -398,7 +324,7 @@ fn siblings(fail: bool) -> View {
     ]))
 }
 
-/// A view holding `n` instances of the subscribing component.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/subscribers.md")]
 fn subscribers(n: usize) -> View {
     View::from_fragment(ViewFragment::from_nodes(
         (0..n)
@@ -407,11 +333,10 @@ fn subscribers(n: usize) -> View {
     ))
 }
 
-/// The reserved property name a sibling reads to decide whether to fail.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/FAIL.md")]
 const FAIL: InternedSymbol = InternedSymbol::from_raw(0x8000_2B03);
 
-/// Props that refuse to decode when `fail` is set — the one way a component's
-/// view generation can fail through the public surface.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/SiblingProps.md")]
 struct SiblingProps;
 
 impl FromProps for SiblingProps {
@@ -430,14 +355,13 @@ impl FromProps for SiblingProps {
     }
 }
 
-/// A sibling component that renders `"<name>:ok"`, and whose fallback UI
-/// renders `"<name>:fallback"`.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/Sibling.md")]
 struct Sibling {
     name: &'static str,
 }
 
 impl Sibling {
-    /// The stable component id derived from `name`.
+    #[doc = include_str!("spec_ch2_lifecycle_ir.doc/id.md")]
     fn id(name: &str) -> ComponentId {
         obscur_kit::ui_ir::name_binding::user_component_id(name)
     }
@@ -514,7 +438,7 @@ impl ComponentFactory for SiblingFactory {
     }
 }
 
-/// A component that subscribes to `source` for as long as it is mounted.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/Subscriber.md")]
 struct Subscriber {
     source: obscur_kit::identity::SignalId,
 }
@@ -556,7 +480,7 @@ impl ComponentFactory for SubscriberFactory {
     }
 }
 
-/// Every text node's content in `v`.
+#[doc = include_str!("spec_ch2_lifecycle_ir.doc/text_of.md")]
 fn text_of(v: &View) -> Vec<String> {
     v.root()
         .nodes()

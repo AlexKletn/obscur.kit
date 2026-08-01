@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** time and animation-scheduling cases for obscur.kit
-//! §3.5 ("animation progress is sampled from time/value, never slowed to match
-//! missed frames"; "active animations continue requesting frames") and §3.3
-//! ("Runtime adapters provide `Clock`").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §3
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the runtime, and must not be "corrected" by editing the expected
-//! value.
+#![doc = include_str!("spec_ch3_motion_time.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch3_support/mod.rs"]
@@ -30,7 +22,7 @@ fn scene() -> View {
     view(vec![el(1, "page", vec![el(2, "box", vec![])])])
 }
 
-/// A runtime with the scene rendered once, plus the animated node.
+#[doc = include_str!("spec_ch3_motion_time.doc/started.md")]
 fn started(duration: f32, from: f32, to: f32) -> (UiRuntime, Stylesheet, NodeId) {
     let sheet = support::compile(CSS);
     let v = scene();
@@ -51,11 +43,7 @@ fn started(duration: f32, from: f32, to: f32) -> (UiRuntime, Stylesheet, NodeId)
     (rt, sheet, node)
 }
 
-/// §3.5 Rules — "animation progress is sampled from time/value, never slowed to
-/// match missed frames".
-///
-/// A 1000 ms 0→100 animation stalled from t=0 to t=900 with no frames presented
-/// samples **90** in the next frame — not 1.67 (one 16 ms step) and not 100.
+#[doc = include_str!("spec_ch3_motion_time.doc/a_stalled_animation_samples_from_the_clock_not_from_the_frame_count.md")]
 #[test]
 fn a_stalled_animation_samples_from_the_clock_not_from_the_frame_count() {
     let (mut rt, sheet, _node) = started(1.0, 0.0, 100.0);
@@ -78,10 +66,7 @@ fn a_stalled_animation_samples_from_the_clock_not_from_the_frame_count() {
     );
 }
 
-/// §3.5 Rules — "active animations continue requesting frames".
-///
-/// A 500 ms animation with no external frame requests at all keeps the scheduler
-/// armed for its whole duration, then retires it.
+#[doc = include_str!("spec_ch3_motion_time.doc/an_active_animation_arms_the_scheduler_and_then_retires_it.md")]
 #[test]
 fn an_active_animation_arms_the_scheduler_and_then_retires_it() {
     let (mut rt, sheet, _node) = started(0.5, 0.0, 100.0);
@@ -116,10 +101,7 @@ fn an_active_animation_arms_the_scheduler_and_then_retires_it() {
     );
 }
 
-/// §3.3 Runtime adapters provide — "`Clock`".
-///
-/// With the injected clock pinned at t=0, 60 presented frames must all sample
-/// the same value: no subsystem may read a second time source.
+#[doc = include_str!("spec_ch3_motion_time.doc/sixty_frames_on_a_frozen_clock_sample_one_identical_value.md")]
 #[test]
 fn sixty_frames_on_a_frozen_clock_sample_one_identical_value() {
     let (mut rt, sheet, _node) = started(1.0, 0.0, 100.0);

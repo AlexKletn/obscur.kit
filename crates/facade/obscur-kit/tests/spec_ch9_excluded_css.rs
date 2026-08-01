@@ -1,11 +1,4 @@
-//! **SPECIFICATION-DERIVED** cases for the CSS features obscur.kit §9.1 declares
-//! non-goals and §4.1/§4.13 exclude normatively: float/clear, table layout,
-//! multicol, legacy clip/zoom/page-break, browser link/visited/target state, and
-//! network loading through `@import`.
-//!
-//! Every expected value was produced by an agent reading the specification with
-//! **no access to this repository's source**. A failure here is a defect report
-//! about the engine, and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch9_excluded_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch9_support/mod.rs"]
@@ -16,10 +9,7 @@ use support::{approx, assert_color, at, drive, el, geom, unsupported, view};
 
 const VW: f32 = 1000.0;
 
-/// §4.1 Layout models — "Excluded legacy/browser baggage:" / "- float/clear;"
-/// (making concrete §9.1 "legacy browser layout behavior").
-///
-/// NG-FLOAT-01.
+#[doc = include_str!("spec_ch9_excluded_css.doc/float_left_does_not_place_children_side_by_side.md")]
 #[test]
 fn float_left_does_not_place_children_side_by_side() {
     let rt = drive(
@@ -47,11 +37,7 @@ fn float_left_does_not_place_children_side_by_side() {
     approx(container_h, 100.0, "container content height");
 }
 
-/// §4.13 — "Excluded or restricted:" / "- float/clear;" plus §1.6 "diagnostics
-/// include severity, subsystem, stable code, node/resource/window context and
-/// recovery action".
-///
-/// NG-FLOAT-02.
+#[doc = include_str!("spec_ch9_excluded_css.doc/an_excluded_float_declaration_is_reported_and_its_siblings_still_apply.md")]
 #[test]
 fn an_excluded_float_declaration_is_reported_and_its_siblings_still_apply() {
     let css = ".a{float:left;color:rgb(255,0,0)}";
@@ -81,10 +67,7 @@ fn an_excluded_float_declaration_is_reported_and_its_siblings_still_apply() {
     );
 }
 
-/// §4.1 — "Excluded legacy/browser baggage:" / "- table layout as a
-/// general-purpose layout engine;".
-///
-/// NG-TABLE-01.
+#[doc = include_str!("spec_ch9_excluded_css.doc/display_table_cell_children_stack_and_do_not_form_a_row.md")]
 #[test]
 fn display_table_cell_children_stack_and_do_not_form_a_row() {
     let rt = drive(
@@ -112,9 +95,7 @@ fn display_table_cell_children_stack_and_do_not_form_a_row() {
     approx(container_h, 80.0, "container content height");
 }
 
-/// §4.13 — "Excluded or restricted:" / "- columns;".
-///
-/// NG-COLUMNS-01.
+#[doc = include_str!("spec_ch9_excluded_css.doc/column_count_does_not_fragment_the_flow.md")]
 #[test]
 fn column_count_does_not_fragment_the_flow() {
     let rt = drive(
@@ -147,9 +128,7 @@ fn column_count_does_not_fragment_the_flow() {
     approx(container_h, 200.0, "container content height");
 }
 
-/// §4.13 — "Excluded or restricted:" / "- legacy clip/zoom/page-break features;".
-///
-/// NG-ZOOM-01.
+#[doc = include_str!("spec_ch9_excluded_css.doc/zoom_neither_scales_layout_nor_becomes_a_transform.md")]
 #[test]
 fn zoom_neither_scales_layout_nor_becomes_a_transform() {
     let rt = drive(
@@ -194,9 +173,7 @@ fn zoom_neither_scales_layout_nor_becomes_a_transform() {
     assert_eq!(reports[0].name(), "zoom");
 }
 
-/// §4.13 — "Excluded or restricted:" / "- browser link/visited/target state;".
-///
-/// NG-LINKSTATE-01.
+#[doc = include_str!("spec_ch9_excluded_css.doc/visited_and_target_selectors_are_excluded_not_merely_inert.md")]
 #[test]
 fn visited_and_target_selectors_are_excluded_not_merely_inert() {
     let css = ".item:visited{color:rgb(255,0,0)}\
@@ -234,11 +211,7 @@ fn visited_and_target_selectors_are_excluded_not_merely_inert() {
     );
 }
 
-/// §4.13 — "Excluded or restricted:" / "- arbitrary network loading via `url()`
-/// and `@import`;" and §5.15 "The kit does not perform arbitrary network access
-/// by itself."
-///
-/// NG-IMPORT-01.
+#[doc = include_str!("spec_ch9_excluded_css.doc/an_import_at_rule_is_rejected_and_the_rest_of_the_sheet_survives.md")]
 #[test]
 fn an_import_at_rule_is_rejected_and_the_rest_of_the_sheet_survives() {
     let css = "@import url(\"https://example.invalid/theme.css\");\n\
@@ -263,11 +236,7 @@ fn an_import_at_rule_is_rejected_and_the_rest_of_the_sheet_survives() {
     );
 }
 
-/// §5.6 Offscreen output — "Paged document/print rendering is not a core goal."
-/// and §4.13 "- print/page fragmentation;".
-///
-/// NG-PRINT-01 (the `page-break-after` half; the paged-export half is recorded as
-/// unexpressible — the kit exposes no offscreen paged-export entry point at all).
+#[doc = include_str!("spec_ch9_excluded_css.doc/page_break_after_is_reported_and_moves_nothing.md")]
 #[test]
 fn page_break_after_is_reported_and_moves_nothing() {
     let css = ".box{width:300px}\

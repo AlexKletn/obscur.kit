@@ -1,32 +1,18 @@
-//! A parsed URL-like location: path, query, and fragment (spec §6.13).
+#![doc = include_str!("route.doc/_module.md")]
 
-/// A parsed URL-like navigation location (spec §6.13).
-///
-/// A `Route` models the three addressable parts of a URL-like location: a
-/// normalized [`path`](Route::path) (always beginning with `/`), an ordered
-/// list of [`query`](Route::query) key/value pairs, and an optional
-/// [`fragment`](Route::fragment). It is pure data produced by
-/// [`Route::parse`]; application navigation policy (what a location *means*)
-/// lives outside the toolkit.
-///
-/// Query values are stored raw. Percent-decoding is intentionally *not*
-/// performed here: encoding rules depend on the frontend's URL scheme, so
-/// decoding is a frontend concern applied on top of these raw strings.
+#[doc = include_str!("route.doc/Route.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Route {
-    /// The normalized path; always starts with `/`.
+    #[doc = include_str!("route.doc/path.md")]
     path: Box<str>,
-    /// The ordered query key/value pairs, in the order they appeared.
+    #[doc = include_str!("route.doc/query.md")]
     query: Vec<(Box<str>, Box<str>)>,
-    /// The fragment (the part after `#`), without the leading `#`.
+    #[doc = include_str!("route.doc/fragment.md")]
     fragment: Option<Box<str>>,
 }
 
 impl Route {
-    /// Creates a route from a path with an empty query and no fragment.
-    ///
-    /// The path is normalized to begin with `/`: a leading slash is prepended
-    /// when the input does not already have one.
+    #[doc = include_str!("route.doc/new.md")]
     #[must_use]
     pub fn new(path: impl Into<Box<str>>) -> Self {
         Self {
@@ -36,14 +22,7 @@ impl Route {
         }
     }
 
-    /// Parses a URL-like string into a [`Route`] (spec §6.13).
-    ///
-    /// Parsing splits the input in order: the `#fragment` is removed first,
-    /// then the `?query` is removed from the remainder, and whatever is left is
-    /// the path (normalized to begin with `/`). The query is split on `&` into
-    /// pairs, and each pair on the first `=` into a key and value; a pair with
-    /// no `=` yields an empty value. Values are stored raw (see the type-level
-    /// note on percent-decoding).
+    #[doc = include_str!("route.doc/parse.md")]
     #[must_use]
     pub fn parse(input: &str) -> Self {
         // Split off the fragment first (everything after the first '#').
@@ -67,19 +46,19 @@ impl Route {
         }
     }
 
-    /// Returns the normalized path (always starting with `/`).
+    #[doc = include_str!("route.doc/path_2.md")]
     #[must_use]
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    /// Returns the ordered query key/value pairs.
+    #[doc = include_str!("route.doc/query_2.md")]
     #[must_use]
     pub fn query(&self) -> &[(Box<str>, Box<str>)] {
         &self.query
     }
 
-    /// Returns the value of the first query parameter matching `key`, if any.
+    #[doc = include_str!("route.doc/query_param.md")]
     #[must_use]
     pub fn query_param(&self, key: &str) -> Option<&str> {
         self.query
@@ -88,26 +67,19 @@ impl Route {
             .map(|(_, v)| &**v)
     }
 
-    /// Returns the fragment (without the leading `#`), if present.
+    #[doc = include_str!("route.doc/fragment_2.md")]
     #[must_use]
     pub fn fragment(&self) -> Option<&str> {
         self.fragment.as_deref()
     }
 
-    /// Returns the non-empty path segments, splitting on `/`.
-    ///
-    /// Empty segments (from leading, trailing, or doubled slashes) are skipped,
-    /// so `/a/b/` yields `["a", "b"]`.
+    #[doc = include_str!("route.doc/segments.md")]
     #[must_use]
     pub fn segments(&self) -> Vec<&str> {
         self.path.split('/').filter(|s| !s.is_empty()).collect()
     }
 
-    /// Reconstructs the location as `path?query#fragment`.
-    ///
-    /// The `?` and query are emitted only when the query is non-empty, and the
-    /// `#` and fragment only when a fragment is present. Query pairs are joined
-    /// with `&` and each rendered as `key=value`.
+    #[doc = include_str!("route.doc/to_string_path.md")]
     #[must_use]
     pub fn to_string_path(&self) -> String {
         let mut out = String::from(&*self.path);
@@ -130,7 +102,7 @@ impl Route {
     }
 }
 
-/// Normalizes a raw path so that it begins with `/`.
+#[doc = include_str!("route.doc/normalize_path.md")]
 fn normalize_path(path: &str) -> Box<str> {
     if path.starts_with('/') {
         Box::from(path)
@@ -142,7 +114,7 @@ fn normalize_path(path: &str) -> Box<str> {
     }
 }
 
-/// Parses a raw query string (`k=v&k2=v2`) into ordered key/value pairs.
+#[doc = include_str!("route.doc/parse_query.md")]
 fn parse_query(query: &str) -> Vec<(Box<str>, Box<str>)> {
     query
         .split('&')

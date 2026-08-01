@@ -1,41 +1,19 @@
-//! Which of §2.3's propagation phases a listener asked to be run in.
+#![doc = include_str!("listener_phase.doc/_module.md")]
 
 use super::EventPhase;
 
-/// The phase a listener *registers* for (spec §2.3).
-///
-/// §2.3's propagation is *"1. capture; 2. target; 3. bubble; 4. default action"*,
-/// but only two of those are a **registration** choice: a listener asks to be run
-/// on the way down or on the way up. [`EventPhase::Target`] is not a choice —
-/// every listener attached to the target node runs when the event reaches it,
-/// whichever direction it registered for — and the default action is not a
-/// listener at all. Hence two variants, not four.
-///
-/// # Why the default is `Bubble`
-///
-/// Capture is the unusual request: it lets an ancestor see an event *before* the
-/// node the user actually interacted with, which is how an overlay or a
-/// gesture arbiter takes an interaction away from its target. Bubble is what a
-/// handler ordinarily wants — "tell me after the thing that was hit has had its
-/// say" — so it is the default, and capture must be asked for explicitly.
+#[doc = include_str!("listener_phase.doc/ListenerPhase.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ListenerPhase {
-    /// Run while the event descends from the root toward the target, *before*
-    /// the target itself is reached.
+    #[doc = include_str!("listener_phase.doc/Capture.md")]
     Capture,
-    /// Run while the event ascends from the target back toward the root.
+    #[doc = include_str!("listener_phase.doc/Bubble.md")]
     #[default]
     Bubble,
 }
 
 impl ListenerPhase {
-    /// Returns whether a listener registered for this phase runs during `phase`.
-    ///
-    /// At [`EventPhase::Target`] the answer is `true` for **both** variants: the
-    /// event has arrived at the node the listener is attached to, so the
-    /// direction it registered for no longer distinguishes anything. This mirrors
-    /// the DOM, where target-phase listeners run in registration order regardless
-    /// of their capture flag.
+    #[doc = include_str!("listener_phase.doc/runs_in.md")]
     #[must_use]
     pub const fn runs_in(self, phase: EventPhase) -> bool {
         match phase {

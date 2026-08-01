@@ -1,19 +1,4 @@
-//! End-to-end: a body `{expr}` **renders its value**, on both front ends
-//! (spec §2.8, §2.10).
-//!
-//! `<div>{user.name}</div>` rendered the literal text `user.name` — the nine
-//! characters of the binding's own source. Not a missing feature: a document that
-//! silently showed its own spelling. The attribute case was fixed and this one,
-//! the more common one, was left live, and the two front ends drifted while it
-//! was: the macro emitted the path as text, and the `.okui` file emitted an
-//! element named `Expression` that renders as an empty box.
-//!
-//! One representation now serves both — `UiIrNode::interpolation`, which carries
-//! the expression rather than its spelling — so `ViewCodegen` emits the same text
-//! node from either. The macro tests below check a `View` built by the real
-//! `okui!` with real locals in scope; the file test checks the Rust the file front
-//! end emits for the same document.
-
+#![doc = include_str!("okui_text_binding.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::okui_compiler::codegen::{CodegenRoot, ViewCodegen};
@@ -23,7 +8,7 @@ use obscur_kit::okui_syntax::parser::Parser;
 use obscur_kit::ui_macros::okui;
 use obscur_kit::view::view::{View, ViewNode};
 
-/// `node`'s text content.
+#[doc = include_str!("okui_text_binding.doc/text.md")]
 fn text(node: &ViewNode) -> &str {
     let ViewNode::Text { content, .. } = node else {
         panic!("expected a text node, got {node:?}");
@@ -31,7 +16,7 @@ fn text(node: &ViewNode) -> &str {
     content
 }
 
-/// `node`'s children.
+#[doc = include_str!("okui_text_binding.doc/children.md")]
 fn children(node: &ViewNode) -> &[ViewNode] {
     let ViewNode::Element { children, .. } = node else {
         panic!("expected an element, got {node:?}");
@@ -39,12 +24,12 @@ fn children(node: &ViewNode) -> &[ViewNode] {
     children.nodes()
 }
 
-/// The view's single root node.
+#[doc = include_str!("okui_text_binding.doc/root.md")]
 fn root(view: &View) -> &ViewNode {
     &view.root().nodes()[0]
 }
 
-/// The Rust source the `.okui` file front end emits for `source`.
+#[doc = include_str!("okui_text_binding.doc/generated.md")]
 fn generated(source: &str) -> String {
     let parsed = Parser::new().parse(source);
     let document = Document::cast(parsed.tree().root().clone()).expect("root casts to Document");

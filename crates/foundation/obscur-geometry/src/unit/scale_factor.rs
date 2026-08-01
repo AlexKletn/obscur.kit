@@ -1,14 +1,14 @@
-//! Fractional display scale factor.
+#![doc = include_str!("scale_factor.doc/_module.md")]
 
-/// A fractional DPI scale factor mapping logical to physical pixels.
+#[doc = include_str!("scale_factor.doc/ScaleFactor.md")]
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ScaleFactor(f32);
 
 impl ScaleFactor {
-    /// The identity scale factor (1.0).
+    #[doc = include_str!("scale_factor.doc/IDENTITY.md")]
     pub const IDENTITY: Self = Self(1.0);
 
-    /// Creates a scale factor, clamping non-positive inputs to the identity.
+    #[doc = include_str!("scale_factor.doc/new.md")]
     #[must_use]
     pub fn new(value: f32) -> Self {
         if value > 0.0 {
@@ -18,7 +18,7 @@ impl ScaleFactor {
         }
     }
 
-    /// Returns the raw scale multiplier.
+    #[doc = include_str!("scale_factor.doc/get.md")]
     #[must_use]
     pub fn get(self) -> f32 {
         self.0

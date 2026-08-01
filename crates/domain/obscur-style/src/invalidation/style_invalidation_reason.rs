@@ -1,35 +1,19 @@
-//! Why a node must be restyled: the typed [`StyleInvalidationReason`] (§4.3).
-//!
-//! Style invalidation in Obscur Kit 2 is dependency-driven with *typed*
-//! invalidation reasons, not a scattering of ad-hoc dirty booleans (§4.3). Each
-//! reason records the kind of input change that forced a node back into the
-//! restyle set, so the runtime can reason about, log and prioritise pending work
-//! deterministically.
+#![doc = include_str!("style_invalidation_reason.doc/_module.md")]
 
-/// The typed reason a node's computed style was invalidated (§4.3).
-///
-/// Every entry in a [`crate::invalidation::StyleInvalidation`] set carries one of
-/// these so the cause of a restyle is explicit rather than implied by a bare
-/// dirty flag. `Copy + Eq + Hash` so it can be stored in maps/sets cheaply and
-/// compared without allocation.
+#[doc = include_str!("style_invalidation_reason.doc/StyleInvalidationReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StyleInvalidationReason {
-    /// A stylesheet was added, removed or mutated, so the node's matched rules
-    /// may have changed and it must be re-matched and recomputed.
+    #[doc = include_str!("style_invalidation_reason.doc/StylesheetChanged.md")]
     StylesheetChanged,
-    /// The node's own set of matched declarations changed (for example a rule
-    /// that targets it gained or lost a declaration), so it must recompute.
+    #[doc = include_str!("style_invalidation_reason.doc/DeclarationsChanged.md")]
     DeclarationsChanged,
-    /// An *inherited* value on the parent's computed style changed, so a value
-    /// this node inherited from its parent is now stale (inheritance flows down).
+    #[doc = include_str!("style_invalidation_reason.doc/ParentStyleChanged.md")]
     ParentStyleChanged,
-    /// A custom property this node consumed (e.g. via `var()`) changed on an
-    /// ancestor, so any value substituted from it must be recomputed.
+    #[doc = include_str!("style_invalidation_reason.doc/CustomPropertyChanged.md")]
     CustomPropertyChanged,
-    /// The node's active interaction/state pseudo-classes changed (e.g. `:hover`
-    /// toggled), so state-dependent selectors must be re-matched.
+    #[doc = include_str!("style_invalidation_reason.doc/PseudoStateChanged.md")]
     PseudoStateChanged,
-    /// The node's inline style declarations changed, so it must recompute.
+    #[doc = include_str!("style_invalidation_reason.doc/InlineStyleChanged.md")]
     InlineStyleChanged,
 }
 

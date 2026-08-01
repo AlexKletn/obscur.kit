@@ -1,48 +1,20 @@
-//! `GridAreaTemplate`: a parsed `grid-template-areas` grid of named cells.
+#![doc = include_str!("grid_area_template.doc/_module.md")]
 
 use crate::property::GridAreaRect;
 
-/// A grid container's `grid-template-areas` value: a rectangular grid of cells,
-/// each either a named area or a null (`.`) cell, with every named area resolved
-/// to the line-number rectangle it spans (spec §4.2, the named-areas subset).
-///
-/// The template is built from the authored rows of cell tokens via
-/// [`from_rows`](GridAreaTemplate::from_rows), which enforces the two CSS
-/// well-formedness rules:
-///
-/// * every row has the same number of columns, and
-/// * every named area forms a *filled rectangle* (all its cells are contiguous,
-///   with no hole and no second disjoint block of the same name).
-///
-/// A template that breaks either rule is rejected (`from_rows` returns [`None`]),
-/// so the CSS layer can emit a diagnostic and skip the declaration rather than
-/// laying out against a malformed grid.
-///
-/// The resolved areas are stored **sorted by name**, so the template is a
-/// deterministic value with a stable [`PartialEq`] independent of author order.
-///
-/// # Line numbers
-///
-/// [`area`](GridAreaTemplate::area) returns each area's [`GridAreaRect`] in
-/// 1-based grid line numbers, directly usable as a child's `grid-row` /
-/// `grid-column` line placement.
+#[doc = include_str!("grid_area_template.doc/GridAreaTemplate.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridAreaTemplate {
-    /// The number of rows (strings) in the template.
+    #[doc = include_str!("grid_area_template.doc/rows.md")]
     rows: u32,
-    /// The number of columns (cells per row) in the template.
+    #[doc = include_str!("grid_area_template.doc/columns.md")]
     columns: u32,
-    /// The resolved named areas, sorted by name for determinism.
+    #[doc = include_str!("grid_area_template.doc/areas.md")]
     areas: Box<[(Box<str>, GridAreaRect)]>,
 }
 
 impl GridAreaTemplate {
-    /// Builds a template from the authored rows of cell tokens.
-    ///
-    /// Each row is a slice of cells; a cell is `Some(name)` for a named area or
-    /// [`None`] for a null (`.`) cell. Returns [`None`] when the grid is empty,
-    /// when the rows are ragged (unequal column counts), or when any named area is
-    /// not a filled rectangle (a hole, or two disjoint blocks of the same name).
+    #[doc = include_str!("grid_area_template.doc/from_rows.md")]
     #[must_use]
     pub fn from_rows(rows: &[Vec<Option<Box<str>>>]) -> Option<Self> {
         let row_count = rows.len();
@@ -105,8 +77,7 @@ impl GridAreaTemplate {
         })
     }
 
-    /// Returns the line-number [`GridAreaRect`] of the area named `name`, or
-    /// [`None`] when no such area exists in the template.
+    #[doc = include_str!("grid_area_template.doc/area.md")]
     #[must_use]
     pub fn area(&self, name: &str) -> Option<GridAreaRect> {
         self.areas
@@ -115,21 +86,20 @@ impl GridAreaTemplate {
             .map(|(_, rect)| *rect)
     }
 
-    /// The number of rows in the template.
+    #[doc = include_str!("grid_area_template.doc/rows_2.md")]
     #[must_use]
     pub const fn rows(&self) -> u32 {
         self.rows
     }
 
-    /// The number of columns in the template.
+    #[doc = include_str!("grid_area_template.doc/columns_2.md")]
     #[must_use]
     pub const fn columns(&self) -> u32 {
         self.columns
     }
 }
 
-/// Narrows a 0-based `usize` index into the 1-based `u32` line number `index + 1`,
-/// saturating so a pathologically large grid cannot overflow.
+#[doc = include_str!("grid_area_template.doc/to_line.md")]
 fn to_line(index: usize) -> u32 {
     u32::try_from(index)
         .unwrap_or(u32::MAX - 1)

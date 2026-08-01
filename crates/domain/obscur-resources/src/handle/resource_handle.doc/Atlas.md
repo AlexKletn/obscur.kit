@@ -1,0 +1,1 @@
+A texture atlas resource.

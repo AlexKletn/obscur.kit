@@ -1,30 +1,19 @@
-//! `ReconciliationPlan`: the ordered op log produced by a reconcile pass.
+#![doc = include_str!("reconciliation_plan.doc/_module.md")]
 
 use obscur_identity::{NodeId, StableKey};
 
 use super::ReconciliationOp;
 
-/// An ordered record of the [`ReconciliationOp`]s produced by a reconcile pass.
-///
-/// The plan is the op log a [`Reconciler`](super::Reconciler) emits while
-/// transforming the retained tree from a desired tree: a flat, ordered sequence
-/// of the inserts, removes, moves, and in-place updates it performed. It exists
-/// for diagnostics, tests, and — later — observers.
-///
-/// The transaction sub-step will wrap a reconcile pass in atomic `UiOps` commit
-/// boundaries; here the plan is simply the produced op log, with no transactional
-/// guarantees of its own.
+#[doc = include_str!("reconciliation_plan.doc/ReconciliationPlan.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReconciliationPlan {
-    /// Sibling groups whose desired children reused one key (spec §2.4 keyed
-    /// identity). Recorded rather than reported: this crate is domain code and
-    /// performs no I/O, so the runtime raises the diagnostic.
+    #[doc = include_str!("reconciliation_plan.doc/duplicate_keys.md")]
     duplicate_keys: Vec<DuplicateKey>,
     ops: Vec<ReconciliationOp>,
 }
 
 impl ReconciliationPlan {
-    /// Creates an empty plan.
+    #[doc = include_str!("reconciliation_plan.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -33,46 +22,43 @@ impl ReconciliationPlan {
         }
     }
 
-    /// Appends an op to the end of the log, preserving order.
+    #[doc = include_str!("reconciliation_plan.doc/push.md")]
     pub fn push(&mut self, op: ReconciliationOp) {
         self.ops.push(op);
     }
 
-    /// Returns the recorded ops in order.
+    #[doc = include_str!("reconciliation_plan.doc/push_duplicate_key.md")]
     #[must_use]
-    /// Records a sibling group that reused `key` `count` times under `parent`.
+    #[doc = include_str!("reconciliation_plan.doc/push_duplicate_key_2.md")]
     pub fn push_duplicate_key(&mut self, parent: NodeId, key: StableKey, count: usize) {
         self.duplicate_keys
             .push(DuplicateKey { parent, key, count });
     }
 
-    /// The duplicate-key collisions this reconcile saw (spec §2.4).
+    #[doc = include_str!("reconciliation_plan.doc/duplicate_keys_2.md")]
     #[must_use]
     pub fn duplicate_keys(&self) -> &[DuplicateKey] {
         &self.duplicate_keys
     }
 
-    /// The recorded operations, in the order the reconcile produced them.
-    ///
-    /// Order is part of the contract: an op may refer to a node an earlier op
-    /// created, so applying them out of sequence is not the same plan.
+    #[doc = include_str!("reconciliation_plan.doc/ops.md")]
     #[must_use]
     pub fn ops(&self) -> &[ReconciliationOp] {
         &self.ops
     }
 
-    /// Returns an iterator over the recorded ops in order.
+    #[doc = include_str!("reconciliation_plan.doc/iter.md")]
     pub fn iter(&self) -> core::slice::Iter<'_, ReconciliationOp> {
         self.ops.iter()
     }
 
-    /// Returns the number of recorded ops.
+    #[doc = include_str!("reconciliation_plan.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.ops.len()
     }
 
-    /// Returns `true` if no ops were recorded (a no-op reconcile pass).
+    #[doc = include_str!("reconciliation_plan.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()

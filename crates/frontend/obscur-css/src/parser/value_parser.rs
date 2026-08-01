@@ -1,90 +1,60 @@
-//! The [`ValueParser`] and its parsed component-value AST.
-//!
-//! A declaration value is modelled as the CSS *component value* list (spec
-//! §4.13): a flat [`Vec<ParsedValue>`] of space-separated components in which
-//! commas and operators survive as their own [`ParsedValue::Comma`] /
-//! [`ParsedValue::Delimiter`] components. Functions nest their arguments as a
-//! child component list. Nothing is evaluated here — `calc()` and friends keep
-//! their raw operands so the compiler can lower or fold them later.
+#![doc = include_str!("value_parser.doc/_module.md")]
 
 use crate::error::{CssParseError, CssParseErrorKind};
 use crate::source::CssSource;
 
-use super::stylesheet_parser::{CssToken, CssTokenKind, TokenCursor, Tokenizer};
+use super::css_tokenizer::{CssToken, CssTokenKind, Tokenizer};
+use super::token_cursor::TokenCursor;
 
-/// A single parsed CSS component value (spec §4.13).
-///
-/// This is a *syntactic* model: no unit validation, colour resolution, or
-/// arithmetic happens here. Commas and bare operator characters are preserved as
-/// [`Comma`](ParsedValue::Comma) and [`Delimiter`](ParsedValue::Delimiter)
-/// components so a value round-trips structurally into the compiler.
+#[doc = include_str!("value_parser.doc/ParsedValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParsedValue {
-    /// A bare identifier keyword such as `flex`, `auto`, or `inherit`.
+    #[doc = include_str!("value_parser.doc/Keyword.md")]
     Keyword(Box<str>),
-    /// A unitless number such as `12` or `-0.5`.
+    #[doc = include_str!("value_parser.doc/Number.md")]
     Number(f64),
-    /// A percentage such as `50%`; stores the numeric part (`50`).
+    #[doc = include_str!("value_parser.doc/Percentage.md")]
     Percentage(f64),
-    /// A dimension such as `12px` or `1.5rem`; the unit is kept verbatim and is
-    /// validated later by the compiler.
+    #[doc = include_str!("value_parser.doc/Dimension.md")]
     Dimension {
-        /// The numeric part of the dimension.
+        #[doc = include_str!("value_parser.doc/value.md")]
         value: f64,
-        /// The unit text (for example `px`, `rem`, `fr`, `deg`, `ms`).
+        #[doc = include_str!("value_parser.doc/unit.md")]
         unit: Box<str>,
     },
-    /// A quoted string (without its quotes).
+    #[doc = include_str!("value_parser.doc/String.md")]
     String(Box<str>),
-    /// A hash value such as a hex colour `#ff0000`; stored without the `#`.
+    #[doc = include_str!("value_parser.doc/Hash.md")]
     Hash(Box<str>),
-    /// A function call such as `calc(…)`, `rgb(…)`, `var(…)`, or `translate(…)`.
-    ///
-    /// A bare parenthesised group `( … )` is represented as a function with an
-    /// empty [`name`](ParsedValue::Function::name). Arguments are the raw nested
-    /// component list, commas and operators included.
+    #[doc = include_str!("value_parser.doc/Function.md")]
     Function {
-        /// The function name (empty for a bare parenthesised group).
+        #[doc = include_str!("value_parser.doc/name.md")]
         name: Box<str>,
-        /// The nested argument component list.
+        #[doc = include_str!("value_parser.doc/args.md")]
         args: Vec<ParsedValue>,
     },
-    /// A `,` comma separator between components (for example between font
-    /// families or `transition` layers).
+    #[doc = include_str!("value_parser.doc/Comma.md")]
     Comma,
-    /// A bare operator/delimiter character (for example `+`, `-`, `*`, `/`
-    /// inside `calc()`).
+    #[doc = include_str!("value_parser.doc/Delimiter.md")]
     Delimiter(char),
-    /// A bracketed line-name group `[ a b … ]` from a grid track list
-    /// (`grid-template-columns: [sidebar-start] 200px [main]`). The names are the
-    /// `<custom-ident>`s inside the brackets, in author order; an empty group
-    /// (`[]`) carries no names. Only the grid track-list compiler reads this; any
-    /// other property degrades to an unsupported-feature diagnostic (spec §4.13).
+    #[doc = include_str!("value_parser.doc/LineNames.md")]
     LineNames(Box<[Box<str>]>),
 }
 
-/// Parses a declaration's value tokens into a component-value list.
-///
-/// The parser is stateless; a single instance may parse any number of values.
+#[doc = include_str!("value_parser.doc/ValueParser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ValueParser {
     _private: (),
 }
 
 impl ValueParser {
-    /// Creates a value parser.
+    #[doc = include_str!("value_parser.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { _private: () }
     }
 
-    /// Parses `source` as a standalone component-value list.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] if a function or parenthesised group is
-    /// unterminated, or a stray closing delimiter or block token appears where a
-    /// value was expected.
+    #[doc = include_str!("value_parser.doc/parse.md")]
     pub fn parse(&self, source: &CssSource) -> Result<Vec<ParsedValue>, CssParseError> {
         let text = source.text();
         let eof = u32::try_from(text.len()).unwrap_or(u32::MAX);
@@ -95,12 +65,7 @@ impl ValueParser {
         Self::parse_tokens(&tokens, eof)
     }
 
-    /// Parses a component-value list from an already-tokenized slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] on an unterminated function/group or a stray
-    /// closing/block token.
+    #[doc = include_str!("value_parser.doc/parse_tokens.md")]
     pub(crate) fn parse_tokens(
         tokens: &[CssToken],
         eof: u32,
@@ -110,8 +75,7 @@ impl ValueParser {
     }
 }
 
-/// Parses a run of components. When `in_function`, stops at (and consumes) the
-/// matching `)`; otherwise stops at end-of-input.
+#[doc = include_str!("value_parser.doc/parse_components.md")]
 fn parse_components(
     cursor: &mut TokenCursor<'_>,
     in_function: bool,
@@ -142,7 +106,7 @@ fn parse_components(
     }
 }
 
-/// Parses exactly one component value.
+#[doc = include_str!("value_parser.doc/parse_component.md")]
 fn parse_component(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParseError> {
     let span = cursor.here_span();
     let kind = cursor.peek_kind().cloned();
@@ -207,13 +171,7 @@ fn parse_component(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParse
     }
 }
 
-/// Parses a bracketed line-name group `[ a b … ]` after its opening `[` has been
-/// consumed, up to and including the closing `]`.
-///
-/// Each name is a `<custom-ident>` (an `Ident` token); whitespace between names
-/// is skipped. An unterminated group (EOF before `]`) or a non-ident token inside
-/// the brackets is an error, so a malformed group degrades the declaration rather
-/// than being silently accepted.
+#[doc = include_str!("value_parser.doc/parse_line_names.md")]
 fn parse_line_names(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParseError> {
     let mut names: Vec<Box<str>> = Vec::new();
     loop {
@@ -239,7 +197,7 @@ fn parse_line_names(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssPars
     }
 }
 
-/// Tokenizes `text` and parses it as a component-value list (test helper).
+#[doc = include_str!("value_parser.doc/parse_str.md")]
 #[cfg(test)]
 fn parse_str(text: &str) -> Result<Vec<ParsedValue>, CssParseError> {
     let src = CssSource::anonymous(text);

@@ -1,0 +1,1 @@
+`nominative` — the dictionary form.

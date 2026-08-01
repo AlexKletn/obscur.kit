@@ -1,34 +1,4 @@
-//! **Proof: CSS color-matrix `filter` functions as REAL per-pixel transforms via
-//! our own wgpu color-matrix pass over Vello.**
-//!
-//! Renders one colourful reference element (eight vertical colour bars) beside six
-//! copies, each wrapped in a `ColorMatrix` layer —
-//! `PushLayer(SceneLayer::with_clip(bounds).add_effect(color_matrix(M)))` …
-//! `PopLayer` — exactly the command bracket the scene coordinator emits when it
-//! folds an element's color-op `filter` chain into one 4×5 matrix. The renderer's
-//! owned color-matrix wgpu pass applies each `M`; the read-back PNG
-//! (`target/color_filter_proof.png`) shows each transform:
-//!
-//! - `grayscale(1)`  — the bars collapse to their luminance grays,
-//! - `brightness(1.5)` — everything lightens,
-//! - `saturate(2)`   — the colours intensify,
-//! - `invert(1)`     — every colour negates (red→cyan, white→black, …),
-//! - `hue-rotate(120deg)` — hues rotate a third of the wheel (red→green→blue),
-//! - `sepia(1)`      — the image warms to brown tones.
-//!
-//! Vello 0.9 has no color filters, so this drives the renderer half of the slice
-//! end to end (sub-scene extraction → the owned color-matrix fragment pass →
-//! composite). The matrices here are the spec-exact folds the coordinator produces
-//! (its folding is separately unit-tested); this hand-built list is byte-for-byte
-//! the structure it emits for these single-function filters.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. With none it prints a diagnostic and exits cleanly
-//! (no panic); it never fabricates a device.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example color_filter_proof --features render-vello`
+#![doc = include_str!("color_filter_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -45,11 +15,11 @@ use obscur_kit::scene::paint::Paint;
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// A single tile's size (one filtered element).
+#[doc = include_str!("color_filter_proof.doc/TILE.md")]
 const TILE: Size = Size::new(220.0, 120.0);
-/// Gap between tiles.
+#[doc = include_str!("color_filter_proof.doc/GAP.md")]
 const GAP: f32 = 16.0;
-/// Tiles per row in the grid.
+#[doc = include_str!("color_filter_proof.doc/COLS.md")]
 const COLS: usize = 4;
 
 fn main() {
@@ -130,9 +100,7 @@ fn main() {
     );
 }
 
-/// Builds the grid: a dark backdrop plus each tile's colour bars, the filtered
-/// ones wrapped in a `ColorMatrix` layer clipped to the tile (the coordinator's
-/// folded-color-op-chain shape).
+#[doc = include_str!("color_filter_proof.doc/build_scene.md")]
 #[allow(clippy::cast_precision_loss)]
 fn build_scene(tiles: &[(&str, Option<[f32; 20]>)], viewport: Size) -> DisplayList {
     let mut commands: Vec<PaintCommand> = Vec::new();
@@ -169,9 +137,7 @@ fn build_scene(tiles: &[(&str, Option<[f32; 20]>)], viewport: Size) -> DisplayLi
     DisplayList::from_commands(commands)
 }
 
-/// Fills `panel` with eight vertical colour bars (red, orange, yellow, green,
-/// cyan, blue, magenta, white) — a saturated spectrum whose transform under each
-/// filter is unmistakable.
+#[doc = include_str!("color_filter_proof.doc/color_bars.md")]
 #[allow(clippy::cast_precision_loss)]
 fn color_bars(commands: &mut Vec<PaintCommand>, panel: Rect) {
     let bars = [
@@ -194,7 +160,7 @@ fn color_bars(commands: &mut Vec<PaintCommand>, panel: Rect) {
     }
 }
 
-/// A solid-fill `DrawPath` command over `rect`.
+#[doc = include_str!("color_filter_proof.doc/fill.md")]
 fn fill(rect: Rect, color: Color) -> PaintCommand {
     PaintCommand::DrawPath {
         path: Path::rect(rect),
@@ -206,7 +172,7 @@ fn fill(rect: Rect, color: Color) -> PaintCommand {
 // These mirror the coordinator's fold for a single color function (CSS Filter
 // Effects §, https://drafts.fxtf.org/filter-effects/).
 
-/// Builds a `[f32; 20]` from an RGB 3×3 (alpha row identity) and an RGB bias.
+#[doc = include_str!("color_filter_proof.doc/mat.md")]
 fn mat(rows: [[f32; 3]; 3], bias: [f32; 3]) -> [f32; 20] {
     let mut m = [0.0_f32; 20];
     for (r, row) in rows.iter().enumerate() {
@@ -301,8 +267,7 @@ fn hue_rotate(theta: f32) -> [f32; 20] {
     )
 }
 
-/// Acquires a headless wgpu device + queue (no surface), or [`None`] when no
-/// adapter/device is available so the caller exits cleanly instead of panicking.
+#[doc = include_str!("color_filter_proof.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -314,7 +279,7 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("color_filter_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

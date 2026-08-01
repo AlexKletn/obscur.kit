@@ -1,4 +1,4 @@
-//! Paint module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod blend_mode;
 pub use blend_mode::BlendMode;
 mod brush;

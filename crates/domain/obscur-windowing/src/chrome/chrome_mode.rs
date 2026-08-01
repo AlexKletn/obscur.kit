@@ -1,35 +1,24 @@
-//! How a window's frame is provided: system, client-side, or custom chrome
-//! (spec §6.4).
+#![doc = include_str!("chrome_mode.doc/_module.md")]
 
-/// How the window frame and its controls are provided (spec §6.4).
-///
-/// This selects who draws the window's decorations. Dynamic switching between
-/// modes is allowed where the platform supports it; where it does not,
-/// [`ChromeMode::SystemFrame`] is the safe fallback and is therefore the
-/// default.
+#[doc = include_str!("chrome_mode.doc/ChromeMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChromeMode {
-    /// Native window decorations drawn by the platform (the system-frame
-    /// fallback).
+    #[doc = include_str!("chrome_mode.doc/SystemFrame.md")]
     SystemFrame,
-    /// Client-side decorations where the kit draws the standard controls.
+    #[doc = include_str!("chrome_mode.doc/ClientSide.md")]
     ClientSide,
-    /// A fully custom title bar drawn entirely by the application.
+    #[doc = include_str!("chrome_mode.doc/Custom.md")]
     Custom,
 }
 
 impl ChromeMode {
-    /// Returns whether this is a fully custom title bar.
+    #[doc = include_str!("chrome_mode.doc/is_custom.md")]
     #[must_use]
     pub const fn is_custom(self) -> bool {
         matches!(self, Self::Custom)
     }
 
-    /// Returns whether the frame is drawn client-side rather than by the
-    /// platform.
-    ///
-    /// This is `true` for both [`ChromeMode::ClientSide`] and
-    /// [`ChromeMode::Custom`], since both draw their own decorations.
+    #[doc = include_str!("chrome_mode.doc/uses_client_side.md")]
     #[must_use]
     pub const fn uses_client_side(self) -> bool {
         matches!(self, Self::ClientSide | Self::Custom)
@@ -37,8 +26,7 @@ impl ChromeMode {
 }
 
 impl Default for ChromeMode {
-    /// The default chrome mode is [`ChromeMode::SystemFrame`], the safe
-    /// system-frame fallback.
+    #[doc = include_str!("chrome_mode.doc/default.md")]
     fn default() -> Self {
         Self::SystemFrame
     }

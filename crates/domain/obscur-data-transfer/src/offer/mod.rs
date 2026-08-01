@@ -1,4 +1,4 @@
-//! Offer module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod data_offer;
 pub use data_offer::DataOffer;
 mod data_representation;

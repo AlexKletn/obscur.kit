@@ -1,60 +1,33 @@
-//! The active IME composition session anchored in the target buffer
-//! (spec §5.12 IME).
+#![doc = include_str!("composition.doc/_module.md")]
 
 use crate::span::TextRange;
 
 use super::Preedit;
 
-/// The lifecycle state of a [`Composition`] (spec §5.12).
-///
-/// A composition begins [`Composing`](Self::Composing) and ends exactly once, in
-/// either [`Committed`](Self::Committed) (the preedit was finalized into the
-/// buffer) or [`Cancelled`](Self::Cancelled) (the composition was abandoned and
-/// the anchored range left untouched).
+#[doc = include_str!("composition.doc/CompositionState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompositionState {
-    /// The composition is live; the preedit may still be updated.
+    #[doc = include_str!("composition.doc/Composing.md")]
     Composing,
-    /// The composition was committed; its text was finalized.
+    #[doc = include_str!("composition.doc/Committed.md")]
     Committed,
-    /// The composition was cancelled; nothing was committed.
+    #[doc = include_str!("composition.doc/Cancelled.md")]
     Cancelled,
 }
 
-/// An active IME composition session anchored in the target buffer (spec §5.12).
-///
-/// A composition ties an [`anchor`](Self::anchor) — the byte range in the buffer
-/// the composition occupies and will replace — to a live [`preedit`](Self::preedit)
-/// and a [`state`](Self::state). The anchor is established at the primary caret
-/// when the session [`start`](Self::start)s (multi-selection is restricted while
-/// composing, so there is a single anchor); while
-/// [`Composing`](CompositionState::Composing) the preedit is shown inline at that
-/// range.
-///
-/// The typed lifecycle mirrors §5.12: [`start`](Self::start) →
-/// [`update`](Self::update)\* → [`commit`](Self::commit) or
-/// [`cancel`](Self::cancel). Per §5.12 "one composition is one undo unit"; that
-/// undo grouping is enforced by the editing engine, which wraps the commit in a
-/// single [`UndoKind::Composition`](crate::editing::UndoKind::Composition) unit.
-/// This type only models the composition *state* — it performs no buffer edits;
-/// the caller applies [`commit`](Self::commit)'s returned text as a replacement
-/// over the anchor.
+#[doc = include_str!("composition.doc/Composition.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Composition {
-    /// The byte range in the target buffer the composition occupies / replaces.
+    #[doc = include_str!("composition.doc/anchor.md")]
     anchor: TextRange,
-    /// The uncommitted preedit shown at the anchor.
+    #[doc = include_str!("composition.doc/preedit.md")]
     preedit: Preedit,
-    /// The lifecycle state.
+    #[doc = include_str!("composition.doc/state.md")]
     state: CompositionState,
 }
 
 impl Composition {
-    /// Starts a composition anchored at `anchor` (spec §5.12 "start").
-    ///
-    /// The session begins [`Composing`](CompositionState::Composing) with an
-    /// empty preedit. Anchoring at the primary caret's range here also
-    /// establishes the one-undo-unit scope the editing engine will use.
+    #[doc = include_str!("composition.doc/start.md")]
     #[must_use]
     pub fn start(anchor: TextRange) -> Self {
         Self {
@@ -64,25 +37,14 @@ impl Composition {
         }
     }
 
-    /// Replaces the preedit with `preedit`, keeping the state
-    /// [`Composing`](CompositionState::Composing) (spec §5.12 "update").
-    ///
-    /// Ignored (a no-op) when the composition is no longer composing, so a stray
-    /// update after commit/cancel cannot resurrect a finished session.
+    #[doc = include_str!("composition.doc/update.md")]
     pub fn update(&mut self, preedit: Preedit) {
         if self.state == CompositionState::Composing {
             self.preedit = preedit;
         }
     }
 
-    /// Commits the composition and returns the text to insert: the preedit text
-    /// at commit time (spec §5.12 "commit").
-    ///
-    /// Marks the state [`Committed`](CompositionState::Committed) and clears the
-    /// preedit. The buffer-side replacement over the [`anchor`](Self::anchor) and
-    /// its undo-unit handling live in the editing engine, not here. Committing an
-    /// already-finished composition returns an empty string and leaves the state
-    /// unchanged.
+    #[doc = include_str!("composition.doc/commit.md")]
     #[must_use]
     pub fn commit(&mut self) -> Box<str> {
         if self.state != CompositionState::Composing {
@@ -94,11 +56,7 @@ impl Composition {
         text
     }
 
-    /// Cancels the composition (spec §5.12 "cancel").
-    ///
-    /// Marks the state [`Cancelled`](CompositionState::Cancelled) and clears the
-    /// preedit; the anchored range is left untouched by the caller. Ignored when
-    /// the composition is no longer composing.
+    #[doc = include_str!("composition.doc/cancel.md")]
     pub fn cancel(&mut self) {
         if self.state == CompositionState::Composing {
             self.preedit = Preedit::empty();
@@ -106,44 +64,31 @@ impl Composition {
         }
     }
 
-    /// Returns whether the composition is live
-    /// ([`Composing`](CompositionState::Composing)).
+    #[doc = include_str!("composition.doc/is_active.md")]
     #[must_use]
     pub const fn is_active(&self) -> bool {
         matches!(self.state, CompositionState::Composing)
     }
 
-    /// Returns the byte range the composition occupies in the target buffer.
+    #[doc = include_str!("composition.doc/anchor_2.md")]
     #[must_use]
     pub const fn anchor(&self) -> TextRange {
         self.anchor
     }
 
-    /// Returns the current preedit.
+    #[doc = include_str!("composition.doc/preedit_2.md")]
     #[must_use]
     pub const fn preedit(&self) -> &Preedit {
         &self.preedit
     }
 
-    /// Returns the lifecycle state.
+    #[doc = include_str!("composition.doc/state_2.md")]
     #[must_use]
     pub const fn state(&self) -> CompositionState {
         self.state
     }
 
-    /// Returns whether an external `edit` is valid against the composition (spec
-    /// §5.12 "external edits validate the composition range").
-    ///
-    /// While [`Composing`](CompositionState::Composing) an external edit is
-    /// invalid when it overlaps the composition [`anchor`](Self::anchor) — an
-    /// edit inside the live composition range would corrupt it — so this returns
-    /// `false` for an overlapping edit and `true` otherwise. When the composition
-    /// is no longer composing there is nothing to protect, so it is always
-    /// `true`.
-    ///
-    /// Overlap is tested with [`TextRange::intersects`], which treats
-    /// endpoint-touching ranges (e.g. `0..2` and `2..4`) and empty ranges as
-    /// non-overlapping.
+    #[doc = include_str!("composition.doc/validate_external_edit.md")]
     #[must_use]
     pub fn validate_external_edit(&self, edit: TextRange) -> bool {
         if self.state == CompositionState::Composing {

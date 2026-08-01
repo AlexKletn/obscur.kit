@@ -1,6 +1,5 @@
-//! Contribution (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("contribution.doc/_module.md")]
 
-/// Placeholder for the `Contribution` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("contribution.doc/Contribution.md")]
 #[derive(Debug)]
 pub struct Contribution;

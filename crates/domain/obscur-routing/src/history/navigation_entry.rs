@@ -1,26 +1,20 @@
-//! A single entry in the navigation history stack (spec §6.13).
+#![doc = include_str!("navigation_entry.doc/_module.md")]
 
 use crate::route::{Route, RouteState};
 
-/// One entry in the navigation history stack (spec §6.13).
-///
-/// An entry pairs the [`Route`] that was navigated to with the opaque
-/// [`RouteState`] captured for it (scroll position, form data, a selection) and
-/// a monotonic [`id`](NavigationEntry::id) assigned by the history provider. The
-/// id lets a caller distinguish two entries with the same route (for example the
-/// same page visited twice) without comparing their state.
+#[doc = include_str!("navigation_entry.doc/NavigationEntry.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavigationEntry {
-    /// The route this entry navigated to.
+    #[doc = include_str!("navigation_entry.doc/route.md")]
     route: Route,
-    /// The opaque, application-defined state captured for this entry.
+    #[doc = include_str!("navigation_entry.doc/state.md")]
     state: RouteState,
-    /// The monotonic identity assigned by the history provider.
+    #[doc = include_str!("navigation_entry.doc/id.md")]
     id: u64,
 }
 
 impl NavigationEntry {
-    /// Creates an entry for `route` with the given `id` and empty state.
+    #[doc = include_str!("navigation_entry.doc/new.md")]
     #[must_use]
     pub fn new(id: u64, route: Route) -> Self {
         Self {
@@ -30,26 +24,26 @@ impl NavigationEntry {
         }
     }
 
-    /// Returns this entry with its state replaced by `state` (builder style).
+    #[doc = include_str!("navigation_entry.doc/with_state.md")]
     #[must_use]
     pub fn with_state(mut self, state: RouteState) -> Self {
         self.state = state;
         self
     }
 
-    /// Returns the route this entry navigated to.
+    #[doc = include_str!("navigation_entry.doc/route_2.md")]
     #[must_use]
     pub fn route(&self) -> &Route {
         &self.route
     }
 
-    /// Returns the opaque state captured for this entry.
+    #[doc = include_str!("navigation_entry.doc/state_2.md")]
     #[must_use]
     pub fn state(&self) -> &RouteState {
         &self.state
     }
 
-    /// Returns the monotonic identity assigned by the history provider.
+    #[doc = include_str!("navigation_entry.doc/id_2.md")]
     #[must_use]
     pub const fn id(&self) -> u64 {
         self.id

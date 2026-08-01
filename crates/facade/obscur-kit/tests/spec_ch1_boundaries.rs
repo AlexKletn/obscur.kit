@@ -1,15 +1,4 @@
-//! **SPECIFICATION-DERIVED** component-error-boundary cases for obscur.kit §1.7.
-//!
-//! Read this before touching anything in the file.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §1
-//! (Architecture & boundaries) with **no access to this repository's source**.
-//! The cases are a statement of what the implementation owes the spec, not a
-//! record of what it currently does. A failure here is a defect report about the
-//! toolkit (or, occasionally, about the spec), and must not be "corrected" by
-//! editing the expected value.
-//!
-//! Each test's doc comment carries the quoted normative sentence it encodes.
+#![doc = include_str!("spec_ch1_boundaries.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch1_support/mod.rs"]
@@ -26,7 +15,7 @@ use support::{
     txt, view,
 };
 
-/// The viewport every case in this file renders under.
+#[doc = include_str!("spec_ch1_boundaries.doc/VP.md")]
 const VP: f32 = 1000.0;
 
 const C1: ComponentId = ComponentId::from_raw(0x0C1);
@@ -35,7 +24,7 @@ const C3: ComponentId = ComponentId::from_raw(0x0C3);
 const OUTER: ComponentId = ComponentId::from_raw(0x0A0);
 const MID: ComponentId = ComponentId::from_raw(0x0B0);
 
-/// `.cell` gives every component node a definite, hit-testable box.
+#[doc = include_str!("spec_ch1_boundaries.doc/cell_sheet.md")]
 fn cell_sheet() -> obscur_kit::style::matching::Stylesheet {
     compile(
         ".chrome { display: block; width: 200px; height: 20px } \
@@ -43,8 +32,7 @@ fn cell_sheet() -> obscur_kit::style::matching::Stylesheet {
     )
 }
 
-/// §1.7: "Every component is an error boundary by default." and the failure "is
-/// contained within the component subtree".
+#[doc = include_str!("spec_ch1_boundaries.doc/arch_21_a_failing_component_leaves_its_siblings_and_their_state_alone.md")]
 #[test]
 fn arch_21_a_failing_component_leaves_its_siblings_and_their_state_alone() {
     let mut rt = runtime_with_id(1, VP, VP);
@@ -107,7 +95,7 @@ fn arch_21_a_failing_component_leaves_its_siblings_and_their_state_alone() {
     );
 }
 
-/// §1.7: the boundary "replaces the subtree with fallback UI".
+#[doc = include_str!("spec_ch1_boundaries.doc/arch_22_the_failed_slot_holds_fallback_ui_that_lays_out_and_hit_tests.md")]
 #[test]
 fn arch_22_the_failed_slot_holds_fallback_ui_that_lays_out_and_hit_tests() {
     let mut rt = runtime_with_id(1, VP, VP);
@@ -169,10 +157,7 @@ fn arch_22_the_failed_slot_holds_fallback_ui_that_lays_out_and_hit_tests() {
     );
 }
 
-/// §1.7: the failure "is reported to diagnostics and DevTools".
-///
-/// The DevTools half of the case (the same event visible to an attached
-/// DevTools session) is not covered here; see the run report.
+#[doc = include_str!("spec_ch1_boundaries.doc/arch_24_the_boundary_reports_a_diagnostic_whose_node_id_round_trips.md")]
 #[test]
 fn arch_24_the_boundary_reports_a_diagnostic_whose_node_id_round_trips() {
     let mut rt = runtime_with_id(1, VP, VP);
@@ -232,8 +217,7 @@ fn arch_24_the_boundary_reports_a_diagnostic_whose_node_id_round_trips() {
     );
 }
 
-/// §1.7: a contained failure "may be retried according to component or host
-/// policy".
+#[doc = include_str!("spec_ch1_boundaries.doc/arch_25_a_retry_restores_the_component_without_remounting_its_siblings.md")]
 #[test]
 fn arch_25_a_retry_restores_the_component_without_remounting_its_siblings() {
     let mut rt = runtime_with_id(1, VP, VP);
@@ -288,7 +272,7 @@ fn arch_25_a_retry_restores_the_component_without_remounting_its_siblings() {
     );
 }
 
-/// §1.7: "A component may customize or explicitly disable its boundary."
+#[doc = include_str!("spec_ch1_boundaries.doc/arch_26_a_disabled_boundary_escalates_to_the_nearest_enclosing_component.md")]
 #[test]
 fn arch_26_a_disabled_boundary_escalates_to_the_nearest_enclosing_component() {
     // The failure originates in Mid's own view generation, so Mid's boundary is
@@ -370,8 +354,7 @@ fn arch_26_a_disabled_boundary_escalates_to_the_nearest_enclosing_component() {
     );
 }
 
-/// §1.7: "Layout, renderer and resource failures use subsystem-specific
-/// recovery boundaries."
+#[doc = include_str!("spec_ch1_boundaries.doc/arch_28_a_missing_resource_does_not_trip_the_component_boundary.md")]
 #[test]
 fn arch_28_a_missing_resource_does_not_trip_the_component_boundary() {
     let mut rt = runtime_with_id(1, VP, VP);
@@ -423,34 +406,7 @@ fn arch_28_a_missing_resource_does_not_trip_the_component_boundary() {
     );
 }
 
-/// §1.7: "Layout, renderer and resource failures use subsystem-specific
-/// recovery boundaries."
-///
-/// WEAKENED 2026-07-19, and read the reason — the original failure message was
-/// actively misleading. It ended by demanding "exactly one layout diagnostic"
-/// with node context and a recovery action, and reported `0`, which reads as a
-/// bug in the layout subsystem. It is not: `calc(1px / 0)` never reaches layout.
-/// `LengthExpr::resolve` returns `None` for a zero divisor
-/// (obscur-style/src/property/length_expr.rs:112-118), so the declaration fails
-/// to fold in the STYLE subsystem and the used value falls back to `auto`. No
-/// non-finite value is ever produced, and the case's premise — "a pathological
-/// layout input" — is never constructed by this fixture. The missing emission it
-/// would otherwise report is the style subsystem's, and that is already tracked
-/// as a real gap by `arch_16_a_malformed_declaration_kills_neither_its_rule_nor_the_sheet`;
-/// duplicating it here under a layout label would misattribute it.
-///
-/// §1.7's sentence says failures use subsystem-specific recovery boundaries. It
-/// does not say each recovery emits a diagnostic — §1.6 specifies the *shape* of
-/// diagnostics that are emitted, not an obligation to emit one per recovery. The
-/// containment assertions, which do encode the quoted sentence and do
-/// discriminate against an implementation that escalates a value failure to the
-/// component boundary, are kept.
-///
-/// Candidate spec amendment: two. (1) State whether every subsystem-local
-/// recovery must emit a diagnostic, or only those that change observable
-/// geometry. (2) Provide a way to construct a genuinely pathological *layout*
-/// input through the public surface, since at present style-level folding
-/// catches every route to one and this boundary cannot be tested at all.
+#[doc = include_str!("spec_ch1_boundaries.doc/arch_29_a_pathological_layout_input_stays_inside_the_layout_subsystem.md")]
 #[test]
 fn arch_29_a_pathological_layout_input_stays_inside_the_layout_subsystem() {
     // Control: the same column with a well-formed sibling.

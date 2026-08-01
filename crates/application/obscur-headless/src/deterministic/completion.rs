@@ -1,42 +1,36 @@
-//! A single controlled async completion (spec §7.4, §3.3).
+#![doc = include_str!("completion.doc/_module.md")]
 
 use obscur_identity::OperationId;
 
-/// One controlled async completion: a `value` produced for a particular
-/// [`OperationId`].
-///
-/// Delivering a completion is how a headless test resolves an async result at a
-/// deterministic synchronization point. The [`OperationId`] identifies the
-/// operation the result belongs to, so callers can recognize and drop stale
-/// results whose generation/version no longer matches (spec §3.3).
+#[doc = include_str!("completion.doc/Completion.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Completion<T> {
-    /// The operation this completion resolves.
+    #[doc = include_str!("completion.doc/operation.md")]
     operation: OperationId,
-    /// The delivered result value.
+    #[doc = include_str!("completion.doc/value.md")]
     value: T,
 }
 
 impl<T> Completion<T> {
-    /// Creates a completion pairing `operation` with its result `value`.
+    #[doc = include_str!("completion.doc/new.md")]
     #[must_use]
     pub fn new(operation: OperationId, value: T) -> Self {
         Self { operation, value }
     }
 
-    /// Returns the operation this completion resolves.
+    #[doc = include_str!("completion.doc/operation_2.md")]
     #[must_use]
     pub fn operation(&self) -> OperationId {
         self.operation
     }
 
-    /// Returns a reference to the delivered result value.
+    #[doc = include_str!("completion.doc/value_2.md")]
     #[must_use]
     pub fn value(&self) -> &T {
         &self.value
     }
 
-    /// Consumes the completion, returning its result value.
+    #[doc = include_str!("completion.doc/into_value.md")]
     #[must_use]
     pub fn into_value(self) -> T {
         self.value

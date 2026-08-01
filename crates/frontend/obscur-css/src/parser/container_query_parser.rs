@@ -1,33 +1,29 @@
-//! The [`ContainerQueryParser`] and its parsed container-query AST (spec §4.13).
-//!
-//! Parses an `@container` prelude: an optional container name followed by a
-//! feature condition list (`(min-width: 400px)`, `(inline-size > 200px)`). The
-//! feature/condition grammar is shared with [`super::media_query_parser`].
+#![doc = include_str!("container_query_parser.doc/_module.md")]
 
 use crate::error::CssParseError;
 use crate::source::CssSource;
 
+use super::css_tokenizer::{CssToken, Tokenizer};
 use super::media_query_parser::{Inner, MediaComparator, MediaCondition};
-use super::stylesheet_parser::{CssToken, Tokenizer};
 use super::value_parser::ParsedValue;
 
-/// A parsed `@container` query: an optional name and its feature conditions.
+#[doc = include_str!("container_query_parser.doc/ParsedContainerQuery.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParsedContainerQuery {
-    /// The container name, if the query targets a named container.
+    #[doc = include_str!("container_query_parser.doc/name.md")]
     pub name: Option<Box<str>>,
-    /// The feature conditions, in source order.
+    #[doc = include_str!("container_query_parser.doc/conditions.md")]
     pub conditions: Vec<ContainerCondition>,
 }
 
-/// A single container feature condition, mirroring the media condition shape.
+#[doc = include_str!("container_query_parser.doc/ContainerCondition.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContainerCondition {
-    /// The feature name (for example `min-width`, `inline-size`).
+    #[doc = include_str!("container_query_parser.doc/feature.md")]
     pub feature: Box<str>,
-    /// The range comparator, or [`None`] for a colon or boolean feature.
+    #[doc = include_str!("container_query_parser.doc/comparator.md")]
     pub comparator: Option<MediaComparator>,
-    /// The feature value, or [`None`] for a boolean feature.
+    #[doc = include_str!("container_query_parser.doc/value.md")]
     pub value: Option<Vec<ParsedValue>>,
 }
 
@@ -41,29 +37,20 @@ impl From<MediaCondition> for ContainerCondition {
     }
 }
 
-/// Parses an `@container` prelude into a [`ParsedContainerQuery`].
-///
-/// The parser is stateless; a single instance may parse any number of preludes.
+#[doc = include_str!("container_query_parser.doc/ContainerQueryParser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ContainerQueryParser {
     _private: (),
 }
 
 impl ContainerQueryParser {
-    /// Creates a container-query parser.
+    #[doc = include_str!("container_query_parser.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { _private: () }
     }
 
-    /// Parses `source` as a container-query prelude (without the `@container`
-    /// keyword).
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] with kind
-    /// [`InvalidAtRule`](crate::error::CssParseErrorKind::InvalidAtRule) on
-    /// malformed syntax.
+    #[doc = include_str!("container_query_parser.doc/parse.md")]
     pub fn parse(&self, source: &CssSource) -> Result<ParsedContainerQuery, CssParseError> {
         let text = source.text();
         let eof = u32::try_from(text.len()).unwrap_or(u32::MAX);
@@ -74,11 +61,7 @@ impl ContainerQueryParser {
         Self::parse_tokens(&tokens, eof)
     }
 
-    /// Parses a container-query prelude from an already-tokenized slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`CssParseError`] on malformed syntax.
+    #[doc = include_str!("container_query_parser.doc/parse_tokens.md")]
     pub(crate) fn parse_tokens(
         tokens: &[CssToken],
         eof: u32,

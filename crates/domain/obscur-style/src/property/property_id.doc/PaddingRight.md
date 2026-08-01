@@ -1,0 +1,1 @@
+The `padding-right` longhand.

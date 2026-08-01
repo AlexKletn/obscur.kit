@@ -1,0 +1,1 @@
+The (clamped) intersection threshold.

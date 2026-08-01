@@ -1,67 +1,55 @@
-//! `ViewFragment`: an ordered collection of desired view nodes.
+#![doc = include_str!("view_fragment.doc/_module.md")]
 
 use super::ViewNode;
 
-/// An ordered sequence of [`ViewNode`]s.
-///
-/// A fragment is the output shape of a component render and of collection or
-/// conditional constructs (`For`/`If`, spec §2.11), which produce nodes only
-/// when their rendered output requires them. Recursion in the desired tree
-/// arises because an element node's `children` is itself a `ViewFragment`.
-///
-/// Because nodes carry [`super::ViewValue`] (which contains an `f64`), this
-/// type derives only `Debug`, `Clone`, and `PartialEq`.
+#[doc = include_str!("view_fragment.doc/ViewFragment.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ViewFragment {
     nodes: Vec<ViewNode>,
 }
 
 impl ViewFragment {
-    /// Creates an empty fragment.
+    #[doc = include_str!("view_fragment.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self { nodes: Vec::new() }
     }
 
-    /// Creates a fragment from an existing vector of nodes.
+    #[doc = include_str!("view_fragment.doc/from_nodes.md")]
     #[must_use]
     pub fn from_nodes(nodes: Vec<ViewNode>) -> Self {
         Self { nodes }
     }
 
-    /// Appends a node to the end of the fragment.
+    #[doc = include_str!("view_fragment.doc/push.md")]
     pub fn push(&mut self, node: ViewNode) {
         self.nodes.push(node);
     }
 
-    /// Returns an iterator over the fragment's nodes in order.
+    #[doc = include_str!("view_fragment.doc/iter.md")]
     pub fn iter(&self) -> core::slice::Iter<'_, ViewNode> {
         self.nodes.iter()
     }
 
-    /// Returns the number of nodes in the fragment.
+    #[doc = include_str!("view_fragment.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Returns `true` if the fragment contains no nodes.
+    #[doc = include_str!("view_fragment.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    /// Returns the fragment's nodes as a slice.
+    #[doc = include_str!("view_fragment.doc/nodes.md")]
     #[must_use]
     pub fn nodes(&self) -> &[ViewNode] {
         &self.nodes
     }
 
-    /// Consumes the fragment, returning its nodes.
-    ///
-    /// The by-value counterpart of [`nodes`](Self::nodes), for a transform that
-    /// rebuilds a fragment rather than reading one — slot projection moves each
-    /// node into its projected position instead of cloning the subtree.
+    #[doc = include_str!("view_fragment.doc/into_nodes.md")]
     #[must_use]
     pub fn into_nodes(self) -> Vec<ViewNode> {
         self.nodes

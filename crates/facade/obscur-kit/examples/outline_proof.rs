@@ -1,22 +1,4 @@
-//! **Proof: `outline` + `outline-offset` paints a focus ring OUTSIDE the box.**
-//!
-//! Builds a display list of three filled boxes, each with a `2px` outline offset
-//! `3px` — exactly as the scene coordinator emits it: a single `DrawPath` that
-//! STROKES a rect (or rounded rect) positioned at the border box INFLATED by
-//! `outline-offset + width/2`, so the ring's inner edge sits `offset` px outside
-//! the box and does not touch it. The three variants are a dashed outline
-//! (`2px dashed #2b2a27`), a solid outline, and a rounded box with a rounded
-//! outline. It rasterizes through the software [`CpuRenderer`] (no GPU) and writes
-//! `target/outline_proof.png`.
-//!
-//! Before writing it machine-checks the dashed box: (1) ink pixels exist OUTSIDE
-//! the box's left edge — the ring is outside the box; (2) the column one pixel
-//! left of the box is empty (white) — the `outline-offset` gap is visible; and
-//! (3) the top ring edge alternates painted dashes and gaps — the outline is
-//! dashed, not solid.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example outline_proof --features render-cpu`
+#![doc = include_str!("outline_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -32,11 +14,11 @@ use obscur_kit::scene::paint::{Brush, Stroke};
 use obscur_kit::scene::path::Path;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 
-/// The output image extent.
+#[doc = include_str!("outline_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(420.0, 220.0);
-/// Outline width in logical px (the CSS `2px`).
+#[doc = include_str!("outline_proof.doc/OUTLINE.md")]
 const OUTLINE: f32 = 2.0;
-/// Outline offset in logical px (the CSS `outline-offset: 3px`).
+#[doc = include_str!("outline_proof.doc/OFFSET.md")]
 const OFFSET: f32 = 3.0;
 
 fn main() {
@@ -114,8 +96,7 @@ fn main() {
     );
 }
 
-/// The outline stroke: solid ink brush, `OUTLINE` wide; dashed `[3·w, 3·w]` when
-/// `dashed` — the same pattern the coordinator's `dashed_border_pattern` uses.
+#[doc = include_str!("outline_proof.doc/outline_stroke.md")]
 fn outline_stroke(ink: Color, dashed: bool) -> Stroke {
     let stroke = Stroke::new(Brush::solid(ink), OUTLINE);
     if dashed {
@@ -126,9 +107,7 @@ fn outline_stroke(ink: Color, dashed: bool) -> Stroke {
     }
 }
 
-/// Mirrors the coordinator's `outline_paint` geometry: the border box INFLATED by
-/// `outline-offset + width/2` (rounded, with radii grown by the same inflation,
-/// when `has_radius`), so a centered stroke's inner edge sits `offset` px outside.
+#[doc = include_str!("outline_proof.doc/outline_path.md")]
 fn outline_path(bounds: Rect, radii: CornerRadii, has_radius: bool) -> Path {
     let d = OFFSET + OUTLINE / 2.0;
     let rect = Rect::new(
@@ -145,7 +124,7 @@ fn outline_path(bounds: Rect, radii: CornerRadii, has_radius: bool) -> Path {
     }
 }
 
-/// Renders `list` through the software renderer into a pixmap at [`VIEWPORT`].
+#[doc = include_str!("outline_proof.doc/render.md")]
 fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
     let frame = RenderFrame::new(snapshot, VIEWPORT);
@@ -158,15 +137,14 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Whether a pixel reads as ring ink (dark and opaque).
+#[doc = include_str!("outline_proof.doc/is_ink.md")]
 fn is_ink(pixmap: &tiny_skia::Pixmap, x: u32, y: u32) -> bool {
     pixmap
         .pixel(x, y)
         .is_some_and(|p| p.alpha() > 40 && p.red() < 120)
 }
 
-/// Asserts the ring is painted OUTSIDE the box's left edge with a visible offset
-/// gap between the ring and the box.
+#[doc = include_str!("outline_proof.doc/verify_ring_outside_with_gap.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn verify_ring_outside_with_gap(pixmap: &tiny_skia::Pixmap, box_rect: Rect) {
     let left = box_rect.origin.x as u32;
@@ -206,8 +184,7 @@ fn verify_ring_outside_with_gap(pixmap: &tiny_skia::Pixmap, box_rect: Rect) {
     );
 }
 
-/// Scans row `y` across the box's outline width and asserts the ink alternates
-/// between painted dashes and empty gaps (proving the dashed outline).
+#[doc = include_str!("outline_proof.doc/verify_dashes.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn verify_dashes(pixmap: &tiny_skia::Pixmap, y: u32, box_rect: Rect) {
     let d = OFFSET + OUTLINE / 2.0;
@@ -231,7 +208,7 @@ fn verify_dashes(pixmap: &tiny_skia::Pixmap, y: u32, box_rect: Rect) {
     println!("[verify] OK — the outline is a dashed ring outside the box with a visible offset");
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("outline_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

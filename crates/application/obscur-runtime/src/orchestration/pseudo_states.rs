@@ -1,41 +1,25 @@
-//! The runtime-owned per-node interaction state source: [`PseudoStates`].
+#![doc = include_str!("pseudo_states.doc/_module.md")]
 
 use std::collections::HashMap;
 
 use obscur_identity::NodeId;
 use obscur_style::selector::PseudoState;
 
-/// The per-node interaction [`PseudoState`] the runtime owns and the selector
-/// matcher reads, keyed by [`NodeId`].
-///
-/// Interaction-driven pseudo-classes (`:hover`, `:focus`, `:active`, …) can only
-/// match when *something* tells the matcher which nodes currently carry those
-/// states. `obscur-style` deliberately does not decide that — it only consumes a
-/// [`PseudoState`] bitset per element (via
-/// [`MatchElement::pseudo_state`](obscur_style::selector::MatchElement::pseudo_state)).
-/// `PseudoStates` is that source: the runtime maintains it as input events are
-/// dispatched, and [`TreeElement`](super::TreeElement) reads it during matching so
-/// authored `:hover`/`:focus` rules finally take effect.
-///
-/// A node with no recorded state resolves to [`PseudoState::empty`], so a fresh
-/// (or fully cleared) map means "no interaction state anywhere" — exactly the
-/// pre-Phase-3 behaviour. The map is a plain owned value: cheap to clone and to
-/// reset between interaction epochs.
+#[doc = include_str!("pseudo_states.doc/PseudoStates.md")]
 #[derive(Debug, Clone, Default)]
 pub struct PseudoStates {
-    /// The recorded interaction state for each node that has any non-empty state.
+    #[doc = include_str!("pseudo_states.doc/states.md")]
     states: HashMap<NodeId, PseudoState>,
 }
 
 impl PseudoStates {
-    /// Creates an empty source; every node then reports [`PseudoState::empty`].
+    #[doc = include_str!("pseudo_states.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns the interaction state recorded for `node`, or
-    /// [`PseudoState::empty`] when the node has no entry.
+    #[doc = include_str!("pseudo_states.doc/get.md")]
     #[must_use]
     pub fn get(&self, node: NodeId) -> PseudoState {
         self.states
@@ -44,12 +28,7 @@ impl PseudoStates {
             .unwrap_or_else(PseudoState::empty)
     }
 
-    /// Records `state` as `node`'s interaction state, replacing any previous
-    /// entry.
-    ///
-    /// Setting [`PseudoState::empty`] removes the node's entry, keeping the map
-    /// canonical: an absent node and a node explicitly set to empty are
-    /// indistinguishable to [`get`](Self::get).
+    #[doc = include_str!("pseudo_states.doc/set.md")]
     pub fn set(&mut self, node: NodeId, state: PseudoState) {
         if state.is_empty() {
             self.states.remove(&node);
@@ -58,30 +37,23 @@ impl PseudoStates {
         }
     }
 
-    /// Clears every recorded interaction state; afterwards every node reports
-    /// [`PseudoState::empty`].
+    #[doc = include_str!("pseudo_states.doc/clear.md")]
     pub fn clear(&mut self) {
         self.states.clear();
     }
 
-    /// Iterates the `(node, state)` pairs of every node carrying a non-empty
-    /// interaction state.
-    ///
-    /// Because the map is canonical (see [`set`](Self::set)), a node absent from
-    /// this iteration reports [`PseudoState::empty`]. That is what lets two maps
-    /// be diffed by walking both sides' entries rather than the whole tree — see
-    /// [`RestyleScope::changed_states`](crate::invalidation::RestyleScope::changed_states).
+    #[doc = include_str!("pseudo_states.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, PseudoState)> + '_ {
         self.states.iter().map(|(&node, &state)| (node, state))
     }
 
-    /// Returns whether no node carries any interaction state.
+    #[doc = include_str!("pseudo_states.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
     }
 
-    /// Returns the number of nodes carrying a non-empty interaction state.
+    #[doc = include_str!("pseudo_states.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.states.len()

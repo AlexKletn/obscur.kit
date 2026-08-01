@@ -1,34 +1,28 @@
-//! Per-node generation used to detect stale `NodeId` references.
+#![doc = include_str!("node_generation.doc/_module.md")]
 
 use obscur_identity::Generation;
 
-/// A per-node generation counter.
-///
-/// The retained tree is an arena: when a slot's `NodeId` index is reused for a
-/// new node, this generation is advanced so that references minted against the
-/// previous occupant can be recognised as stale (spec §1.5). It wraps the shared
-/// [`obscur_identity::Generation`] primitive so the whole workspace agrees on a
-/// single generation representation.
+#[doc = include_str!("node_generation.doc/NodeGeneration.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeGeneration(Generation);
 
 impl NodeGeneration {
-    /// The first live generation for a freshly created node.
+    #[doc = include_str!("node_generation.doc/FIRST.md")]
     pub const FIRST: Self = Self(Generation::FIRST);
 
-    /// Creates a node generation at [`NodeGeneration::FIRST`].
+    #[doc = include_str!("node_generation.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self::FIRST
     }
 
-    /// Returns the next generation, used when a slot is reused.
+    #[doc = include_str!("node_generation.doc/next.md")]
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0.next())
     }
 
-    /// Returns the raw generation value.
+    #[doc = include_str!("node_generation.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0.raw()

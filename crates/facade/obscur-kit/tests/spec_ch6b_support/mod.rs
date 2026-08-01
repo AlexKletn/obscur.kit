@@ -1,4 +1,4 @@
-//! Shared harness for the `spec_ch6b_*` platform-service conformance tests.
+#![doc = include_str!("mod.doc/_module.md")]
 
 pub mod harness;
 

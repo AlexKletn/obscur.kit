@@ -1,6 +1,5 @@
-//! `ExecutorEvent` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("executor_event.doc/_module.md")]
 
-/// Placeholder for the `ExecutorEvent` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("executor_event.doc/ExecutorEvent.md")]
 #[derive(Debug)]
 pub struct ExecutorEvent;

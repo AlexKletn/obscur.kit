@@ -1,54 +1,48 @@
-//! Protocol version and version-range negotiation (spec §7.6).
+#![doc = include_str!("protocol_version.doc/_module.md")]
 
-/// A protocol version as `{ major, minor }`.
-///
-/// Compatibility follows semantic-version rules for a wire protocol: the same
-/// `major` is required, and the serving side's `minor` must be at least the
-/// peer's (a higher minor is additive and backward compatible).
+#[doc = include_str!("protocol_version.doc/ProtocolVersion.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProtocolVersion {
-    /// Major version; a change here is a breaking wire change.
+    #[doc = include_str!("protocol_version.doc/major.md")]
     pub major: u16,
-    /// Minor version; a higher value is additive and backward compatible.
+    #[doc = include_str!("protocol_version.doc/minor.md")]
     pub minor: u16,
 }
 
 impl ProtocolVersion {
-    /// The protocol version implemented by this crate.
+    #[doc = include_str!("protocol_version.doc/CURRENT.md")]
     pub const CURRENT: Self = Self { major: 1, minor: 0 };
 
-    /// Creates a protocol version.
+    #[doc = include_str!("protocol_version.doc/new.md")]
     #[must_use]
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
     }
 
-    /// Returns whether `self` can serve a peer speaking `other`.
-    ///
-    /// Compatible when the majors match and `self.minor >= other.minor`.
+    #[doc = include_str!("protocol_version.doc/is_compatible_with.md")]
     #[must_use]
     pub const fn is_compatible_with(self, other: Self) -> bool {
         self.major == other.major && self.minor >= other.minor
     }
 }
 
-/// An inclusive range of protocol versions a peer supports.
+#[doc = include_str!("protocol_version.doc/VersionRange.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VersionRange {
-    /// Lowest supported version (inclusive).
+    #[doc = include_str!("protocol_version.doc/min.md")]
     pub min: ProtocolVersion,
-    /// Highest supported version (inclusive).
+    #[doc = include_str!("protocol_version.doc/max.md")]
     pub max: ProtocolVersion,
 }
 
 impl VersionRange {
-    /// Creates a version range.
+    #[doc = include_str!("protocol_version.doc/new_2.md")]
     #[must_use]
     pub const fn new(min: ProtocolVersion, max: ProtocolVersion) -> Self {
         Self { min, max }
     }
 
-    /// Creates a range covering exactly one version.
+    #[doc = include_str!("protocol_version.doc/exact.md")]
     #[must_use]
     pub const fn exact(version: ProtocolVersion) -> Self {
         Self {
@@ -57,17 +51,13 @@ impl VersionRange {
         }
     }
 
-    /// Returns whether `version` falls within this (inclusive) range.
+    #[doc = include_str!("protocol_version.doc/contains.md")]
     #[must_use]
     pub fn contains(self, version: ProtocolVersion) -> bool {
         self.min <= version && version <= self.max
     }
 
-    /// Negotiates the highest version supported by both `self` (the serving
-    /// side) and the `client` range.
-    ///
-    /// Returns the highest mutually supported version, or `None` when the two
-    /// ranges do not overlap (for example, a major-version mismatch).
+    #[doc = include_str!("protocol_version.doc/negotiate.md")]
     #[must_use]
     pub fn negotiate(self, client: Self) -> Option<ProtocolVersion> {
         // The highest candidate both sides could speak is the lower of the two

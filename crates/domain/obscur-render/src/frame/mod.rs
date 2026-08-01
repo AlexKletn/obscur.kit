@@ -1,4 +1,4 @@
-//! Frame module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod device_loss;
 pub use device_loss::{DeviceLoss, DeviceLossReason};
 mod frame_submission;

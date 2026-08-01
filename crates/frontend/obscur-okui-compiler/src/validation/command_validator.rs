@@ -1,71 +1,30 @@
-//! `CommandValidator`: checks every `on:<event>` handler reference in a document
-//! against the commands the caller declared (spec §2.13).
+#![doc = include_str!("command_validator.doc/_module.md")]
 
 use obscur_okui_syntax::ast::{Document, Element};
 
 use crate::lowering::{attribute_value_text, event_local_name};
 use crate::validation::{CommandSurface, ValidationDiagnostic};
 
-/// Checks that every handler a document references is a command somebody claims
-/// (spec §2.13, "Unknown attributes, events and **string method names** are
-/// compile errors").
-///
-/// # What it walks, and what it reads
-///
-/// Every element in the document, recursively, and for each of its `on:<event>`
-/// attributes the handler reference: the *same* string the lowering's own
-/// `attribute_value_text` hands it, which is the string
-/// `name_binding::fallback_symbol` hashes into the command symbol the runtime
-/// dispatches on. Reading it through that one function is deliberate — a checker
-/// with its own extraction could admit a name the IR does not carry, and a
-/// validator that disagrees with the artefact is worse than none.
-///
-/// All three authored spellings are therefore covered by construction:
-/// `on:click=increment`, `on:click={increment}` and (already refused as string
-/// dispatch by the [`ContractValidator`](super::ContractValidator))
-/// `on:click="increment"`.
-///
-/// # Only a declared surface can be judged
-///
-/// The verdict comes from a [`CommandSurface`], and the default
-/// [`Unchecked`](CommandSurface::Unchecked) surface reports nothing at all. A
-/// command is claimed by a runtime registration, which does not exist while
-/// anything is compiling, so the compiler cannot discover the set — the caller
-/// declares it, exactly as it declares granted capabilities. Guessing instead
-/// would turn a silent no-op into a false compile error, which is the worse of the
-/// two failures.
-///
-/// # The empty-handler case
-///
-/// `on:click` with no value at all lowers to an empty handler string, which hashes
-/// to a symbol nothing can ever register. It is reported as its own diagnostic
-/// rather than as an unclaimed name, because "the command '' is not claimed" would
-/// name nothing to fix.
+#[doc = include_str!("command_validator.doc/CommandValidator.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CommandValidator {
     surface: CommandSurface,
 }
 
 impl CommandValidator {
-    /// Creates a validator judging handler references against `surface`.
+    #[doc = include_str!("command_validator.doc/new.md")]
     #[must_use]
     pub const fn new(surface: CommandSurface) -> Self {
         Self { surface }
     }
 
-    /// The surface this validator judges against.
+    #[doc = include_str!("command_validator.doc/surface.md")]
     #[must_use]
     pub const fn surface(&self) -> &CommandSurface {
         &self.surface
     }
 
-    /// Validates every element in `document`, recursively, reporting each handler
-    /// reference no declared command claims (spec §2.13).
-    ///
-    /// Returns nothing when the surface is
-    /// [`Unchecked`](CommandSurface::Unchecked) — including the empty-handler
-    /// diagnostic, which is a statement about the declared surface too: with no
-    /// declaration, a document's bindings are simply not this pass's business.
+    #[doc = include_str!("command_validator.doc/validate.md")]
     #[must_use]
     pub fn validate(&self, document: &Document) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
@@ -78,8 +37,7 @@ impl CommandValidator {
         diagnostics
     }
 
-    /// Checks one element's event bindings, then recurses into its element-shaped
-    /// children.
+    #[doc = include_str!("command_validator.doc/validate_element.md")]
     fn validate_element(&self, element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         let element_offset = element.syntax().offset().unwrap_or(0);
         for attribute in element.attributes() {

@@ -1,28 +1,24 @@
-//! A single workspace crate node: its name, layer, manifest and the `obscur-*`
-//! crates it depends on.
+#![doc = include_str!("crate_node.doc/_module.md")]
 
 use std::fs;
 use std::path::PathBuf;
 
 use super::layer::Layer;
 
-/// One node in the workspace dependency graph.
+#[doc = include_str!("crate_node.doc/CrateNode.md")]
 pub(crate) struct CrateNode {
-    /// Package name (`[package] name = "…"`).
+    #[doc = include_str!("crate_node.doc/name.md")]
     pub(crate) name: String,
-    /// Architectural layer inferred from the crate's path.
+    #[doc = include_str!("crate_node.doc/layer.md")]
     pub(crate) layer: Layer,
-    /// Path to the crate's `Cargo.toml` (used to anchor violations).
+    #[doc = include_str!("crate_node.doc/manifest.md")]
     pub(crate) manifest: PathBuf,
-    /// Names of the `obscur-*` crates this crate depends on (normal and build
-    /// dependencies; dev-dependencies are excluded because they are test-only
-    /// and may legitimately point up the graph).
+    #[doc = include_str!("crate_node.doc/deps.md")]
     pub(crate) deps: Vec<String>,
 }
 
 impl CrateNode {
-    /// Parses a crate node from its manifest, returning `None` if the manifest
-    /// is unreadable or has no package name.
+    #[doc = include_str!("crate_node.doc/parse.md")]
     pub(crate) fn parse(manifest: PathBuf, layer: Layer) -> Option<Self> {
         let text = fs::read_to_string(&manifest).ok()?;
         let name = package_name(&text)?;
@@ -36,7 +32,7 @@ impl CrateNode {
     }
 }
 
-/// Extracts `[package] name = "…"` from a manifest.
+#[doc = include_str!("crate_node.doc/package_name.md")]
 fn package_name(text: &str) -> Option<String> {
     let mut in_package = false;
     for raw in text.lines() {
@@ -58,9 +54,7 @@ fn package_name(text: &str) -> Option<String> {
     None
 }
 
-/// Collects `obscur-*` dependency keys from every `[dependencies]` /
-/// `[build-dependencies]` (including `[target.'…'.dependencies]`) table,
-/// skipping `dev-dependencies`.
+#[doc = include_str!("crate_node.doc/obscur_deps.md")]
 fn obscur_deps(text: &str) -> Vec<String> {
     let mut deps = Vec::new();
     let mut in_deps = false;
@@ -82,9 +76,7 @@ fn obscur_deps(text: &str) -> Vec<String> {
     deps
 }
 
-/// If `line` declares an `obscur-*` dependency, returns its crate name.
-///
-/// Handles both `obscur-foo = { … }` and `obscur-foo.workspace = true` forms.
+#[doc = include_str!("crate_node.doc/obscur_dep_key.md")]
 fn obscur_dep_key(line: &str) -> Option<String> {
     if !line.starts_with("obscur-") {
         return None;

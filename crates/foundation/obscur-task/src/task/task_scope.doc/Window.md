@@ -1,0 +1,1 @@
+Bound to a window.

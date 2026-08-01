@@ -1,13 +1,4 @@
-//! **SPECIFICATION-DERIVED** cases for §7.7 Diagnostics endpoint security ("is
-//! disabled by default; is local-only unless explicitly configured; separates
-//! read, subscribe, control and event-injection permissions; audits dangerous
-//! operations") and §7.5 Stable selectors ("do not affect layout") — the
-//! invariants behind the §9.6 guardrail "turn DevTools protocol into an
-//! arbitrary code-execution channel".
-//!
-//! Every expected value was produced by an agent reading the specification with
-//! **no access to this repository's source**. A failure here is a defect report
-//! about the engine, and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch9_devtools.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch9_support/mod.rs"]
@@ -26,7 +17,7 @@ use support::{approx, at, compile, drive, el, geom, view};
 
 const VW: f32 = 1000.0;
 
-/// The full protocol range a client offers during the handshake.
+#[doc = include_str!("spec_ch9_devtools.doc/client_versions.md")]
 fn client_versions() -> VersionRange {
     VersionRange::new(
         ProtocolVersion::new(0, 0),
@@ -34,10 +25,7 @@ fn client_versions() -> VersionRange {
     )
 }
 
-/// §7.7 — "The diagnostics endpoint: - is disabled by default; - is local-only
-/// unless explicitly configured;"
-///
-/// NG-DEVTOOLS-01.
+#[doc = include_str!("spec_ch9_devtools.doc/the_diagnostics_endpoint_is_disabled_by_default_and_binds_loopback_when_enabled.md")]
 #[test]
 fn the_diagnostics_endpoint_is_disabled_by_default_and_binds_loopback_when_enabled() {
     // Defaults: nothing is listening.
@@ -60,11 +48,7 @@ fn the_diagnostics_endpoint_is_disabled_by_default_and_binds_loopback_when_enabl
     );
 }
 
-/// §7.7 — "- separates read, subscribe, control and event-injection
-/// permissions;" and "The endpoint never provides arbitrary Rust execution or
-/// unrestricted memory access."
-///
-/// NG-DEVTOOLS-02.
+#[doc = include_str!("spec_ch9_devtools.doc/a_read_only_client_cannot_inject_events_or_issue_control.md")]
 #[test]
 fn a_read_only_client_cannot_inject_events_or_issue_control() {
     let mut auth = Authenticator::new();
@@ -127,10 +111,7 @@ fn a_read_only_client_cannot_inject_events_or_issue_control() {
     );
 }
 
-/// §7.7 — "- audits dangerous operations;" and §7.5 Stable selectors —
-/// "- do not affect layout;"
-///
-/// NG-DEVTOOLS-03.
+#[doc = include_str!("spec_ch9_devtools.doc/dangerous_operations_are_audited_and_test_ids_never_affect_rendering.md")]
 #[test]
 fn dangerous_operations_are_audited_and_test_ids_never_affect_rendering() {
     let mut auth = Authenticator::new();

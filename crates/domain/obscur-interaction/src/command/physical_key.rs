@@ -1,167 +1,154 @@
-//! The [`PhysicalKey`] layout-independent key position (spec §6.7).
+#![doc = include_str!("physical_key.doc/_module.md")]
 
 use crate::command::Modifier;
 
-/// A layout-independent physical key position (spec §6.7).
-///
-/// A physical key names a scan position on the keyboard, independent of the
-/// active layout: `KeyA` is the key where QWERTY prints `A`, whatever character
-/// that key produces under the user's layout. Physical keys are the right
-/// binding surface for spatial controls such as WASD movement, where the shape
-/// of the layout matters more than the produced character. For text entry and
-/// shortcuts, prefer [`LogicalKey`](crate::command::LogicalKey).
-///
-/// This is a closed enum covering a practical subset of keys (letters, digits,
-/// function keys, editing and navigation keys, and the left/right modifier
-/// pairs). It is non-exhaustive in spirit — real keyboards have more keys — but
-/// deliberately closed so callers can match exhaustively.
+#[doc = include_str!("physical_key.doc/PhysicalKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PhysicalKey {
-    /// The `A` scan position.
+    #[doc = include_str!("physical_key.doc/KeyA.md")]
     KeyA,
-    /// The `B` scan position.
+    #[doc = include_str!("physical_key.doc/KeyB.md")]
     KeyB,
-    /// The `C` scan position.
+    #[doc = include_str!("physical_key.doc/KeyC.md")]
     KeyC,
-    /// The `D` scan position.
+    #[doc = include_str!("physical_key.doc/KeyD.md")]
     KeyD,
-    /// The `E` scan position.
+    #[doc = include_str!("physical_key.doc/KeyE.md")]
     KeyE,
-    /// The `F` scan position.
+    #[doc = include_str!("physical_key.doc/KeyF.md")]
     KeyF,
-    /// The `G` scan position.
+    #[doc = include_str!("physical_key.doc/KeyG.md")]
     KeyG,
-    /// The `H` scan position.
+    #[doc = include_str!("physical_key.doc/KeyH.md")]
     KeyH,
-    /// The `I` scan position.
+    #[doc = include_str!("physical_key.doc/KeyI.md")]
     KeyI,
-    /// The `J` scan position.
+    #[doc = include_str!("physical_key.doc/KeyJ.md")]
     KeyJ,
-    /// The `K` scan position.
+    #[doc = include_str!("physical_key.doc/KeyK.md")]
     KeyK,
-    /// The `L` scan position.
+    #[doc = include_str!("physical_key.doc/KeyL.md")]
     KeyL,
-    /// The `M` scan position.
+    #[doc = include_str!("physical_key.doc/KeyM.md")]
     KeyM,
-    /// The `N` scan position.
+    #[doc = include_str!("physical_key.doc/KeyN.md")]
     KeyN,
-    /// The `O` scan position.
+    #[doc = include_str!("physical_key.doc/KeyO.md")]
     KeyO,
-    /// The `P` scan position.
+    #[doc = include_str!("physical_key.doc/KeyP.md")]
     KeyP,
-    /// The `Q` scan position.
+    #[doc = include_str!("physical_key.doc/KeyQ.md")]
     KeyQ,
-    /// The `R` scan position.
+    #[doc = include_str!("physical_key.doc/KeyR.md")]
     KeyR,
-    /// The `S` scan position.
+    #[doc = include_str!("physical_key.doc/KeyS.md")]
     KeyS,
-    /// The `T` scan position.
+    #[doc = include_str!("physical_key.doc/KeyT.md")]
     KeyT,
-    /// The `U` scan position.
+    #[doc = include_str!("physical_key.doc/KeyU.md")]
     KeyU,
-    /// The `V` scan position.
+    #[doc = include_str!("physical_key.doc/KeyV.md")]
     KeyV,
-    /// The `W` scan position.
+    #[doc = include_str!("physical_key.doc/KeyW.md")]
     KeyW,
-    /// The `X` scan position.
+    #[doc = include_str!("physical_key.doc/KeyX.md")]
     KeyX,
-    /// The `Y` scan position.
+    #[doc = include_str!("physical_key.doc/KeyY.md")]
     KeyY,
-    /// The `Z` scan position.
+    #[doc = include_str!("physical_key.doc/KeyZ.md")]
     KeyZ,
-    /// The `0` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit0.md")]
     Digit0,
-    /// The `1` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit1.md")]
     Digit1,
-    /// The `2` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit2.md")]
     Digit2,
-    /// The `3` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit3.md")]
     Digit3,
-    /// The `4` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit4.md")]
     Digit4,
-    /// The `5` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit5.md")]
     Digit5,
-    /// The `6` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit6.md")]
     Digit6,
-    /// The `7` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit7.md")]
     Digit7,
-    /// The `8` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit8.md")]
     Digit8,
-    /// The `9` scan position on the main number row.
+    #[doc = include_str!("physical_key.doc/Digit9.md")]
     Digit9,
-    /// The `F1` function key.
+    #[doc = include_str!("physical_key.doc/F1.md")]
     F1,
-    /// The `F2` function key.
+    #[doc = include_str!("physical_key.doc/F2.md")]
     F2,
-    /// The `F3` function key.
+    #[doc = include_str!("physical_key.doc/F3.md")]
     F3,
-    /// The `F4` function key.
+    #[doc = include_str!("physical_key.doc/F4.md")]
     F4,
-    /// The `F5` function key.
+    #[doc = include_str!("physical_key.doc/F5.md")]
     F5,
-    /// The `F6` function key.
+    #[doc = include_str!("physical_key.doc/F6.md")]
     F6,
-    /// The `F7` function key.
+    #[doc = include_str!("physical_key.doc/F7.md")]
     F7,
-    /// The `F8` function key.
+    #[doc = include_str!("physical_key.doc/F8.md")]
     F8,
-    /// The `F9` function key.
+    #[doc = include_str!("physical_key.doc/F9.md")]
     F9,
-    /// The `F10` function key.
+    #[doc = include_str!("physical_key.doc/F10.md")]
     F10,
-    /// The `F11` function key.
+    #[doc = include_str!("physical_key.doc/F11.md")]
     F11,
-    /// The `F12` function key.
+    #[doc = include_str!("physical_key.doc/F12.md")]
     F12,
-    /// The `Escape` key.
+    #[doc = include_str!("physical_key.doc/Escape.md")]
     Escape,
-    /// The `Enter` / `Return` key.
+    #[doc = include_str!("physical_key.doc/Enter.md")]
     Enter,
-    /// The space bar.
+    #[doc = include_str!("physical_key.doc/Space.md")]
     Space,
-    /// The `Tab` key.
+    #[doc = include_str!("physical_key.doc/Tab.md")]
     Tab,
-    /// The `Backspace` key.
+    #[doc = include_str!("physical_key.doc/Backspace.md")]
     Backspace,
-    /// The forward `Delete` key.
+    #[doc = include_str!("physical_key.doc/Delete.md")]
     Delete,
-    /// The up arrow key.
+    #[doc = include_str!("physical_key.doc/ArrowUp.md")]
     ArrowUp,
-    /// The down arrow key.
+    #[doc = include_str!("physical_key.doc/ArrowDown.md")]
     ArrowDown,
-    /// The left arrow key.
+    #[doc = include_str!("physical_key.doc/ArrowLeft.md")]
     ArrowLeft,
-    /// The right arrow key.
+    #[doc = include_str!("physical_key.doc/ArrowRight.md")]
     ArrowRight,
-    /// The `Home` key.
+    #[doc = include_str!("physical_key.doc/Home.md")]
     Home,
-    /// The `End` key.
+    #[doc = include_str!("physical_key.doc/End.md")]
     End,
-    /// The `Page Up` key.
+    #[doc = include_str!("physical_key.doc/PageUp.md")]
     PageUp,
-    /// The `Page Down` key.
+    #[doc = include_str!("physical_key.doc/PageDown.md")]
     PageDown,
-    /// The left `Shift` key.
+    #[doc = include_str!("physical_key.doc/ShiftLeft.md")]
     ShiftLeft,
-    /// The right `Shift` key.
+    #[doc = include_str!("physical_key.doc/ShiftRight.md")]
     ShiftRight,
-    /// The left `Control` key.
+    #[doc = include_str!("physical_key.doc/ControlLeft.md")]
     ControlLeft,
-    /// The right `Control` key.
+    #[doc = include_str!("physical_key.doc/ControlRight.md")]
     ControlRight,
-    /// The left `Alt` / `Option` key.
+    #[doc = include_str!("physical_key.doc/AltLeft.md")]
     AltLeft,
-    /// The right `Alt` / `Option` key.
+    #[doc = include_str!("physical_key.doc/AltRight.md")]
     AltRight,
-    /// The left `Meta` / `Super` / `Command` key.
+    #[doc = include_str!("physical_key.doc/MetaLeft.md")]
     MetaLeft,
-    /// The right `Meta` / `Super` / `Command` key.
+    #[doc = include_str!("physical_key.doc/MetaRight.md")]
     MetaRight,
 }
 
 impl PhysicalKey {
-    /// Returns whether this is one of the left/right modifier keys
-    /// (`Shift`, `Control`, `Alt`, or `Meta`).
+    #[doc = include_str!("physical_key.doc/is_modifier.md")]
     #[must_use]
     pub const fn is_modifier(&self) -> bool {
         matches!(
@@ -177,16 +164,7 @@ impl PhysicalKey {
         )
     }
 
-    /// Returns the [`Modifier`] this key contributes when it is a left/right
-    /// modifier key, or `None` for a non-modifier key.
-    ///
-    /// The left and right members of each pair collapse to the same logical
-    /// [`Modifier`]: `ShiftLeft`/`ShiftRight` → [`Modifier::Shift`],
-    /// `ControlLeft`/`ControlRight` → [`Modifier::Ctrl`],
-    /// `AltLeft`/`AltRight` → [`Modifier::Alt`], and
-    /// `MetaLeft`/`MetaRight` → [`Modifier::Meta`]. This lets a keyboard input
-    /// step fold physical modifier presses into a [`Modifiers`](crate::command::Modifiers)
-    /// set for shortcut matching.
+    #[doc = include_str!("physical_key.doc/modifier.md")]
     #[must_use]
     pub const fn modifier(&self) -> Option<Modifier> {
         match self {
@@ -198,7 +176,7 @@ impl PhysicalKey {
         }
     }
 
-    /// Returns whether this is one of the four arrow keys.
+    #[doc = include_str!("physical_key.doc/is_arrow.md")]
     #[must_use]
     pub const fn is_arrow(&self) -> bool {
         matches!(

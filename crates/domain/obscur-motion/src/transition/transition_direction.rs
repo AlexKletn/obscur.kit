@@ -1,43 +1,29 @@
-//! The [`TransitionDirection`] play direction for a transition (spec §4.17
-//! "reversal").
+#![doc = include_str!("transition_direction.doc/_module.md")]
 
-/// The direction a transition plays in (spec §4.17 "reversal").
-///
-/// A transition runs either `Forward` (an *enter* animation, driving progress
-/// from its origin toward its target) or `Reverse` (an *exit* or *undo*, driving
-/// progress back from the target toward the origin). Modeling reversal as a
-/// direction — rather than swapping the endpoints — lets an in-flight transition
-/// be turned around in place while keeping its stable identity and endpoints
-/// intact (see [`TimelineId`](crate::timeline::TimelineId)).
-///
-/// [`orient`](Self::orient) folds this direction into a raw progress value so a
-/// single forward-parameterised curve serves both directions.
+#[doc = include_str!("transition_direction.doc/TransitionDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TransitionDirection {
-    /// Play from origin toward target — the *enter* direction.
+    #[doc = include_str!("transition_direction.doc/Forward.md")]
     #[default]
     Forward,
-    /// Play from target back toward origin — the *exit* / *undo* direction.
+    #[doc = include_str!("transition_direction.doc/Reverse.md")]
     Reverse,
 }
 
 impl TransitionDirection {
-    /// Returns `true` if this is [`Forward`](Self::Forward) (spec §4.17).
+    #[doc = include_str!("transition_direction.doc/is_forward.md")]
     #[must_use]
     pub const fn is_forward(self) -> bool {
         matches!(self, Self::Forward)
     }
 
-    /// Returns `true` if this is [`Reverse`](Self::Reverse) (spec §4.17).
+    #[doc = include_str!("transition_direction.doc/is_reverse.md")]
     #[must_use]
     pub const fn is_reverse(self) -> bool {
         matches!(self, Self::Reverse)
     }
 
-    /// Returns the opposite direction (spec §4.17 "reversal").
-    ///
-    /// `Forward` becomes `Reverse` and vice versa — used to turn an in-flight
-    /// transition around without disturbing its endpoints.
+    #[doc = include_str!("transition_direction.doc/flipped.md")]
     #[must_use]
     pub const fn flipped(self) -> Self {
         match self {
@@ -46,13 +32,7 @@ impl TransitionDirection {
         }
     }
 
-    /// Maps raw progress `t` to directional progress (spec §4.17 "reversal").
-    ///
-    /// `t` is first clamped to `[0, 1]`. `Forward` returns `t` unchanged;
-    /// `Reverse` returns `1 - t`, so raw progress `0` sits at the target and
-    /// raw progress `1` sits at the origin. The result is the progress an
-    /// endpoint-parameterised curve (easing, interpolation) should be sampled
-    /// at.
+    #[doc = include_str!("transition_direction.doc/orient.md")]
     #[must_use]
     pub fn orient(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);

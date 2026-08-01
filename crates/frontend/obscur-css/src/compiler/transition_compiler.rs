@@ -1,16 +1,4 @@
-//! Lowering CSS `transition` into `obscur-motion` track templates (§4.17).
-//!
-//! A CSS `transition` names a property, a duration, an optional delay, and a
-//! timing function — but *not* the endpoints, which are only known at runtime
-//! (the value before and after a state change). [`TransitionCompiler`] therefore
-//! lowers a `transition` declaration into a [`CompiledTransition`] *template*:
-//! the property, timings (in seconds), and an [`Easing`]. At runtime,
-//! [`CompiledTransition::build_track`] binds concrete `from`/`to`
-//! [`MotionValue`]s into a [`TransitionTrack`].
-//!
-//! `cubic-bezier(...)` / `steps(...)` timing functions are not modelled by the
-//! domain's [`Easing`] enum; they fall back to [`Easing::Linear`] and are
-//! reported as an [`UnsupportedCssFeature`] (§4.13).
+#![doc = include_str!("transition_compiler.doc/_module.md")]
 
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{ParsedDeclaration, ParsedValue};
@@ -19,49 +7,42 @@ use obscur_motion::track::{Easing, TransitionTrack};
 use obscur_motion::value::MotionValue;
 use obscur_style::property::PropertyId;
 
-use super::property_compiler::{narrow_f32, property_id_from_name};
+use super::longhand_catalog::property_id_from_name;
+use super::property_compiler::narrow_f32;
 
-/// A compiled `transition` template: everything but the runtime endpoints.
-///
-/// Bind concrete endpoints with [`CompiledTransition::build_track`] to obtain a
-/// runnable [`TransitionTrack`].
+#[doc = include_str!("transition_compiler.doc/CompiledTransition.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CompiledTransition {
-    /// The property this transition animates.
+    #[doc = include_str!("transition_compiler.doc/property.md")]
     pub property: PropertyId,
-    /// The transition duration, in seconds.
+    #[doc = include_str!("transition_compiler.doc/duration_secs.md")]
     pub duration_secs: f32,
-    /// The delay before the transition starts, in seconds.
+    #[doc = include_str!("transition_compiler.doc/delay_secs.md")]
     pub delay_secs: f32,
-    /// The timing function.
+    #[doc = include_str!("transition_compiler.doc/easing.md")]
     pub easing: Easing,
 }
 
 impl CompiledTransition {
-    /// Binds runtime `from`/`to` endpoints into a runnable [`TransitionTrack`],
-    /// carrying this template's easing.
+    #[doc = include_str!("transition_compiler.doc/build_track.md")]
     #[must_use]
     pub fn build_track(&self, from: MotionValue, to: MotionValue) -> TransitionTrack {
         TransitionTrack::new(from, to).with_easing(self.easing)
     }
 }
 
-/// Lowers `transition` declarations into [`CompiledTransition`] templates.
+#[doc = include_str!("transition_compiler.doc/TransitionCompiler.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TransitionCompiler;
 
 impl TransitionCompiler {
-    /// Creates a transition compiler.
+    #[doc = include_str!("transition_compiler.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Lowers a `transition` shorthand declaration into one template per
-    /// comma-separated layer.
-    ///
-    /// A layer without a resolvable [`PropertyId`] is skipped (for example a
-    /// `transition: all …` layer, whose property cannot be enumerated).
+    #[doc = include_str!("transition_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(
         &self,
@@ -78,7 +59,7 @@ impl TransitionCompiler {
     }
 }
 
-/// Splits a component-value list into comma-separated layers.
+#[doc = include_str!("transition_compiler.doc/split_layers.md")]
 fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
     values
         .split(|value| matches!(value, ParsedValue::Comma))
@@ -86,7 +67,7 @@ fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
         .collect()
 }
 
-/// Compiles one transition layer, or [`None`] when no property resolves.
+#[doc = include_str!("transition_compiler.doc/compile_layer.md")]
 fn compile_layer(
     layer: &[ParsedValue],
     span: crate::source::SourceSpan,
@@ -135,7 +116,7 @@ fn compile_layer(
     })
 }
 
-/// Maps a CSS timing-function keyword to an [`Easing`], or [`None`].
+#[doc = include_str!("transition_compiler.doc/easing_from_keyword.md")]
 fn easing_from_keyword(keyword: &str) -> Option<Easing> {
     if keyword.eq_ignore_ascii_case("linear") {
         Some(Easing::Linear)

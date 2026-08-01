@@ -1,4 +1,4 @@
-//! Scheduler module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod backpressure_policy;
 pub use backpressure_policy::{BackpressureDecision, BackpressurePolicy};
 mod frame_scheduler;

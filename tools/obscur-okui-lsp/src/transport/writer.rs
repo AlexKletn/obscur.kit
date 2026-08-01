@@ -1,13 +1,8 @@
-//! `write_message`: writes one `Content-Length`-framed LSP message to a writer.
+#![doc = include_str!("writer.doc/_module.md")]
 
 use std::io::{self, Write};
 
-/// Writes `body` as a framed LSP message: a `Content-Length` header (the body's
-/// **byte** length), the blank-line separator, then the body — and flushes.
-///
-/// # Errors
-///
-/// Propagates any write or flush error from the underlying writer.
+#[doc = include_str!("writer.doc/write_message.md")]
 pub fn write_message<W: Write>(writer: &mut W, body: &str) -> io::Result<()> {
     write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
     writer.write_all(body.as_bytes())?;

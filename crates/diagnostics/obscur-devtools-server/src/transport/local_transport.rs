@@ -1,4 +1,4 @@
-//! In-process loopback transport and its wire envelopes (spec §7.6/§7.7).
+#![doc = include_str!("local_transport.doc/_module.md")]
 
 use std::collections::VecDeque;
 
@@ -8,48 +8,33 @@ use obscur_devtools_protocol::message::{
     SnapshotMessage, Subscription,
 };
 
-/// A message travelling from a DevTools client to the server.
-///
-/// The transport is direction-typed: only handshakes and commands flow toward
-/// the server.
+#[doc = include_str!("local_transport.doc/ServerBound.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerBound {
-    /// A connection handshake request.
+    #[doc = include_str!("local_transport.doc/Handshake.md")]
     Handshake(HandshakeRequest),
-    /// A capability-scoped command.
+    #[doc = include_str!("local_transport.doc/Command.md")]
     Command(CommandMessage),
 }
 
-/// A message travelling from the server to a DevTools client.
-///
-/// Carries handshake results, snapshot responses, pushed events, subscription
-/// records, command acknowledgements, and protocol errors.
+#[doc = include_str!("local_transport.doc/ClientBound.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientBound {
-    /// The server's response to a handshake.
+    #[doc = include_str!("local_transport.doc/Handshake_2.md")]
     Handshake(HandshakeResponse),
-    /// A snapshot answering an `Inspect` command.
+    #[doc = include_str!("local_transport.doc/Snapshot.md")]
     Snapshot(SnapshotMessage),
-    /// An event pushed over an active subscription.
+    #[doc = include_str!("local_transport.doc/Event.md")]
     Event(ProtocolEvent),
-    /// A subscription record answering a `Subscribe` command.
+    #[doc = include_str!("local_transport.doc/Subscription.md")]
     Subscription(Subscription),
-    /// An acknowledgement that a command was applied, keyed by its id.
+    #[doc = include_str!("local_transport.doc/Acknowledged.md")]
     Acknowledged(CommandId),
-    /// A protocol-level error answering a command.
+    #[doc = include_str!("local_transport.doc/Error.md")]
     Error(ProtocolError),
 }
 
-/// An in-process, loopback message channel between a DevTools client and server.
-///
-/// This models the spec's *local socket* transport (spec §7.6) without any real
-/// IO: two bounded queues carry [`ServerBound`] messages one way and
-/// [`ClientBound`] messages the other. A real socket transport would expose the
-/// same shape (`send_to_server` / `poll_server` / `push_to_client` /
-/// `poll_client`) over a kernel socket. Both queues enforce
-/// [`MESSAGE_LIMIT`](obscur_devtools_protocol::message::MESSAGE_LIMIT):
-/// enqueueing onto a full queue fails with
-/// [`ProtocolError::LimitExceeded`] rather than growing unboundedly (spec §7.7).
+#[doc = include_str!("local_transport.doc/LocalTransport.md")]
 #[derive(Debug, Clone, Default)]
 pub struct LocalTransport {
     to_server: VecDeque<ServerBound>,
@@ -57,7 +42,7 @@ pub struct LocalTransport {
 }
 
 impl LocalTransport {
-    /// Creates an empty transport with both queues drained.
+    #[doc = include_str!("local_transport.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -66,12 +51,7 @@ impl LocalTransport {
         }
     }
 
-    /// Enqueues a client→server message.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::LimitExceeded`] when the server-bound queue
-    /// already holds [`MESSAGE_LIMIT`] messages.
+    #[doc = include_str!("local_transport.doc/send_to_server.md")]
     pub fn send_to_server(&mut self, message: ServerBound) -> Result<(), ProtocolError> {
         if self.to_server.len() >= MESSAGE_LIMIT {
             return Err(ProtocolError::LimitExceeded {
@@ -82,18 +62,13 @@ impl LocalTransport {
         Ok(())
     }
 
-    /// Removes and returns the next client→server message, if any.
+    #[doc = include_str!("local_transport.doc/poll_server.md")]
     #[must_use]
     pub fn poll_server(&mut self) -> Option<ServerBound> {
         self.to_server.pop_front()
     }
 
-    /// Enqueues a server→client message.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::LimitExceeded`] when the client-bound queue
-    /// already holds [`MESSAGE_LIMIT`] messages.
+    #[doc = include_str!("local_transport.doc/push_to_client.md")]
     pub fn push_to_client(&mut self, message: ClientBound) -> Result<(), ProtocolError> {
         if self.to_client.len() >= MESSAGE_LIMIT {
             return Err(ProtocolError::LimitExceeded {
@@ -104,19 +79,19 @@ impl LocalTransport {
         Ok(())
     }
 
-    /// Removes and returns the next server→client message, if any.
+    #[doc = include_str!("local_transport.doc/poll_client.md")]
     #[must_use]
     pub fn poll_client(&mut self) -> Option<ClientBound> {
         self.to_client.pop_front()
     }
 
-    /// Returns the number of queued client→server messages.
+    #[doc = include_str!("local_transport.doc/pending_to_server.md")]
     #[must_use]
     pub fn pending_to_server(&self) -> usize {
         self.to_server.len()
     }
 
-    /// Returns the number of queued server→client messages.
+    #[doc = include_str!("local_transport.doc/pending_to_client.md")]
     #[must_use]
     pub fn pending_to_client(&self) -> usize {
         self.to_client.len()

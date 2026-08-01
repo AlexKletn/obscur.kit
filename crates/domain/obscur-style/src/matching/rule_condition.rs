@@ -1,60 +1,44 @@
-//! The evaluable `@media`/`@container` condition gating a
-//! [`StyleRule`](crate::matching::StyleRule): [`RuleCondition`].
-//!
-//! This is `obscur-style`'s own, CSS-syntax-free model of a conditional group's
-//! condition. The CSS frontend lowers a parsed media/container query into one of
-//! these, attaches it to the matchable rule, and the
-//! [`StyleMatcher`](crate::matching::StyleMatcher) evaluates it against a
-//! [`MediaEnvironment`] at match time — so a conditional rule contributes only
-//! when its condition holds.
+#![doc = include_str!("rule_condition.doc/_module.md")]
 
 use crate::matching::MediaEnvironment;
 
-/// The environment dimension a [`FeatureQuery`] tests.
+#[doc = include_str!("rule_condition.doc/ConditionAxis.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConditionAxis {
-    /// The viewport width (`@media` `width`/`min-width`/`max-width`).
+    #[doc = include_str!("rule_condition.doc/ViewportWidth.md")]
     ViewportWidth,
-    /// The viewport height (`@media` `height`/`min-height`/`max-height`).
+    #[doc = include_str!("rule_condition.doc/ViewportHeight.md")]
     ViewportHeight,
-    /// The querying container's inline size (`@container` `inline-size`/`width`).
+    #[doc = include_str!("rule_condition.doc/ContainerWidth.md")]
     ContainerWidth,
-    /// The querying container's block size (`@container` `block-size`/`height`).
+    #[doc = include_str!("rule_condition.doc/ContainerHeight.md")]
     ContainerHeight,
 }
 
 impl ConditionAxis {
-    /// Whether this axis measures a query container rather than the viewport.
-    ///
-    /// The two families differ in how an *unknown* value is treated — see
-    /// [`FeatureQuery::holds`].
+    #[doc = include_str!("rule_condition.doc/is_container.md")]
     #[must_use]
     pub const fn is_container(self) -> bool {
         matches!(self, Self::ContainerWidth | Self::ContainerHeight)
     }
 }
 
-/// The comparison a [`FeatureQuery`] applies between the environment value and
-/// its reference length.
+#[doc = include_str!("rule_condition.doc/ConditionComparator.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConditionComparator {
-    /// Strictly less than (`<`).
+    #[doc = include_str!("rule_condition.doc/Lt.md")]
     Lt,
-    /// Less than or equal (`<=`, and the `max-*` prefix forms).
+    #[doc = include_str!("rule_condition.doc/Le.md")]
     Le,
-    /// Equal (`=`, and a plain `(width: 600px)` colon form).
+    #[doc = include_str!("rule_condition.doc/Eq.md")]
     Eq,
-    /// Greater than or equal (`>=`, and the `min-*` prefix forms).
+    #[doc = include_str!("rule_condition.doc/Ge.md")]
     Ge,
-    /// Strictly greater than (`>`).
+    #[doc = include_str!("rule_condition.doc/Gt.md")]
     Gt,
 }
 
-/// A single feature comparison: `axis comparator reference_px`.
-///
-/// The reference length is stored resolved to logical pixels. An unknown axis
-/// resolves per-family: unknown *viewport* axes are non-restrictive, unknown
-/// *container* axes never hold. See [`holds`](Self::holds).
+#[doc = include_str!("rule_condition.doc/FeatureQuery.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeatureQuery {
     axis: ConditionAxis,
@@ -63,7 +47,7 @@ pub struct FeatureQuery {
 }
 
 impl FeatureQuery {
-    /// Creates a feature query comparing `axis` against `reference_px`.
+    #[doc = include_str!("rule_condition.doc/new.md")]
     #[must_use]
     pub const fn new(
         axis: ConditionAxis,
@@ -77,36 +61,25 @@ impl FeatureQuery {
         }
     }
 
-    /// The axis this query tests.
+    #[doc = include_str!("rule_condition.doc/axis.md")]
     #[must_use]
     pub const fn axis(&self) -> ConditionAxis {
         self.axis
     }
 
-    /// The comparator this query applies.
+    #[doc = include_str!("rule_condition.doc/comparator.md")]
     #[must_use]
     pub const fn comparator(&self) -> ConditionComparator {
         self.comparator
     }
 
-    /// The reference length in logical pixels.
+    #[doc = include_str!("rule_condition.doc/reference_px.md")]
     #[must_use]
     pub const fn reference_px(&self) -> f32 {
         self.reference_px
     }
 
-    /// Evaluates the query against `env`.
-    ///
-    /// An unknown axis resolves by family, and the asymmetry is deliberate:
-    ///
-    /// - An unknown **viewport** axis is non-restrictive (`true`). A live
-    ///   runtime always supplies a viewport, so `None` here only ever means a
-    ///   caller opted out of gating via [`MediaEnvironment::unbounded`].
-    /// - An unknown **container** axis never holds (`false`). `None` means no
-    ///   ancestor established a query container, and css-contain-3 §3.1 makes a
-    ///   container query against a nonexistent container *false*. Holding here
-    ///   would make every `@container` rule apply at every container size —
-    ///   which is exactly the bug this asymmetry exists to prevent.
+    #[doc = include_str!("rule_condition.doc/holds.md")]
     #[must_use]
     pub fn holds(&self, env: &MediaEnvironment) -> bool {
         let actual = match self.axis {
@@ -128,33 +101,25 @@ impl FeatureQuery {
     }
 }
 
-/// An evaluable `@media`/`@container` condition tree.
-///
-/// Built by the CSS frontend from a parsed query and evaluated by the matcher.
-/// The frontend maps a *media* feature it cannot represent (a boolean feature, a
-/// non-`px` length, an unknown feature name) to [`Always`](Self::Always) so that
-/// such rules are never silently dropped; the same unrepresentable feature in a
-/// *container* query maps to [`Never`](Self::Never) instead, because no element
-/// can currently be a query container (see [`FeatureQuery::holds`]).
+#[doc = include_str!("rule_condition.doc/RuleCondition.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuleCondition {
-    /// A single feature comparison.
+    #[doc = include_str!("rule_condition.doc/Feature.md")]
     Feature(FeatureQuery),
-    /// Conjunction: holds when every child holds (an empty `All` holds).
+    #[doc = include_str!("rule_condition.doc/All.md")]
     All(Vec<RuleCondition>),
-    /// Disjunction: holds when any child holds (an empty `Any` never holds).
+    #[doc = include_str!("rule_condition.doc/Any.md")]
     Any(Vec<RuleCondition>),
-    /// Negation of the inner condition.
+    #[doc = include_str!("rule_condition.doc/Not.md")]
     Not(Box<RuleCondition>),
-    /// Always holds (an unconstrained `screen` query, or a non-restrictive but
-    /// unrepresentable feature).
+    #[doc = include_str!("rule_condition.doc/Always.md")]
     Always,
-    /// Never holds (for example a `print`-only query in a screen environment).
+    #[doc = include_str!("rule_condition.doc/Never.md")]
     Never,
 }
 
 impl RuleCondition {
-    /// Evaluates the condition against `env`.
+    #[doc = include_str!("rule_condition.doc/holds_2.md")]
     #[must_use]
     pub fn holds(&self, env: &MediaEnvironment) -> bool {
         match self {

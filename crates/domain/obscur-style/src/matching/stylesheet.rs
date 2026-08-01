@@ -1,17 +1,9 @@
-//! One cascade origin's worth of authored style rules: [`Stylesheet`] (§4.14).
+#![doc = include_str!("stylesheet.doc/_module.md")]
 
 use crate::cascade::CascadeOrigin;
 use crate::matching::StyleRule;
 
-/// A collection of [`StyleRule`]s that all share a single [`CascadeOrigin`]
-/// (§4.14).
-///
-/// A stylesheet represents exactly one origin band: the system-default sheet,
-/// the theme sheet, the global-app sheet, a component/module sheet, or the
-/// inline sheet. A complete application therefore has several stylesheets, one
-/// per origin; the [`StyleMatcher`](crate::matching::StyleMatcher) accepts an
-/// ordered slice of them (low origin → high origin) and stamps each rule's
-/// declarations with this origin during matching.
+#[doc = include_str!("stylesheet.doc/Stylesheet.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stylesheet {
     origin: CascadeOrigin,
@@ -19,32 +11,32 @@ pub struct Stylesheet {
 }
 
 impl Stylesheet {
-    /// Creates a stylesheet for `origin` from its rules in document order.
+    #[doc = include_str!("stylesheet.doc/new.md")]
     #[must_use]
     pub const fn new(origin: CascadeOrigin, rules: Vec<StyleRule>) -> Self {
         Self { origin, rules }
     }
 
-    /// Returns the cascade origin every rule in this sheet belongs to.
+    #[doc = include_str!("stylesheet.doc/origin.md")]
     #[must_use]
     pub const fn origin(&self) -> CascadeOrigin {
         self.origin
     }
 
-    /// Returns the sheet's rules in document order.
+    #[doc = include_str!("stylesheet.doc/rules.md")]
     #[must_use]
     pub fn rules(&self) -> &[StyleRule] {
         &self.rules
     }
 
-    /// Appends a rule to the end of the sheet (later in document order).
+    #[doc = include_str!("stylesheet.doc/push.md")]
     pub fn push(&mut self, rule: StyleRule) {
         self.rules.push(rule);
     }
 }
 
 impl Default for Stylesheet {
-    /// An empty stylesheet in the [`CascadeOrigin::GlobalApp`] origin.
+    #[doc = include_str!("stylesheet.doc/default.md")]
     fn default() -> Self {
         Self::new(CascadeOrigin::GlobalApp, Vec::new())
     }

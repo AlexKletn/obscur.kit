@@ -1,11 +1,6 @@
-//! A position within a source file [`SourceLocation`] (spec §2.5 source maps).
+#![doc = include_str!("source_location.doc/_module.md")]
 
-/// A single position within a source file (spec §2.5).
-///
-/// Records a byte `offset` together with the human-facing `line` and `column`
-/// it corresponds to. Lines and columns are 1-based (the first character is at
-/// line 1, column 1); the offset is 0-based. Ordering is by `offset` alone,
-/// which is the canonical position within the source.
+#[doc = include_str!("source_location.doc/SourceLocation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceLocation {
     offset: u32,
@@ -14,8 +9,7 @@ pub struct SourceLocation {
 }
 
 impl SourceLocation {
-    /// Creates a location from a byte `offset` (0-based) and its `line` and
-    /// `column` (both 1-based).
+    #[doc = include_str!("source_location.doc/new.md")]
     #[must_use]
     pub const fn new(offset: u32, line: u32, column: u32) -> Self {
         Self {
@@ -25,26 +19,25 @@ impl SourceLocation {
         }
     }
 
-    /// Returns the location at the very start of a source: offset 0, line 1,
-    /// column 1.
+    #[doc = include_str!("source_location.doc/start.md")]
     #[must_use]
     pub const fn start() -> Self {
         Self::new(0, 1, 1)
     }
 
-    /// Returns the 0-based byte offset.
+    #[doc = include_str!("source_location.doc/offset.md")]
     #[must_use]
     pub const fn offset(self) -> u32 {
         self.offset
     }
 
-    /// Returns the 1-based line number.
+    #[doc = include_str!("source_location.doc/line.md")]
     #[must_use]
     pub const fn line(self) -> u32 {
         self.line
     }
 
-    /// Returns the 1-based column number.
+    #[doc = include_str!("source_location.doc/column.md")]
     #[must_use]
     pub const fn column(self) -> u32 {
         self.column

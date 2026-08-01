@@ -1,4 +1,4 @@
-//! `DockingLayout`: dock children to the container edges (`DockPanel` style).
+#![doc = include_str!("docking_layout.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
@@ -6,88 +6,48 @@ use crate::model::{LayoutBox, LayoutStyle};
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
-/// The edge a docked child attaches to (spec §4.1).
-///
-/// [`Fill`](DockSide::Fill) is the default when a child has no configured side:
-/// it consumes whatever remaining space is left, which conventionally makes the
-/// last child expand to fill the container's centre.
+#[doc = include_str!("docking_layout.doc/DockSide.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DockSide {
-    /// Dock against the top edge, spanning the remaining width.
+    #[doc = include_str!("docking_layout.doc/Top.md")]
     Top,
-    /// Dock against the bottom edge, spanning the remaining width.
+    #[doc = include_str!("docking_layout.doc/Bottom.md")]
     Bottom,
-    /// Dock against the left edge, spanning the remaining height.
+    #[doc = include_str!("docking_layout.doc/Left.md")]
     Left,
-    /// Dock against the right edge, spanning the remaining height.
+    #[doc = include_str!("docking_layout.doc/Right.md")]
     Right,
-    /// Fill the entire remaining space.
+    #[doc = include_str!("docking_layout.doc/Fill.md")]
     Fill,
 }
 
-/// Dock-to-edge layout, in the style of a WPF `DockPanel` (spec §4.1, §4.2).
-///
-/// Children are docked, in order, to the edges of a shrinking rectangle. Each
-/// child claims a band along its assigned edge; that band is removed from the
-/// remaining space, and the next child docks against the smaller rectangle that
-/// is left. A [`Fill`](DockSide::Fill) child takes all remaining space.
-///
-/// # Configuration
-///
-/// This is a **self-configured** algorithm (the model has no dock-side field):
-/// `sides` is parallel to the children by index. If a child has no corresponding
-/// entry, it defaults to [`Fill`](DockSide::Fill); the last child conventionally
-/// fills the centre when its side is `Fill`.
-///
-/// # Algorithm
-///
-/// A `remaining` rectangle starts at the padded content area. For each child in
-/// order, looking up its side (defaulting to `Fill`):
-///
-/// * **Top** / **Bottom** — measured with its width fixed to the remaining width
-///   and its natural height (up to the remaining height); arranged flush against
-///   that edge; `remaining` shrinks vertically by the band height.
-/// * **Left** / **Right** — measured with its height fixed to the remaining
-///   height and its natural width (up to the remaining width); arranged flush
-///   against that edge; `remaining` shrinks horizontally by the band width.
-/// * **Fill** — measured under the whole `remaining` rectangle and arranged to
-///   cover it; `remaining` collapses to zero, so any later children get no
-///   space.
-///
-/// The node size is the bounding box of the docked children plus the container
-/// `padding`, clamped into `constraints`.
-///
-/// # Out of scope
-///
-/// `LastChildFill` toggling, per-child dock spacing, and right-to-left edge
-/// remapping are not modelled; docking is strictly in child order against the
-/// four physical edges with a trailing fill.
+#[doc = include_str!("docking_layout.doc/DockingLayout.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DockingLayout {
-    /// The dock side per child index; missing entries default to `Fill`.
+    #[doc = include_str!("docking_layout.doc/sides.md")]
     sides: Vec<DockSide>,
 }
 
 impl DockingLayout {
-    /// Creates a docking layout with no configured sides (every child fills).
+    #[doc = include_str!("docking_layout.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { sides: Vec::new() }
     }
 
-    /// Returns a copy whose per-child dock sides are replaced by `sides`.
+    #[doc = include_str!("docking_layout.doc/with_sides.md")]
     #[must_use]
     pub fn with_sides(mut self, sides: Vec<DockSide>) -> Self {
         self.sides = sides;
         self
     }
 
-    /// Appends `side` for the next child index.
+    #[doc = include_str!("docking_layout.doc/push_side.md")]
     pub fn push_side(&mut self, side: DockSide) {
         self.sides.push(side);
     }
 
-    /// The configured dock sides, parallel to the children by index.
+    #[doc = include_str!("docking_layout.doc/sides_2.md")]
     #[must_use]
     pub fn sides(&self) -> &[DockSide] {
         &self.sides

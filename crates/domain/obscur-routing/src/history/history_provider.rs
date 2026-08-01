@@ -1,92 +1,62 @@
-//! The replaceable history port and its in-memory reference impl (spec §6.13).
+#![doc = include_str!("history_provider.doc/_module.md")]
 
 use crate::history::NavigationEntry;
 use crate::route::{Route, RouteState};
 
-/// The replaceable port for a navigation history stack (spec §6.13 history).
-///
-/// A history provider owns the ordered stack of visited entries and a cursor
-/// marking the current one. The domain drives navigation through this trait and
-/// stores it as `Box<dyn HistoryProvider>`, so it is deliberately **object-safe**
-/// — no generic methods and no `Self`-returning methods. The
-/// [`std::fmt::Debug`] supertrait lets a boxed provider be `Debug` (so the
-/// composing `Router` can derive it).
-///
-/// Mutating navigation takes `&mut self`; queries take `&self`. The colocated
-/// [`MemoryHistory`] is the reference in-memory implementation and documents the
-/// contract of each method concretely.
+#[doc = include_str!("history_provider.doc/HistoryProvider.md")]
 pub trait HistoryProvider: std::fmt::Debug {
-    /// Pushes a new entry for `route` with `state`, assigning a fresh id.
-    ///
-    /// Standard browser semantics: pushing truncates any forward history (every
-    /// entry after the current cursor) before appending, so a push after going
-    /// back discards the entries that were ahead. The new entry becomes current.
+    #[doc = include_str!("history_provider.doc/push.md")]
     fn push(&mut self, route: Route, state: RouteState);
 
-    /// Replaces the current entry in place with a new entry for `route` and
-    /// `state`, assigning a fresh id.
-    ///
-    /// The cursor and the rest of the stack are unchanged; only the current
-    /// entry is overwritten. When the history is empty there is no current entry
-    /// to replace, so this behaves like [`push`](HistoryProvider::push).
+    #[doc = include_str!("history_provider.doc/replace.md")]
     fn replace(&mut self, route: Route, state: RouteState);
 
-    /// Moves the cursor back one entry and returns the new current entry, or
-    /// `None` when already at the start of history.
+    #[doc = include_str!("history_provider.doc/back.md")]
     fn back(&mut self) -> Option<&NavigationEntry>;
 
-    /// Moves the cursor forward one entry and returns the new current entry, or
-    /// `None` when already at the end of history.
+    #[doc = include_str!("history_provider.doc/forward.md")]
     fn forward(&mut self) -> Option<&NavigationEntry>;
 
-    /// Returns the current entry, or `None` when the history is empty.
+    #[doc = include_str!("history_provider.doc/current.md")]
     #[must_use]
     fn current(&self) -> Option<&NavigationEntry>;
 
-    /// Returns whether a [`back`](HistoryProvider::back) move is possible.
+    #[doc = include_str!("history_provider.doc/can_go_back.md")]
     #[must_use]
     fn can_go_back(&self) -> bool;
 
-    /// Returns whether a [`forward`](HistoryProvider::forward) move is possible.
+    #[doc = include_str!("history_provider.doc/can_go_forward.md")]
     #[must_use]
     fn can_go_forward(&self) -> bool;
 
-    /// Returns the number of entries in the history stack.
+    #[doc = include_str!("history_provider.doc/len.md")]
     #[must_use]
     fn len(&self) -> usize;
 
-    /// Returns whether the history stack holds no entries.
+    #[doc = include_str!("history_provider.doc/is_empty.md")]
     #[must_use]
     fn is_empty(&self) -> bool;
 }
 
-/// The reference, in-memory [`HistoryProvider`] (spec §6.13).
-///
-/// `MemoryHistory` keeps the visited entries in a [`Vec`] and a `cursor` index
-/// pointing at the current entry. The cursor is only meaningful when the stack
-/// is non-empty; when `entries` is empty it is a dormant `0` and every query
-/// guards on emptiness. Fresh ids come from a plain monotonic `next_id` counter
-/// — there is no wall-clock or randomness, so the provider is fully
-/// deterministic.
+#[doc = include_str!("history_provider.doc/MemoryHistory.md")]
 #[derive(Debug, Default, Clone)]
 pub struct MemoryHistory {
-    /// The visited entries, oldest first.
+    #[doc = include_str!("history_provider.doc/entries.md")]
     entries: Vec<NavigationEntry>,
-    /// The index of the current entry; meaningful only when `entries` is
-    /// non-empty.
+    #[doc = include_str!("history_provider.doc/cursor.md")]
     cursor: usize,
-    /// The monotonic source of fresh entry ids.
+    #[doc = include_str!("history_provider.doc/next_id.md")]
     next_id: u64,
 }
 
 impl MemoryHistory {
-    /// Creates an empty history with no entries.
+    #[doc = include_str!("history_provider.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Mints the next fresh entry id from the monotonic counter.
+    #[doc = include_str!("history_provider.doc/allocate_id.md")]
     fn allocate_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;

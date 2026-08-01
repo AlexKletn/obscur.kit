@@ -1,36 +1,26 @@
-//! The [`DisplayConverter`] pure winit→domain monitor converter (spec §6.6
-//! display enumeration; §2.7 "преобразует native events в доменные события").
+#![doc = include_str!("display_converter.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, ScaleFactor, Size};
 use obscur_windowing::display::{Display, DisplayId, DisplayMode};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 
-/// One winit monitor's readings, taken at a single instant (spec §6.6).
-///
-/// A [`MonitorHandle`](winit::monitor::MonitorHandle) cannot be constructed
-/// without a live event loop and a real platform connection, so a projection
-/// written directly against it is reachable only from a running winit
-/// application. This snapshot is the seam that splits that problem in two: it
-/// carries exactly the readings the projection consumes, in winit's own `dpi`
-/// types, so [`DisplayConverter::project`] — the half with the decisions in it —
-/// is an ordinary pure function, and [`MonitorSnapshot::read`] is left holding
-/// nothing but five accessor calls.
+#[doc = include_str!("display_converter.doc/MonitorSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct MonitorSnapshot {
-    /// The human-readable monitor name, or `None` if winit could not read one.
+    #[doc = include_str!("display_converter.doc/name.md")]
     pub name: Option<String>,
-    /// The monitor's resolution in physical pixels.
+    #[doc = include_str!("display_converter.doc/size.md")]
     pub size: PhysicalSize<u32>,
-    /// The monitor's top-left corner in the global physical coordinate space.
+    #[doc = include_str!("display_converter.doc/position.md")]
     pub position: PhysicalPosition<i32>,
-    /// The monitor's scale factor mapping logical to physical pixels.
+    #[doc = include_str!("display_converter.doc/scale_factor.md")]
     pub scale_factor: f64,
-    /// The refresh rate in millihertz, or `None` if winit could not read one.
+    #[doc = include_str!("display_converter.doc/refresh_rate_millihertz.md")]
     pub refresh_rate_millihertz: Option<u32>,
 }
 
 impl MonitorSnapshot {
-    /// Reads `monitor`'s current state.
+    #[doc = include_str!("display_converter.doc/read.md")]
     #[must_use]
     pub fn read(monitor: &winit::monitor::MonitorHandle) -> Self {
         Self {
@@ -43,36 +33,15 @@ impl MonitorSnapshot {
     }
 }
 
-/// A stateless converter from a winit monitor to the domain's [`Display`]
-/// (spec §6.6, §2.7).
-///
-/// This is a **pure** projection of a monitor snapshot: the caller supplies the
-/// stable [`DisplayId`] (the adapter mints and retains it), and the converter
-/// reads the monitor's current size, refresh rate, scale factor, name, and
-/// position into the domain model.
-///
-/// Global-coordinate honesty (spec §6.6: "On Wayland, *unavailable* global
-/// coordinates are represented honestly"): the condition is unavailability, not a
-/// platform. Wayland compositors do publish each output's logical position, over
-/// **xdg-output**, and winit reports it — so a Wayland session is not by itself a
-/// reason to blank anything. What cannot be read is a compositor that withholds by
-/// answering `(0, 0)` for every output: that is an absence, not an origin, and
-/// publishing it would describe a topology in which every monitor overlaps. The
-/// converter cannot detect that itself, so
-/// the caller chooses the constructor: [`DisplayConverter::new`] projects the
-/// position into bounds, and [`DisplayConverter::without_global_coordinates`]
-/// leaves both bounds `None`, which is what
-/// [`Display::has_global_coordinates`] is there to report.
+#[doc = include_str!("display_converter.doc/DisplayConverter.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct DisplayConverter {
-    /// Whether the platform underneath exposes where each monitor sits in a
-    /// global coordinate space.
+    #[doc = include_str!("display_converter.doc/global_coordinates.md")]
     global_coordinates: bool,
 }
 
 impl DisplayConverter {
-    /// Creates a converter for a platform that exposes global monitor
-    /// coordinates (spec §6.6).
+    #[doc = include_str!("display_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -80,12 +49,7 @@ impl DisplayConverter {
         }
     }
 
-    /// Creates a converter for a platform that does not expose global monitor
-    /// coordinates — Wayland (spec §6.6).
-    ///
-    /// The projected displays carry no `logical_bounds` and no
-    /// `physical_bounds`: winit's `(0, 0)` position is unavailability, and the
-    /// domain models unavailable geometry as `None`.
+    #[doc = include_str!("display_converter.doc/without_global_coordinates.md")]
     #[must_use]
     pub const fn without_global_coordinates() -> Self {
         Self {
@@ -93,27 +57,13 @@ impl DisplayConverter {
         }
     }
 
-    /// Converts a live winit `monitor` to a domain [`Display`] with the
-    /// caller-supplied `id` (spec §6.6).
+    #[doc = include_str!("display_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, id: DisplayId, monitor: &winit::monitor::MonitorHandle) -> Display {
         self.project(id, &MonitorSnapshot::read(monitor))
     }
 
-    /// Projects a monitor `snapshot` onto a domain [`Display`] with the
-    /// caller-supplied `id` (spec §6.6).
-    ///
-    /// The size and position casts to `f32` are lossless enough at UI scale:
-    /// monitor pixel dimensions and coordinates stay within the precise integer
-    /// range of `f32`. The refresh rate is preserved exactly in millihertz.
-    ///
-    /// [`Display::available_modes`], [`Display::work_area`], and
-    /// [`Display::color`] are left at their empty defaults: winit 0.30 exposes
-    /// no reserved-region and no color/HDR query at all, and its
-    /// `video_modes()` enumerates *exclusive-fullscreen* modes, which this
-    /// backend refuses to present (`supports(ExclusiveFullscreen)` is
-    /// `Limited`, degraded to borderless), so nothing downstream could act on
-    /// the list.
+    #[doc = include_str!("display_converter.doc/project.md")]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn project(&self, id: DisplayId, snapshot: &MonitorSnapshot) -> Display {
@@ -151,13 +101,7 @@ impl Default for DisplayConverter {
     }
 }
 
-/// Divides physical `bounds` by `scale_factor` into the logical space
-/// [`Display::logical_bounds`] is documented in.
-///
-/// winit reports both a monitor's size and its position in physical pixels, so
-/// the two bounds differ by exactly the scale factor. Publishing the physical
-/// rectangle as the logical one would place a 2× monitor's logical origin at
-/// twice its true logical coordinate.
+#[doc = include_str!("display_converter.doc/to_logical.md")]
 fn to_logical(bounds: Rect, scale_factor: ScaleFactor) -> Rect {
     let scale = scale_factor.get();
     Rect::new(

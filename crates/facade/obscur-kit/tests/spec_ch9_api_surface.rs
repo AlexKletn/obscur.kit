@@ -1,17 +1,4 @@
-//! **SPECIFICATION-DERIVED** cases for §1.1 ("Concrete window-system, GPU,
-//! filesystem, networking and platform types never leak upward."), §1.3
-//! ("Unused backends and optional integrations must not be linked.") and §2.3
-//! ("Events are typed. String-based method dispatch is not used.") — the
-//! invariants behind the §9.6 guardrails "leak platform types into core" and
-//! "introduce untyped string dispatch", and the §9.1 non-goal "arbitrary
-//! networking in the core".
-//!
-//! These are linkage and API-surface claims, not behaviour claims, so they are
-//! asserted against the repository's own manifests and public signatures.
-//!
-//! Every expectation was written by an agent reading the specification with **no
-//! access to this repository's source**. A failure here is a defect report about
-//! the engine, and must not be "corrected" by editing the expected value.
+#![doc = include_str!("spec_ch9_api_surface.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch9_support/mod.rs"]
@@ -19,8 +6,7 @@ mod support;
 
 use support::{public_api_lines, workspace_root};
 
-/// The crates §1.1 calls "core": core/tree/style/layout/text/scene, plus the
-/// view layer they are addressed through.
+#[doc = include_str!("spec_ch9_api_surface.doc/CORE_CRATES.md")]
 const CORE_CRATES: &[&str] = &[
     "crates/domain/obscur-tree",
     "crates/domain/obscur-style",
@@ -30,10 +16,7 @@ const CORE_CRATES: &[&str] = &[
     "crates/domain/obscur-view",
 ];
 
-/// §1.1 — "Concrete window-system, GPU, filesystem, networking and platform
-/// types never leak upward." (guardrail §9.6 "leak platform types into core")
-///
-/// NG-PLATTYPES-01.
+#[doc = include_str!("spec_ch9_api_surface.doc/no_core_public_signature_mentions_a_platform_type.md")]
 #[test]
 fn no_core_public_signature_mentions_a_platform_type() {
     let root = workspace_root();
@@ -77,10 +60,7 @@ fn no_core_public_signature_mentions_a_platform_type() {
     );
 }
 
-/// §2.3 Events — "Events are typed. String-based method dispatch is not used."
-///
-/// NG-EVENT-TYPED-01: no public entry point in the runtime or view layers takes
-/// an event or method *name* as a string.
+#[doc = include_str!("spec_ch9_api_surface.doc/no_public_api_dispatches_or_subscribes_by_string_event_name.md")]
 #[test]
 fn no_public_api_dispatches_or_subscribes_by_string_event_name() {
     let root = workspace_root();
@@ -117,14 +97,7 @@ fn no_public_api_dispatches_or_subscribes_by_string_event_name() {
     );
 }
 
-/// §9.1 — "- arbitrary networking in the core;" and §1.3 "Unused backends and
-/// optional integrations must not be linked."
-///
-/// NG-NETDEPS-01. (The per-crate resolved dependency graph is not reachable from
-/// a test without shelling out to cargo — which would contend for the build lock
-/// — so this asserts the two observable proxies: no HTTP/TLS/socket crate is in
-/// the workspace lockfile at all, and the umbrella's default feature set names no
-/// GPU or windowing backend.)
+#[doc = include_str!("spec_ch9_api_surface.doc/no_core_dependency_graph_contains_an_http_tls_or_socket_crate.md")]
 #[test]
 fn no_core_dependency_graph_contains_an_http_tls_or_socket_crate() {
     let root = workspace_root();

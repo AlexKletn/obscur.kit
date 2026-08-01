@@ -1,4 +1,4 @@
-//! Selection module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod selection;
 pub use selection::Selection;
 mod selection_anchor;

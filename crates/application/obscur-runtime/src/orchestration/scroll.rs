@@ -1,15 +1,4 @@
-//! Per-element vertical scroll containers: which nodes scroll, their scrollport,
-//! and their scrollable content extent.
-//!
-//! Reimplemented from **CSS Overflow Module Level 3** — a box whose computed
-//! `overflow` is `scroll` or `auto` is a **scroll container** (§overflow) with a
-//! **scrollport** (the visible cutout its content is clipped and scrolled within,
-//! §scrollable-overflow) and a **scrollable overflow region** (the union of its
-//! content's overflow, §scrollable-overflow-region). This module is pure and
-//! IO-free: the same tree/style/box inputs always yield the same containers, so
-//! both the runtime (which owns the live scroll position + wheel + hit-test) and
-//! the scene coordinator (which paints the scroll offset + scrollbar) resolve the
-//! identical set from one source of truth.
+#![doc = include_str!("scroll.doc/_module.md")]
 
 use std::collections::HashSet;
 
@@ -21,42 +10,28 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutBoxes};
 
-/// A resolved scroll container: a node whose computed `overflow` is `scroll` or
-/// `auto` **and** whose scrollable content is taller than its scrollport, so it
-/// owns a vertical scroll position (CSS Overflow 3 §scroll-container).
+#[doc = include_str!("scroll.doc/ScrollContainer.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ScrollContainer {
-    /// The scroll-container element.
+    #[doc = include_str!("scroll.doc/node.md")]
     pub node: NodeId,
-    /// The scrollport rect (logical px). This implementation uses the **border
-    /// box** — matching the existing `overflow` paint clip — where CSS Overflow 3
-    /// defines the scrollport as the padding box: a documented simplification kept
-    /// deliberately in step with the coordinator's overflow clip so the clipped
-    /// region and the scrolled region coincide exactly.
+    #[doc = include_str!("scroll.doc/scrollport.md")]
     pub scrollport: Rect,
-    /// The scrollable content height (logical px): the bottom-most descendant edge
-    /// measured from the scrollport top (CSS Overflow 3 §scrollable-overflow-region),
-    /// never less than the scrollport height.
+    #[doc = include_str!("scroll.doc/content_height.md")]
     pub content_height: f32,
-    /// The node's tree depth (root = 0), so a consumer can resolve nested
-    /// containers outermost-first.
+    #[doc = include_str!("scroll.doc/depth.md")]
     pub depth: u32,
 }
 
 impl ScrollContainer {
-    /// The maximum `scroll_top` (logical px): `content_height − scrollport_height`,
-    /// clamped non-negative — the scroll position is clamped to the scrollable
-    /// overflow rectangle (CSS Overflow 3 §scrolling).
+    #[doc = include_str!("scroll.doc/max_scroll_top.md")]
     #[must_use]
     pub(crate) fn max_scroll_top(self) -> f32 {
         (self.content_height - self.scrollport.size.height).max(0.0)
     }
 }
 
-/// Whether a node's computed `overflow` makes it a **scroll container** — the
-/// reserved `scroll` or `auto` handles (CSS Overflow 3 §overflow). `visible` /
-/// `hidden` / `clip` / absent are not scroll containers (they never own a scroll
-/// position, even though `hidden` / `clip` still clip).
+#[doc = include_str!("scroll.doc/overflow_scrolls.md")]
 #[must_use]
 pub(crate) fn overflow_scrolls(computed: &ComputedStyles, node: NodeId) -> bool {
     matches!(
@@ -69,14 +44,7 @@ pub(crate) fn overflow_scrolls(computed: &ComputedStyles, node: NodeId) -> bool 
     )
 }
 
-/// Whether a node's computed `overflow` makes it a **scroll container** in the
-/// CSS Overflow 3 §overflow sense: `scroll`, `auto`, **or `hidden`**. Unlike
-/// [`overflow_scrolls`] (which names only the visibly-scrollable `scroll`/`auto`),
-/// this includes `hidden` because "the content must still be scrollable
-/// programmatically […] and the box is therefore still a scroll container". Only
-/// `overflow: clip` (and `visible` / absent) is excluded — `clip` "forbids
-/// scrolling entirely, through any mechanism, and therefore the box is not a scroll
-/// container".
+#[doc = include_str!("scroll.doc/establishes_scroll_container.md")]
 #[must_use]
 pub(crate) fn establishes_scroll_container(computed: &ComputedStyles, node: NodeId) -> bool {
     matches!(
@@ -91,13 +59,7 @@ pub(crate) fn establishes_scroll_container(computed: &ComputedStyles, node: Node
     )
 }
 
-/// The scrollable content height of `node` (logical px), measured from its
-/// scrollport top down to the bottom-most descendant edge (CSS Overflow 3
-/// §scrollable-overflow-region), never less than the scrollport height.
-///
-/// The walk descends the node's subtree but **stops at any nested scroll
-/// container** (its own border box already bounds its overflow), so an inner
-/// scroller's tall content does not inflate the outer scroller's extent.
+#[doc = include_str!("scroll.doc/scrollable_content_height.md")]
 #[must_use]
 fn scrollable_content_height(
     tree: &RetainedTree,
@@ -129,13 +91,7 @@ fn scrollable_content_height(
     max_bottom - top
 }
 
-/// Enumerates every scroll container in the tree that **currently overflows**,
-/// depth-sorted ascending (outermost first) so a consumer can compose their
-/// scroll positions outer-to-inner (CSS Overflow 3 §scroll-container).
-///
-/// A scroll container whose content fits (content height ≤ scrollport height)
-/// owns no scroll position and is omitted — with `overflow: auto` it also shows
-/// no scrollbar, matching the spec's "as needed" rule.
+#[doc = include_str!("scroll.doc/scroll_containers.md")]
 #[must_use]
 pub(crate) fn scroll_containers(
     tree: &RetainedTree,

@@ -1,15 +1,4 @@
-//! End-to-end proof that the two historical `.okui` "bridge gaps" — real widgets
-//! and `<img src>` — are closed, driven through the *real* frontend
-//! (parse → compile → lower) rather than a hand-built IR node.
-//!
-//! Both `.okui` lowering paths resolve names through the shared
-//! `obscur_ui_ir::name_binding` registry, so this file checks each gap on both:
-//!
-//! - the **runtime bridge** path renders an authored `<img src>` all the way to
-//!   a `PaintCommand::DrawImage` (registry → reserved `SRC` → decoded pixels),
-//!   and binds `<Button>` to the real `Button::COMPONENT_ID`; and
-//! - the **codegen** path emits, from the same compiled IR, Rust source carrying
-//!   those same real handles.
+#![doc = include_str!("okui_codegen_gaps.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(
     feature = "resource-fs",
@@ -39,8 +28,7 @@ use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{SRC, View, ViewNode};
 use obscur_kit::widgets::button::Button;
 
-/// A real 2×2 opaque-red PNG (RGB), embedded so the test needs no image-encoding
-/// dependency — the fs loader reads these bytes and the decoder yields RGBA8.
+#[doc = include_str!("okui_codegen_gaps.doc/RED_2X2_PNG.md")]
 const RED_2X2_PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
     0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 218, 99, 248, 207, 192, 0, 68, 12,
@@ -49,7 +37,7 @@ const RED_2X2_PNG: &[u8] = &[
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A fresh sandbox dir holding `logo.png` (the embedded red PNG).
+#[doc = include_str!("okui_codegen_gaps.doc/temp_asset_dir.md")]
 fn temp_asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-okui-gaps-{}-{n}", std::process::id()));
@@ -58,8 +46,7 @@ fn temp_asset_dir() -> PathBuf {
     dir
 }
 
-/// Parses and compiles `.okui` source, returning the bridged runtime `View` and
-/// the generated Rust source for the same document. Fails on any compile error.
+#[doc = include_str!("okui_codegen_gaps.doc/compile_okui.md")]
 fn compile_okui(source: &str) -> (View, String) {
     let parsed = Parser::new().parse(source);
     let document = Document::cast(parsed.tree().root().clone()).expect("root casts to Document");
@@ -75,7 +62,7 @@ fn compile_okui(source: &str) -> (View, String) {
     (view, generated)
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("okui_codegen_gaps.doc/compile_css.md")]
 fn compile_css(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();

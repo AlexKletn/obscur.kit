@@ -1,4 +1,4 @@
-//! Tree module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod retained_tree;
 pub use retained_tree::RetainedTree;
 mod secondary_map;

@@ -1,4 +1,4 @@
-//! Builds an AccessKit [`Node`] from a domain [`SemanticNode`] (§7.1).
+#![doc = include_str!("node_converter.doc/_module.md")]
 
 use accesskit::{Invalid, Node, NodeId, Rect, Toggled};
 use obscur_accessibility::semantic::{SemanticNode, SemanticValue};
@@ -6,15 +6,7 @@ use obscur_identity::NodeId as DomainNodeId;
 
 use super::{ActionConverter, RoleConverter};
 
-/// Builds an AccessKit [`Node`] from a domain [`SemanticNode`] and its child
-/// ids (spec §7.1, §2.7).
-///
-/// The converter composes a [`RoleConverter`] and an [`ActionConverter`], both
-/// stateless, and projects a semantic node's role, accessible name and
-/// description, state flags, value, supported actions, on-screen bounds, and
-/// children onto the corresponding AccessKit properties. Because AccessKit
-/// 0.17 builds nodes directly (there is no separate builder type), the returned
-/// [`Node`] is ready to place into a [`accesskit::TreeUpdate`].
+#[doc = include_str!("node_converter.doc/NodeConverter.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NodeConverter {
     role: RoleConverter,
@@ -22,7 +14,7 @@ pub struct NodeConverter {
 }
 
 impl NodeConverter {
-    /// Creates a converter with the stateless role and action converters.
+    #[doc = include_str!("node_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -31,24 +23,13 @@ impl NodeConverter {
         }
     }
 
-    /// Maps a domain [`NodeId`](DomainNodeId) to its AccessKit [`NodeId`],
-    /// preserving the raw handle value so the two trees share identities.
+    #[doc = include_str!("node_converter.doc/node_id.md")]
     #[must_use]
     pub const fn node_id(&self, id: DomainNodeId) -> NodeId {
         NodeId(id.raw())
     }
 
-    /// Builds an AccessKit [`Node`] for `node`, attaching `children` (already
-    /// mapped to domain ids) as its child list.
-    ///
-    /// State maps as follows: `disabled` → [`Node::set_disabled`], an ignored
-    /// node (decorative or hidden) → [`Node::set_hidden`], `selected` →
-    /// [`Node::set_selected`], `required` → [`Node::set_required`], `readonly`
-    /// → [`Node::set_read_only`], `busy` → [`Node::set_busy`], `invalid` →
-    /// [`Node::set_invalid`], a `checked` tri-state → [`Node::set_toggled`],
-    /// and an `expanded` tri-state → [`Node::set_expanded`]. A
-    /// [`SemanticValue::Text`] becomes the AccessKit `value` string; a
-    /// [`SemanticValue::Number`] becomes the numeric value plus its bounds.
+    #[doc = include_str!("node_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, node: &SemanticNode, children: &[DomainNodeId]) -> Node {
         let mut out = Node::new(self.role.convert(node.role()));

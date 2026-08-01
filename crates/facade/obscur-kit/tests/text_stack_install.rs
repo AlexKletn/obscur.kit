@@ -1,29 +1,4 @@
-//! End-to-end: `KitBootstrap::install_text_stack` gives a host a working text
-//! stack in one call, and the faces it installs actually drive layout (spec
-//! §5.10, §5.18).
-//!
-//! # Why these fonts, and not the machine's
-//!
-//! Every assertion here is a number read out of a specific font's tables, so the
-//! faces must be the same on every machine or the file asserts nothing. They are
-//! the vendored `assets/fonts/` faces, embedded at compile time — never
-//! `fc-match`ed. On the authoring machine `fc-match sans-serif` resolves into
-//! `/usr/share/fonts/WindowsFonts/`, which is exactly the drift this avoids.
-//!
-//! The expectations, derived from the vendored faces (both 1000 upem):
-//!
-//! * Noto Sans `hhea` ascender 1069, descender −293, line-gap 0 ⇒ at a 16px
-//!   font-size a line box is `(1069 + 293)/1000 × 16` = **21.792px**. The
-//!   idealized 0.8/0.2 ratios the stack falls back to give **16.0px** — so the
-//!   two are 5.8px apart and a test cannot pass by accident.
-//! * Noto Sans Mono `0` advance 600 ⇒ `1ch` = **9.6px** at 16px. CSS Values 4
-//!   §6.1.2's `0.5em` substitute gives **8.0px**.
-//! * Noto Sans glyph ids: `A` = 36, `Б` = 425. The
-//!   [`MockTextShaper`](obscur_kit::text::shaping::MockTextShaper) emits the
-//!   Unicode scalar instead (`A` = 65), so a real index is unmistakable.
-//!
-//! This whole file needs both text adapters; they are in `default`, but the gate
-//! keeps `--no-default-features` builds honest.
+#![doc = include_str!("text_stack_install.doc/_module.md")]
 #![cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
 #![forbid(unsafe_code)]
 
@@ -37,8 +12,7 @@ use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::text::font::{FontAttributes, FontFamily, GenericFamily};
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The vendored faces, embedded at compile time so the test binary carries them
-/// and no filesystem lookup can vary the answer.
+#[doc = include_str!("text_stack_install.doc/NOTO_SANS.md")]
 const NOTO_SANS: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../assets/fonts/NotoSans-Regular.ttf"
@@ -48,26 +22,23 @@ const NOTO_SANS_MONO: &[u8] = include_bytes!(concat!(
     "/../../../assets/fonts/NotoSansMono-Regular.ttf"
 ));
 
-/// Noto Sans: `(ascender 1069 + |descender| 293 + gap 0) / 1000 upem × 16px`.
+#[doc = include_str!("text_stack_install.doc/SANS_LINE_HEIGHT_16.md")]
 const SANS_LINE_HEIGHT_16: f32 = 21.792;
-/// What a line box measures when the face's own metrics do NOT reach it: the
-/// idealized 0.8/0.2 ratios, whose scaled line height is exactly the font size.
+#[doc = include_str!("text_stack_install.doc/IDEALIZED_LINE_HEIGHT_16.md")]
 const IDEALIZED_LINE_HEIGHT_16: f32 = 16.0;
-/// Noto Sans Mono: `0` advance 600 / 1000 upem × 16px.
+#[doc = include_str!("text_stack_install.doc/MONO_CH_16.md")]
 const MONO_CH_16: f32 = 9.6;
-/// Noto Sans: `0` advance 572 / 1000 upem × 16px.
+#[doc = include_str!("text_stack_install.doc/SANS_CH_16.md")]
 const SANS_CH_16: f32 = 9.152;
-/// What the default mock shaper measures a `0` as: a flat `0.6 × font-size`.
-/// Note this equals [`MONO_CH_16`] exactly — see
-/// `ch_resolves_to_the_installed_faces_measured_zero_advance`.
+#[doc = include_str!("text_stack_install.doc/MOCK_CH_16.md")]
 const MOCK_CH_16: f32 = 9.6;
-/// CSS Values 4 §6.1.2's substitute when the `0` glyph cannot be measured.
+#[doc = include_str!("text_stack_install.doc/CH_SUBSTITUTE_16.md")]
 const CH_SUBSTITUTE_16: f32 = 8.0;
-/// Noto Sans glyph ids, read from its `cmap`.
+#[doc = include_str!("text_stack_install.doc/GID_A.md")]
 const GID_A: u32 = 36;
 const GID_CYRILLIC_BE: u32 = 425;
 
-/// Both vendored faces, sans first, each under its own generic family.
+#[doc = include_str!("text_stack_install.doc/vendored_fonts.md")]
 fn vendored_fonts() -> FontSet {
     FontSet::new()
         .with(
@@ -92,7 +63,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Builds a `.page > .item > text` view, renders it, and returns the runtime.
+#[doc = include_str!("text_stack_install.doc/render.md")]
 fn render(css: &str, text: &str, install: bool) -> (UiRuntime, NodeId) {
     let sheet = compile(css);
     let component = ComponentId::from_raw(0x00C0_0001);
@@ -117,7 +88,7 @@ fn render(css: &str, text: &str, install: bool) -> (UiRuntime, NodeId) {
     (runtime, item_id)
 }
 
-/// The arranged height of the `.item` box.
+#[doc = include_str!("text_stack_install.doc/item_height.md")]
 fn item_height(runtime: &UiRuntime, item: NodeId) -> f32 {
     runtime
         .layout_boxes()
@@ -127,7 +98,7 @@ fn item_height(runtime: &UiRuntime, item: NodeId) -> f32 {
         .height
 }
 
-/// The arranged width of the `.item` box.
+#[doc = include_str!("text_stack_install.doc/item_width.md")]
 fn item_width(runtime: &UiRuntime, item: NodeId) -> f32 {
     runtime
         .layout_boxes()
@@ -137,7 +108,7 @@ fn item_width(runtime: &UiRuntime, item: NodeId) -> f32 {
         .width
 }
 
-/// Every glyph id in the first `DrawText` run of the last frame.
+#[doc = include_str!("text_stack_install.doc/glyph_ids.md")]
 fn glyph_ids(runtime: &UiRuntime) -> Vec<u32> {
     runtime
         .snapshot()
@@ -153,7 +124,7 @@ fn glyph_ids(runtime: &UiRuntime) -> Vec<u32> {
         .unwrap_or_default()
 }
 
-/// Every `DrawText` run in the last frame, as `(font handle, glyph ids)`.
+#[doc = include_str!("text_stack_install.doc/text_runs.md")]
 fn text_runs(runtime: &UiRuntime) -> Vec<(u32, Vec<u32>)> {
     runtime
         .snapshot()
@@ -170,13 +141,7 @@ fn text_runs(runtime: &UiRuntime) -> Vec<(u32, Vec<u32>)> {
         .collect()
 }
 
-/// **The keystone.** A line box must be sized by the installed face's own `hhea`
-/// metrics, not by the idealized ratios.
-///
-/// This is the assertion the audit's 5-B(c) is about: shaping real glyphs into
-/// ratio-sized boxes is real text in fake boxes, and it looks identical to working
-/// until you measure. 21.792 ≠ 16.0 is the whole difference, and it can only come
-/// from Noto Sans's tables — no arithmetic over the font size produces it.
+#[doc = include_str!("text_stack_install.doc/install_text_stack_puts_the_real_faces_metrics_in_the_line_box.md")]
 #[test]
 fn install_text_stack_puts_the_real_faces_metrics_in_the_line_box() {
     let css = ".page { width: 400px; height: 400px; font-size: 16px } .item { }";
@@ -198,8 +163,7 @@ fn install_text_stack_puts_the_real_faces_metrics_in_the_line_box() {
     );
 }
 
-/// The install must replace the mock shaper: real, font-specific glyph indices
-/// rather than Unicode scalars.
+#[doc = include_str!("text_stack_install.doc/install_text_stack_emits_the_faces_real_glyph_indices.md")]
 #[test]
 fn install_text_stack_emits_the_faces_real_glyph_indices() {
     let css = ".page { width: 400px; height: 400px; font-size: 16px } \
@@ -220,8 +184,7 @@ fn install_text_stack_emits_the_faces_real_glyph_indices() {
     );
 }
 
-/// The install must replace the empty resolver: a run resolves to a face that
-/// actually covers it, and Cyrillic is covered by the vendored faces.
+#[doc = include_str!("text_stack_install.doc/install_text_stack_resolves_cyrillic_through_the_registrys_coverage.md")]
 #[test]
 fn install_text_stack_resolves_cyrillic_through_the_registrys_coverage() {
     let css = ".page { width: 400px; height: 400px; font-size: 16px } \
@@ -234,9 +197,7 @@ fn install_text_stack_resolves_cyrillic_through_the_registrys_coverage() {
     );
 }
 
-/// `font-family: monospace` must reach the mono face, not merely the first
-/// registered one — the two are registered under distinct generics, and a resolver
-/// that ignored the family would hand back Noto Sans for both.
+#[doc = include_str!("text_stack_install.doc/install_text_stack_registers_each_generic_under_its_own_family.md")]
 #[test]
 fn install_text_stack_registers_each_generic_under_its_own_family() {
     let css = ".page { width: 400px; height: 400px; font-size: 16px } \
@@ -251,25 +212,7 @@ fn install_text_stack_registers_each_generic_under_its_own_family() {
     );
 }
 
-/// The install must replace the single-run itemizer — the audit's "**no bidi by
-/// default**", which is not merely a missing feature but an actively wrong answer.
-///
-/// `direction: rtl` over `abc.` is the smallest case that shows it. UAX#9 says the
-/// Latin letters are a left-to-right island (level 2) inside an RTL paragraph,
-/// while the trailing `.` is a neutral that takes the paragraph's own level (1) by
-/// rule N2 — so the correct visual order is `.abc`: the period jumps to the left,
-/// the letters do **not** reverse.
-///
-/// Out of the box the whole node is one level-0 run and the renderer reverses it
-/// wholesale to `.cba`, mangling the word. One install call is the difference.
-///
-/// # Why a Latin-only font can test bidi
-///
-/// Neither vendored face covers any RTL script, so this cannot use real RTL
-/// letters. It does not need to: bidi *levels* are what split and reorder
-/// segments, and a neutral beside an L run in an RTL paragraph produces two levels
-/// out of Latin alone. Genuine RTL *shaping* remains untested — no RTL face is
-/// vendored.
+#[doc = include_str!("text_stack_install.doc/install_text_stack_gives_the_runtime_bidi.md")]
 #[test]
 fn install_text_stack_gives_the_runtime_bidi() {
     // `a`=68, `b`=69, `c`=70, `.`=17 in Noto Sans; the mock emits scalars instead.
@@ -308,19 +251,7 @@ fn install_text_stack_gives_the_runtime_bidi() {
     );
 }
 
-/// `ch` must resolve to the installed face's own measured `0` advance.
-///
-/// # Why this asserts against the *sans* face
-///
-/// The obvious test — `font-family: monospace` — is **vacuous here**, and the
-/// coincidence is worth naming so nobody "fixes" this back:
-/// [`MockTextShaper::ADVANCE_RATIO`](obscur_kit::text::shaping::MockTextShaper::ADVANCE_RATIO)
-/// is `0.6`, and Noto Sans Mono's `0` advance is `600/1000` upem — the same ratio,
-/// at every font size. So the mock and the real mono face agree on `1ch` to the
-/// bit, and a mono assertion would pass with the whole install reverted.
-///
-/// Noto Sans's `0` is 572/1000, so it discriminates: 9.152px against the mock's
-/// 9.6px, and against the `0.5em` substitute's 8.0px.
+#[doc = include_str!("text_stack_install.doc/ch_resolves_to_the_installed_faces_measured_zero_advance.md")]
 #[test]
 fn ch_resolves_to_the_installed_faces_measured_zero_advance() {
     const N: f32 = 25.0;
@@ -354,26 +285,7 @@ fn ch_resolves_to_the_installed_faces_measured_zero_advance() {
     );
 }
 
-/// The installed face's `0` advance must reach **paint**, not just layout.
-///
-/// # Why this exists next to the test above, which looks identical
-///
-/// `ch_resolves_to_the_installed_faces_measured_zero_advance` reads `item_width`
-/// off the **layout** boxes, and layout has always been able to measure `ch`
-/// itself (`ch_width_for`). So it passes whether or not the computed-value step
-/// resolves `ch` — verified by neutering that step, which leaves it green. It
-/// pins the *font*, and cannot pin the *seam*.
-///
-/// Paint is the half that could not measure: it reads the computed property
-/// through `Length::as_px`, which honours absolute `px` only, so a `ch` that
-/// survives the fold reaches it as `0`. Asserting a painted border edge is
-/// therefore the assertion layout's fallback cannot rescue.
-///
-/// The sans face is load-bearing here for the reason the module header gives:
-/// Noto Sans Mono's `0` is `600/1000` and `MockTextShaper::ADVANCE_RATIO` is
-/// `0.6` — equal at every size, so a mono assertion passes with the whole install
-/// reverted. Noto Sans's `572/1000` discriminates all three candidate answers:
-/// 9.152 measured, 9.6 mocked, 8.0 substituted.
+#[doc = include_str!("text_stack_install.doc/a_ch_border_paints_the_installed_sans_faces_zero_advance.md")]
 #[test]
 fn a_ch_border_paints_the_installed_sans_faces_zero_advance() {
     const N: f32 = 4.0;
@@ -410,9 +322,7 @@ fn a_ch_border_paints_the_installed_sans_faces_zero_advance() {
     );
 }
 
-/// The painted width of the item's **top** border edge, or `0.0` when no edge was
-/// painted — which is precisely the old seam's signature, so it must not be
-/// confusable with a real measurement.
+#[doc = include_str!("text_stack_install.doc/painted_edge_extent.md")]
 fn painted_edge_extent(commands: &[PaintCommand], bounds: obscur_kit::geometry::Rect) -> f32 {
     commands
         .iter()
@@ -427,10 +337,7 @@ fn painted_edge_extent(commands: &[PaintCommand], bounds: obscur_kit::geometry::
         .fold(0.0f32, f32::max)
 }
 
-/// The mono face's `ch` is still worth pinning — just not against the mock. This
-/// asserts it against the **`0.5em` substitute**, which is the foil that matters
-/// for `ch`: 9.6px real against 8.0px substituted is the 20% mis-sizing that
-/// `ch_base`'s doc warns about, on the fixed-pitch faces `ch` exists to serve.
+#[doc = include_str!("text_stack_install.doc/the_mono_faces_ch_is_a_fifth_wider_than_the_specs_substitute.md")]
 #[test]
 fn the_mono_faces_ch_is_a_fifth_wider_than_the_specs_substitute() {
     let css = ".page { width: 400px; height: 400px; font-size: 16px } \
@@ -449,8 +356,7 @@ fn the_mono_faces_ch_is_a_fifth_wider_than_the_specs_substitute() {
     );
 }
 
-/// The handle table is the half the runtime cannot finish, so it must be exactly
-/// what the renderer needs: dense, in installed order, paired with the same bytes.
+#[doc = include_str!("text_stack_install.doc/installed_fonts_hands_back_dense_handles_in_installed_order.md")]
 #[test]
 fn installed_fonts_hands_back_dense_handles_in_installed_order() {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(100.0, 100.0));
@@ -471,10 +377,7 @@ fn installed_fonts_hands_back_dense_handles_in_installed_order() {
     );
 }
 
-/// §5.18's bundled fallback, asserted rather than described: an empty host set is
-/// the WASM/isolated case, and the install must still paint text from the vendored
-/// last-resort face. The kit now **ships** a bundled set — the earlier deviation is
-/// reversed.
+#[doc = include_str!("text_stack_install.doc/an_empty_font_set_falls_back_to_the_bundled_face_and_paints.md")]
 #[test]
 fn an_empty_font_set_falls_back_to_the_bundled_face_and_paints() {
     let css = ".page { width: 400px; height: 400px; font-size: 16px } .item { }";
@@ -524,9 +427,7 @@ fn an_empty_font_set_falls_back_to_the_bundled_face_and_paints() {
     );
 }
 
-/// A `FontSet` is ordinary data a host builds from bytes it got anywhere — a
-/// bundle, an HTTP fetch, a `queryLocalFonts()` result. That is the WASM path, and
-/// it needs no filesystem.
+#[doc = include_str!("text_stack_install.doc/a_font_set_is_built_from_bytes_alone.md")]
 #[test]
 fn a_font_set_is_built_from_bytes_alone() {
     let set = FontSet::new().with_face(FontFaceBytes::new(

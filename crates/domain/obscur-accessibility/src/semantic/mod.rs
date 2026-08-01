@@ -1,4 +1,4 @@
-//! Semantic module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod semantic_action;
 pub use semantic_action::SemanticAction;
 mod semantic_node;

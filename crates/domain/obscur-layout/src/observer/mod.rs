@@ -1,4 +1,4 @@
-//! Observer module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod intersection_observer;
 pub use intersection_observer::{IntersectionChange, IntersectionObserver};
 mod layout_observer;

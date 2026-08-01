@@ -1,19 +1,4 @@
-//! §1.5 parallelism, proved on the one facility that has a port for it: a
-//! resource load must run on **another thread**, and the deterministic harness
-//! must keep running it on the caller's.
-//!
-//! §1.5 lists eight candidates for parallel work — resource loading, image
-//! decoding, CSS parsing, text shaping, isolated layout work, scene preparation,
-//! rendering, plugin executors — and says results "return as typed messages and
-//! are committed at deterministic synchronization points". Resource loading is
-//! the only one with a port (`BlockingExecutor`, spec §3.3). Until now nothing
-//! in the workspace could put a thread behind it: the only implementations were
-//! the headless `DeterministicExecutor`, which by contract runs jobs inline on
-//! the caller, and a test stub.
-//!
-//! Every assertion here is on `ThreadId`, not on the existence of a spawner. A
-//! spawner that queues the job and runs it on the caller — which is exactly what
-//! the deterministic one does, deliberately — satisfies every weaker check.
+#![doc = include_str!("off_thread_resource_load.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(
     feature = "resource-fs",
@@ -41,24 +26,20 @@ use obscur_kit::scene::scene::SceneSnapshot;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under.
+#[doc = include_str!("off_thread_resource_load.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 64.0;
 
-/// A real 2×2 opaque-red PNG, the same fixture `image_css.rs` uses: the fs loader
-/// reads these exact bytes off disk and the `image`-crate decoder turns them into
-/// RGBA8. Real bytes matter here — the load must be real work, not a mock that
-/// returns instantly enough to hide where it ran.
+#[doc = include_str!("off_thread_resource_load.doc/RED_2X2_PNG.md")]
 const RED_2X2_PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
     0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 218, 99, 248, 207, 192, 0, 68, 12,
     16, 10, 0, 31, 238, 3, 253, 99, 94, 187, 91, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
 
-/// Process-unique counter so concurrent tests never collide on a temp name.
+#[doc = include_str!("off_thread_resource_load.doc/COUNTER.md")]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Creates a fresh temp directory holding `logo.png`, and returns it (the
-/// loader's sandbox root).
+#[doc = include_str!("off_thread_resource_load.doc/temp_asset_dir.md")]
 fn temp_asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("obscur-kit-offthread-{}-{n}", std::process::id()));
@@ -67,13 +48,7 @@ fn temp_asset_dir() -> PathBuf {
     dir
 }
 
-/// The probe: the facade's **real** `FsResourceLoader`, wrapped so the test can
-/// read back which thread `load` was called on.
-///
-/// Wrapping rather than mocking keeps the loaded bytes, the decode and the paint
-/// real; the only thing added is the `ThreadId` record. This is the test's
-/// instrument — the executor, the runtime path and the decoder are all
-/// production.
+#[doc = include_str!("off_thread_resource_load.doc/ThreadRecordingLoader.md")]
 struct ThreadRecordingLoader {
     inner: obscur_kit::resource_fs::loader::FsResourceLoader,
     loaded_on: Mutex<Vec<ThreadId>>,
@@ -87,7 +62,7 @@ impl ThreadRecordingLoader {
         }
     }
 
-    /// The threads `load` ran on, in call order.
+    #[doc = include_str!("off_thread_resource_load.doc/loaded_on.md")]
     fn loaded_on(&self) -> Vec<ThreadId> {
         self.loaded_on.lock().expect("lock").clone()
     }
@@ -107,14 +82,14 @@ impl ResourceLoader for ThreadRecordingLoader {
     }
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("off_thread_resource_load.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A single element classed `.img`, the image-background target.
+#[doc = include_str!("off_thread_resource_load.doc/img_view.md")]
 fn img_view() -> View {
     let node = ViewNode::element(ComponentId::from_raw(40))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("img".into())));
@@ -134,11 +109,7 @@ fn draw_image_count(snapshot: &SceneSnapshot) -> usize {
         .count()
 }
 
-/// Waits until the recording loader has seen `n` calls, or the deadline passes.
-///
-/// A bounded poll rather than a sleep: the pool decides when the job runs, and
-/// the test must not assert on timing. Failing to reach `n` is left to the
-/// caller's assertion, which reports what was actually seen.
+#[doc = include_str!("off_thread_resource_load.doc/wait_for_loads.md")]
 fn wait_for_loads(loader: &ThreadRecordingLoader, n: usize) {
     for _ in 0..500 {
         if loader.loaded_on().len() >= n {
@@ -148,8 +119,7 @@ fn wait_for_loads(loader: &ThreadRecordingLoader, n: usize) {
     }
 }
 
-/// THE §1.5 claim: with the facade's blocking executor installed, the load leaves
-/// the frame thread — and the frame that referenced the image did not wait for it.
+#[doc = include_str!("off_thread_resource_load.doc/an_installed_blocking_executor_runs_the_load_on_another_thread.md")]
 #[test]
 fn an_installed_blocking_executor_runs_the_load_on_another_thread() {
     let dir = temp_asset_dir();
@@ -205,16 +175,7 @@ fn an_installed_blocking_executor_runs_the_load_on_another_thread() {
     );
 }
 
-/// The half that pins the §3.3 capability default: without the executor NO
-/// background thread is spawned — the load runs on the frame thread. What the
-/// frame-purity ruling (§3.4/§5.15) changed is only its TIMING: the load is
-/// deferred out of `render_now` and run by `poll_resource_tasks`, still on the
-/// frame thread. So the loader is never touched during the frame, and when it is
-/// finally run it runs right here on the caller — no thread was ever spawned.
-///
-/// This is what makes the off-thread test above discriminating: both halves drive
-/// the identical runtime path, and the only difference is the one install call —
-/// with it, the load leaves this thread; without it, the load stays on it.
+#[doc = include_str!("off_thread_resource_load.doc/with_no_executor_the_load_runs_on_the_frame_thread.md")]
 #[test]
 fn with_no_executor_the_load_runs_on_the_frame_thread() {
     let dir = temp_asset_dir();
@@ -261,16 +222,7 @@ fn with_no_executor_the_load_runs_on_the_frame_thread() {
     );
 }
 
-/// The commit claim on its own, with no threads and no timing: a result that has
-/// come back is committed by the **frame**, without anyone calling
-/// `poll_resource_tasks` (§1.5 "committed at deterministic synchronization
-/// points").
-///
-/// The deterministic executor is the instrument that makes this exact: `run()`
-/// runs the queued job inline, so the typed message is provably on the channel
-/// before the next frame starts — where the off-thread test above can only wait
-/// for a pool. `run_tasks` is deliberately not called; it is the method that
-/// polls, and polling is the discipline under test.
+#[doc = include_str!("off_thread_resource_load.doc/a_finished_load_is_committed_by_the_next_frame_with_no_polling.md")]
 #[test]
 fn a_finished_load_is_committed_by_the_next_frame_with_no_polling() {
     let dir = temp_asset_dir();
@@ -302,9 +254,7 @@ fn a_finished_load_is_committed_by_the_next_frame_with_no_polling() {
     );
 }
 
-/// §7.3/§7.4's reproducibility, which the change above must not have bought its
-/// parallelism with: the headless host's deterministic executor still runs every
-/// load on the caller's thread, when `run_tasks` says so and never before.
+#[doc = include_str!("off_thread_resource_load.doc/the_headless_host_still_loads_on_the_calling_thread.md")]
 #[test]
 fn the_headless_host_still_loads_on_the_calling_thread() {
     let dir = temp_asset_dir();

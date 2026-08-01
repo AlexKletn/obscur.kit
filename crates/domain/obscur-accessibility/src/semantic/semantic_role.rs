@@ -1,78 +1,65 @@
-//! The ARIA-like semantic role of an accessibility node (spec §7.1).
+#![doc = include_str!("semantic_role.doc/_module.md")]
 
-/// The semantic role of an accessibility node (spec §7.1).
-///
-/// A role is the ARIA-like classification a platform adapter maps onto its
-/// native accessibility API (UI Automation control types, AX roles, AT-SPI
-/// roles, or web `role` attributes). It covers the common cross-platform set;
-/// [`Unknown`](Self::Unknown) is the neutral default for nodes whose role has
-/// not been established.
-///
-/// Two coarse predicates classify roles without exhaustive matching:
-/// [`is_interactive`](Self::is_interactive) for roles a user can operate, and
-/// [`is_container`](Self::is_container) for roles that primarily group other
-/// nodes.
+#[doc = include_str!("semantic_role.doc/SemanticRole.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SemanticRole {
-    /// An unclassified node. The default.
+    #[doc = include_str!("semantic_role.doc/Unknown.md")]
     #[default]
     Unknown,
-    /// A generic grouping of related nodes with no stronger semantics.
+    #[doc = include_str!("semantic_role.doc/Group.md")]
     Group,
-    /// A landmark region of the interface.
+    #[doc = include_str!("semantic_role.doc/Region.md")]
     Region,
-    /// A push button that performs an action when activated.
+    #[doc = include_str!("semantic_role.doc/Button.md")]
     Button,
-    /// A hyperlink to another location or resource.
+    #[doc = include_str!("semantic_role.doc/Link.md")]
     Link,
-    /// A run of static, non-editable text.
+    #[doc = include_str!("semantic_role.doc/Text.md")]
     Text,
-    /// A heading that introduces a section of content.
+    #[doc = include_str!("semantic_role.doc/Heading.md")]
     Heading,
-    /// A graphical image.
+    #[doc = include_str!("semantic_role.doc/Image.md")]
     Image,
-    /// A two- or tri-state checkbox.
+    #[doc = include_str!("semantic_role.doc/Checkbox.md")]
     Checkbox,
-    /// A radio button, one choice within a mutually exclusive group.
+    #[doc = include_str!("semantic_role.doc/RadioButton.md")]
     RadioButton,
-    /// An editable text field.
+    #[doc = include_str!("semantic_role.doc/TextInput.md")]
     TextInput,
-    /// A list of items.
+    #[doc = include_str!("semantic_role.doc/List.md")]
     List,
-    /// A single item within a list.
+    #[doc = include_str!("semantic_role.doc/ListItem.md")]
     ListItem,
-    /// A data table.
+    #[doc = include_str!("semantic_role.doc/Table.md")]
     Table,
-    /// A row within a table.
+    #[doc = include_str!("semantic_role.doc/Row.md")]
     Row,
-    /// A cell within a table row.
+    #[doc = include_str!("semantic_role.doc/Cell.md")]
     Cell,
-    /// A dialog or modal surface.
+    #[doc = include_str!("semantic_role.doc/Dialog.md")]
     Dialog,
-    /// A menu of choices.
+    #[doc = include_str!("semantic_role.doc/Menu.md")]
     Menu,
-    /// A single item within a menu.
+    #[doc = include_str!("semantic_role.doc/MenuItem.md")]
     MenuItem,
-    /// A tab in a tab strip.
+    #[doc = include_str!("semantic_role.doc/Tab.md")]
     Tab,
-    /// The content panel associated with a tab.
+    #[doc = include_str!("semantic_role.doc/TabPanel.md")]
     TabPanel,
-    /// A slider for selecting a value from a range.
+    #[doc = include_str!("semantic_role.doc/Slider.md")]
     Slider,
-    /// A progress indicator.
+    #[doc = include_str!("semantic_role.doc/ProgressBar.md")]
     ProgressBar,
-    /// A visual or semantic separator between content.
+    #[doc = include_str!("semantic_role.doc/Separator.md")]
     Separator,
-    /// A toolbar grouping controls.
+    #[doc = include_str!("semantic_role.doc/Toolbar.md")]
     Toolbar,
-    /// A tooltip providing contextual help.
+    #[doc = include_str!("semantic_role.doc/Tooltip.md")]
     Tooltip,
 }
 
 impl SemanticRole {
-    /// Returns whether this role names a control the user can directly operate
-    /// (spec §7.1): buttons, links, checkboxes, radio buttons, text inputs,
-    /// menu items, tabs, and sliders.
+    #[doc = include_str!("semantic_role.doc/is_interactive.md")]
     #[must_use]
     pub const fn is_interactive(&self) -> bool {
         matches!(
@@ -88,9 +75,7 @@ impl SemanticRole {
         )
     }
 
-    /// Returns whether this role primarily groups other nodes (spec §7.1):
-    /// groups, regions, lists, tables, rows, dialogs, menus, toolbars, and tab
-    /// panels.
+    #[doc = include_str!("semantic_role.doc/is_container.md")]
     #[must_use]
     pub const fn is_container(&self) -> bool {
         matches!(

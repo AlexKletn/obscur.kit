@@ -1,4 +1,4 @@
-//! `MountedComponent`: one live component instance the runtime renders through.
+#![doc = include_str!("mounted_component.doc/_module.md")]
 
 use core::fmt;
 
@@ -15,62 +15,27 @@ use obscur_view::view::{View, ViewProperty};
 use crate::component::GuardedRender;
 use crate::recovery::ComponentRecovery;
 
-/// The code every component-render failure is reported under (spec §1.6: codes
-/// are stable and not reused for unrelated conditions).
-///
-/// One code covers every failure a render can report today, because there is
-/// exactly one: a node's authored properties not decoding into the component's
-/// typed props. A render itself cannot fail — see [`ErasedComponent`].
+#[doc = include_str!("mounted_component.doc/COMPONENT_PROPS_FAILED.md")]
 pub const COMPONENT_PROPS_FAILED: DiagnosticCode = DiagnosticCode::new("view.component.props");
 
-/// One mounted component instance: its bookkeeping record plus the erased value
-/// the runtime actually renders (spec §2.1).
-///
-/// The two halves come from the same factory but are deliberately distinct:
-/// [`ComponentInstance`] is plain, inspectable data (identity, lifecycle state,
-/// subscription scope), while the [`ErasedComponent`] owns the author's
-/// [`LocalState`](obscur_view::state::LocalState) fields. Keeping *this* value
-/// alive across frames is precisely what preserves a component's local state;
-/// dropping it releases that state and the instance's scoped subscriptions,
-/// which is the spec's "automatic cleanup".
-///
-/// # `needs_update`
-///
-/// [`ComponentContext::request_update`] writes through a `&mut bool` the caller
-/// owns — this struct is that owner. The flag is the component's way of saying
-/// "render me again"; the runtime reads it after each render and clears it when
-/// it acts, so a request is never serviced twice.
-///
-/// # The error boundary
-///
-/// Every component is an error boundary by default (spec §1.7), so every
-/// mounted instance owns one — built from the author's
-/// [`error_boundary`](obscur_view::component::Component::error_boundary) policy
-/// and [`fallback`](obscur_view::component::Component::fallback) when it mounts.
-/// [`render`](Self::render) goes *through* it: a failed render is contained,
-/// retried or propagated here, never returned raw to the caller.
+#[doc = include_str!("mounted_component.doc/MountedComponent.md")]
 pub struct MountedComponent {
-    /// Identity, lifecycle phase and scoped subscriptions.
+    #[doc = include_str!("mounted_component.doc/instance.md")]
     instance: ComponentInstance,
-    /// The author's component value, behind the erasure. Holds its local state.
+    #[doc = include_str!("mounted_component.doc/component.md")]
     component: Box<dyn ErasedComponent>,
-    /// Set by [`ComponentContext::request_update`] during a render or hook.
+    #[doc = include_str!("mounted_component.doc/needs_update.md")]
     needs_update: bool,
-    /// The runtime's dirty mark: this component's output is stale and must be
-    /// re-rendered. True from mount (nothing has rendered it yet).
+    #[doc = include_str!("mounted_component.doc/needs_render.md")]
     needs_render: bool,
-    /// This component's §1.7 error boundary, governed by the author's policy.
+    #[doc = include_str!("mounted_component.doc/boundary.md")]
     boundary: ErrorBoundary,
-    /// How many failures this boundary has recorded since the component last
-    /// rendered cleanly — the attempt the next failure counts as, and so what
-    /// spends the policy's retry budget. Reset by a healthy render, which is
-    /// what makes the budget per *episode* rather than per instance.
+    #[doc = include_str!("mounted_component.doc/attempts.md")]
     attempts: u32,
 }
 
 impl MountedComponent {
-    /// Pairs a freshly minted `instance` record with its `component` value, and
-    /// builds the component's error boundary from its own policy and fallback.
+    #[doc = include_str!("mounted_component.doc/new.md")]
     #[must_use]
     pub fn new(instance: ComponentInstance, component: Box<dyn ErasedComponent>) -> Self {
         let mut boundary = ErrorBoundary::new(component.error_boundary_erased());
@@ -88,50 +53,48 @@ impl MountedComponent {
         }
     }
 
-    /// The §1.7 policy governing this component's boundary.
+    #[doc = include_str!("mounted_component.doc/boundary_policy.md")]
     #[must_use]
     pub fn boundary_policy(&self) -> ErrorBoundaryPolicy {
         self.boundary.policy()
     }
 
-    /// This component's error boundary.
+    #[doc = include_str!("mounted_component.doc/boundary_2.md")]
     #[must_use]
     pub const fn boundary(&self) -> &ErrorBoundary {
         &self.boundary
     }
 
-    /// This instance's identity.
+    #[doc = include_str!("mounted_component.doc/instance_id.md")]
     #[must_use]
     pub const fn instance_id(&self) -> InstanceId {
         self.instance.id()
     }
 
-    /// The bookkeeping record.
+    #[doc = include_str!("mounted_component.doc/instance_2.md")]
     #[must_use]
     pub const fn instance(&self) -> &ComponentInstance {
         &self.instance
     }
 
-    /// Whether the component asked to be re-rendered since the flag was last
-    /// cleared.
+    #[doc = include_str!("mounted_component.doc/needs_update_2.md")]
     #[must_use]
     pub const fn needs_update(&self) -> bool {
         self.needs_update
     }
 
-    /// Whether this component's output is stale and must be re-rendered.
+    #[doc = include_str!("mounted_component.doc/needs_render_2.md")]
     #[must_use]
     pub const fn needs_render(&self) -> bool {
         self.needs_render
     }
 
-    /// Marks the component's output stale — e.g. because the node's authored
-    /// props changed, so its typed props may decode differently.
+    #[doc = include_str!("mounted_component.doc/mark_dirty.md")]
     pub const fn mark_dirty(&mut self) {
         self.needs_render = true;
     }
 
-    /// Advances the instance to `Mounted` and runs the component's `on_mount`.
+    #[doc = include_str!("mounted_component.doc/mount.md")]
     pub fn mount(&mut self, signals: &SignalGenerations) {
         self.instance.mount();
         let Self {
@@ -146,11 +109,7 @@ impl MountedComponent {
         component.on_mount_erased(&mut mount);
     }
 
-    /// Runs the component's `on_unmount`, then retires the instance (clearing its
-    /// subscription scope).
-    ///
-    /// Called *before* the value is dropped, so a component can act while its
-    /// state is still readable — releasing the state itself needs no hook.
+    #[doc = include_str!("mounted_component.doc/unmount.md")]
     pub fn unmount(&mut self, signals: &SignalGenerations) {
         let Self {
             instance,
@@ -165,29 +124,13 @@ impl MountedComponent {
         self.instance.unmount();
     }
 
-    /// Whether this component depends on `source` and has not seen its `current`
-    /// generation — i.e. it is a consumer of a value that changed (spec §3.1).
+    #[doc = include_str!("mounted_component.doc/depends_on_stale.md")]
     #[must_use]
     pub fn depends_on_stale(&self, source: SignalId, current: StateGeneration) -> bool {
         self.instance.scope().is_stale_for(source, current)
     }
 
-    /// Renders the component against the node's authored `props`, through its
-    /// error boundary (spec §1.7).
-    ///
-    /// `signals` supplies the current generation of every observable source, so a
-    /// dependency recorded by [`ComponentContext::track`] captures the generation
-    /// it was actually taken at.
-    ///
-    /// # A failed render never returns raw
-    ///
-    /// There is no `Result` here on purpose: a caller handed an error would have
-    /// to decide what happens to the subtree, and that decision is the
-    /// boundary's. A failure comes back as [`GuardedRender::Failed`] with the
-    /// boundary's [`RecoveryResult`](crate::recovery::RecoveryResult) already taken — and with the dirty mark
-    /// already set to match it, because only a *retry* wants this component
-    /// rendered again with the same props. Leaving it stale after any other
-    /// decision would re-fire the failure, and its diagnostic, every frame.
+    #[doc = include_str!("mounted_component.doc/render.md")]
     pub fn render(&mut self, props: &[ViewProperty], signals: &SignalGenerations) -> GuardedRender {
         match self.try_render(props, signals) {
             Ok(view) => {
@@ -202,7 +145,7 @@ impl MountedComponent {
         }
     }
 
-    /// Applies the §1.7 boundary to a render that failed with `error`.
+    #[doc = include_str!("mounted_component.doc/contain.md")]
     fn contain(&mut self, error: &PropsError) -> GuardedRender {
         let failure = ComponentFailure::new(
             self.instance.state(),
@@ -228,14 +171,7 @@ impl MountedComponent {
         }
     }
 
-    /// Contains `diagnostic` — a failure that escaped a descendant's disabled
-    /// boundary — at this boundary, returning the failure as recorded here and
-    /// the fallback UI that replaces *this* component's subtree.
-    ///
-    /// The retry budget belongs to the boundary the failure happened in, so a
-    /// boundary catching an escaped failure replaces its subtree rather than
-    /// retrying: the replacement unmounts the descendant that failed, which is
-    /// what containing it means.
+    #[doc = include_str!("mounted_component.doc/contain_escaped.md")]
     pub fn contain_escaped(&mut self, diagnostic: Diagnostic) -> (ComponentFailure, View) {
         let failure =
             ComponentFailure::from_diagnostic(self.instance.state(), self.attempts, diagnostic);
@@ -244,20 +180,12 @@ impl MountedComponent {
         (failure, self.fallback())
     }
 
-    /// The fallback UI to put in place of this component's subtree.
-    ///
-    /// A component that supplied none falls back to *nothing*: the failed
-    /// subtree is emptied rather than left showing the last good output.
+    #[doc = include_str!("mounted_component.doc/fallback.md")]
     fn fallback(&self) -> View {
         self.boundary.fallback_view().cloned().unwrap_or_default()
     }
 
-    /// Renders the component, reporting a props-decode failure raw.
-    ///
-    /// # Errors
-    ///
-    /// Returns the [`PropsError`] when `props` do not satisfy the component's
-    /// typed props; the component is not called in that case.
+    #[doc = include_str!("mounted_component.doc/try_render.md")]
     fn try_render(
         &mut self,
         props: &[ViewProperty],
@@ -289,9 +217,7 @@ impl MountedComponent {
 }
 
 impl fmt::Debug for MountedComponent {
-    /// Shows the record and the update flag; the erased component is opaque by
-    /// construction (it has no `Debug` bound — requiring one would force every
-    /// author's component to derive it).
+    #[doc = include_str!("mounted_component.doc/fmt.md")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MountedComponent")
             .field("instance", &self.instance)

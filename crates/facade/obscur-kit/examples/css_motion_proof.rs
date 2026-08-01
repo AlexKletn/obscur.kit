@@ -1,28 +1,4 @@
-//! **Proof: CSS-authored motion actually moves.**
-//!
-//! A `transition` and an `@keyframes` animation, authored in plain CSS, compiled
-//! through the real CSS frontend, and driven by the runtime's motion scheduler —
-//! rasterized through the software [`CpuRenderer`] as a five-panel filmstrip in
-//! `target/css_motion_proof.png`:
-//!
-//! - **The blue `.bar`** carries `transition: width 1s linear`. Hovering it
-//!   changes its computed width `60px -> 300px`, so the transition fires and the
-//!   bar *grows across the strip* instead of snapping.
-//! - **The red `.ghost`** plays `@keyframes fade` via the `animation` shorthand,
-//!   so it fades in `opacity: 0.15 -> 1` over the same second.
-//!
-//! Each panel is one motion frame at `t = 0, 0.25, 0.5, 0.75, 1.0`. The bar's
-//! width is read back from the runtime's own layout boxes and **asserted** at
-//! every step, so a regression fails the run rather than printing a still image.
-//!
-//! The wiring is the kit's, not this example's: [`CssPipeline::install`] hands the
-//! sources to the CSS frontend and installs *both* halves of the result on the
-//! runtime — the matchable rules and the `transition`/`@keyframes` motion (§4.17).
-//! A host that installs only the rules gets a motionless UI, which is exactly why
-//! the plumbing lives in the kit.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example css_motion_proof --features render-cpu`
+#![doc = include_str!("css_motion_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -40,12 +16,10 @@ use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::style::selector::PseudoState;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The logical extent each panel is laid out and rasterized under.
+#[doc = include_str!("css_motion_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(340.0, 130.0);
 
-/// The authored sheet. Both motion frontends at once: a `transition` whose
-/// trigger is a `:hover`-gated width change, and a named `@keyframes` played
-/// through the `animation` shorthand.
+#[doc = include_str!("css_motion_proof.doc/CSS.md")]
 const CSS: &str = "\
 .stage { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; \
 padding: 20px; background: #f4f3f0; width: 100%; height: 100%; }\
@@ -55,10 +29,10 @@ padding: 20px; background: #f4f3f0; width: 100%; height: 100%; }\
 .ghost { width: 300px; height: 36px; background: #d9534f; animation: fade 1s; }\
 ";
 
-/// The motion frames captured, in seconds since the transition fired.
+#[doc = include_str!("css_motion_proof.doc/TIMELINE.md")]
 const TIMELINE: &[f32] = &[0.0, 0.25, 0.5, 0.75, 1.0];
 
-/// The bar's authored width endpoints — `.bar` and `.bar:hover`.
+#[doc = include_str!("css_motion_proof.doc/WIDTH_FROM.md")]
 const WIDTH_FROM: f32 = 60.0;
 const WIDTH_TO: f32 = 300.0;
 
@@ -173,8 +147,7 @@ fn main() {
     );
 }
 
-/// The view: a `.stage` column holding the transitioned `.bar` and the animated
-/// `.ghost`.
+#[doc = include_str!("css_motion_proof.doc/view.md")]
 fn view() -> View {
     let bar = ViewNode::element(ComponentId::from_raw(2))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("bar".into())));
@@ -186,8 +159,7 @@ fn view() -> View {
     View::single(stage)
 }
 
-/// The `.bar`'s node: the tree root is synthetic, so the `.stage` is its first
-/// child and the `.bar` is the stage's.
+#[doc = include_str!("css_motion_proof.doc/bar_node.md")]
 fn bar_node(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("a root after the first frame");
     let stage = runtime
@@ -202,7 +174,7 @@ fn bar_node(runtime: &UiRuntime) -> NodeId {
         .child_nodes()[0]
 }
 
-/// The laid-out width of `node`, read back from the runtime's own layout boxes.
+#[doc = include_str!("css_motion_proof.doc/bar_width.md")]
 fn bar_width(runtime: &UiRuntime, node: NodeId) -> f32 {
     runtime
         .layout_boxes()
@@ -212,7 +184,7 @@ fn bar_width(runtime: &UiRuntime, node: NodeId) -> f32 {
         .width
 }
 
-/// Rasterizes a rendered frame's scene through the software renderer.
+#[doc = include_str!("css_motion_proof.doc/rasterize.md")]
 fn rasterize(
     renderer: &mut CpuRenderer,
     result: &obscur_kit::runtime::frame::FrameResult,
@@ -226,7 +198,7 @@ fn rasterize(
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-/// Horizontally stitches `panels` left-to-right with thin dividers between them.
+#[doc = include_str!("css_motion_proof.doc/stitch.md")]
 fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 3u32;
     let height = panels.iter().map(|p| p.height()).max().unwrap_or(0);
@@ -250,7 +222,7 @@ fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     out
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("css_motion_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

@@ -1,48 +1,22 @@
-//! The replaceable port a [`Localizer`](crate::catalog::Localizer) reads messages
-//! through (spec §7.2 replaceable provider).
+#![doc = include_str!("message_provider.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 
 use crate::locale::LanguageTag;
 use crate::message::{MessageKey, MessagePattern};
 
-/// The replaceable port for looking a message up (spec §7.2).
-///
-/// This is the hexagonal port §7.2 calls the *replaceable provider*: the domain
-/// holds a `Box<dyn MessageProvider>` and never knows whether the patterns behind
-/// it came from a compiled-in table, a `.ftl` file an adapter parsed, or a
-/// translation service. Object-safe on purpose — no generics, no `Self`-returning
-/// methods — so providers are stored polymorphically.
-///
-/// # Contract
-///
-/// - [`pattern`](Self::pattern) is asked for an **exact** locale, never a
-///   language "close enough". Walking the fallback chain is the
-///   [`Localizer`](crate::catalog::Localizer)'s job, and a provider that
-///   second-guessed it would fall back twice.
-/// - A provider reports an honest [`availability`](Self::availability) and never
-///   panics.
-///
-/// The toolkit deliberately stops here. §7.2: *"The toolkit is not a full
-/// application translation-management platform."* Extraction, merge, pluralisation
-/// linting, translator workflow — all of that lives on the far side of this trait.
+#[doc = include_str!("message_provider.doc/MessageProvider.md")]
 pub trait MessageProvider {
-    /// Returns the pattern registered for `key` in exactly `locale`, or `None`.
+    #[doc = include_str!("message_provider.doc/pattern.md")]
     #[must_use]
     fn pattern(&self, locale: &LanguageTag, key: &MessageKey) -> Option<&MessagePattern>;
 
-    /// Returns whether this provider can supply messages at all (spec §7.2).
+    #[doc = include_str!("message_provider.doc/availability.md")]
     #[must_use]
     fn availability(&self) -> SupportLevel;
 }
 
-/// A [`MessageProvider`] holding no messages.
-///
-/// The honest default for a [`Localizer`](crate::catalog::Localizer) nobody has
-/// given a catalogue to: it reports [`SupportLevel::Unavailable`] and answers
-/// `None` for everything, so a localizer over it renders every key as itself. That
-/// is a documented reference implementation of the contract — visibly untranslated
-/// beats invisibly English.
+#[doc = include_str!("message_provider.doc/EmptyMessageProvider.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EmptyMessageProvider;
 

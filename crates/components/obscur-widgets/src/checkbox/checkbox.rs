@@ -1,4 +1,4 @@
-//! `Checkbox`: a headless tri-state checkbox control (spec §2.6).
+#![doc = include_str!("checkbox.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -8,19 +8,7 @@ use obscur_view::view::{
     ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
-/// A headless tri-state checkbox control (spec §2.6).
-///
-/// `Checkbox` owns its `checked` state as an [`Option<bool>`]: `Some(true)` is
-/// checked, `Some(false)` is unchecked, and `None` is the *mixed* /
-/// indeterminate state a parent can hold while its descendants disagree. It
-/// bakes in **no** visual theme — [`view`](Self::view) derives a
-/// [`SemanticRole::Checkbox`] element whose checked state is encoded as a
-/// tri-state integer property (see [`view`](Self::view)) plus a change event
-/// bound to `command` and a single [`Text`] label child, rendered by the style
-/// layer keyed on [`COMPONENT_ID`](Self::COMPONENT_ID).
-///
-/// The state machine is [`toggle`](Self::toggle): disabled is a no-op, `None`
-/// (mixed) advances to `Some(true)`, and a definite value flips.
+#[doc = include_str!("checkbox.doc/Checkbox.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checkbox {
     label: Box<str>,
@@ -30,30 +18,22 @@ pub struct Checkbox {
 }
 
 impl Checkbox {
-    /// Stable component id for the checkbox widget (see [`Button::COMPONENT_ID`]
-    /// for the shared `0x00D0_00NN` scheme).
-    ///
-    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    #[doc = include_str!("checkbox.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0003);
 
-    /// Component id of the boxed indicator sub-part (the 20×20 `.checkbox-box`).
-    /// Shares the widget id space with the high nibble of the suffix flipped
-    /// (`..13`), mirroring the menu/table sub-part scheme.
+    #[doc = include_str!("checkbox.doc/BOX_ID.md")]
     const BOX_ID: ComponentId = ComponentId::from_raw(0x00D0_0013);
-    /// Component id of the indeterminate bar sub-part (`.checkbox-bar`).
+    #[doc = include_str!("checkbox.doc/BAR_ID.md")]
     const BAR_ID: ComponentId = ComponentId::from_raw(0x00D0_0023);
 
-    /// Interned name of the semantic-role property (`role`); shares the
-    /// `0x00D1_NNXX` scheme with `NN = 03` (checkbox): role=`00`, disabled=`01`,
-    /// checked=`02`.
+    #[doc = include_str!("checkbox.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0300);
-    /// Interned name of the `disabled` state property.
+    #[doc = include_str!("checkbox.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0301);
-    /// Interned name of the tri-state `checked` property (see [`view`](Self::view)).
+    #[doc = include_str!("checkbox.doc/PROP_CHECKED.md")]
     const PROP_CHECKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0302);
 
-    /// Creates an enabled, *unchecked* (`Some(false)`) checkbox showing `label`
-    /// that fires `command` on change.
+    #[doc = include_str!("checkbox.doc/new.md")]
     #[must_use]
     pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -64,8 +44,7 @@ impl Checkbox {
         }
     }
 
-    /// Creates an enabled *indeterminate* (`None`, mixed) checkbox showing
-    /// `label` that fires `command` on change.
+    #[doc = include_str!("checkbox.doc/indeterminate.md")]
     #[must_use]
     pub fn indeterminate(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -76,22 +55,21 @@ impl Checkbox {
         }
     }
 
-    /// Sets the definite checked state, returning the updated checkbox (fluent).
+    #[doc = include_str!("checkbox.doc/checked.md")]
     #[must_use]
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = Some(checked);
         self
     }
 
-    /// Sets the disabled state, returning the updated checkbox (fluent).
+    #[doc = include_str!("checkbox.doc/disabled.md")]
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Advances the tri-state: a no-op while disabled; `None` (mixed) resolves
-    /// to `Some(true)`; a definite value flips.
+    #[doc = include_str!("checkbox.doc/toggle.md")]
     pub fn toggle(&mut self) {
         if self.disabled {
             return;
@@ -102,75 +80,59 @@ impl Checkbox {
         };
     }
 
-    /// Returns whether the checkbox is definitely checked (`Some(true)`).
+    #[doc = include_str!("checkbox.doc/is_checked.md")]
     #[must_use]
     pub const fn is_checked(&self) -> bool {
         matches!(self.checked, Some(true))
     }
 
-    /// Returns whether the checkbox is in the mixed / indeterminate state.
+    #[doc = include_str!("checkbox.doc/is_indeterminate.md")]
     #[must_use]
     pub const fn is_indeterminate(&self) -> bool {
         self.checked.is_none()
     }
 
-    /// Returns the raw tri-state checked value.
+    #[doc = include_str!("checkbox.doc/checked_state.md")]
     #[must_use]
     pub const fn checked_state(&self) -> Option<bool> {
         self.checked
     }
 
-    /// Sets the definite checked state in place.
+    #[doc = include_str!("checkbox.doc/set_checked.md")]
     pub fn set_checked(&mut self, checked: bool) {
         self.checked = Some(checked);
     }
 
-    /// Returns the command fired when the checkbox changes.
+    #[doc = include_str!("checkbox.doc/command.md")]
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    /// Returns the checkbox label.
+    #[doc = include_str!("checkbox.doc/label.md")]
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
-    /// Returns whether the checkbox is disabled.
+    #[doc = include_str!("checkbox.doc/is_disabled.md")]
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    /// Sets the disabled state in place.
+    #[doc = include_str!("checkbox.doc/set_disabled.md")]
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    /// Returns the accessible role of this control.
+    #[doc = include_str!("checkbox.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Checkbox
     }
 
-    /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role
-    /// and disabled state, the tri-state checked value as an integer property
-    /// (`-1` = mixed/`None`, `0` = unchecked, `1` = checked), a change event
-    /// bound to `command`, and — as children — the boxed indicator sub-part
-    /// followed by the label [`Text`].
-    ///
-    /// The indicator is a `.checkbox-box` element the UA/theme sheet fills; it
-    /// carries a state class (`checked` when definitely on, `indeterminate` when
-    /// mixed) so a `.checkbox-box.checked { … }` rule (or a
-    /// `checkbox:hover .checkbox-box { … }` descendant rule) can key on it. Its
-    /// child is the tick [`Text`] "✓" when checked, or a thin `.checkbox-bar`
-    /// element when mixed; nothing when unchecked. The interactive state
-    /// (`EVENT_CHANGE`, reserved `:checked`/`:disabled` attrs) stays on the OUTER
-    /// control element, so a click on the box bubbles to it and pseudo-classes
-    /// still drive the whole control.
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[doc = include_str!("checkbox.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let checked = match self.checked {

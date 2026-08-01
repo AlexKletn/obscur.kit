@@ -1,4 +1,4 @@
-//! `Select`: a headless single-choice dropdown control (spec §2.6).
+#![doc = include_str!("select.doc/_module.md")]
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -8,24 +8,7 @@ use obscur_view::view::{
     ViewNode, ViewProperty, ViewValue,
 };
 
-/// A headless single-choice dropdown control (spec §2.6).
-///
-/// `Select` owns its list of `options`, the index of the currently
-/// [`selected`](Self::selected_index) option (if any), whether the popup is
-/// [`open`](Self::is_open), and a disabled flag. It bakes in **no** visual
-/// theme — [`view`](Self::view) derives a semantic element carrying the open
-/// and selected state as properties, a click event bound to `command`, and
-/// each option as a [`Text`] child, rendered by the style layer keyed on
-/// [`COMPONENT_ID`](Self::COMPONENT_ID).
-///
-/// The accessible role is [`SemanticRole::Menu`]: [`SemanticRole`] has no
-/// dedicated list-box role, and a menu is the closest choice-list classification
-/// in the common cross-platform set.
-///
-/// The state machine covers popup open/close ([`open`](Self::open),
-/// [`close`](Self::close), [`toggle_open`](Self::toggle_open)) and committing a
-/// choice ([`select`](Self::select), which validates the index and closes the
-/// popup).
+#[doc = include_str!("select.doc/Select.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Select {
     options: Vec<Box<str>>,
@@ -36,46 +19,31 @@ pub struct Select {
 }
 
 impl Select {
-    /// Stable component id for the select widget (see [`Button::COMPONENT_ID`]
-    /// for the shared `0x00D0_00NN` scheme).
-    ///
-    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    #[doc = include_str!("select.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0004);
 
-    /// Component id of the disclosure-arrow indicator sub-part
-    /// (`.select-arrow`), in the widget sub-part id space (`..14`).
+    #[doc = include_str!("select.doc/ARROW_ID.md")]
     const ARROW_ID: ComponentId = ComponentId::from_raw(0x00D0_0014);
 
-    /// Component id of the always-present **header** row sub-part
-    /// (`.select-header`) — the current label + arrow, carrying the box-interior
-    /// padding. The outer control is a vertical column of this header and (when
-    /// open) the option list. Sub-part id space (`..24`).
+    #[doc = include_str!("select.doc/HEADER_ID.md")]
     const HEADER_ID: ComponentId = ComponentId::from_raw(0x00D0_0024);
 
-    /// Component id of the open-popup option-list container sub-part
-    /// (`.select-list`), rendered in normal flow directly below the header.
-    /// Sub-part id space (`..44`).
+    #[doc = include_str!("select.doc/LIST_ID.md")]
     const LIST_ID: ComponentId = ComponentId::from_raw(0x00D0_0044);
 
-    /// Base component id for the option rows of the open popup
-    /// (`.select-option`). Option `i` gets `OPTION_ID_BASE + i` so each row is a
-    /// DISTINCT box, matched positionally across reconciles. Sub-part id space
-    /// (`..34`).
+    #[doc = include_str!("select.doc/OPTION_ID_BASE.md")]
     const OPTION_ID_BASE: u64 = 0x00D0_0034;
 
-    /// Interned name of the semantic-role property (`role`); shares the
-    /// `0x00D1_NNXX` scheme with `NN = 04` (select): role=`00`, disabled=`01`,
-    /// open=`02`, selected=`03`.
+    #[doc = include_str!("select.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0400);
-    /// Interned name of the `disabled` state property.
+    #[doc = include_str!("select.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0401);
-    /// Interned name of the `open` state property.
+    #[doc = include_str!("select.doc/PROP_OPEN.md")]
     const PROP_OPEN: InternedSymbol = InternedSymbol::from_raw(0x00D1_0402);
-    /// Interned name of the `selected` index property (`-1` = no selection).
+    #[doc = include_str!("select.doc/PROP_SELECTED.md")]
     const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0403);
 
-    /// Creates an enabled, closed, option-less select that fires `command` when
-    /// a choice is committed.
+    #[doc = include_str!("select.doc/new.md")]
     #[must_use]
     pub fn new(command: InternedSymbol) -> Self {
         Self {
@@ -87,14 +55,14 @@ impl Select {
         }
     }
 
-    /// Appends a single option, returning the updated select (fluent builder).
+    #[doc = include_str!("select.doc/option.md")]
     #[must_use]
     pub fn option(mut self, label: impl Into<Box<str>>) -> Self {
         self.options.push(label.into());
         self
     }
 
-    /// Appends every option from `labels`, returning the updated select.
+    #[doc = include_str!("select.doc/with_options.md")]
     #[must_use]
     pub fn with_options<I, S>(mut self, labels: I) -> Self
     where
@@ -105,27 +73,26 @@ impl Select {
         self
     }
 
-    /// Sets the disabled state, returning the updated select (fluent builder).
+    #[doc = include_str!("select.doc/disabled.md")]
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Opens the popup. A no-op while [`disabled`](Self::is_disabled).
+    #[doc = include_str!("select.doc/open.md")]
     pub fn open(&mut self) {
         if !self.disabled {
             self.open = true;
         }
     }
 
-    /// Closes the popup.
+    #[doc = include_str!("select.doc/close.md")]
     pub fn close(&mut self) {
         self.open = false;
     }
 
-    /// Toggles the popup open/closed. A no-op while disabled and closed (a
-    /// disabled select can still be closed).
+    #[doc = include_str!("select.doc/toggle_open.md")]
     pub fn toggle_open(&mut self) {
         if self.open {
             self.open = false;
@@ -134,8 +101,7 @@ impl Select {
         }
     }
 
-    /// Selects the option at `index`, closing the popup, and returns `true`.
-    /// Returns `false` (leaving state untouched) when `index` is out of range.
+    #[doc = include_str!("select.doc/select.md")]
     pub fn select(&mut self, index: usize) -> bool {
         if index < self.options.len() {
             self.selected = Some(index);
@@ -146,13 +112,13 @@ impl Select {
         }
     }
 
-    /// Returns the index of the selected option, if any.
+    #[doc = include_str!("select.doc/selected_index.md")]
     #[must_use]
     pub const fn selected_index(&self) -> Option<usize> {
         self.selected
     }
 
-    /// Returns the label of the selected option, if any.
+    #[doc = include_str!("select.doc/selected_label.md")]
     #[must_use]
     pub fn selected_label(&self) -> Option<&str> {
         self.selected
@@ -160,70 +126,48 @@ impl Select {
             .map(|s| &**s)
     }
 
-    /// Returns whether the popup is open.
+    #[doc = include_str!("select.doc/is_open.md")]
     #[must_use]
     pub const fn is_open(&self) -> bool {
         self.open
     }
 
-    /// Returns whether the select is disabled.
+    #[doc = include_str!("select.doc/is_disabled.md")]
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    /// Sets the disabled state in place.
+    #[doc = include_str!("select.doc/set_disabled.md")]
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    /// Returns the command fired when a choice is committed.
+    #[doc = include_str!("select.doc/command.md")]
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    /// Returns the number of options.
+    #[doc = include_str!("select.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.options.len()
     }
 
-    /// Returns whether the select has no options.
+    #[doc = include_str!("select.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.options.is_empty()
     }
 
-    /// Returns the accessible role of this control ([`SemanticRole::Menu`], the
-    /// closest choice-list role — see the type docs).
+    #[doc = include_str!("select.doc/semantic_role.md")]
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Menu
     }
 
-    /// Derives the semantic view: a [`COMPONENT_ID`] outer element — the box and
-    /// the click/`:disabled` target — laid out as a **vertical column** of a
-    /// `.select-header` row and, while open, a `.select-list` popup.
-    ///
-    /// The **header** (`.select-header`) is a row of the **current label** (the
-    /// selected option, else the first option, else empty — the browser-faithful
-    /// closed display) followed by a trailing `.select-arrow` indicator sub-part.
-    /// The arrow carries an `open` state class (so a `select-arrow.open { … }` or
-    /// `select:disabled .select-arrow { … }` rule can key on it) and shows the
-    /// disclosure glyph as its text child — "▼" closed, "▲" open.
-    ///
-    /// When [`is_open`](Self::is_open), a `.select-list` of `.select-option` rows
-    /// (one per option, the selected one also carrying a `selected` class) is
-    /// appended after the header, so the popup renders as a vertical stack directly
-    /// below it. The list is emitted **in normal flow** (not absolutely
-    /// positioned): the toolkit's layout/render of a positioned popup subtree is
-    /// unreliable here, so an in-flow list is the faithful, deterministic choice —
-    /// it grows the control's box downward rather than overlaying following content.
-    /// The click event and reserved `:disabled` attr stay on the OUTER element, so a
-    /// click anywhere in the control (header or a row) bubbles to the one handler.
-    ///
-    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[doc = include_str!("select.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let selected = self.selected.map_or(-1, |i| i64::try_from(i).unwrap_or(-1));

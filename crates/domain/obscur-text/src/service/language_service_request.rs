@@ -1,64 +1,37 @@
-//! A request to analyze a text region with the language services (spec §5.13).
+#![doc = include_str!("language_service_request.doc/_module.md")]
 
 use crate::span::TextRange;
 
-/// Which analysis a [`LanguageServiceRequest`] asks a provider to run
-/// (spec §5.13 optional language services).
+#[doc = include_str!("language_service_request.doc/ServiceKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ServiceKind {
-    /// Spellcheck: flag misspelled words.
+    #[doc = include_str!("language_service_request.doc/Spellcheck.md")]
     Spellcheck,
-    /// Grammar: flag grammatical issues.
+    #[doc = include_str!("language_service_request.doc/Grammar.md")]
     Grammar,
-    /// Autocorrect: propose replacements for likely typos.
+    #[doc = include_str!("language_service_request.doc/Autocorrect.md")]
     Autocorrect,
-    /// Language detection: identify the text's language.
+    #[doc = include_str!("language_service_request.doc/LanguageDetection.md")]
     LanguageDetection,
 }
 
-/// A request to analyze a region of a document with the language services
-/// (spec §5.13 optional language services).
-///
-/// Analysis is **incremental and versioned** (§5.13): [`text`](Self::text) is the
-/// slice to analyze — the whole document or an incremental fragment —
-/// [`range`](Self::range) locates that slice within the document (so diagnostics
-/// can be mapped back to document byte offsets), and [`version`](Self::version)
-/// records the text version so the resulting diagnostics can be dated.
-///
-/// [`services`](Self::services) selects which analyses to run — an **empty** list
-/// means "all" (see [`wants`](Self::wants)). [`ignored_ranges`](Self::ignored_ranges)
-/// lists **ignored / sensitive** document regions a provider must skip (§5.13),
-/// for example code spans, URLs, or password fields; an offset inside any ignored
-/// range is reported by [`is_ignored`](Self::is_ignored).
-///
-/// This type is pure data: it carries a request but performs no analysis; a
-/// [`TextServiceProvider`] consumes it.
-///
-/// [`TextServiceProvider`]: super::TextServiceProvider
+#[doc = include_str!("language_service_request.doc/LanguageServiceRequest.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguageServiceRequest {
-    /// The text to analyze: the whole document or an incremental fragment.
+    #[doc = include_str!("language_service_request.doc/text.md")]
     text: Box<str>,
-    /// Where [`text`](Self::text) begins within the document, for mapping
-    /// local offsets to document byte offsets.
+    #[doc = include_str!("language_service_request.doc/range.md")]
     range: TextRange,
-    /// The requested analyses; empty means "all" (see [`wants`](Self::wants)).
+    #[doc = include_str!("language_service_request.doc/services.md")]
     services: Vec<ServiceKind>,
-    /// Ignored / sensitive document ranges the provider must skip.
+    #[doc = include_str!("language_service_request.doc/ignored_ranges.md")]
     ignored_ranges: Vec<TextRange>,
-    /// The version of the text being analyzed.
+    #[doc = include_str!("language_service_request.doc/version.md")]
     version: u64,
 }
 
 impl LanguageServiceRequest {
-    /// Creates a request to analyze `text`, located at `range` in the document
-    /// and stamped with `version` (spec §5.13).
-    ///
-    /// The request initially requests **all** services (an empty
-    /// [`services`](Self::services) list) and has no
-    /// [`ignored_ranges`](Self::ignored_ranges); narrow it with
-    /// [`with_services`](Self::with_services) / [`requesting`](Self::requesting)
-    /// and [`ignoring`](Self::ignoring).
+    #[doc = include_str!("language_service_request.doc/new.md")]
     #[must_use]
     pub fn new(text: impl Into<Box<str>>, range: TextRange, version: u64) -> Self {
         Self {
@@ -70,72 +43,64 @@ impl LanguageServiceRequest {
         }
     }
 
-    /// Replaces the requested services, returning the updated request.
-    ///
-    /// An empty list means "all services" (see [`wants`](Self::wants)).
+    #[doc = include_str!("language_service_request.doc/with_services.md")]
     #[must_use]
     pub fn with_services(mut self, services: Vec<ServiceKind>) -> Self {
         self.services = services;
         self
     }
 
-    /// Adds a single requested service, returning the updated request.
+    #[doc = include_str!("language_service_request.doc/requesting.md")]
     #[must_use]
     pub fn requesting(mut self, kind: ServiceKind) -> Self {
         self.services.push(kind);
         self
     }
 
-    /// Adds an ignored / sensitive range the provider must skip, returning the
-    /// updated request.
+    #[doc = include_str!("language_service_request.doc/ignoring.md")]
     #[must_use]
     pub fn ignoring(mut self, range: TextRange) -> Self {
         self.ignored_ranges.push(range);
         self
     }
 
-    /// Returns the text to analyze.
+    #[doc = include_str!("language_service_request.doc/text_2.md")]
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Returns where the text begins within the document.
+    #[doc = include_str!("language_service_request.doc/range_2.md")]
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    /// Returns the requested services; empty means "all".
+    #[doc = include_str!("language_service_request.doc/services_2.md")]
     #[must_use]
     pub fn services(&self) -> &[ServiceKind] {
         &self.services
     }
 
-    /// Returns the ignored / sensitive ranges the provider must skip.
+    #[doc = include_str!("language_service_request.doc/ignored_ranges_2.md")]
     #[must_use]
     pub fn ignored_ranges(&self) -> &[TextRange] {
         &self.ignored_ranges
     }
 
-    /// Returns the version of the text being analyzed.
+    #[doc = include_str!("language_service_request.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> u64 {
         self.version
     }
 
-    /// Returns whether `kind` is requested (spec §5.13).
-    ///
-    /// An empty [`services`](Self::services) list requests every service, so this
-    /// returns `true` for any `kind` in that case; otherwise it returns whether
-    /// `kind` is explicitly listed.
+    #[doc = include_str!("language_service_request.doc/wants.md")]
     #[must_use]
     pub fn wants(&self, kind: ServiceKind) -> bool {
         self.services.is_empty() || self.services.contains(&kind)
     }
 
-    /// Returns whether the document byte `offset` falls within any ignored range
-    /// (spec §5.13 ignored / sensitive ranges).
+    #[doc = include_str!("language_service_request.doc/is_ignored.md")]
     #[must_use]
     pub fn is_ignored(&self, offset: usize) -> bool {
         self.ignored_ranges.iter().any(|r| r.contains(offset))

@@ -1,0 +1,1 @@
+The structured snapshot payload.

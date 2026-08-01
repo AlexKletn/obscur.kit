@@ -1,35 +1,24 @@
-//! `DevTools` metrics for one cache (spec §5.19 metrics, correctness transparency).
+#![doc = include_str!("cache_statistics.doc/_module.md")]
 
-/// Running metrics for one runtime cache (spec §5.19 *`DevTools` metrics; correctness
-/// transparency*).
-///
-/// Counts hits, misses, evictions, and insertions, and tracks the live entry
-/// count and total bytes. These figures surface a cache's behaviour to `DevTools`
-/// and make its correctness transparent — for example, an unexpectedly low
-/// [`hit_rate`](CacheStatistics::hit_rate) or a runaway eviction count is visible
-/// rather than hidden.
-///
-/// This is pure bookkeeping: every counter uses saturating arithmetic, so it can
-/// never overflow or underflow, and it holds no artifact data. All fields are
-/// integers, so the type derives `Eq`, `Hash`, and `Default`.
+#[doc = include_str!("cache_statistics.doc/CacheStatistics.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CacheStatistics {
-    /// Number of lookups that found a live entry.
+    #[doc = include_str!("cache_statistics.doc/hits.md")]
     hits: u64,
-    /// Number of lookups that found nothing.
+    #[doc = include_str!("cache_statistics.doc/misses.md")]
     misses: u64,
-    /// Number of entries evicted to stay within budget (spec §5.19 eviction).
+    #[doc = include_str!("cache_statistics.doc/evictions.md")]
     evictions: u64,
-    /// Number of entries inserted over the cache's lifetime.
+    #[doc = include_str!("cache_statistics.doc/insertions.md")]
     insertions: u64,
-    /// Current number of live entries.
+    #[doc = include_str!("cache_statistics.doc/entries.md")]
     entries: usize,
-    /// Current total bytes held.
+    #[doc = include_str!("cache_statistics.doc/bytes.md")]
     bytes: u64,
 }
 
 impl CacheStatistics {
-    /// Creates a zeroed set of metrics.
+    #[doc = include_str!("cache_statistics.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -42,36 +31,31 @@ impl CacheStatistics {
         }
     }
 
-    /// Records a cache hit (spec §5.19 metrics).
+    #[doc = include_str!("cache_statistics.doc/record_hit.md")]
     pub fn record_hit(&mut self) {
         self.hits = self.hits.saturating_add(1);
     }
 
-    /// Records a cache miss (spec §5.19 metrics).
+    #[doc = include_str!("cache_statistics.doc/record_miss.md")]
     pub fn record_miss(&mut self) {
         self.misses = self.misses.saturating_add(1);
     }
 
-    /// Records the eviction of an entry that freed `freed_bytes`, decrementing
-    /// the live entry count and byte total (spec §5.19 eviction).
-    ///
-    /// Uses saturating subtraction so the counts can never underflow.
+    #[doc = include_str!("cache_statistics.doc/record_eviction.md")]
     pub fn record_eviction(&mut self, freed_bytes: u64) {
         self.evictions = self.evictions.saturating_add(1);
         self.entries = self.entries.saturating_sub(1);
         self.bytes = self.bytes.saturating_sub(freed_bytes);
     }
 
-    /// Records the insertion of an entry of `byte_size`, incrementing the live
-    /// entry count and byte total (spec §5.19 metrics).
+    #[doc = include_str!("cache_statistics.doc/record_insertion.md")]
     pub fn record_insertion(&mut self, byte_size: u64) {
         self.insertions = self.insertions.saturating_add(1);
         self.entries = self.entries.saturating_add(1);
         self.bytes = self.bytes.saturating_add(byte_size);
     }
 
-    /// Returns the hit rate `hits / (hits + misses)`, or `0.0` when there have
-    /// been no accesses (spec §5.19 correctness transparency).
+    #[doc = include_str!("cache_statistics.doc/hit_rate.md")]
     #[must_use]
     pub fn hit_rate(&self) -> f32 {
         let accesses = self.hits.saturating_add(self.misses);
@@ -82,43 +66,43 @@ impl CacheStatistics {
         }
     }
 
-    /// Returns the number of recorded hits.
+    #[doc = include_str!("cache_statistics.doc/hits_2.md")]
     #[must_use]
     pub const fn hits(&self) -> u64 {
         self.hits
     }
 
-    /// Returns the number of recorded misses.
+    #[doc = include_str!("cache_statistics.doc/misses_2.md")]
     #[must_use]
     pub const fn misses(&self) -> u64 {
         self.misses
     }
 
-    /// Returns the number of recorded evictions.
+    #[doc = include_str!("cache_statistics.doc/evictions_2.md")]
     #[must_use]
     pub const fn evictions(&self) -> u64 {
         self.evictions
     }
 
-    /// Returns the number of recorded insertions.
+    #[doc = include_str!("cache_statistics.doc/insertions_2.md")]
     #[must_use]
     pub const fn insertions(&self) -> u64 {
         self.insertions
     }
 
-    /// Returns the current number of live entries.
+    #[doc = include_str!("cache_statistics.doc/entries_2.md")]
     #[must_use]
     pub const fn entries(&self) -> usize {
         self.entries
     }
 
-    /// Returns the current total bytes held.
+    #[doc = include_str!("cache_statistics.doc/bytes_2.md")]
     #[must_use]
     pub const fn bytes(&self) -> u64 {
         self.bytes
     }
 
-    /// Resets every metric back to zero.
+    #[doc = include_str!("cache_statistics.doc/reset.md")]
     pub fn reset(&mut self) {
         *self = Self::new();
     }

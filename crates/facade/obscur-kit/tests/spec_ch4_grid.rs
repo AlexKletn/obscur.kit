@@ -1,20 +1,4 @@
-//! **SPECIFICATION-DERIVED** grid-layout cases for obscur.kit §4.1 / §4.13.
-//!
-//! Every expected number below was produced by an agent reading the
-//! specification — obscur.kit §4 and the W3C css-grid-2 text it normatively
-//! cites — with **no access to this repository's source**. A failure here is a
-//! defect report about the engine, and must not be "corrected" by editing the
-//! expected value.
-//!
-//! Two translation notes, both recorded rather than hidden:
-//!
-//! * The deriver's `column-gap` is authored here as the `gap` shorthand, because
-//!   `column-gap` / `row-gap` are not modelled as properties in this workspace.
-//!   Every gap assertion in this file reads only inline-axis geometry, which the
-//!   shorthand sets identically.
-//! * "sized under a max-content constraint" / "available inline space is
-//!   indefinite" is expressed by making the grid a `flex: 0 0 auto` item of a flex
-//!   row, which is the shrink-to-fit context available through the public API.
+#![doc = include_str!("spec_ch4_grid.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch4_support/mod.rs"]
@@ -25,7 +9,7 @@ use support::{approx, at, drive, el, geom, view};
 
 const VW: f32 = 1000.0;
 
-/// A `.g` grid holding children with the given classes.
+#[doc = include_str!("spec_ch4_grid.doc/grid.md")]
 fn grid(classes: &[&str]) -> View {
     let kids = classes
         .iter()
@@ -35,7 +19,7 @@ fn grid(classes: &[&str]) -> View {
     view(vec![el(10, "g", kids)])
 }
 
-/// A `.g` grid inside a `.wrap` flex row, so the grid is shrink-to-fit.
+#[doc = include_str!("spec_ch4_grid.doc/shrink_to_fit_grid.md")]
 fn shrink_to_fit_grid(kids: Vec<obscur_kit::view::view::ViewNode>) -> View {
     view(vec![el(9, "wrap", vec![el(10, "g", kids)])])
 }
@@ -43,10 +27,7 @@ fn shrink_to_fit_grid(kids: Vec<obscur_kit::view::view::ViewNode>) -> View {
 const WRAP: &str = ".wrap{display:flex;width:1000px;height:400px} \
                    .g{flex:0 0 auto}";
 
-/// css-grid-2 §12.7.1 Find the Size of an fr: "Let flex factor sum be the sum of
-/// the flex factors of the flexible tracks. If this value is less than 1, set it
-/// to 1 instead. Let the hypothetical fr size be the leftover space divided by
-/// the flex factor sum."
+#[doc = include_str!("spec_ch4_grid.doc/an_fr_factor_sum_below_one_leaves_space_unfilled.md")]
 #[test]
 fn an_fr_factor_sum_below_one_leaves_space_unfilled() {
     let rt = drive(
@@ -68,9 +49,7 @@ fn an_fr_factor_sum_below_one_leaves_space_unfilled() {
     approx(cx, 200.0, "column 3 start; the last 100px stays empty");
 }
 
-/// css-grid-2 §12.7.1: "If the product of the hypothetical fr size and a flexible
-/// track's flex factor is less than the track's base size, restart this algorithm
-/// treating all such tracks as inflexible."
+#[doc = include_str!("spec_ch4_grid.doc/an_fr_track_blown_by_content_restarts_the_fr_algorithm.md")]
 #[test]
 fn an_fr_track_blown_by_content_restarts_the_fr_algorithm() {
     let v = view(vec![el(
@@ -100,10 +79,7 @@ fn an_fr_track_blown_by_content_restarts_the_fr_algorithm() {
     approx(bx, 50.0, "column 2 starts at 50");
 }
 
-/// css-grid-2 §7.2.3.2: "the number of repetitions is the largest possible
-/// positive integer that does not cause the grid to overflow the content box of
-/// its grid container taking gap into account; if any number of repetitions would
-/// overflow, then 1 repetition."
+#[doc = include_str!("spec_ch4_grid.doc/auto_fill_repetition_count_accounts_for_the_gap.md")]
 #[test]
 fn auto_fill_repetition_count_accounts_for_the_gap() {
     let rt = drive(
@@ -129,7 +105,7 @@ fn auto_fill_repetition_count_accounts_for_the_gap() {
     assert!(y5 > y1, "the 5th item is on the second row, got y={y5}");
 }
 
-/// css-grid-2 §7.2.3.2: "Otherwise, the specified track list repeats only once."
+#[doc = include_str!("spec_ch4_grid.doc/auto_fill_under_an_indefinite_size_repeats_once.md")]
 #[test]
 fn auto_fill_under_an_indefinite_size_repeats_once() {
     let rt = drive(
@@ -151,10 +127,7 @@ fn auto_fill_under_an_indefinite_size_repeats_once() {
     approx(aw, 100.0, "the single 100px column");
 }
 
-/// css-grid-2 §8.5 worked example: "The number of columns needed is 6. The
-/// explicit grid provides 5 columns (from grid-template-columns) with lines number
-/// 1 through 6, but #grid-item's column position means it ends on line 7, which
-/// requires an additional column added to the end of the implicit grid."
+#[doc = include_str!("spec_ch4_grid.doc/an_out_of_range_placement_adds_an_implicit_column.md")]
 #[test]
 fn an_out_of_range_placement_adds_an_implicit_column() {
     let rt = drive(
@@ -178,12 +151,7 @@ fn an_out_of_range_placement_adds_an_implicit_column() {
     approx(gw, 550.0, "5x100 explicit + 1x50 implicit");
 }
 
-/// css-grid-2 §8.5, sparse packing: "Increment the column position of the
-/// auto-placement cursor until either this item's grid area does not overlap any
-/// occupied grid cells, or the cursor's column position, plus the item's column
-/// span, overflow the number of columns in the implicit grid […] If a
-/// non-overlapping position was found in the previous step, set the item's
-/// row-start and column-start lines to the cursor's position."
+#[doc = include_str!("spec_ch4_grid.doc/sparse_auto_placement_never_backtracks.md")]
 #[test]
 fn sparse_auto_placement_never_backtracks() {
     let rt = drive(
@@ -208,9 +176,7 @@ fn sparse_auto_placement_never_backtracks() {
     approx(gh, 150.0, "three rows of 50px");
 }
 
-/// css-grid-2 §8.5, dense packing: "If the item has an automatic grid position in
-/// both axes: / Set the cursor's row and column positions to start-most row and
-/// column lines in the implicit grid."
+#[doc = include_str!("spec_ch4_grid.doc/dense_auto_placement_backfills_the_earlier_hole.md")]
 #[test]
 fn dense_auto_placement_backfills_the_earlier_hole() {
     let rt = drive(
@@ -228,9 +194,7 @@ fn dense_auto_placement_backfills_the_earlier_hole() {
     approx(gh, 100.0, "two rows of 50px");
 }
 
-/// css-grid-2 §8.5: "If the largest column span among all the items without a
-/// definite column position is larger than the width of the implicit grid, add
-/// columns to the end of the implicit grid to accommodate that column span."
+#[doc = include_str!("spec_ch4_grid.doc/an_auto_placed_span_widens_the_implicit_grid.md")]
 #[test]
 fn an_auto_placed_span_widens_the_implicit_grid() {
     let rt = drive(
@@ -250,16 +214,7 @@ fn an_auto_placed_span_widens_the_implicit_grid() {
     approx(gw, 180.0, "the implicit grid grew to three columns");
 }
 
-/// css-grid-2 §12.5: "For intrinsic maximums: Next distribute extra space to the
-/// growth limits of tracks with intrinsic max track sizing function, to
-/// accommodate these items' min-content contributions. Mark any tracks whose
-/// growth limit changed from infinite to finite in this step as infinitely
-/// growable for the next step." (The spec's own worked outcome: "Grow only the
-/// second track's growth limit, and end up with growth limits = [10, 90].")
-///
-/// Item 2's min-content main size is 30px and its max-content is 100px: the text
-/// is ten characters in a face whose advance is exactly 10px at this size, with a
-/// longest word of three characters.
+#[doc = include_str!("spec_ch4_grid.doc/an_infinitely_growable_track_absorbs_the_whole_max_content_remainder.md")]
 #[test]
 fn an_infinitely_growable_track_absorbs_the_whole_max_content_remainder() {
     let v = shrink_to_fit_grid(vec![

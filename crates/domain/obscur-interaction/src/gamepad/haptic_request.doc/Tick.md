@@ -1,0 +1,1 @@
+A light, brief tick.

@@ -1,12 +1,12 @@
-//! How long a permission grant lasts.
+#![doc = include_str!("permission_duration.doc/_module.md")]
 
-/// The lifetime of a permission grant (spec §8.57).
+#[doc = include_str!("permission_duration.doc/PermissionDuration.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionDuration {
-    /// Valid for a single use.
+    #[doc = include_str!("permission_duration.doc/OneShot.md")]
     OneShot,
-    /// Valid for the current session.
+    #[doc = include_str!("permission_duration.doc/Session.md")]
     Session,
-    /// Persisted across sessions until revoked.
+    #[doc = include_str!("permission_duration.doc/Persistent.md")]
     Persistent,
 }

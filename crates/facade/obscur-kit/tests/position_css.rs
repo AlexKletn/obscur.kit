@@ -1,14 +1,4 @@
-//! End-to-end verification that authored `position` / inset CSS reaches the
-//! layout engine and offsets a `position: relative` element (and its subtree)
-//! without moving its siblings (spec §4.1).
-//!
-//! Like the sibling `layout_css` suite, every test drives the genuine pipeline —
-//! author CSS text, compile it through the real `obscur-css` frontend, and render
-//! one frame on a [`UiRuntime`] via [`render_now`](UiRuntime::render_now)
-//! (`reconcile -> match -> cascade -> resolve -> layout`). The assertions read the
-//! actual absolute [`LayoutBox`](obscur_kit::layout::model::LayoutBox) coordinates
-//! the pipeline produced, so a regression anywhere from the CSS lowering through
-//! the computed→layout bridge to `arrange` fails the run.
+#![doc = include_str!("position_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -21,17 +11,17 @@ use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under, so geometry is deterministic.
+#[doc = include_str!("position_css.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 300.0;
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("position_css.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Tags a view node with a `class` attribute so authored selectors match it.
+#[doc = include_str!("position_css.doc/tag.md")]
 fn tag(node: ViewNode, cls: &str) -> ViewNode {
     node.with_prop(ViewProperty::new(CLASS, ViewValue::Text(cls.into())))
 }
@@ -40,8 +30,7 @@ fn el(id: u64) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
 }
 
-/// A `.row` container holding a `.a` child (which itself holds a `.leaf`
-/// grandchild) followed by a `.b` sibling.
+#[doc = include_str!("position_css.doc/view.md")]
 fn view() -> View {
     let leaf = tag(el(23), "leaf");
     let a = tag(el(21), "a").with_children(ViewFragment::from_nodes(vec![leaf]));
@@ -50,12 +39,12 @@ fn view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![container]))
 }
 
-/// Renders one real frame for `css` + the view and returns the driven runtime.
+#[doc = include_str!("position_css.doc/drive.md")]
 fn drive(css: &str) -> UiRuntime {
     drive_view(css, &view())
 }
 
-/// Renders one real frame for `css` + an arbitrary `view` and returns the runtime.
+#[doc = include_str!("position_css.doc/drive_view.md")]
 fn drive_view(css: &str, view: &View) -> UiRuntime {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     let sheet = compile(css);
@@ -65,7 +54,7 @@ fn drive_view(css: &str, view: &View) -> UiRuntime {
     rt
 }
 
-/// The absolute size `(width, height)` of a node's layout box.
+#[doc = include_str!("position_css.doc/box_size.md")]
 fn box_size(rt: &UiRuntime, node: NodeId) -> (f32, f32) {
     let b = rt
         .layout_boxes()
@@ -75,25 +64,25 @@ fn box_size(rt: &UiRuntime, node: NodeId) -> (f32, f32) {
     (b.size().width, b.size().height)
 }
 
-/// The `.row` container [`NodeId`].
+#[doc = include_str!("position_css.doc/container_node.md")]
 fn container_node(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
     rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
-/// The `.a` and `.b` child [`NodeId`]s of the container, in order.
+#[doc = include_str!("position_css.doc/children.md")]
 fn children(rt: &UiRuntime) -> (NodeId, NodeId) {
     let container = container_node(rt);
     let kids = rt.tree().get(container).unwrap().child_nodes().to_vec();
     (kids[0], kids[1])
 }
 
-/// The `.leaf` grandchild [`NodeId`] under `.a`.
+#[doc = include_str!("position_css.doc/leaf_node.md")]
 fn leaf_node(rt: &UiRuntime, a: NodeId) -> NodeId {
     rt.tree().get(a).unwrap().child_nodes().to_vec()[0]
 }
 
-/// The absolute origin `(x, y)` of a node's layout box.
+#[doc = include_str!("position_css.doc/origin.md")]
 fn origin(rt: &UiRuntime, node: NodeId) -> (f32, f32) {
     let b = rt
         .layout_boxes()

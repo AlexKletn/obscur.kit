@@ -1,17 +1,4 @@
-//! `font-size` accepts a math function, so type can follow the window
-//! (css-values-4 §10, css-fonts-4 §3.5).
-//!
-//! It did not. A `calc()` / `min()` / `max()` / `clamp()` value is a
-//! `PropertyValue::Calc`, not a `Length`, and the font-size path read only the
-//! length — so the whole declaration was dropped and the element kept the
-//! initial `medium`. Every math function computed to **16px at every window
-//! size**, which quietly ruled out responsive typography altogether:
-//! `clamp(16px, 5vmin, 30px)` is exactly how type is meant to track the window
-//! between bounds.
-//!
-//! The tell was that it looked like *nothing*: a fixed label in a key that grows
-//! with the window drifts out of proportion, and reads as a centring bug rather
-//! than as a dropped declaration.
+#![doc = include_str!("responsive_font_size.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -24,7 +11,7 @@ use obscur_kit::style::computed::ComputedValue;
 use obscur_kit::style::property::{Length, PropertyId, PropertyValue};
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The computed `font-size` of `.box` under `css` at a `w x h` viewport.
+#[doc = include_str!("responsive_font_size.doc/font_size.md")]
 fn font_size(css: &str, w: f32, h: f32) -> Option<f32> {
     let source = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&source).parse();
@@ -70,8 +57,7 @@ fn min_and_max_pick_their_side() {
     );
 }
 
-/// The case the whole fix is for: type that follows the window and stops at both
-/// ends.
+#[doc = include_str!("responsive_font_size.doc/clamp_tracks_the_window_between_its_bounds.md")]
 #[test]
 fn clamp_tracks_the_window_between_its_bounds() {
     let css = ".box { font-size: clamp(16px, 5vmin, 30px) }";
@@ -84,10 +70,7 @@ fn clamp_tracks_the_window_between_its_bounds() {
     assert_eq!(font_size(css, 200.0, 200.0), Some(16.0));
 }
 
-/// A font-relative unit inside the expression means the **parent's** size, per
-/// CSS Values 4 §6.1.2 — the same rule a bare `font-size: 2em` follows, and the
-/// reason the expression is folded against the parent rather than against the
-/// element itself.
+#[doc = include_str!("responsive_font_size.doc/an_em_inside_the_expression_means_the_parent.md")]
 #[test]
 fn an_em_inside_the_expression_means_the_parent() {
     // The root's parent size is the initial 16px, so `calc(2em)` is 32.
@@ -97,8 +80,7 @@ fn an_em_inside_the_expression_means_the_parent() {
     );
 }
 
-/// A plain length still behaves exactly as before — the fix adds a branch, it
-/// does not reroute the ordinary path.
+#[doc = include_str!("responsive_font_size.doc/a_plain_length_is_unaffected.md")]
 #[test]
 fn a_plain_length_is_unaffected() {
     assert_eq!(
@@ -111,13 +93,7 @@ fn a_plain_length_is_unaffected() {
     );
 }
 
-/// A **floor** is what makes type stop following the window: below it the label
-/// keeps its size while the box around it carries on shrinking, and ends up
-/// several times wider than the key it sits in.
-///
-/// Measured on the demo's own shape, this was 18px of label inside a 1.5px key.
-/// A ceiling alone — `min(<vmin>, <px>)` — keeps type sane on a wall-sized
-/// window and lets it shrink the whole way on a squeezed one.
+#[doc = include_str!("responsive_font_size.doc/a_ceiling_only_size_keeps_shrinking_where_a_floor_would_stop.md")]
 #[test]
 fn a_ceiling_only_size_keeps_shrinking_where_a_floor_would_stop() {
     let ceiling = ".box { font-size: min(6vmin, 34px) }";

@@ -1,0 +1,386 @@
+#![doc = include_str!("text_painter.doc/_module.md")]
+
+use obscur_geometry::{Point, Rect, Size};
+use obscur_identity::NodeId;
+use obscur_scene::color::Color;
+use obscur_scene::command::DisplayListBuilder;
+use obscur_scene::paint::Brush;
+use obscur_scene::text::{GlyphRun, PositionedGlyph};
+use obscur_text::layout::{TextAlignment, TextOverflow};
+use obscur_text::selection::{SelectionGeometry, TextSelection};
+use obscur_text::shaping::ShapedRun;
+use obscur_tree::tree::RetainedTree;
+
+use super::caret_geometry::{caret_line_geometry, caret_line_geometry_affinity};
+use super::editing_role::{EditingRole, editing_role};
+use super::paint_color::{scene_color_from, text_color_of};
+use super::paragraph_shaping::{ParagraphShaping, font_size_of, overflow_for_text};
+use super::{
+    ComputedStyles, EditingView, GeneratedRun, LayoutBoxes, alignment_for, attributes_for,
+    direction_for, display_text, families_for, letter_spacing_for, line_height_for,
+    overflow_wrap_for, root_font_size, tab_size_for, text_transform_for, white_space_for,
+    word_break_for, word_spacing_for,
+};
+
+#[doc = include_str!("text_painter.doc/CARET_WIDTH.md")]
+pub(super) const CARET_WIDTH: f32 = 1.0;
+
+#[doc = include_str!("text_painter.doc/PREEDIT_UNDERLINE_THICKNESS.md")]
+pub(super) const PREEDIT_UNDERLINE_THICKNESS: f32 = 1.0;
+
+#[doc = include_str!("text_painter.doc/SELECTION_COLOR.md")]
+pub(super) const SELECTION_COLOR: Color = Color::rgba(0.20, 0.45, 0.90, 0.35);
+
+#[doc = include_str!("text_painter.doc/positioned_run.md")]
+fn positioned_run(
+    segment: &ShapedRun,
+    baseline: f32,
+    font_size: f32,
+    text: &str,
+    content: &str,
+) -> GlyphRun {
+    let mut pen_x = 0.0_f32;
+    let mut glyphs: Vec<PositionedGlyph> = Vec::new();
+    for glyph in segment.run().glyphs() {
+        // A control character shapes to a `.notdef` tofu; suppress the visible
+        // glyph but keep advancing the pen so positions and caret offsets hold.
+        let suppressed = content
+            .get(glyph.cluster()..)
+            .and_then(|rest| rest.chars().next())
+            .is_some_and(char::is_control);
+        if !suppressed {
+            glyphs.push(PositionedGlyph::new(
+                glyph.glyph_id(),
+                glyph.cluster(),
+                pen_x + glyph.x_offset(),
+                baseline + glyph.y_offset(),
+                glyph.x_advance(),
+            ));
+        }
+        pen_x += glyph.x_advance();
+    }
+    GlyphRun::new(glyphs, font_size, text)
+        .with_font(segment.font().get())
+        .with_synthesis(segment.synth_oblique(), segment.synth_bold())
+}
+
+#[doc = include_str!("text_painter.doc/paint_text_node.md")]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_text_node(
+    shaping: &ParagraphShaping,
+    node_paint: &mut DisplayListBuilder,
+    tree: &RetainedTree,
+    computed: &ComputedStyles,
+    boxes: &LayoutBoxes,
+    node: NodeId,
+    retained_content: &str,
+    editing: Option<EditingView<'_>>,
+) {
+    let Some(layout_box) = boxes.get(&node) else {
+        return;
+    };
+    // Is this text node the focused editable's text? Then paint the
+    // live SESSION text (not the possibly-lagging retained content)
+    // and, below, the caret + selection highlight. `editing` is
+    // `None` on every non-editing frame, so this whole override
+    // path is inert and the retained content is drawn unchanged.
+    // The role also decides the `.placeholder` overlay case: the
+    // session overrides the placeholder slot only while it has typed
+    // text (`:placeholder-shown` is false once the effective text is
+    // non-empty), and then paints in the FIELD's ink, not the muted
+    // hint color.
+    let role = editing.map_or(EditingRole::None, |view| {
+        editing_role(tree, node, view.node)
+    });
+    let active = editing.filter(|view| role.overrides(view));
+    // The displayed text, computed through the SAME `display_text`
+    // seam the layout (measure/arrange) pass uses, so this frame's
+    // box and the glyphs painted here shape the identical string
+    // (CSS Text 3 §4.1.1). While actively editing this node's text,
+    // the live session buffer (with any IME preedit spliced in for
+    // DISPLAY, spec §5.12) is shaped RAW — `text-transform` (§2.1)
+    // and `white-space` collapsing (§4.1.1) are skipped so the
+    // caret/selection can index the shaped string by live buffer
+    // byte offsets; otherwise the retained content flows through
+    // casing then whitespace processing. The field is wrapped by its
+    // OWN `white-space` in both states, so a single-line `input`
+    // (`nowrap`, per the UA sheet) stays one line while typing — it
+    // does NOT reflow like a `<textarea>` — while a `pre-wrap` field
+    // keeps its literal newlines and wraps at the box width.
+    let white_space = white_space_for(computed.get(&node));
+    let displayed = display_text(
+        retained_content,
+        active,
+        text_transform_for(computed.get(&node)),
+        white_space,
+    );
+    let content: &str = displayed.as_ref();
+    // The rendered caret/selection: while composing, the caret sits
+    // at the preedit's caret within the SPLICED display text; with
+    // no preedit it is the session's own selection (buffer offsets
+    // equal display offsets). `None` on a non-editing text node.
+    let display_selection = active.map(|view| match view.preedit {
+        Some(preedit) => {
+            let at = preedit.at.min(view.text.len());
+            TextSelection::caret(at + preedit.caret)
+        }
+        None => view.selection,
+    });
+    // The ink for the glyphs, caret and preedit underline. Normally
+    // the node's own computed `color`; but when the live session is
+    // painted OVER the `.placeholder` overlay (typed text, not the
+    // hint) it uses the editing FIELD's normal ink instead of the
+    // overlay's muted placeholder color — so typed text is not muted.
+    let text_color = match (active, role) {
+        (Some(view), EditingRole::Placeholder) => text_color_of(computed, view.node),
+        _ => text_color_of(computed, node),
+    };
+    let brush = Brush::solid(text_color);
+    // Same per-node font size the layout phase measured with, so
+    // the drawn advances and baseline match the sized box.
+    let font_size = font_size_of(computed, node);
+    // Root `font-size` resolves any `rem` in the text metrics (CSS
+    // Values 4 §5.1.1); `em` / `%` resolve against this node's
+    // `font_size`. Same bases the layout phase measured with.
+    let root_font = root_font_size(computed, tree.root());
+    // The node's authored `font-family` drives the fallback chain,
+    // and its `font-weight`/`font-style`/`direction` drive the
+    // shaping attributes and base direction — the SAME inputs the
+    // layout phase measured this box with.
+    let fallback = families_for(computed.get(&node));
+    let attributes = attributes_for(computed.get(&node));
+    let direction = direction_for(computed.get(&node));
+    let alignment = alignment_for(computed.get(&node));
+    let overflow = overflow_for_text(tree, computed, node);
+    let origin = layout_box.origin();
+    // The editing field's horizontal scroll offset (single-line
+    // text-control scroll model, CSS Overflow 3 §3.1): the run,
+    // caret, selection highlight and preedit are all translated
+    // left by `scroll_left` so the caret stays inside the field's
+    // content box, and the field's `overflow: hidden` clip (an
+    // ancestor bracket) hides the scrolled-out head/tail. It is
+    // `0.0` on every non-editing text node and on a fitting or
+    // wrapping field, so the paint is then byte-identical to the
+    // unscrolled path. The runtime derives it with the SAME advance
+    // model (`caret_advance_x`) used below, so paint and hit-test
+    // agree.
+    let scroll_left = active.map_or(0.0, |view| view.scroll_left);
+    // A horizontally-scrolled single-line field must NOT
+    // glyph-truncate: `text-overflow: clip`/`ellipsis` keeps only the
+    // box-width *prefix* (CSS UI 3 §7), but scrolling translates the
+    // run left to track the caret, so a truncated prefix would be
+    // shifted off-screen and the box would render empty. When scrolled
+    // we shape the FULL run (`Visible`) and let the field's
+    // `overflow: hidden` clip-rect show only the scrolled window; the
+    // unscrolled path (caret at head, `scroll_left == 0`) keeps the
+    // authored truncation so a long value still clips at the box edge.
+    let overflow = if scroll_left > 0.0 {
+        TextOverflow::Visible
+    } else {
+        overflow
+    };
+    // The wrapped multi-line paragraph the glyphs are drawn from
+    // (spec §5.10). The caret + selection resolve their (line, x, y)
+    // against THIS same layout — a byte's line by its wrapped range,
+    // its pen x by the source-order advance model relative to that
+    // line's start — so a caret lands on the line its glyphs paint
+    // on. A single-line (`nowrap`) field wraps to one line, so the
+    // caret resolves to line 0 at the identical pen x the flat
+    // `caret_offset_x` returned (byte-identical single-line paint).
+    let layout = shaping.shape_lines(
+        content,
+        &fallback,
+        &attributes,
+        direction,
+        alignment,
+        overflow,
+        white_space,
+        overflow_wrap_for(computed.get(&node)),
+        word_break_for(computed.get(&node)),
+        font_size,
+        layout_box.size().width,
+        line_height_for(computed.get(&node), font_size, root_font),
+        letter_spacing_for(computed.get(&node), font_size, root_font),
+        word_spacing_for(computed.get(&node), font_size, root_font),
+        tab_size_for(computed.get(&node), font_size, root_font),
+    );
+    // Wrapping answered to the box, alignment answers to the
+    // containing block — see `align_width_for`. The caret and the
+    // selection below resolve against THIS layout, so re-aligning
+    // here keeps all three on one set of line offsets.
+    let layout = if matches!(
+        alignment,
+        TextAlignment::Center | TextAlignment::Right | TextAlignment::End | TextAlignment::Justify
+    ) {
+        let width =
+            ParagraphShaping::align_width_for(tree, computed, boxes, node, layout_box.size().width);
+        layout.aligned_to(width)
+    } else {
+        layout
+    };
+    // Selection highlight, painted BEHIND the glyphs (emitted before
+    // the runs so the text shows over it): the documented
+    // semi-transparent selection color. A span over the wrapped
+    // `layout` paints ONE partial rect per covered line (spec §5.11):
+    // the leading line from x(start) to its trailing edge, whole
+    // interior lines full-width, the trailing line up to x(end). The
+    // per-line geometry is computed by the domain
+    // `SelectionGeometry::from_paragraph` (the source of truth) in
+    // paragraph-local space using the SAME per-line spaced/tabbed
+    // advance + alignment `x_offset` model the caret uses; the
+    // coordinator only translates each rect by the box `origin` and
+    // the field's `−scroll_left`. A span confined to ONE line yields
+    // exactly the single rect the old first-line-only path produced
+    // (byte-identical). A collapsed selection paints nothing.
+    if let Some(selection) = display_selection
+        && !selection.is_empty()
+    {
+        let geometry =
+            SelectionGeometry::from_paragraph(&layout, selection.start(), selection.end());
+        for line_rect in geometry.rects() {
+            node_paint.fill_rect(
+                Rect::new(
+                    Point::new(
+                        origin.x + line_rect.origin.x - scroll_left,
+                        origin.y + line_rect.origin.y,
+                    ),
+                    line_rect.size,
+                ),
+                Brush::solid(SELECTION_COLOR),
+            );
+        }
+    }
+    for line in layout.lines() {
+        let baseline = line.baseline();
+        let line_top = origin.y + line.top();
+        let line_left = origin.x + line.x_offset() - scroll_left;
+        if line.segments().is_empty() {
+            // An empty line (e.g. empty text) still emits a single
+            // empty run at the line origin so the painted line count
+            // matches the box height (one line per wrapped line).
+            let range = line.range();
+            let line_text = content.get(range.start..range.end).unwrap_or_default();
+            let run = GlyphRun::new(Vec::new(), font_size, line_text);
+            node_paint.draw_text(Point::new(line_left, line_top), run, brush.clone());
+            continue;
+        }
+        // Walk the line's contiguous same-font segments left to
+        // right, emitting one DrawText per segment at the running
+        // pen origin so a multi-font line paints as several
+        // font-tagged runs (spec §5.10).
+        let mut seg_x = 0.0_f32;
+        for segment in line.segments() {
+            let range = segment.run().source();
+            let seg_text = content.get(range.start..range.end).unwrap_or_default();
+            let run = positioned_run(segment, baseline, font_size, seg_text, content);
+            let seg_origin = Point::new(line_left + seg_x, line_top);
+            node_paint.draw_text(seg_origin, run, brush.clone());
+            seg_x += segment.run().advance();
+        }
+    }
+    // IME preedit underline (spec §5.12): a thin bar beneath the
+    // composing text, distinguishing the uncommitted preedit from
+    // committed glyphs. The preedit's x-range is bounded with the
+    // SAME line-aware, spaced advance-walk the caret/selection use
+    // (`caret_line_geometry`), over the spliced display `content`:
+    // from x(at) to x(at + preedit len), including the preedit line's
+    // alignment `x_offset` so a right/centre-aligned field underlines
+    // the composing glyphs. Only for the editing field with a live,
+    // non-empty preedit.
+    if let Some(preedit) = active.and_then(|view| view.preedit)
+        && !preedit.text.is_empty()
+    {
+        let at = preedit.at.min(content.len());
+        let line_height = shaping.paragraph().line_metrics(font_size).line_height();
+        let (top0, _h0, xoff0, x0) = caret_line_geometry(shaping, &layout, font_size, at);
+        let (_, _, _, x1) =
+            caret_line_geometry(shaping, &layout, font_size, at + preedit.text.len());
+        node_paint.fill_rect(
+            Rect::new(
+                Point::new(
+                    origin.x + xoff0 + x0 - scroll_left,
+                    origin.y + top0 + line_height - PREEDIT_UNDERLINE_THICKNESS,
+                ),
+                Size::new((x1 - x0).max(0.0), PREEDIT_UNDERLINE_THICKNESS),
+            ),
+            Brush::solid(text_color),
+        );
+    }
+    // Caret, painted ON TOP of the glyphs (emitted after the runs):
+    // a thin vertical bar at the caret's pen x, spanning the first
+    // line's height, in the text color. Only for the editing field
+    // and only when the (display) selection is collapsed (a caret) —
+    // a non-empty selection shows the highlight above instead. While
+    // composing, the display selection is the preedit's caret.
+    if let Some(selection) = display_selection
+        && selection.is_collapsed()
+    {
+        // Line-aware caret geometry (spec §5.10/§5.11): the focus
+        // byte resolves to its wrapped line's top + height and its
+        // pen x within that line, so a caret on line 2 paints at
+        // y ≈ line-height and an x measured within line 2 — not the
+        // summed width of every line. At a soft-wrap boundary the
+        // focus byte is shared by two lines; the selection's
+        // `CaretAffinity` disambiguates — Upstream binds the caret to
+        // the trailing edge of the earlier line, Downstream (the
+        // default) to the leading edge of the later line. Single-line
+        // (and every default-affinity caret) → line 0, top 0, and the
+        // identical pen x (byte-identical).
+        let (top, height, x_offset, caret_x) = caret_line_geometry_affinity(
+            shaping,
+            &layout,
+            content,
+            font_size,
+            selection.focus(),
+            selection.affinity(),
+        );
+        node_paint.fill_rect(
+            Rect::new(
+                Point::new(origin.x + x_offset + caret_x - scroll_left, origin.y + top),
+                Size::new(CARET_WIDTH, height),
+            ),
+            Brush::solid(text_color),
+        );
+    }
+}
+
+#[doc = include_str!("text_painter.doc/emit_generated_run.md")]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_generated_run(
+    shaping: &ParagraphShaping,
+    node_paint: &mut DisplayListBuilder,
+    tree: &RetainedTree,
+    computed: &ComputedStyles,
+    boxes: &LayoutBoxes,
+    node: NodeId,
+    origin: Point,
+    box_width: f32,
+    run: &GeneratedRun,
+) {
+    let color = run
+        .color
+        .map_or_else(|| text_color_of(computed, node), scene_color_from);
+    let brush = Brush::solid(color);
+    let font_size = font_size_of(computed, node);
+    let layout = shaping.shape_text_lines(tree, computed, boxes, node, &run.text, box_width);
+    for line in layout.lines() {
+        if line.segments().is_empty() {
+            continue;
+        }
+        let baseline = line.baseline();
+        let line_top = origin.y + line.top();
+        let line_left = origin.x + line.x_offset();
+        let mut seg_x = 0.0_f32;
+        for segment in line.segments() {
+            let range = segment.run().source();
+            let seg_text = run.text.get(range.start..range.end).unwrap_or_default();
+            let glyph_run = positioned_run(segment, baseline, font_size, seg_text, &run.text);
+            node_paint.draw_text(
+                Point::new(line_left + seg_x, line_top),
+                glyph_run,
+                brush.clone(),
+            );
+            seg_x += segment.run().advance();
+        }
+    }
+}

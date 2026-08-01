@@ -1,35 +1,22 @@
-//! The [`PointerConverter`] pure winit→domain pointer-event converter
-//! (spec §4.7 pointer input; §6.1 windowing; §2.7 "преобразует native events в
-//! доменные события").
+#![doc = include_str!("pointer_converter.doc/_module.md")]
 
 use obscur_geometry::Point;
 use obscur_interaction::pointer::{
     PointerButton, PointerButtons, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
 
-/// A stateless converter from winit's native mouse input to the domain's
-/// [`PointerEvent`] model (spec §4.7, §2.7).
-///
-/// These are **pure**, per-event conversions with no event-loop state: each maps
-/// one winit sub-value (a button, an element state, a cursor position) to the
-/// matching domain value. The converters here intentionally do *not* track the
-/// held-button set across events — full button-state tracking is the backend's
-/// job, which threads a running [`PointerButtons`](obscur_interaction::pointer::PointerButtons)
-/// through these per-event conversions. Every event produced here uses
-/// [`PointerDevice::Mouse`] and the conventional [`PointerId::MOUSE`].
+#[doc = include_str!("pointer_converter.doc/PointerConverter.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PointerConverter;
 
 impl PointerConverter {
-    /// Creates a converter.
+    #[doc = include_str!("pointer_converter.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Maps a winit [`MouseButton`](winit::event::MouseButton) to the domain
-    /// [`PointerButton`], or `None` for a button the domain does not model
-    /// ([`MouseButton::Other`](winit::event::MouseButton::Other)).
+    #[doc = include_str!("pointer_converter.doc/button.md")]
     #[must_use]
     pub fn button(button: winit::event::MouseButton) -> Option<PointerButton> {
         use winit::event::MouseButton as Winit;
@@ -43,10 +30,7 @@ impl PointerConverter {
         }
     }
 
-    /// Maps a winit [`ElementState`](winit::event::ElementState) to the pointer
-    /// [`PointerEventKind`] for a button transition
-    /// (`Pressed` → [`Down`](PointerEventKind::Down),
-    /// `Released` → [`Up`](PointerEventKind::Up)).
+    #[doc = include_str!("pointer_converter.doc/kind.md")]
     #[must_use]
     pub fn kind(state: winit::event::ElementState) -> PointerEventKind {
         match state {
@@ -55,8 +39,7 @@ impl PointerConverter {
         }
     }
 
-    /// Builds a [`PointerEventKind::Move`] event at `position` for pointer `id`
-    /// (spec §4.7).
+    #[doc = include_str!("pointer_converter.doc/moved.md")]
     #[must_use]
     pub fn moved(
         &self,
@@ -66,8 +49,7 @@ impl PointerConverter {
         self.event(id, PointerEventKind::Move, position)
     }
 
-    /// Builds a [`PointerEventKind::Enter`] event at `position` for pointer `id`
-    /// (spec §4.7).
+    #[doc = include_str!("pointer_converter.doc/entered.md")]
     #[must_use]
     pub fn entered(
         &self,
@@ -77,23 +59,13 @@ impl PointerConverter {
         self.event(id, PointerEventKind::Enter, position)
     }
 
-    /// Builds a [`PointerEventKind::Leave`] event at `position` for pointer `id`
-    /// (spec §4.7).
+    #[doc = include_str!("pointer_converter.doc/left.md")]
     #[must_use]
     pub fn left(&self, id: PointerId, position: winit::dpi::PhysicalPosition<f64>) -> PointerEvent {
         self.event(id, PointerEventKind::Leave, position)
     }
 
-    /// Builds a [`PointerEventKind::Down`] event at `position` for pointer `id`,
-    /// with `buttons` held **after** the press (spec §4.7).
-    ///
-    /// This exists because without it §2.3's trusted flag answers nothing where it
-    /// matters. A host had no way to obtain a *trusted* press: the builders were
-    /// move/enter/leave only, so a real click came in through `PointerEvent::new`
-    /// as **untrusted** — exactly like a `§7.6` injected one. The two kinds
-    /// DevTools can inject are `PointerDown`/`PointerUp`, and those were precisely
-    /// the two this converter could not produce, so the flag's trusted and
-    /// injectable sets were disjoint and it could never tell them apart.
+    #[doc = include_str!("pointer_converter.doc/pressed.md")]
     #[must_use]
     pub fn pressed(
         &self,
@@ -105,9 +77,7 @@ impl PointerConverter {
             .with_buttons(buttons)
     }
 
-    /// Builds a [`PointerEventKind::Up`] event at `position` for pointer `id`, with
-    /// `buttons` still held **after** the release (spec §4.7). See
-    /// [`pressed`](Self::pressed) for why the trusted flag needs this.
+    #[doc = include_str!("pointer_converter.doc/released.md")]
     #[must_use]
     pub fn released(
         &self,
@@ -119,38 +89,7 @@ impl PointerConverter {
             .with_buttons(buttons)
     }
 
-    /// Converts one winit touch `contact` into the domain [`PointerEvent`] for
-    /// that finger (spec §2.4 "the pointer model supports mouse, touch, pen and
-    /// trackpad-like sources", §4.7).
-    ///
-    /// This is the whole of the touchscreen's path into the kit. Everything above
-    /// it — hit-testing, hover, focus, activation, capture — is already
-    /// device-agnostic and already reads [`PointerDevice`], so a finger needs no
-    /// parallel pipeline; it needs this conversion and nothing else.
-    ///
-    /// The mapping:
-    ///
-    /// - **Phase → kind.** `Started`/`Moved`/`Ended` are the pointer's
-    ///   `Down`/`Move`/`Up`. `Cancelled` is [`Cancel`](PointerEventKind::Cancel),
-    ///   *not* `Up`: the system took the sequence away (a gesture won it, the
-    ///   window lost the contact), and a cancelled contact must not activate what
-    ///   it happened to be over.
-    /// - **Contact → [`PointerId::touch`]**, so several fingers stay several
-    ///   pointers and the first one is not mistaken for the mouse.
-    /// - **Contact → the primary button held.** A finger has no buttons, but the
-    ///   pointer model's whole point is that device-agnostic code works, and such
-    ///   code asks whether the primary button is down to mean "is this pointer
-    ///   engaged". Contact is that engagement, so it is reported as the primary
-    ///   button — the pointer-events convention — and released on `Ended` and
-    ///   `Cancelled` alike.
-    /// - **Force → pressure**, normalized to `0.0..=1.0`. A platform that does not
-    ///   report force (winit gives it on iOS/Windows/Web/Android only, so not on
-    ///   this workspace's Wayland target) leaves pressure `0.0`, which the domain
-    ///   already defines as "a device without pressure" — it is not a claim of a
-    ///   feather-light touch.
-    ///
-    /// Like the mouse builders, the event is marked [trusted](Self::pressed): it
-    /// came from the compositor for a real contact.
+    #[doc = include_str!("pointer_converter.doc/touch.md")]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn touch(&self, contact: winit::event::Touch) -> PointerEvent {
@@ -178,12 +117,7 @@ impl PointerConverter {
         .with_pressure(pressure)
     }
 
-    /// Assembles a mouse pointer event of `kind` at `position` with no held
-    /// buttons — the shared body of the mouse builders above, and
-    /// [`event_of`](Self::event_of) fixed to [`PointerDevice::Mouse`].
-    ///
-    /// Takes `&self` for symmetry with the public builders (spec: converter
-    /// methods take `&self`); it needs no instance state.
+    #[doc = include_str!("pointer_converter.doc/event.md")]
     #[allow(clippy::trivially_copy_pass_by_ref)]
     fn event(
         &self,
@@ -194,30 +128,7 @@ impl PointerConverter {
         self.event_of(PointerDevice::Mouse, id, kind, position)
     }
 
-    /// Assembles a trusted pointer event of `kind` from `device` at `position`
-    /// with no held buttons — the body [`event`](Self::event) and
-    /// [`touch`](Self::touch) share.
-    ///
-    /// The device is a parameter rather than a constant because trust is decided
-    /// here, once, for everything the compositor delivered: a finger is exactly as
-    /// real a gesture as a click, and routing touch around this function to keep
-    /// trust mouse-only would have re-created the disjoint sets described below.
-    ///
-    /// # Where trust enters the runtime
-    ///
-    /// Every event built here descends from a `winit::event::WindowEvent` the
-    /// compositor delivered for an actual device, so this converter — and, in this
-    /// workspace, *only* this converter — marks its output
-    /// [`Trusted`](obscur_interaction::event::EventTrust::Trusted) (§2.3). The
-    /// other two producers of a `PointerEvent` are synthetic by definition
-    /// (§7.6's DevTools `Inject`, §7.4's headless harness) and leave the default
-    /// untrusted standing, so an application can tell a real click from a driven
-    /// one — but only for the kinds this converter can actually build. That is why
-    /// [`pressed`](Self::pressed) and [`released`](Self::released) exist: while the
-    /// builders were move/enter/leave only, the trusted set and the injectable set
-    /// (`PointerDown`/`PointerUp`) were **disjoint**, and the flag distinguished
-    /// nothing on the one gesture an attacker would forge. Key events still have no
-    /// converter here at all, so a real `KeyDown` remains untrusted.
+    #[doc = include_str!("pointer_converter.doc/clippy.md")]
     #[allow(
         clippy::cast_possible_truncation,
         clippy::unused_self,

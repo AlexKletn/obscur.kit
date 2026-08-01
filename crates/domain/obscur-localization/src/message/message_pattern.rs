@@ -1,83 +1,47 @@
-//! `MessagePattern`: a parsed translatable message, and the selection it
-//! performs (spec §7.2).
+#![doc = include_str!("message_pattern.doc/_module.md")]
 
 use crate::message::{MessageArgs, MessagePatternError, MessageValue};
 use crate::plural::{PluralCategory, PluralRules};
 
-/// A parsed message pattern: literal text, interpolations, and the arm selection
-/// that makes plural, gender and case agreement possible.
-///
-/// # Syntax
-///
-/// A deliberate subset of ICU MessageFormat, spelled the same way so a pattern
-/// here reads the way translators already expect:
-///
-/// ```text
-/// Привет, {name}!
-/// {count, plural, one{# файл} few{# файла} many{# файлов} other{# файла}}
-/// {actor, select, feminine{добавила} other{добавил}} файл
-/// нет {noun, select, genitive{файла} other{файл}}
-/// ```
-///
-/// - `{name}` interpolates the argument's text.
-/// - `{name, plural, <arm>…}` selects on the argument's [`PluralCategory`] under
-///   the *formatting locale's* [`PluralRules`]. Arms are CLDR category keywords
-///   (`zero one two few many other`) or `=<integer>` exact matches, which win over
-///   the category when they match (`=0{no files} other{# files}`). Inside a
-///   `plural` arm, `#` interpolates the number.
-/// - `{name, select, <arm>…}` selects by name — this is how *gender* and *case*
-///   variants are expressed, since both are a choice among arms keyed by a value
-///   the caller binds.
-/// - Every selector must have an `other` arm; [`parse`](Self::parse) rejects one
-///   that does not.
-/// - Arms nest: an arm's body is a full pattern.
-///
-/// # No escape syntax
-///
-/// `{`, `}` and (inside a `plural` arm) `#` cannot appear as literal text. ICU
-/// quotes them with apostrophes; this subset does not implement that, and rather
-/// than accept an apostrophe convention it cannot honour, [`parse`](Self::parse)
-/// **rejects** a stray brace. A message that must render a literal brace cannot
-/// be expressed, and will say so at parse time rather than at paint time.
+#[doc = include_str!("message_pattern.doc/MessagePattern.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct MessagePattern {
     parts: Vec<PatternPart>,
 }
 
-/// One piece of a parsed pattern.
+#[doc = include_str!("message_pattern.doc/PatternPart.md")]
 #[derive(Debug, Clone, PartialEq)]
 enum PatternPart {
-    /// Literal text, emitted verbatim.
+    #[doc = include_str!("message_pattern.doc/Literal.md")]
     Literal(Box<str>),
-    /// `{name}` — the argument's text.
+    #[doc = include_str!("message_pattern.doc/Argument.md")]
     Argument(Box<str>),
-    /// `#` inside a `plural` arm — the number being pluralised.
+    #[doc = include_str!("message_pattern.doc/Number.md")]
     Number,
-    /// `{name, plural, …}`.
+    #[doc = include_str!("message_pattern.doc/Plural.md")]
     Plural {
-        /// The argument selected on.
+        #[doc = include_str!("message_pattern.doc/name.md")]
         name: Box<str>,
-        /// `=<integer>` arms, checked before the category arms.
+        #[doc = include_str!("message_pattern.doc/exact.md")]
         exact: Vec<(u64, MessagePattern)>,
-        /// Category arms.
+        #[doc = include_str!("message_pattern.doc/categories.md")]
         categories: Vec<(PluralCategory, MessagePattern)>,
-        /// The mandatory `other` arm.
+        #[doc = include_str!("message_pattern.doc/other.md")]
         other: MessagePattern,
     },
-    /// `{name, select, …}`.
+    #[doc = include_str!("message_pattern.doc/Select.md")]
     Select {
-        /// The argument selected on.
+        #[doc = include_str!("message_pattern.doc/name_2.md")]
         name: Box<str>,
-        /// Named arms, in source order.
+        #[doc = include_str!("message_pattern.doc/arms.md")]
         arms: Vec<(Box<str>, MessagePattern)>,
-        /// The mandatory `other` arm.
+        #[doc = include_str!("message_pattern.doc/other_2.md")]
         other: MessagePattern,
     },
 }
 
 impl MessagePattern {
-    /// Parses `source`; see the type docs for the syntax and
-    /// [`MessagePatternError`] for what is refused.
+    #[doc = include_str!("message_pattern.doc/parse.md")]
     pub fn parse(source: &str) -> Result<Self, MessagePatternError> {
         let mut parser = Parser {
             input: source.as_bytes(),
@@ -91,24 +55,7 @@ impl MessagePattern {
         Ok(pattern)
     }
 
-    /// Formats the pattern with `args`, selecting plural arms under `rules`.
-    ///
-    /// `rules` is the *formatting locale's*, which is the whole point: the same
-    /// pattern text formats differently under `ru` and `en` because the category
-    /// of 21 differs. A [`Localizer`](crate::catalog::Localizer) pairs the two;
-    /// this method is what it calls.
-    ///
-    /// # Missing and mismatched arguments
-    ///
-    /// Formatting never fails and never panics — it is on the frame path, and a
-    /// missing argument is a catalogue bug that must not take the UI down.
-    /// Instead it renders visibly:
-    ///
-    /// - an unbound `{name}` renders as `{name}`, brace-and-all, so it is obvious
-    ///   on screen and greppable in a screenshot;
-    /// - a `plural` over an unbound or non-numeric argument takes the `other`
-    ///   arm, which is the only arm guaranteed to exist;
-    /// - `#` outside any number renders empty.
+    #[doc = include_str!("message_pattern.doc/format.md")]
     #[must_use]
     pub fn format(&self, args: &MessageArgs, rules: &PluralRules) -> String {
         let mut out = String::new();
@@ -116,10 +63,7 @@ impl MessagePattern {
         out
     }
 
-    /// Appends this pattern's rendering to `out`.
-    ///
-    /// `number` is the literal `#` stands for — `Some` only inside a `plural`
-    /// arm, and inherited by nested patterns so `#` works at any depth.
+    #[doc = include_str!("message_pattern.doc/write.md")]
     fn write(
         &self,
         out: &mut String,
@@ -182,21 +126,14 @@ impl MessagePattern {
     }
 }
 
-/// A hand-written recursive-descent parser over the pattern bytes.
-///
-/// Byte-oriented: every token it looks for (`{`, `}`, `,`, `#`) is ASCII, and it
-/// only ever slices at those positions, so multi-byte text passes through intact.
+#[doc = include_str!("message_pattern.doc/Parser.md")]
 struct Parser<'a> {
     input: &'a [u8],
     at: usize,
 }
 
 impl<'a> Parser<'a> {
-    /// Parses a pattern until end of input or an unmatched `}`.
-    ///
-    /// `in_plural_arm` enables `#`; outside one, a `#` is ordinary text (there is
-    /// no number for it to mean, and rejecting it would outlaw `#1` in every
-    /// message).
+    #[doc = include_str!("message_pattern.doc/pattern.md")]
     fn pattern(&mut self, in_plural_arm: bool) -> Result<MessagePattern, MessagePatternError> {
         let mut parts = Vec::new();
         let mut literal = String::new();
@@ -238,14 +175,7 @@ impl<'a> Parser<'a> {
         Ok(MessagePattern { parts })
     }
 
-    /// Parses the body of a `{…}` placeholder; `self.at` is just past the `{`.
-    ///
-    /// `in_plural_arm` says whether this placeholder sits inside a `plural` arm.
-    /// It is carried in rather than recomputed because it must **survive** a
-    /// nested `select`: in `{n, plural, other{{g, select, …{# штук}…}}}` the `#`
-    /// is lexically inside the select's arm but semantically still the plural's
-    /// number, and dropping the flag at the select would parse it as a literal
-    /// `#`.
+    #[doc = include_str!("message_pattern.doc/placeholder.md")]
     fn placeholder(&mut self, in_plural_arm: bool) -> Result<PatternPart, MessagePatternError> {
         let name = self.token(|b| b == b',' || b == b'}')?;
         if name.is_empty() {
@@ -275,7 +205,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses `<arm>…}` for a `plural` placeholder.
+    #[doc = include_str!("message_pattern.doc/plural_arms.md")]
     fn plural_arms(&mut self, name: &str) -> Result<PatternPart, MessagePatternError> {
         let arms = self.arms(true)?;
         let mut exact = Vec::new();
@@ -303,8 +233,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses `<arm>…}` for a `select` placeholder, whose arms inherit
-    /// `in_plural_arm` from the context the placeholder appears in.
+    #[doc = include_str!("message_pattern.doc/select_arms.md")]
     fn select_arms(
         &mut self,
         name: &str,
@@ -326,7 +255,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses `name{body}` arms up to the placeholder's closing `}`.
+    #[doc = include_str!("message_pattern.doc/arms_2.md")]
     fn arms(
         &mut self,
         in_plural: bool,
@@ -363,8 +292,7 @@ impl<'a> Parser<'a> {
         Ok(arms)
     }
 
-    /// Reads a trimmed token up to the first byte `stop` accepts, without
-    /// consuming it.
+    #[doc = include_str!("message_pattern.doc/token.md")]
     fn token(&mut self, stop: impl Fn(u8) -> bool) -> Result<&'a str, MessagePatternError> {
         let start = self.at;
         while self.at < self.input.len() && !stop(self.input[self.at]) {
@@ -376,14 +304,14 @@ impl<'a> Parser<'a> {
             .map_err(|_| MessagePatternError::UnexpectedBrace)
     }
 
-    /// Skips ASCII whitespace between arms.
+    #[doc = include_str!("message_pattern.doc/skip_space.md")]
     fn skip_space(&mut self) {
         while self.at < self.input.len() && self.input[self.at].is_ascii_whitespace() {
             self.at += 1;
         }
     }
 
-    /// Returns the byte at the cursor, if any.
+    #[doc = include_str!("message_pattern.doc/peek.md")]
     fn peek(&self) -> Option<u8> {
         self.input.get(self.at).copied()
     }

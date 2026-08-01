@@ -1,4 +1,4 @@
-//! A named bundle of tokens for a visual mode (spec §2.6).
+#![doc = include_str!("theme_preset.doc/_module.md")]
 
 use std::collections::BTreeMap;
 
@@ -6,52 +6,39 @@ use obscur_scene::color::Color;
 
 use crate::token::{ThemeToken, TokenValue};
 
-/// The visual mode a [`ThemePreset`] targets (spec §2.6).
-///
-/// These mirror the built-in presets the theme system ships: an ordinary light
-/// theme, a dark theme, and an accessibility-oriented high-contrast theme.
+#[doc = include_str!("theme_preset.doc/ThemeMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThemeMode {
-    /// A light theme: light background, dark foreground.
+    #[doc = include_str!("theme_preset.doc/Light.md")]
     #[default]
     Light,
-    /// A dark theme: dark background, light foreground.
+    #[doc = include_str!("theme_preset.doc/Dark.md")]
     Dark,
-    /// A high-contrast theme for accessibility.
+    #[doc = include_str!("theme_preset.doc/HighContrast.md")]
     HighContrast,
 }
 
 impl ThemeMode {
-    /// Returns whether this is the high-contrast mode.
+    #[doc = include_str!("theme_preset.doc/is_high_contrast.md")]
     #[must_use]
     pub const fn is_high_contrast(self) -> bool {
         matches!(self, Self::HighContrast)
     }
 }
 
-/// A named bundle of design tokens realising a visual mode (spec §2.6).
-///
-/// A preset is the unit an application selects to theme its UI: it pairs a human
-/// name and a [`ThemeMode`] with a set of [`ThemeToken`]s keyed by name. Tokens
-/// are stored in a [`BTreeMap`] so iteration and equality are deterministic
-/// regardless of insertion order. The built-in [`light`](Self::light),
-/// [`dark`](Self::dark) and [`high_contrast`](Self::high_contrast) presets each
-/// seed a small, sensible token set.
-///
-/// The token values carry [`Color`] and `f32` payloads, so this type derives
-/// `Debug`, `Clone`, and `PartialEq` only.
+#[doc = include_str!("theme_preset.doc/ThemePreset.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemePreset {
-    /// The preset's human-readable name (e.g. `"Light"`).
+    #[doc = include_str!("theme_preset.doc/name.md")]
     pub name: Box<str>,
-    /// The visual mode this preset targets.
+    #[doc = include_str!("theme_preset.doc/mode.md")]
     pub mode: ThemeMode,
-    /// The tokens keyed by their namespaced name, in deterministic order.
+    #[doc = include_str!("theme_preset.doc/tokens.md")]
     pub tokens: BTreeMap<Box<str>, TokenValue>,
 }
 
 impl ThemePreset {
-    /// Creates an empty preset with the given name and mode.
+    #[doc = include_str!("theme_preset.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, mode: ThemeMode) -> Self {
         Self {
@@ -61,37 +48,37 @@ impl ThemePreset {
         }
     }
 
-    /// Inserts a token, keyed by its name; replaces any existing token of that name.
+    #[doc = include_str!("theme_preset.doc/insert.md")]
     pub fn insert(&mut self, token: ThemeToken) {
         self.tokens.insert(token.name, token.value);
     }
 
-    /// Inserts a token and returns the preset, for fluent construction.
+    #[doc = include_str!("theme_preset.doc/with.md")]
     #[must_use]
     pub fn with(mut self, token: ThemeToken) -> Self {
         self.insert(token);
         self
     }
 
-    /// Returns the preset's name.
+    #[doc = include_str!("theme_preset.doc/name_2.md")]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns the preset's visual mode.
+    #[doc = include_str!("theme_preset.doc/mode_2.md")]
     #[must_use]
     pub const fn mode(&self) -> ThemeMode {
         self.mode
     }
 
-    /// Resolves a token by name.
+    #[doc = include_str!("theme_preset.doc/get.md")]
     #[must_use]
     pub fn get(&self, token_name: &str) -> Option<&TokenValue> {
         self.tokens.get(token_name)
     }
 
-    /// Resolves a token as a color, or `None` if absent or not a color.
+    #[doc = include_str!("theme_preset.doc/color.md")]
     #[must_use]
     pub fn color(&self, token_name: &str) -> Option<Color> {
         match self.get(token_name) {
@@ -100,7 +87,7 @@ impl ThemePreset {
         }
     }
 
-    /// Resolves a token as a length, or `None` if absent or not a length.
+    #[doc = include_str!("theme_preset.doc/length.md")]
     #[must_use]
     pub fn length(&self, token_name: &str) -> Option<f32> {
         match self.get(token_name) {
@@ -109,30 +96,30 @@ impl ThemePreset {
         }
     }
 
-    /// Returns whether a token with the given name is present.
+    #[doc = include_str!("theme_preset.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, token_name: &str) -> bool {
         self.tokens.contains_key(token_name)
     }
 
-    /// Returns the number of tokens in the preset.
+    #[doc = include_str!("theme_preset.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.tokens.len()
     }
 
-    /// Returns whether the preset has no tokens.
+    #[doc = include_str!("theme_preset.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tokens.is_empty()
     }
 
-    /// Iterates the tokens as `(name, value)` pairs in deterministic name order.
+    #[doc = include_str!("theme_preset.doc/tokens_2.md")]
     pub fn tokens(&self) -> impl Iterator<Item = (&str, &TokenValue)> {
         self.tokens.iter().map(|(name, value)| (&**name, value))
     }
 
-    /// The built-in light preset: a light background with a dark foreground.
+    #[doc = include_str!("theme_preset.doc/light.md")]
     #[must_use]
     pub fn light() -> Self {
         Self::new("Light", ThemeMode::Light)
@@ -155,7 +142,7 @@ impl ThemePreset {
             .with(ThemeToken::font_family("font.body", "sans-serif"))
     }
 
-    /// The built-in dark preset: a dark background with a light foreground.
+    #[doc = include_str!("theme_preset.doc/dark.md")]
     #[must_use]
     pub fn dark() -> Self {
         Self::new("Dark", ThemeMode::Dark)
@@ -178,7 +165,7 @@ impl ThemePreset {
             .with(ThemeToken::font_family("font.body", "sans-serif"))
     }
 
-    /// The built-in high-contrast preset: pure black/white with a saturated primary.
+    #[doc = include_str!("theme_preset.doc/high_contrast.md")]
     #[must_use]
     pub fn high_contrast() -> Self {
         Self::new("High Contrast", ThemeMode::HighContrast)

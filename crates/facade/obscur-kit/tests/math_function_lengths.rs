@@ -1,21 +1,4 @@
-//! A math function is a `<length>`, everywhere one is allowed (CSS Values 4
-//! §10.1) — through the whole stack, not only where it parses.
-//!
-//! The defect these pin was two failures of the same rule, one at each end of
-//! the pipeline, and each was invisible on its own:
-//!
-//! 1. **The frontend** rejected a math function as a component of a 1-4 value box
-//!    shorthand. That does not degrade one side — it degrades the *whole*
-//!    declaration to `Unsupported`, so `border-radius: min(3vmin, 14px)` left
-//!    four square corners.
-//! 2. **The computed-value step** kept a `calc()` symbolic even after nothing in
-//!    it was unknown. Every consumer that reads a length rather than an
-//!    expression — the radius corners, `border-width`, the paint path — then read
-//!    nothing and contributed zero.
-//!
-//! Both are asserted here at the level a user would notice: painted geometry.
-//! Neither would have failed a test of the parser alone, which is why these
-//! render a frame rather than inspect a stylesheet.
+#![doc = include_str!("math_function_lengths.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -46,9 +29,7 @@ fn view() -> View {
     ]))
 }
 
-/// The count of curved segments across every painted path in one frame of `css`
-/// at a 400×300 viewport. A square-cornered background paints straight lines
-/// only, so this is zero exactly when the radius was lost.
+#[doc = include_str!("math_function_lengths.doc/curves.md")]
 fn curves(css: &str) -> usize {
     let sheet = compile(css);
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0));
@@ -72,8 +53,7 @@ fn curves(css: &str) -> usize {
         .count()
 }
 
-/// The control: the same radius written as a plain length rounds the corners.
-/// Without it a stack that rounded *nothing* would still satisfy the case below.
+#[doc = include_str!("math_function_lengths.doc/a_plain_length_radius_rounds_the_corners.md")]
 #[test]
 fn a_plain_length_radius_rounds_the_corners() {
     let painted = curves(
@@ -83,9 +63,7 @@ fn a_plain_length_radius_rounds_the_corners() {
     assert!(painted > 0, "a 12px radius paints curved corners");
 }
 
-/// The case: `min()` picks 12px here (3vmin of a 400×300 viewport is 9px — so
-/// the *smaller* term is the vmin one, and the corner is 9px). Either way it is
-/// a curve, and before the fix it was four straight lines.
+#[doc = include_str!("math_function_lengths.doc/a_math_function_radius_rounds_the_corners_too.md")]
 #[test]
 fn a_math_function_radius_rounds_the_corners_too() {
     let painted = curves(
@@ -98,9 +76,7 @@ fn a_math_function_radius_rounds_the_corners_too() {
     );
 }
 
-/// The shorthand's per-side rule: a math function in one component must not take
-/// the other three down with it. `4px` on the block edges is the tell — if the
-/// declaration had degraded, no corner would be round at all.
+#[doc = include_str!("math_function_lengths.doc/one_math_component_does_not_drop_the_whole_shorthand.md")]
 #[test]
 fn one_math_component_does_not_drop_the_whole_shorthand() {
     let painted = curves(
@@ -110,13 +86,7 @@ fn one_math_component_does_not_drop_the_whole_shorthand() {
     assert!(painted > 0, "the mixed shorthand still rounds");
 }
 
-/// The same rule one property over, to pin that the fix was the shared component
-/// rule and not a special case for radii: `padding` is space the child starts
-/// after.
-///
-/// The padded box is *inside* the root rather than being it, because the root
-/// fills the viewport whatever it asks for — measuring padding on the root would
-/// measure the viewport instead.
+#[doc = include_str!("math_function_lengths.doc/a_math_function_padding_reserves_space.md")]
 #[test]
 fn a_math_function_padding_reserves_space() {
     let css = "#box { width: 200px; height: 100px; padding: min(4vmin, 30px) } \

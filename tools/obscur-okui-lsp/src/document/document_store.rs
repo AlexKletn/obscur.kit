@@ -1,37 +1,30 @@
-//! `DocumentStore`: the set of documents currently open in the language server.
+#![doc = include_str!("document_store.doc/_module.md")]
 
 use std::collections::HashMap;
 
 use crate::document::TextDocument;
 
-/// An in-memory map from document URI to its open [`TextDocument`].
-///
-/// The store mirrors the LSP document-lifecycle notifications: `didOpen` →
-/// [`open`](Self::open), `didChange` → [`change`](Self::change) (full-text
-/// synchronization) and `didClose` → [`close`](Self::close). It is the single
-/// source of truth the [`Analyzer`](crate::Analyzer) reads from.
+#[doc = include_str!("document_store.doc/DocumentStore.md")]
 #[derive(Debug, Clone, Default)]
 pub struct DocumentStore {
     documents: HashMap<Box<str>, TextDocument>,
 }
 
 impl DocumentStore {
-    /// Creates an empty store.
+    #[doc = include_str!("document_store.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Opens (or replaces) the document at `uri` with `version` and `text`,
-    /// returning a reference to the stored document.
+    #[doc = include_str!("document_store.doc/open.md")]
     pub fn open(&mut self, uri: impl Into<Box<str>>, version: i32, text: impl Into<String>) {
         let uri: Box<str> = uri.into();
         self.documents
             .insert(uri.clone(), TextDocument::new(uri, version, text));
     }
 
-    /// Applies a full-text change to an already-open document: bumps its version
-    /// and replaces its text. Returns `true` if the document existed.
+    #[doc = include_str!("document_store.doc/change.md")]
     pub fn change(&mut self, uri: &str, version: i32, new_text: impl Into<String>) -> bool {
         if let Some(document) = self.documents.get_mut(uri) {
             document.version = version;
@@ -42,24 +35,24 @@ impl DocumentStore {
         }
     }
 
-    /// Closes the document at `uri`, returning it if it was open.
+    #[doc = include_str!("document_store.doc/close.md")]
     pub fn close(&mut self, uri: &str) -> Option<TextDocument> {
         self.documents.remove(uri)
     }
 
-    /// Returns the open document at `uri`, if any.
+    #[doc = include_str!("document_store.doc/get.md")]
     #[must_use]
     pub fn get(&self, uri: &str) -> Option<&TextDocument> {
         self.documents.get(uri)
     }
 
-    /// Returns the number of open documents.
+    #[doc = include_str!("document_store.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.documents.len()
     }
 
-    /// Returns whether the store holds no documents.
+    #[doc = include_str!("document_store.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.documents.is_empty()

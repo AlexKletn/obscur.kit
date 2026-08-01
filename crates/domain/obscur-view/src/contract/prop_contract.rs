@@ -1,40 +1,22 @@
-//! `PropContract`: the typed contract of a single component prop (spec §2.13).
+#![doc = include_str!("prop_contract.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
-/// The exported contract for one prop of a component (spec §2.13).
-///
-/// A prop is referenced entirely by interned handles: its own name and the
-/// name of its declared value type. The value type itself is modelled and
-/// interned elsewhere; this contract only names it, so no value/type system is
-/// duplicated here. Whether the prop is required and whether the component
-/// supplies a default are recorded as plain flags, because there is not yet a
-/// value model that could carry the default itself.
+#[doc = include_str!("prop_contract.doc/PropContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropContract {
-    /// Interned name of the prop as it appears on the component.
+    #[doc = include_str!("prop_contract.doc/name.md")]
     pub name: InternedSymbol,
-    /// Interned name of the prop's declared value type.
-    ///
-    /// This is a reference to a type named elsewhere, not an inline type
-    /// definition.
+    #[doc = include_str!("prop_contract.doc/value_type.md")]
     pub value_type: InternedSymbol,
-    /// Whether a value for this prop must be supplied by the caller.
+    #[doc = include_str!("prop_contract.doc/required.md")]
     pub required: bool,
-    /// Whether the component declares a default value for this prop.
-    ///
-    /// Modelled as a flag rather than the default value itself, since the
-    /// contract layer has no value representation yet.
+    #[doc = include_str!("prop_contract.doc/has_default.md")]
     pub has_default: bool,
 }
 
 impl PropContract {
-    /// Creates a prop contract for `name` with declared value type
-    /// `value_type`.
-    ///
-    /// The prop starts out optional and without a default; use
-    /// [`PropContract::required`] and [`PropContract::with_default`] to refine
-    /// it in a builder style.
+    #[doc = include_str!("prop_contract.doc/new.md")]
     #[must_use]
     pub const fn new(name: InternedSymbol, value_type: InternedSymbol) -> Self {
         Self {
@@ -45,15 +27,14 @@ impl PropContract {
         }
     }
 
-    /// Marks the prop as required, returning the updated contract.
+    #[doc = include_str!("prop_contract.doc/required_2.md")]
     #[must_use]
     pub const fn required(mut self) -> Self {
         self.required = true;
         self
     }
 
-    /// Records that the component declares a default for this prop, returning
-    /// the updated contract.
+    #[doc = include_str!("prop_contract.doc/with_default.md")]
     #[must_use]
     pub const fn with_default(mut self) -> Self {
         self.has_default = true;

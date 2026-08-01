@@ -1,39 +1,20 @@
-//! `UiIrValidator`: checks a UI IR document for structural well-formedness
-//! (spec §2.5 validation).
+#![doc = include_str!("ui_ir_validator.doc/_module.md")]
 
 use crate::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind};
 use crate::validation::{UiIrValidationError, UiIrValidationResult, ValidationContext};
 
-/// A stateless validator for [`UiIrDocument`] trees (spec §2.5).
-///
-/// [`validate`](UiIrValidator::validate) walks the whole tree once, threading a
-/// [`ValidationContext`] for cross-node bookkeeping, and returns a
-/// [`UiIrValidationResult`] collecting every fault found. The checks are purely
-/// structural well-formedness rules — they do not require a host or any I/O:
-///
-/// - **duplicate ids** — every node's stable id must be unique across the tree;
-/// - **empty tags** — `Element`/`Component` nodes must name a tag/component;
-/// - **text leaves** — `Text` nodes must not have children;
-/// - **empty bindings** — a property bound to `Binding("")` has no path.
-///
-/// In addition the document's `required_capabilities` are checked for
-/// well-formedness: any capability whose id string is empty is reported as an
-/// [`UndeclaredCapability("")`](UiIrValidationError::UndeclaredCapability).
-/// Framing note: the deeper "does every binding-referenced capability appear in
-/// `required_capabilities`?" analysis is a compiler concern and is intentionally
-/// out of scope here; this validator only checks that the declared set is
-/// itself well-formed (non-empty ids).
+#[doc = include_str!("ui_ir_validator.doc/UiIrValidator.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UiIrValidator;
 
 impl UiIrValidator {
-    /// Creates a validator.
+    #[doc = include_str!("ui_ir_validator.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Validates `doc`, returning the accumulated [`UiIrValidationResult`].
+    #[doc = include_str!("ui_ir_validator.doc/validate.md")]
     #[must_use]
     pub fn validate(&self, doc: &UiIrDocument) -> UiIrValidationResult {
         let mut result = UiIrValidationResult::new();
@@ -51,7 +32,7 @@ impl UiIrValidator {
         result
     }
 
-    /// Recursively checks `node` and its subtree, recording faults on `result`.
+    #[doc = include_str!("ui_ir_validator.doc/validate_node.md")]
     fn validate_node(
         &self,
         node: &UiIrNode,

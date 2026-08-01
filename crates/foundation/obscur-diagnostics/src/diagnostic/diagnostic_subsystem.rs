@@ -1,28 +1,28 @@
-//! Originating subsystem of a diagnostic.
+#![doc = include_str!("diagnostic_subsystem.doc/_module.md")]
 
-/// The subsystem a diagnostic originated from, for attribution (spec §7.9).
+#[doc = include_str!("diagnostic_subsystem.doc/DiagnosticSubsystem.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSubsystem {
-    /// Component/view layer.
+    #[doc = include_str!("diagnostic_subsystem.doc/View.md")]
     View,
-    /// Retained tree and reconciliation.
+    #[doc = include_str!("diagnostic_subsystem.doc/Tree.md")]
     Tree,
-    /// Style resolution.
+    #[doc = include_str!("diagnostic_subsystem.doc/Style.md")]
     Style,
-    /// Layout.
+    #[doc = include_str!("diagnostic_subsystem.doc/Layout.md")]
     Layout,
-    /// Text and shaping.
+    #[doc = include_str!("diagnostic_subsystem.doc/Text.md")]
     Text,
-    /// Motion engine.
+    #[doc = include_str!("diagnostic_subsystem.doc/Motion.md")]
     Motion,
-    /// Scene/paint and rendering.
+    #[doc = include_str!("diagnostic_subsystem.doc/Render.md")]
     Render,
-    /// Resource loading.
+    #[doc = include_str!("diagnostic_subsystem.doc/Resources.md")]
     Resources,
-    /// Windowing and platform.
+    #[doc = include_str!("diagnostic_subsystem.doc/Platform.md")]
     Platform,
-    /// Plugin host.
+    #[doc = include_str!("diagnostic_subsystem.doc/Plugin.md")]
     Plugin,
-    /// Runtime orchestration.
+    #[doc = include_str!("diagnostic_subsystem.doc/Runtime.md")]
     Runtime,
 }

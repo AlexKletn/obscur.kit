@@ -1,26 +1,22 @@
-//! The arranged box of a node.
+#![doc = include_str!("layout_box.doc/_module.md")]
 
 use obscur_geometry::{Insets, Point, Rect, Size};
 
-/// The result of arranging a node: its border-box rectangle in parent-relative
-/// logical pixels (spec §4.2).
-///
-/// Fractional geometry is preserved until paint time; no rounding is applied
-/// here (spec §4.6).
+#[doc = include_str!("layout_box.doc/LayoutBox.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct LayoutBox {
-    /// Arranged border-box bounds in parent-relative logical pixels.
+    #[doc = include_str!("layout_box.doc/bounds.md")]
     pub bounds: Rect,
 }
 
 impl LayoutBox {
-    /// Creates a layout box from arranged border-box bounds.
+    #[doc = include_str!("layout_box.doc/new.md")]
     #[must_use]
     pub const fn new(bounds: Rect) -> Self {
         Self { bounds }
     }
 
-    /// Creates a layout box sized to `size` with its origin at `(0, 0)`.
+    #[doc = include_str!("layout_box.doc/from_size.md")]
     #[must_use]
     pub const fn from_size(size: Size) -> Self {
         Self {
@@ -28,25 +24,19 @@ impl LayoutBox {
         }
     }
 
-    /// The size of the border box.
+    #[doc = include_str!("layout_box.doc/size.md")]
     #[must_use]
     pub const fn size(self) -> Size {
         self.bounds.size
     }
 
-    /// The origin of the border box, relative to the parent.
+    #[doc = include_str!("layout_box.doc/origin.md")]
     #[must_use]
     pub const fn origin(self) -> Point {
         self.bounds.origin
     }
 
-    /// The content box: the border box inset by `border` then `padding`.
-    ///
-    /// The content origin is offset by the top/left of `border` + `padding`, and
-    /// the content extent is the border-box extent minus the corresponding
-    /// edges. Each extent is clamped to be non-negative, so a box smaller than
-    /// its insets yields a zero-extent content rect rather than a negative one.
-    /// This never panics.
+    #[doc = include_str!("layout_box.doc/content_rect.md")]
     #[must_use]
     pub fn content_rect(self, padding: Insets, border: Insets) -> Rect {
         let left = border.left + padding.left;

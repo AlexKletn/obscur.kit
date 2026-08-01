@@ -1,87 +1,75 @@
-//! The [`GamepadEvent`] input event, its [`GamepadId`] identity,
-//! [`GamepadAxis`] axes, and [`GamepadEventKind`] discriminant
-//! (spec §6.16 gamepad input).
+#![doc = include_str!("gamepad_event.doc/_module.md")]
 
 use super::GamepadButton;
 
-/// Stable identity for one connected gamepad (spec §6.16).
-///
-/// This is a *local* newtype: the interaction subsystem mints and compares
-/// these handles itself. The numeric value carries no meaning outside the
-/// subsystem that mints it.
+#[doc = include_str!("gamepad_event.doc/GamepadId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GamepadId(u64);
 
 impl GamepadId {
-    /// Wraps a raw handle value into a `GamepadId`.
+    #[doc = include_str!("gamepad_event.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw handle value backing this identifier.
+    #[doc = include_str!("gamepad_event.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// A continuous analog axis on a gamepad (spec §6.16).
+#[doc = include_str!("gamepad_event.doc/GamepadAxis.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GamepadAxis {
-    /// The left analog stick's horizontal axis.
+    #[doc = include_str!("gamepad_event.doc/LeftStickX.md")]
     LeftStickX,
-    /// The left analog stick's vertical axis.
+    #[doc = include_str!("gamepad_event.doc/LeftStickY.md")]
     LeftStickY,
-    /// The right analog stick's horizontal axis.
+    #[doc = include_str!("gamepad_event.doc/RightStickX.md")]
     RightStickX,
-    /// The right analog stick's vertical axis.
+    #[doc = include_str!("gamepad_event.doc/RightStickY.md")]
     RightStickY,
-    /// The left trigger's analog travel.
+    #[doc = include_str!("gamepad_event.doc/LeftTrigger.md")]
     LeftTrigger,
-    /// The right trigger's analog travel.
+    #[doc = include_str!("gamepad_event.doc/RightTrigger.md")]
     RightTrigger,
 }
 
-/// The kind of change carried by a [`GamepadEvent`] (spec §6.16).
+#[doc = include_str!("gamepad_event.doc/GamepadEventKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GamepadEventKind {
-    /// A button was pressed.
+    #[doc = include_str!("gamepad_event.doc/ButtonDown.md")]
     ButtonDown(GamepadButton),
-    /// A button was released.
+    #[doc = include_str!("gamepad_event.doc/ButtonUp.md")]
     ButtonUp(GamepadButton),
-    /// An analog axis moved to `value` (sticks in `-1.0..=1.0`, triggers in
-    /// `0.0..=1.0`).
+    #[doc = include_str!("gamepad_event.doc/AxisMotion.md")]
     AxisMotion {
-        /// The axis that moved.
+        #[doc = include_str!("gamepad_event.doc/axis.md")]
         axis: GamepadAxis,
-        /// The axis's new value.
+        #[doc = include_str!("gamepad_event.doc/value.md")]
         value: f32,
     },
-    /// The gamepad was connected.
+    #[doc = include_str!("gamepad_event.doc/Connected.md")]
     Connected,
-    /// The gamepad was disconnected.
+    #[doc = include_str!("gamepad_event.doc/Disconnected.md")]
     Disconnected,
 }
 
-/// A single input event from a gamepad (spec §6.16).
-///
-/// Each event pairs the [`gamepad`](Self::gamepad) that produced it with a
-/// [`kind`](Self::kind) of change and a logical [`timestamp`](Self::timestamp)
-/// supplied by the caller — this crate never reads a clock.
+#[doc = include_str!("gamepad_event.doc/GamepadEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GamepadEvent {
-    /// The gamepad that produced this event.
+    #[doc = include_str!("gamepad_event.doc/gamepad.md")]
     pub gamepad: GamepadId,
-    /// The kind of change this event describes.
+    #[doc = include_str!("gamepad_event.doc/kind.md")]
     pub kind: GamepadEventKind,
-    /// A logical timestamp in microseconds, supplied by the caller.
+    #[doc = include_str!("gamepad_event.doc/timestamp_micros.md")]
     pub timestamp_micros: u64,
 }
 
 impl GamepadEvent {
-    /// Creates an event for `gamepad` with the given `kind` and a zero
-    /// timestamp.
+    #[doc = include_str!("gamepad_event.doc/new.md")]
     #[must_use]
     pub const fn new(gamepad: GamepadId, kind: GamepadEventKind) -> Self {
         Self {
@@ -91,34 +79,32 @@ impl GamepadEvent {
         }
     }
 
-    /// Returns this event with its logical timestamp set (fluent).
+    #[doc = include_str!("gamepad_event.doc/with_timestamp.md")]
     #[must_use]
     pub const fn with_timestamp(mut self, timestamp_micros: u64) -> Self {
         self.timestamp_micros = timestamp_micros;
         self
     }
 
-    /// Returns the gamepad that produced this event.
+    #[doc = include_str!("gamepad_event.doc/gamepad_2.md")]
     #[must_use]
     pub const fn gamepad(&self) -> GamepadId {
         self.gamepad
     }
 
-    /// Returns the kind of change this event describes.
+    #[doc = include_str!("gamepad_event.doc/kind_2.md")]
     #[must_use]
     pub const fn kind(&self) -> GamepadEventKind {
         self.kind
     }
 
-    /// Returns the logical timestamp, in microseconds, supplied by the caller.
+    #[doc = include_str!("gamepad_event.doc/timestamp.md")]
     #[must_use]
     pub const fn timestamp(&self) -> u64 {
         self.timestamp_micros
     }
 
-    /// Returns the button involved, if this is a button event
-    /// ([`ButtonDown`](GamepadEventKind::ButtonDown) or
-    /// [`ButtonUp`](GamepadEventKind::ButtonUp)).
+    #[doc = include_str!("gamepad_event.doc/button.md")]
     #[must_use]
     pub const fn button(&self) -> Option<GamepadButton> {
         match self.kind {
@@ -129,9 +115,7 @@ impl GamepadEvent {
         }
     }
 
-    /// Returns whether this event is a connection change
-    /// ([`Connected`](GamepadEventKind::Connected) or
-    /// [`Disconnected`](GamepadEventKind::Disconnected)).
+    #[doc = include_str!("gamepad_event.doc/is_connection_change.md")]
     #[must_use]
     pub const fn is_connection_change(&self) -> bool {
         matches!(

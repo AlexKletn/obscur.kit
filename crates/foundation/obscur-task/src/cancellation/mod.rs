@@ -1,4 +1,4 @@
-//! Cancellation module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod cancellation_reason;
 mod cancellation_source;
 mod cancellation_token;

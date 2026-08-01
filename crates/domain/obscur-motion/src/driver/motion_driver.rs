@@ -1,46 +1,12 @@
-//! The [`MotionDriver`] driver port shared by every motion source (spec §4.17).
-//!
-//! A *driver* is the **source** of a timeline's progression: it turns some
-//! external input — elapsed logical time, an explicit scrubber value, a
-//! drag/cursor/gesture signal, or a scroll offset — into a single normalized
-//! progress in `[0, 1]`. That progress is what feeds a track's `sample(t)`
-//! downstream. Drivers are deliberately narrow (one read of progress plus a
-//! liveness flag) so a heterogeneous set of sources can be held behind
-//! `dyn MotionDriver`.
-//!
-//! Like the rest of the motion engine, drivers are **pure and deterministic**
-//! and **time-agnostic**: a driver never reads a clock. Every input is pushed in
-//! explicitly (a [`TimeDriver`](super::TimeDriver) accumulates an explicit
-//! `delta`, a scroll/signal driver is handed its latest value), so a skipped
-//! frame is just a larger input and runs through the same math.
+#![doc = include_str!("motion_driver.doc/_module.md")]
 
-/// A source of normalized motion progress sampled by tracks (spec §4.17).
-///
-/// Every driver — [`TimeDriver`](super::TimeDriver),
-/// [`ProgressDriver`](super::ProgressDriver),
-/// [`SignalDriver`](super::SignalDriver),
-/// [`ScrollDriver`](super::ScrollDriver) — implements this port: it reports the
-/// [`progress`](Self::progress) it currently dictates and whether it
-/// [`is_active`](Self::is_active). The trait is deliberately **object-safe** (no
-/// generics, no `Self`-returning methods) so drivers of different kinds can be
-/// held together as `Box<dyn MotionDriver>` or borrowed as `&dyn MotionDriver`.
+#[doc = include_str!("motion_driver.doc/MotionDriver.md")]
 pub trait MotionDriver {
-    /// Returns the normalized progress this driver currently dictates (spec
-    /// §4.17).
-    ///
-    /// The value is normally clamped to `[0, 1]` — each implementation documents
-    /// exactly how it derives and bounds it — and is what feeds a track's
-    /// `sample(t)`. Pure and deterministic: reading the same driver in the same
-    /// state always yields the same progress.
+    #[doc = include_str!("motion_driver.doc/progress.md")]
     #[must_use]
     fn progress(&self) -> f32;
 
-    /// Returns whether the driver is still producing motion (spec §4.17).
-    ///
-    /// The default is `true`: a driver keeps going unless it can settle or
-    /// finish. Drivers that reach a terminal state — such as a
-    /// [`TimeDriver`](super::TimeDriver) whose elapsed time has caught up to its
-    /// duration — override this to report when they have stopped advancing.
+    #[doc = include_str!("motion_driver.doc/is_active.md")]
     #[must_use]
     fn is_active(&self) -> bool {
         true

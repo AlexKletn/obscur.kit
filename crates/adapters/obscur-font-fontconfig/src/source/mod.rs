@@ -1,4 +1,4 @@
-//! The fontconfig-backed system font source.
+#![doc = include_str!("mod.doc/_module.md")]
 mod attribute_scale;
 mod fontconfig_source;
 mod system_face;

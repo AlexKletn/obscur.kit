@@ -1,0 +1,1 @@
+A media query qualifier.

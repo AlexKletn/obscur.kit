@@ -1,21 +1,4 @@
-//! **`.okui` → generated Rust → View → headless CPU → PNG.**
-//!
-//! The codegen counterpart of [`showcase_okui_png`](./showcase_okui_png.rs).
-//! Where that example parses, compiles and *bridges* `showcase.okui` into a
-//! `View` at runtime, this one consumes a `View` that was compiled **at build
-//! time**: `build.rs` runs the frontend pipeline over `showcase.okui` and emits a
-//! `pub fn showcase_view() -> View` into `OUT_DIR`, which this example
-//! `include!`s. No parser, compiler, or bridge runs here — the `.okui` is
-//! *ordinary code* by the time this binary starts.
-//!
-//! Because the generated `View` resolves names through the shared
-//! `name_binding` registry, real widgets (`<Button>`) and `<img src>` carry
-//! their true `ComponentId`s and reserved symbols — the two "honest bridge gaps"
-//! called out in `showcase_okui_png` are closed on this path.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example showcase_okui_codegen_png \
-//!   --features "render-cpu resource-fs resource-decode text-harfrust text-unicode"`
+#![doc = include_str!("showcase_okui_codegen_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -47,7 +30,7 @@ mod showcase;
 // both directly.
 include!(concat!(env!("OUT_DIR"), "/showcase_okui_view.rs"));
 
-/// The fixed viewport the showcase is laid out and rasterized under.
+#[doc = include_str!("showcase_okui_codegen_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1000.0, 620.0);
 
 fn main() {
@@ -109,8 +92,7 @@ fn main() {
     );
 }
 
-/// The authored stylesheet, keyed to the classes/types the `.okui` declares —
-/// identical to `showcase_okui_png`, so the two paths render the same scene.
+#[doc = include_str!("showcase_okui_codegen_png.doc/stylesheet.md")]
 fn stylesheet() -> &'static str {
     "\
 #app { display: flex; flex-direction: column; gap: 14px; padding: 20px; \
@@ -151,15 +133,14 @@ card { border-radius: 10px; padding: 12px; background-color: #1c2130; }\n\
 "
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("showcase_okui_codegen_png.doc/compile_css.md")]
 fn compile_css(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Writes the embedded showcase PNG into a fresh temp dir (the loader's sandbox
-/// root) so `url("gallery.png")` resolves; returns that directory.
+#[doc = include_str!("showcase_okui_codegen_png.doc/stage_image_asset.md")]
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-okui-codegen-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
@@ -171,7 +152,7 @@ fn stage_image_asset() -> PathBuf {
     dir
 }
 
-/// The workspace-relative output path `target/showcase_okui_codegen.png`.
+#[doc = include_str!("showcase_okui_codegen_png.doc/output_path.md")]
 fn output_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -179,8 +160,7 @@ fn output_path() -> PathBuf {
         .join("showcase_okui_codegen.png")
 }
 
-/// Wires the full text stack and registers the SAME font bytes on the runtime's
-/// resolver and the CPU renderer so shaped run handles select rasterized outlines.
+#[doc = include_str!("showcase_okui_codegen_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -198,13 +178,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, bytes: V
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("showcase_okui_codegen_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes for the text path (best effort), or `None`
-/// (text then renders as box marks — still no panic).
+#[doc = include_str!("showcase_okui_codegen_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

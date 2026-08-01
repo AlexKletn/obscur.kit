@@ -1,5 +1,4 @@
-//! The [`CommandRegistry`] mapping command symbols to their descriptor and
-//! state (spec §6.7).
+#![doc = include_str!("command_registry.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -7,30 +6,15 @@ use obscur_identity::InternedSymbol;
 
 use crate::command::{Command, CommandState};
 
-/// Maps command symbols to their [`Command`] descriptor and [`CommandState`]
-/// (spec §6.7).
-///
-/// This is the join that makes one action descriptor drive many surfaces. Every
-/// live surface routes an app-owned command [`InternedSymbol`] — a shortcut
-/// resolved by [`CommandRouter`](crate::command::CommandRouter), a menu item
-/// fired by a click, a handler registered on the runtime. The registry keys the
-/// *description* (title, icon, shortcut) and the *state* (enabled, checked,
-/// visible) on that **same** symbol, so a surface holding a symbol can ask for
-/// the title to show, and any surface about to fire one can ask whether it is
-/// actionable right now.
-///
-/// A symbol need not be registered: the registry describes commands, it does not
-/// gate their existence. [`permits_dispatch`](Self::permits_dispatch) states the
-/// resulting policy — an unregistered symbol is unconstrained, a registered one
-/// is inert unless its state is actionable.
+#[doc = include_str!("command_registry.doc/CommandRegistry.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CommandRegistry {
-    /// Descriptor and live state, keyed by the routed command symbol.
+    #[doc = include_str!("command_registry.doc/entries.md")]
     entries: HashMap<InternedSymbol, (Command, CommandState)>,
 }
 
 impl CommandRegistry {
-    /// Creates an empty registry.
+    #[doc = include_str!("command_registry.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -38,13 +22,7 @@ impl CommandRegistry {
         }
     }
 
-    /// Registers `command` under its own [`id`](Command::id) with the default
-    /// live [`CommandState`], returning the previously registered command with
-    /// that symbol, if any.
-    ///
-    /// Re-registering a symbol replaces its descriptor **and** resets its state:
-    /// the new descriptor arrives with the default state, exactly as a first
-    /// registration would.
+    #[doc = include_str!("command_registry.doc/register.md")]
     pub fn register(&mut self, command: Command) -> Option<Command> {
         let id = command.id();
         self.entries
@@ -52,21 +30,19 @@ impl CommandRegistry {
             .map(|(previous, _)| previous)
     }
 
-    /// Returns the descriptor registered for `id`, if any.
+    #[doc = include_str!("command_registry.doc/get.md")]
     #[must_use]
     pub fn get(&self, id: InternedSymbol) -> Option<&Command> {
         self.entries.get(&id).map(|(command, _)| command)
     }
 
-    /// Returns the live state registered for `id`, if any.
+    #[doc = include_str!("command_registry.doc/state.md")]
     #[must_use]
     pub fn state(&self, id: InternedSymbol) -> Option<CommandState> {
         self.entries.get(&id).map(|&(_, state)| state)
     }
 
-    /// Sets the live state of `id`, returning whether a command was registered
-    /// under that symbol (a state set on an unregistered symbol is discarded,
-    /// since there is no descriptor for it to belong to).
+    #[doc = include_str!("command_registry.doc/set_state.md")]
     pub fn set_state(&mut self, id: InternedSymbol, state: CommandState) -> bool {
         match self.entries.get_mut(&id) {
             Some((_, slot)) => {
@@ -77,34 +53,26 @@ impl CommandRegistry {
         }
     }
 
-    /// Whether dispatching `id` is permitted right now.
-    ///
-    /// This is the policy every surface shares, stated once: a symbol with **no**
-    /// registered command is unconstrained (`true`) — the registry describes
-    /// commands, it does not gate symbols an application routes without one. A
-    /// symbol **with** a registered command is permitted only while its state is
-    /// [`actionable`](CommandState::is_actionable), so disabling or hiding one
-    /// command makes it inert on every surface at once: shortcut, menu, and
-    /// click alike.
+    #[doc = include_str!("command_registry.doc/permits_dispatch.md")]
     #[must_use]
     pub fn permits_dispatch(&self, id: InternedSymbol) -> bool {
         self.state(id)
             .is_none_or(|state: CommandState| state.is_actionable())
     }
 
-    /// Returns whether a command is registered under `id`.
+    #[doc = include_str!("command_registry.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, id: InternedSymbol) -> bool {
         self.entries.contains_key(&id)
     }
 
-    /// Returns the number of registered commands.
+    #[doc = include_str!("command_registry.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Returns whether the registry has no registered commands.
+    #[doc = include_str!("command_registry.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

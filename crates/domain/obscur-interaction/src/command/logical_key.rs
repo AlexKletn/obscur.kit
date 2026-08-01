@@ -1,98 +1,85 @@
-//! The [`LogicalKey`] layout-dependent produced key and its [`NamedKey`]
-//! members (spec §6.7).
+#![doc = include_str!("logical_key.doc/_module.md")]
 
-/// A non-character key identified by name (spec §6.7).
-///
-/// These are the keys that do not produce a character: editing, navigation, and
-/// function keys. Character-producing keys are carried by
-/// [`LogicalKey::Character`] instead.
+#[doc = include_str!("logical_key.doc/NamedKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NamedKey {
-    /// The `Enter` / `Return` key.
+    #[doc = include_str!("logical_key.doc/Enter.md")]
     Enter,
-    /// The `Escape` key.
+    #[doc = include_str!("logical_key.doc/Escape.md")]
     Escape,
-    /// The `Tab` key.
+    #[doc = include_str!("logical_key.doc/Tab.md")]
     Tab,
-    /// The space key (as a named key rather than a `' '` character).
+    #[doc = include_str!("logical_key.doc/Space.md")]
     Space,
-    /// The `Backspace` key.
+    #[doc = include_str!("logical_key.doc/Backspace.md")]
     Backspace,
-    /// The forward `Delete` key.
+    #[doc = include_str!("logical_key.doc/Delete.md")]
     Delete,
-    /// The up arrow key.
+    #[doc = include_str!("logical_key.doc/ArrowUp.md")]
     ArrowUp,
-    /// The down arrow key.
+    #[doc = include_str!("logical_key.doc/ArrowDown.md")]
     ArrowDown,
-    /// The left arrow key.
+    #[doc = include_str!("logical_key.doc/ArrowLeft.md")]
     ArrowLeft,
-    /// The right arrow key.
+    #[doc = include_str!("logical_key.doc/ArrowRight.md")]
     ArrowRight,
-    /// The `Home` key.
+    #[doc = include_str!("logical_key.doc/Home.md")]
     Home,
-    /// The `End` key.
+    #[doc = include_str!("logical_key.doc/End.md")]
     End,
-    /// The `Page Up` key.
+    #[doc = include_str!("logical_key.doc/PageUp.md")]
     PageUp,
-    /// The `Page Down` key.
+    #[doc = include_str!("logical_key.doc/PageDown.md")]
     PageDown,
-    /// The `F1` function key.
+    #[doc = include_str!("logical_key.doc/F1.md")]
     F1,
-    /// The `F2` function key.
+    #[doc = include_str!("logical_key.doc/F2.md")]
     F2,
-    /// The `F3` function key.
+    #[doc = include_str!("logical_key.doc/F3.md")]
     F3,
-    /// The `F4` function key.
+    #[doc = include_str!("logical_key.doc/F4.md")]
     F4,
-    /// The `F5` function key.
+    #[doc = include_str!("logical_key.doc/F5.md")]
     F5,
-    /// The `F6` function key.
+    #[doc = include_str!("logical_key.doc/F6.md")]
     F6,
-    /// The `F7` function key.
+    #[doc = include_str!("logical_key.doc/F7.md")]
     F7,
-    /// The `F8` function key.
+    #[doc = include_str!("logical_key.doc/F8.md")]
     F8,
-    /// The `F9` function key.
+    #[doc = include_str!("logical_key.doc/F9.md")]
     F9,
-    /// The `F10` function key.
+    #[doc = include_str!("logical_key.doc/F10.md")]
     F10,
-    /// The `F11` function key.
+    #[doc = include_str!("logical_key.doc/F11.md")]
     F11,
-    /// The `F12` function key.
+    #[doc = include_str!("logical_key.doc/F12.md")]
     F12,
 }
 
-/// A layout-dependent produced key (spec §6.7).
-///
-/// A logical key is what the active keyboard layout produces when a physical key
-/// is pressed: the character `'a'`, `'/'`, or `'?'`, or a
-/// [named](NamedKey) non-character key such as `Enter`. Logical keys are the
-/// right surface for text entry and shortcuts, which follow the user's layout;
-/// for layout-independent spatial bindings use
-/// [`PhysicalKey`](crate::command::PhysicalKey).
+#[doc = include_str!("logical_key.doc/LogicalKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LogicalKey {
-    /// A character produced by the active layout (e.g. `'a'`, `'/'`, `'?'`).
+    #[doc = include_str!("logical_key.doc/Character.md")]
     Character(char),
-    /// A non-character key identified by name.
+    #[doc = include_str!("logical_key.doc/Named.md")]
     Named(NamedKey),
 }
 
 impl LogicalKey {
-    /// Creates a logical key for a produced `character`.
+    #[doc = include_str!("logical_key.doc/character.md")]
     #[must_use]
     pub const fn character(character: char) -> Self {
         Self::Character(character)
     }
 
-    /// Creates a logical key for a `named` non-character key.
+    #[doc = include_str!("logical_key.doc/named.md")]
     #[must_use]
     pub const fn named(named: NamedKey) -> Self {
         Self::Named(named)
     }
 
-    /// Returns the produced character for a [`LogicalKey::Character`], else
-    /// `None`.
+    #[doc = include_str!("logical_key.doc/as_character.md")]
     #[must_use]
     pub const fn as_character(&self) -> Option<char> {
         match self {
@@ -101,13 +88,13 @@ impl LogicalKey {
         }
     }
 
-    /// Returns whether this is a [`LogicalKey::Named`] key.
+    #[doc = include_str!("logical_key.doc/is_named.md")]
     #[must_use]
     pub const fn is_named(&self) -> bool {
         matches!(self, Self::Named(_))
     }
 
-    /// Returns the [`NamedKey`] for a [`LogicalKey::Named`], else `None`.
+    #[doc = include_str!("logical_key.doc/named_key.md")]
     #[must_use]
     pub const fn named_key(&self) -> Option<NamedKey> {
         match self {

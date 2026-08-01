@@ -1,4 +1,4 @@
-//! A lightweight handle over a node and its descendants for subtree lifecycle.
+#![doc = include_str!("subtree.doc/_module.md")]
 
 use std::collections::HashSet;
 
@@ -6,39 +6,26 @@ use obscur_identity::NodeId;
 
 use super::RetainedTree;
 
-/// A lightweight handle identifying a node and its transitive descendants.
-///
-/// A `Subtree` is just a root [`NodeId`]; it owns no node data. All queries are
-/// resolved against a borrowed [`RetainedTree`] by following the by-`NodeId`
-/// [`children`](crate::node::RetainedNode::children) links (spec §2.2). Traversal
-/// is deterministic (pre-order, depth-first) and defensive against malformed or
-/// cyclic links: every node is visited at most once, so a query can never panic
-/// or loop forever.
+#[doc = include_str!("subtree.doc/Subtree.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Subtree {
     root: NodeId,
 }
 
 impl Subtree {
-    /// Creates a subtree handle rooted at `root`.
+    #[doc = include_str!("subtree.doc/new.md")]
     #[must_use]
     pub const fn new(root: NodeId) -> Self {
         Self { root }
     }
 
-    /// Returns the root of this subtree.
+    #[doc = include_str!("subtree.doc/root.md")]
     #[must_use]
     pub const fn root(&self) -> NodeId {
         self.root
     }
 
-    /// Returns the root plus all transitive descendants in deterministic
-    /// pre-order (depth-first, children in link order).
-    ///
-    /// Only ids that resolve to live nodes in `tree` are included, so a dangling
-    /// child link is silently skipped. A cyclic link cannot cause a loop: each
-    /// node is emitted at most once. If the root itself is not live, the result
-    /// is empty.
+    #[doc = include_str!("subtree.doc/descendants.md")]
     #[must_use]
     pub fn descendants(&self, tree: &RetainedTree) -> Vec<NodeId> {
         let mut order = Vec::new();
@@ -62,21 +49,19 @@ impl Subtree {
         order
     }
 
-    /// Returns `true` if `id` is the root or a transitive descendant of this
-    /// subtree within `tree`.
+    #[doc = include_str!("subtree.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, tree: &RetainedTree, id: NodeId) -> bool {
         self.descendants(tree).contains(&id)
     }
 
-    /// Returns the number of live nodes in this subtree (root plus descendants).
+    #[doc = include_str!("subtree.doc/len.md")]
     #[must_use]
     pub fn len(&self, tree: &RetainedTree) -> usize {
         self.descendants(tree).len()
     }
 
-    /// Returns `true` if this subtree contains no live nodes (its root is not
-    /// live in `tree`).
+    #[doc = include_str!("subtree.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self, tree: &RetainedTree) -> bool {
         tree.get(self.root).is_none()

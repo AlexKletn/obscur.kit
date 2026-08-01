@@ -1,30 +1,22 @@
-//! The fullscreen and presentation display modes a window can take (spec §6.5).
+#![doc = include_str!("fullscreen_mode.doc/_module.md")]
 
-/// How a window occupies the screen when presented (spec §6.5).
-///
-/// [`FullscreenMode::Normal`] is the windowed baseline — not fullscreen at all.
-/// The remaining variants are the fullscreen forms;
-/// [`FullscreenMode::Exclusive`] is honored only where the platform offers a
-/// true exclusive mode, and otherwise degrades to a borderless equivalent.
+#[doc = include_str!("fullscreen_mode.doc/FullscreenMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FullscreenMode {
-    /// A normal windowed presentation; not fullscreen.
+    #[doc = include_str!("fullscreen_mode.doc/Normal.md")]
     Normal,
-    /// A borderless window covering the display.
+    #[doc = include_str!("fullscreen_mode.doc/Borderless.md")]
     Borderless,
-    /// True exclusive fullscreen, where the platform makes it available.
+    #[doc = include_str!("fullscreen_mode.doc/Exclusive.md")]
     Exclusive,
-    /// A locked-down kiosk presentation.
+    #[doc = include_str!("fullscreen_mode.doc/Kiosk.md")]
     Kiosk,
-    /// A presentation mode intended for slideshows and similar full-screen
-    /// content.
+    #[doc = include_str!("fullscreen_mode.doc/Presentation.md")]
     Presentation,
 }
 
 impl FullscreenMode {
-    /// Returns whether this mode is any form of fullscreen.
-    ///
-    /// This is `true` for every variant except [`FullscreenMode::Normal`].
+    #[doc = include_str!("fullscreen_mode.doc/is_fullscreen.md")]
     #[must_use]
     pub const fn is_fullscreen(self) -> bool {
         !matches!(self, Self::Normal)
@@ -32,7 +24,7 @@ impl FullscreenMode {
 }
 
 impl Default for FullscreenMode {
-    /// The default mode is [`FullscreenMode::Normal`], the windowed baseline.
+    #[doc = include_str!("fullscreen_mode.doc/default.md")]
     fn default() -> Self {
         Self::Normal
     }

@@ -1,0 +1,1 @@
+Creates a property compiler.

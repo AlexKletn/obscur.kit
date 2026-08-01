@@ -1,19 +1,4 @@
-//! End-to-end: the **`ch` unit** resolves from the `0` glyph actually shaped by
-//! the runtime's font, not from a stand-in (spec §4.5).
-//!
-//! `ch` is the advance of `0` (ZERO, U+0030) in the element's own font — the unit
-//! that sizes a box by character count (`width: 60ch`). CSS Values 4 §6.1.2 allows
-//! `0.5em` as a substitute *only* "in the cases where it is impossible or
-//! impractical to determine the measure of the ZERO glyph". That escape hatch is
-//! the thing these tests exist to rule out: resolving every `ch` to `0.5em` would
-//! look like support while mis-sizing the one case anyone writes `ch` for.
-//!
-//! The default [`MockTextShaper`] is monospace at `0.6 × font-size` per glyph.
-//! That ratio is what makes these assertions meaningful: a real measurement lands
-//! on `0.6em` per `ch`, the substitute would land on `0.5em`, and every test below
-//! is written so those two answers disagree. A `ch` that quietly fell back would
-//! fail here rather than pass with plausible numbers.
-
+#![doc = include_str!("ch_unit.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -26,13 +11,10 @@ use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::text::shaping::MockTextShaper;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The advance the default shaper gives every glyph, as a fraction of the font
-/// size. `ch` must equal this — not the `0.5` substitute.
+#[doc = include_str!("ch_unit.doc/RATIO.md")]
 const RATIO: f32 = MockTextShaper::ADVANCE_RATIO;
 
-/// The substitute [`LengthContext::ch_base`] falls back to when the `0` glyph
-/// cannot be measured. Named here only so the tests can assert they did **not**
-/// get it.
+#[doc = include_str!("ch_unit.doc/SUBSTITUTE.md")]
 const SUBSTITUTE: f32 = 0.5;
 
 fn compile(css: &str) -> Stylesheet {
@@ -41,7 +23,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A `.page` box containing one `.item`.
+#[doc = include_str!("ch_unit.doc/view.md")]
 fn view() -> View {
     let container = ComponentId::from_raw(0x00C0_0001);
     let item = ViewNode::element(container)
@@ -52,7 +34,7 @@ fn view() -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![page]))
 }
 
-/// The `.item`'s arranged size after rendering `css`.
+#[doc = include_str!("ch_unit.doc/item_size.md")]
 fn item_size(css: &str) -> (f32, f32) {
     let sheet = compile(css);
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 600.0));

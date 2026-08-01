@@ -1,20 +1,9 @@
-//! A style part a component exports across its scope boundary.
-//!
-//! Per §4.15, components may export style parts and states so that outside CSS
-//! can target them (like `::part()`), and the host may override an exported
-//! part. An [`ExportedStylePart`] is the style-side counterpart to a component's
-//! exported-part contract: it names the exported part and the visual states it
-//! exposes for the given scope. The actual selector matching against these parts
-//! lives in the matcher / `obscur-css`.
+#![doc = include_str!("exported_style_part.doc/_module.md")]
 
 use crate::scope::ScopeId;
 use obscur_identity::InternedSymbol;
 
-/// A style part exported across a scope boundary, with its exposed states
-/// (§4.15).
-///
-/// The host may override an exported part, so this only *declares* the contract.
-/// It owns a `Vec` of states, hence `Clone` rather than `Copy`.
+#[doc = include_str!("exported_style_part.doc/ExportedStylePart.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportedStylePart {
     scope: ScopeId,
@@ -23,7 +12,7 @@ pub struct ExportedStylePart {
 }
 
 impl ExportedStylePart {
-    /// Creates an exported part named `name` in `scope`, exposing `states`.
+    #[doc = include_str!("exported_style_part.doc/new.md")]
     #[must_use]
     pub fn new(scope: ScopeId, name: InternedSymbol, states: Vec<InternedSymbol>) -> Self {
         Self {
@@ -33,31 +22,31 @@ impl ExportedStylePart {
         }
     }
 
-    /// Creates an exported part that exposes no states.
+    #[doc = include_str!("exported_style_part.doc/stateless.md")]
     #[must_use]
     pub fn stateless(scope: ScopeId, name: InternedSymbol) -> Self {
         Self::new(scope, name, Vec::new())
     }
 
-    /// Returns the scope that exports this part.
+    #[doc = include_str!("exported_style_part.doc/scope.md")]
     #[must_use]
     pub const fn scope(&self) -> ScopeId {
         self.scope
     }
 
-    /// Returns the exported part's name.
+    #[doc = include_str!("exported_style_part.doc/name.md")]
     #[must_use]
     pub const fn name(&self) -> InternedSymbol {
         self.name
     }
 
-    /// Returns the states this part exposes.
+    #[doc = include_str!("exported_style_part.doc/states.md")]
     #[must_use]
     pub fn states(&self) -> &[InternedSymbol] {
         &self.states
     }
 
-    /// Returns `true` when this part exposes the given visual state.
+    #[doc = include_str!("exported_style_part.doc/exposes.md")]
     #[must_use]
     pub fn exposes(&self, state: InternedSymbol) -> bool {
         self.states.contains(&state)

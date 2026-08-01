@@ -1,14 +1,9 @@
-//! An immutable, versioned snapshot of a node's arranged layout.
+#![doc = include_str!("layout_snapshot.doc/_module.md")]
 
 use crate::model::LayoutBox;
 use obscur_identity::VersionStamp;
 
-/// An immutable, versioned snapshot of a node's arranged layout, produced for
-/// hand-off to paint and hit-testing (spec §1.6).
-///
-/// The snapshot pairs the arranged [`LayoutBox`] with the [`VersionStamp`] under
-/// which it was produced, so downstream consumers can detect staleness without
-/// re-reading mutable layout state.
+#[doc = include_str!("layout_snapshot.doc/LayoutSnapshot.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutSnapshot {
     layout_box: LayoutBox,
@@ -16,7 +11,7 @@ pub struct LayoutSnapshot {
 }
 
 impl LayoutSnapshot {
-    /// Creates a snapshot pairing an arranged `layout_box` with its `version`.
+    #[doc = include_str!("layout_snapshot.doc/new.md")]
     #[must_use]
     pub const fn new(layout_box: LayoutBox, version: VersionStamp) -> Self {
         Self {
@@ -25,13 +20,13 @@ impl LayoutSnapshot {
         }
     }
 
-    /// The arranged layout box captured by this snapshot.
+    #[doc = include_str!("layout_snapshot.doc/layout_box.md")]
     #[must_use]
     pub const fn layout_box(self) -> LayoutBox {
         self.layout_box
     }
 
-    /// The version stamp under which this snapshot was produced.
+    #[doc = include_str!("layout_snapshot.doc/version.md")]
     #[must_use]
     pub const fn version(self) -> VersionStamp {
         self.version

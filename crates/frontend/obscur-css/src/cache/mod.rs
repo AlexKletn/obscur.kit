@@ -1,3 +1,3 @@
-//! Cache module: parse each CSS source once per revision (spec §4.12).
+#![doc = include_str!("mod.doc/_module.md")]
 mod stylesheet_cache;
 pub use stylesheet_cache::StylesheetCache;

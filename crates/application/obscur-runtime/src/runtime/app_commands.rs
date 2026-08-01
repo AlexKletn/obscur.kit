@@ -1,4 +1,4 @@
-//! The [`AppCommands`] application-level command fallback (spec §2.6, link 5).
+#![doc = include_str!("app_commands.doc/_module.md")]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -9,82 +9,44 @@ use obscur_interaction::event::UiEvent;
 
 use super::{CommandHandler, IntoCommandHandler};
 
-/// The **application** level of §2.6's command routing chain — its last link.
-///
-/// A [`UiRuntime`](super::UiRuntime) is one *window surface*: it owns one tree,
-/// one viewport and one focus. So a handler registered on the runtime itself
-/// ([`on_command`](super::UiRuntime::on_command)) is a **window**-level handler
-/// — link 4 — and cannot also serve as §2.6's *application* fallback, which by
-/// definition outlives and spans windows.
-///
-/// `AppCommands` is that level: a registry held behind a shared handle, so the
-/// **same** fallback can be installed on every window's runtime via
-/// [`set_app_commands`](super::UiRuntime::set_app_commands). Cloning an
-/// `AppCommands` shares the underlying table rather than copying it — a command
-/// registered once is then the fallback for every window that shares it, which
-/// is what makes the window and application links genuinely distinct rather than
-/// two maps consulted in sequence.
-///
-/// Handlers take either shape [`IntoCommandHandler`] accepts — `FnMut()` or
-/// `FnMut(&mut UiEvent)` — and are not `Send`, matching the rest of the runtime's
-/// single-threaded handler model.
+#[doc = include_str!("app_commands.doc/AppCommands.md")]
 #[derive(Clone, Default)]
 pub struct AppCommands {
     handlers: Rc<RefCell<HashMap<InternedSymbol, CommandHandler>>>,
 }
 
 impl AppCommands {
-    /// Creates an empty application-level fallback registry.
+    #[doc = include_str!("app_commands.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers `handler` as the application fallback for `command`, replacing
-    /// any handler previously registered for that symbol.
-    ///
-    /// The handler runs only when no window-level handler, and nothing in the
-    /// focused node's chain, claimed the command first (spec §2.6).
-    ///
-    /// `handler` may take nothing or take the propagating [`UiEvent`] — see
-    /// [`IntoCommandHandler`]. An application-level fallback is the link most
-    /// likely to want the event, because it is the one link that has no idea
-    /// *where* the command came from until it reads
-    /// [`UiEvent::target`].
+    #[doc = include_str!("app_commands.doc/on_command.md")]
     pub fn on_command<M>(&self, command: InternedSymbol, handler: impl IntoCommandHandler<M>) {
         self.handlers
             .borrow_mut()
             .insert(command, handler.into_command_handler());
     }
 
-    /// Removes the application fallback for `command`, returning whether one was
-    /// registered.
+    #[doc = include_str!("app_commands.doc/remove.md")]
     pub fn remove(&self, command: InternedSymbol) -> bool {
         self.handlers.borrow_mut().remove(&command).is_some()
     }
 
-    /// Returns whether an application fallback is registered for `command`.
+    #[doc = include_str!("app_commands.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, command: InternedSymbol) -> bool {
         self.handlers.borrow().contains_key(&command)
     }
 
-    /// Returns whether two handles share the same underlying registry.
-    ///
-    /// True exactly when one was [`Clone`]d from the other — the property that
-    /// makes an `AppCommands` an *application* level spanning several windows,
-    /// rather than a second per-window table.
+    #[doc = include_str!("app_commands.doc/shares_registry_with.md")]
     #[must_use]
     pub fn shares_registry_with(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.handlers, &other.handlers)
     }
 
-    /// Runs the fallback registered for `command` against the propagating
-    /// `event`, returning whether one ran.
-    ///
-    /// Called by the runtime as the final link of the routing chain. Whatever the
-    /// handler sets on `event` — `prevent_default`, `stop_propagation` — is
-    /// visible to the caller afterwards, exactly as for the other four links.
+    #[doc = include_str!("app_commands.doc/dispatch.md")]
     pub(crate) fn dispatch(&self, command: InternedSymbol, event: &mut UiEvent) -> bool {
         // The borrow is released before returning; a handler cannot re-enter
         // this table because it is a closure over app state with no handle to the

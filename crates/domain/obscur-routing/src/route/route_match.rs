@@ -1,23 +1,18 @@
-//! The result of matching a [`Route`] against a [`RoutePattern`] (spec §6.13).
+#![doc = include_str!("route_match.doc/_module.md")]
 
 use crate::route::{Route, RouteParams, RoutePattern};
 
-/// The outcome of successfully matching a [`Route`] against a [`RoutePattern`]
-/// (spec §6.13).
-///
-/// A `RouteMatch` bundles the [`RouteParams`] captured by the pattern with the
-/// concrete path that matched, giving a caller everything needed to resolve the
-/// route to a screen or component without re-running the match.
+#[doc = include_str!("route_match.doc/RouteMatch.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteMatch {
-    /// The parameters captured by the pattern.
+    #[doc = include_str!("route_match.doc/params.md")]
     params: RouteParams,
-    /// The path that was matched.
+    #[doc = include_str!("route_match.doc/matched_path.md")]
     matched_path: Box<str>,
 }
 
 impl RouteMatch {
-    /// Creates a match from captured `params` and the `matched_path`.
+    #[doc = include_str!("route_match.doc/new.md")]
     #[must_use]
     pub fn new(params: RouteParams, matched_path: impl Into<Box<str>>) -> Self {
         Self {
@@ -26,11 +21,7 @@ impl RouteMatch {
         }
     }
 
-    /// Attempts to match `route`'s path against `pattern` (spec §6.13).
-    ///
-    /// Returns `Some(RouteMatch)` with the captured parameters and the route's
-    /// path when the pattern matches, or `None` otherwise. Only the path
-    /// participates in matching; the route's query and fragment are ignored.
+    #[doc = include_str!("route_match.doc/try_match.md")]
     #[must_use]
     pub fn try_match(route: &Route, pattern: &RoutePattern) -> Option<Self> {
         pattern
@@ -38,13 +29,13 @@ impl RouteMatch {
             .map(|params| Self::new(params, route.path()))
     }
 
-    /// Returns the captured parameters.
+    #[doc = include_str!("route_match.doc/params_2.md")]
     #[must_use]
     pub fn params(&self) -> &RouteParams {
         &self.params
     }
 
-    /// Returns the path that matched.
+    #[doc = include_str!("route_match.doc/matched_path_2.md")]
     #[must_use]
     pub fn matched_path(&self) -> &str {
         &self.matched_path

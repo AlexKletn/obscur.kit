@@ -1,6 +1,5 @@
-//! EntrypointValidator (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("entrypoint_validator.doc/_module.md")]
 
-/// Placeholder for the `EntrypointValidator` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("entrypoint_validator.doc/EntrypointValidator.md")]
 #[derive(Debug)]
 pub struct EntrypointValidator;

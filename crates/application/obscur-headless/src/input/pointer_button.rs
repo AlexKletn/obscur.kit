@@ -1,19 +1,14 @@
-//! Pointer button identity for synthetic pointer input (spec §7.4).
+#![doc = include_str!("pointer_button.doc/_module.md")]
 
-/// Which pointer button a synthetic pointer event refers to.
-///
-/// This mirrors the small, fixed set of logical buttons a test needs to inject
-/// for `PointerDown` / `PointerUp` events. It is inert typed data: the mapping
-/// from a logical button to a concrete platform button is applied by the
-/// interaction subsystem during dispatch (Phase 3), not here.
+#[doc = include_str!("pointer_button.doc/PointerButton.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PointerButton {
-    /// The primary button (typically the left mouse button). This is the default.
+    #[doc = include_str!("pointer_button.doc/Primary.md")]
     #[default]
     Primary,
-    /// The secondary button (typically the right mouse button).
+    #[doc = include_str!("pointer_button.doc/Secondary.md")]
     Secondary,
-    /// The middle button (typically the mouse wheel button).
+    #[doc = include_str!("pointer_button.doc/Middle.md")]
     Middle,
 }
 

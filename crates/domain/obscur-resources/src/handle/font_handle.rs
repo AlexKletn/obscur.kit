@@ -1,45 +1,39 @@
-//! A type-safe handle denoting a font resource (spec §5.15).
+#![doc = include_str!("font_handle.doc/_module.md")]
 
 use obscur_identity::ResourceId;
 
 use crate::handle::{ResourceHandle, ResourceKind};
 
-/// A type-safe handle to a font resource (spec §5.15).
-///
-/// `FontHandle` is a distinct newtype over [`ResourceId`] so that, at compile
-/// time, it can only denote a font. It converts to and from the generic
-/// [`ResourceHandle`] via [`Self::into_handle`] and [`Self::from_handle`]. Like
-/// all handles it is a pure identifier: cheap, `Copy`, and owning no data.
+#[doc = include_str!("font_handle.doc/FontHandle.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct FontHandle(ResourceId);
 
 impl FontHandle {
-    /// Creates a font handle for the given resource id.
+    #[doc = include_str!("font_handle.doc/new.md")]
     pub const fn new(id: ResourceId) -> Self {
         Self(id)
     }
 
-    /// Returns the resource identity this handle refers to.
+    #[doc = include_str!("font_handle.doc/id.md")]
     #[must_use]
     pub const fn id(self) -> ResourceId {
         self.0
     }
 
-    /// Returns the [`ResourceKind`] this handle type denotes ([`ResourceKind::Font`]).
+    #[doc = include_str!("font_handle.doc/kind.md")]
     #[must_use]
     pub const fn kind() -> ResourceKind {
         ResourceKind::Font
     }
 
-    /// Converts this typed handle into a generic [`ResourceHandle`].
+    #[doc = include_str!("font_handle.doc/into_handle.md")]
     #[must_use]
     pub const fn into_handle(self) -> ResourceHandle {
         ResourceHandle::new(self.0, ResourceKind::Font)
     }
 
-    /// Recovers a `FontHandle` from a generic [`ResourceHandle`], or `None` if
-    /// the handle does not denote a font.
+    #[doc = include_str!("font_handle.doc/from_handle.md")]
     #[must_use]
     pub const fn from_handle(handle: ResourceHandle) -> Option<Self> {
         match handle.kind() {

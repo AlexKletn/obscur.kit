@@ -1,10 +1,4 @@
-//! `overflow: hidden` clips, but the user cannot scroll it.
-//!
-//! CSS Overflow 3: `hidden` DOES establish a scroll container — it clips, it has a
-//! scrollport, and it can be scrolled programmatically. What it must not do is answer
-//! the user: no scrollbar, and the wheel passes through to whatever can scroll behind
-//! it. Conflating the two turns every clipping box into a wheel target, so a row that
-//! merely clips a long file name swallows the scroll meant for the list around it.
+#![doc = include_str!("overflow_hidden_scroll.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -28,7 +22,7 @@ fn el(id: u64, class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_children(ViewFragment::from_nodes(children))
 }
 
-/// A scrollable outer list whose rows each clip with `overflow: hidden`.
+#[doc = include_str!("overflow_hidden_scroll.doc/view.md")]
 fn view() -> View {
     let rows: Vec<ViewNode> = (0..40)
         .map(|i| el(0xA100 + i, "row", vec![el(0xA200 + i, "wide", vec![])]))
@@ -84,8 +78,7 @@ fn a_hidden_box_still_clips() {
     );
 }
 
-/// How many paint commands the frame holds. A scrollbar is two filled rects (a track
-/// and a thumb), so a container that wrongly paints one is visible as a count.
+#[doc = include_str!("overflow_hidden_scroll.doc/command_count.md")]
 fn command_count(rt: &UiRuntime) -> usize {
     rt.snapshot().display_list().commands().len()
 }

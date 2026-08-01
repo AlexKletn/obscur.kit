@@ -1,4 +1,4 @@
-//! Timeline module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod fill_mode;
 pub use fill_mode::FillMode;
 mod timeline;

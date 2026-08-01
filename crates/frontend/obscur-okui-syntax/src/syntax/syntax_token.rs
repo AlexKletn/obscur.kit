@@ -1,13 +1,9 @@
-//! `SyntaxToken`: a leaf of the lossless syntax tree.
+#![doc = include_str!("syntax_token.doc/_module.md")]
 
 use crate::lexer::Token;
 use crate::syntax::SyntaxKind;
 
-/// A leaf of the lossless syntax tree (spec §2.8).
-///
-/// A `SyntaxToken` is the tree-level counterpart of a lexer [`Token`]: it keeps
-/// the exact source slice and byte offset, but is labelled with a token-valued
-/// [`SyntaxKind`] so it can live in a uniform tree of nodes and leaves.
+#[doc = include_str!("syntax_token.doc/SyntaxToken.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxToken {
     kind: SyntaxKind,
@@ -16,10 +12,7 @@ pub struct SyntaxToken {
 }
 
 impl SyntaxToken {
-    /// Creates a leaf of `kind` covering `text`, starting at byte `offset`.
-    ///
-    /// `kind` is expected to be a token-valued [`SyntaxKind`]
-    /// (see [`SyntaxKind::is_token`]).
+    #[doc = include_str!("syntax_token.doc/new.md")]
     #[must_use]
     pub fn new(kind: SyntaxKind, text: impl Into<Box<str>>, offset: u32) -> Self {
         Self {
@@ -29,8 +22,7 @@ impl SyntaxToken {
         }
     }
 
-    /// Creates a leaf from a lexer [`Token`], mapping its kind via
-    /// [`SyntaxKind::from_token`].
+    #[doc = include_str!("syntax_token.doc/from_lexer.md")]
     #[must_use]
     pub fn from_lexer(token: &Token) -> Self {
         Self::new(
@@ -40,37 +32,37 @@ impl SyntaxToken {
         )
     }
 
-    /// Returns the leaf's kind.
+    #[doc = include_str!("syntax_token.doc/kind.md")]
     #[must_use]
     pub const fn kind(&self) -> SyntaxKind {
         self.kind
     }
 
-    /// Returns the exact source slice this leaf covers.
+    #[doc = include_str!("syntax_token.doc/text.md")]
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Returns the byte offset of the leaf's start in the source.
+    #[doc = include_str!("syntax_token.doc/offset.md")]
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset
     }
 
-    /// Returns the leaf's length in bytes.
+    #[doc = include_str!("syntax_token.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> u32 {
         u32::try_from(self.text.len()).unwrap_or(u32::MAX)
     }
 
-    /// Returns `true` if the leaf covers no bytes.
+    #[doc = include_str!("syntax_token.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    /// Returns `true` if this leaf is trivia (see [`SyntaxKind::is_trivia`]).
+    #[doc = include_str!("syntax_token.doc/is_trivia.md")]
     #[must_use]
     pub const fn is_trivia(&self) -> bool {
         self.kind.is_trivia()

@@ -1,46 +1,4 @@
-//! The **shared interactive control-gallery** scene, authored once and driven by
-//! both the live windowed Vello example (`controls_window.rs`) and the headless
-//! CPU→PNG proof (`controls_headless.rs`).
-//!
-//! Like the capability showcase, it is deliberately **backend-pure**: it names
-//! only the toolkit's view / widget / primitive / CSS authoring surfaces
-//! (`obscur_kit::*`) and never a renderer, window, or GPU type, so the exact same
-//! [`view`] + [`stylesheet`] feed a software rasterizer and a GPU surface
-//! unchanged.
-//!
-//! # What it exercises
-//!
-//! A live gallery of the base HTML controls, each wired to real interaction state
-//! so hovering, clicking, focusing, typing, toggling, and opening the dropdown
-//! drive live CSS pseudo-classes recomputed by the runtime from the **real** input
-//! pipeline:
-//!
-//! - **Button** — `EVENT_CLICK` bumps a click counter; `:hover` / `:active` /
-//!   `:focus` come straight from the runtime's pointer/focus/press targets.
-//! - **Checkbox** — a plain [`Checkbox`] plus a **tri-state** one; a click runs
-//!   [`Checkbox::toggle`], and the reserved `CHECKED` attribute drives `:checked`.
-//! - **Radio group** — composed in the demo (there is no radio widget): a set of
-//!   clickable elements sharing one selected index in state, the chosen one
-//!   carrying the reserved `CHECKED` attribute so `:checked` fills it.
-//! - **Select** — a real [`Select`] state machine ([`toggle_open`](Select::toggle_open)
-//!   / [`select`](Select::select) / [`is_open`](Select::is_open)); the header
-//!   toggles the popup and, while open, the option rows render from the widget's
-//!   options. Because the widget emits a single bubbled `EVENT_CLICK`, the demo
-//!   attaches a per-option click command so a windowed hit-test can tell which
-//!   option was chosen — noted as composed, not a widget capability.
-//! - **Input** — an editable [`Input`]; a click seats the caret + `:focus` ring,
-//!   and typing / IME flows through the runtime's editing session, whose
-//!   per-keystroke handler mirrors the text back into state.
-//! - A **disabled** variant of each control shows `:disabled` (muted + dashed) and
-//!   is a genuine no-op: its `EVENT_CLICK` binds a command with **no** registered
-//!   handler, so the runtime's activation resolves to nothing.
-//!
-//! # Open state
-//!
-//! There is no reserved `OPEN` attribute / `:open` pseudo-class in the engine, so
-//! the select's open state is expressed **structurally**: the option rows are in
-//! the tree only while the real [`Select::is_open`] is true. Toggling the popup is
-//! therefore a genuine state change driven by the widget's own state machine.
+#![doc = include_str!("scene.doc/_module.md")]
 // Both examples share this module via `#[path]`; each uses a subset of it (so some
 // items look dead/unreachable-pub inside a single example binary, but are part of
 // the shared surface the sibling example also consumes).
@@ -63,83 +21,74 @@ use obscur_kit::widgets::select::Select;
 // runtime only compares symbols, so the app-owned command identity must agree.
 // ---------------------------------------------------------------------------
 
-/// The enabled push-button's click command (bumps the click counter).
+#[doc = include_str!("scene.doc/CMD_BTN.md")]
 pub const CMD_BTN: InternedSymbol = InternedSymbol::from_raw(0x7000_0001);
-/// The **disabled** button's command — deliberately left without a handler so a
-/// click resolves to a genuine no-op.
+#[doc = include_str!("scene.doc/CMD_BTN_OFF.md")]
 pub const CMD_BTN_OFF: InternedSymbol = InternedSymbol::from_raw(0x7000_0002);
-/// The plain checkbox's change command (toggles it).
+#[doc = include_str!("scene.doc/CMD_CHK.md")]
 pub const CMD_CHK: InternedSymbol = InternedSymbol::from_raw(0x7000_0003);
-/// The tri-state checkbox's change command (advances mixed → checked → …).
+#[doc = include_str!("scene.doc/CMD_TRI.md")]
 pub const CMD_TRI: InternedSymbol = InternedSymbol::from_raw(0x7000_0004);
-/// The **disabled** checkbox's command — no handler, so it is a no-op.
+#[doc = include_str!("scene.doc/CMD_CHK_OFF.md")]
 pub const CMD_CHK_OFF: InternedSymbol = InternedSymbol::from_raw(0x7000_0005);
-/// The select header's command (opens/closes the popup).
+#[doc = include_str!("scene.doc/CMD_SEL_TOGGLE.md")]
 pub const CMD_SEL_TOGGLE: InternedSymbol = InternedSymbol::from_raw(0x7000_0006);
-/// The **disabled** select header's command — no handler, so it is a no-op.
+#[doc = include_str!("scene.doc/CMD_SEL_OFF.md")]
 pub const CMD_SEL_OFF: InternedSymbol = InternedSymbol::from_raw(0x7000_0007);
-/// The editable input's per-keystroke text command.
+#[doc = include_str!("scene.doc/CMD_FIELD.md")]
 pub const CMD_FIELD: InternedSymbol = InternedSymbol::from_raw(0x7000_0008);
-/// The **disabled** input's command — no handler, so it is a no-op.
+#[doc = include_str!("scene.doc/CMD_FIELD_OFF.md")]
 pub const CMD_FIELD_OFF: InternedSymbol = InternedSymbol::from_raw(0x7000_0009);
 
-/// The number of enabled radio options.
+#[doc = include_str!("scene.doc/RADIO_COUNT.md")]
 pub const RADIO_COUNT: usize = 3;
-/// The base command for the composed radio group; option `i` fires `CMD_RADIO_BASE + i`.
+#[doc = include_str!("scene.doc/CMD_RADIO_BASE.md")]
 pub const CMD_RADIO_BASE: u32 = 0x7000_0010;
-/// The **disabled** radio's command — no handler, so it is a no-op.
+#[doc = include_str!("scene.doc/CMD_RADIO_OFF.md")]
 pub const CMD_RADIO_OFF: InternedSymbol = InternedSymbol::from_raw(0x7000_001F);
 
-/// The number of select options.
+#[doc = include_str!("scene.doc/SELECT_COUNT.md")]
 pub const SELECT_COUNT: usize = 3;
-/// The base command for a composed select option; option `i` fires `CMD_SEL_OPT_BASE + i`.
+#[doc = include_str!("scene.doc/CMD_SEL_OPT_BASE.md")]
 pub const CMD_SEL_OPT_BASE: u32 = 0x7000_0020;
 
-/// The command a radio option at `index` fires.
+#[doc = include_str!("scene.doc/radio_command.md")]
 #[must_use]
 pub fn radio_command(index: usize) -> InternedSymbol {
     InternedSymbol::from_raw(CMD_RADIO_BASE + index as u32)
 }
 
-/// The command a select option at `index` fires.
+#[doc = include_str!("scene.doc/select_option_command.md")]
 #[must_use]
 pub fn select_option_command(index: usize) -> InternedSymbol {
     InternedSymbol::from_raw(CMD_SEL_OPT_BASE + index as u32)
 }
 
-/// The human labels of the radio options.
+#[doc = include_str!("scene.doc/RADIO_LABELS.md")]
 pub const RADIO_LABELS: [&str; RADIO_COUNT] = ["Small", "Medium", "Large"];
-/// The human labels of the select options.
+#[doc = include_str!("scene.doc/SELECT_LABELS.md")]
 pub const SELECT_LABELS: [&str; SELECT_COUNT] = ["Apple", "Banana", "Cherry"];
 
 // ---------------------------------------------------------------------------
 // The shared interaction state.
 // ---------------------------------------------------------------------------
 
-/// The live interaction state the gallery view is parameterized by. Both drivers
-/// own one behind an `Rc<RefCell<_>>`: the command / text-input handlers mutate
-/// it, and the reactive [`view`] builder reads it back to rebuild every frame.
-///
-/// The checkbox and select are kept as their **real widget structs** so their own
-/// state machines ([`Checkbox::toggle`], [`Select::toggle_open`] /
-/// [`Select::select`]) drive the demo; the radio group and input are plain fields
-/// (the radio group is composed, and the input's text is mirrored from the
-/// runtime's editing session).
+#[doc = include_str!("scene.doc/GalleryState.md")]
 #[derive(Debug, Clone)]
 pub struct GalleryState {
-    /// How many times the enabled button has been clicked.
+    #[doc = include_str!("scene.doc/click_count.md")]
     pub click_count: u32,
-    /// A short human description of the last interaction, shown in the status line.
+    #[doc = include_str!("scene.doc/last_event.md")]
     pub last_event: String,
-    /// The plain checkbox (real widget state machine).
+    #[doc = include_str!("scene.doc/check.md")]
     pub check: Checkbox,
-    /// The tri-state checkbox (starts indeterminate).
+    #[doc = include_str!("scene.doc/tri.md")]
     pub tri: Checkbox,
-    /// The composed radio group's selected index.
+    #[doc = include_str!("scene.doc/radio.md")]
     pub radio: usize,
-    /// The dropdown (real widget: open/selected state machine).
+    #[doc = include_str!("scene.doc/select.md")]
     pub select: Select,
-    /// The editable field's current text, mirrored from the editing session.
+    #[doc = include_str!("scene.doc/input.md")]
     pub input: String,
 }
 
@@ -162,11 +111,7 @@ impl Default for GalleryState {
 // types/classes, WITH live pseudo-class rules driven by the real pipeline.
 // ---------------------------------------------------------------------------
 
-/// The authored stylesheet: a clean dark theme keyed to the widgets' stable CSS
-/// types (`button` / `checkbox` / `input`) and the composed elements' classes,
-/// with live `:hover` / `:focus` / `:active` / `:checked` / `:disabled` rules.
-/// Returned as a `&'static str` so both drivers compile it through the real
-/// `obscur-css` frontend.
+#[doc = include_str!("scene.doc/stylesheet.md")]
 #[must_use]
 pub fn stylesheet() -> &'static str {
     "\
@@ -240,8 +185,7 @@ input:disabled { color: #6b7280; background-color: #191c24; \
 // The view builder.
 // ---------------------------------------------------------------------------
 
-/// Builds the full gallery view tree from `state`. Pure view/widget/primitive
-/// construction — no backend types — so both drivers call it identically.
+#[doc = include_str!("scene.doc/view.md")]
 #[must_use]
 pub fn view(state: &GalleryState) -> View {
     let header = section_bare(vec![
@@ -316,9 +260,7 @@ pub fn view(state: &GalleryState) -> View {
     View::single(app)
 }
 
-/// Builds the composed radio group: `RADIO_COUNT` enabled clickable rows sharing
-/// `state.radio` as the single selected index (the chosen one carries the reserved
-/// `CHECKED` attribute so `:checked` fills it), plus one disabled row.
+#[doc = include_str!("scene.doc/radio_group.md")]
 fn radio_group(state: &GalleryState) -> Vec<ViewNode> {
     let mut rows: Vec<ViewNode> = (0..RADIO_COUNT)
         .map(|i| {
@@ -343,10 +285,7 @@ fn radio_group(state: &GalleryState) -> Vec<ViewNode> {
     rows
 }
 
-/// Builds the select block: a clickable header (fires [`CMD_SEL_TOGGLE`], showing
-/// the selected label or a prompt), the option list rendered **only while the real
-/// [`Select::is_open`] is true** (each option a composed clickable with its own
-/// command), and a disabled header variant.
+#[doc = include_str!("scene.doc/select_block.md")]
 fn select_block(state: &GalleryState) -> Vec<ViewNode> {
     let label = state
         .select
@@ -405,35 +344,31 @@ fn select_block(state: &GalleryState) -> Vec<ViewNode> {
 // Small view helpers.
 // ---------------------------------------------------------------------------
 
-/// A `.section` panel with a bold label and `children` stacked below it.
+#[doc = include_str!("scene.doc/section.md")]
 fn section(label: &str, mut children: Vec<ViewNode>) -> ViewNode {
     let mut nodes = vec![text("section-label", label)];
     nodes.append(&mut children);
     el("section", nodes)
 }
 
-/// A bare (unlabelled, chrome-less) grouping container carrying no class.
+#[doc = include_str!("scene.doc/section_bare.md")]
 fn section_bare(children: Vec<ViewNode>) -> ViewNode {
     Container::new().with_children(children).into_view_node()
 }
 
-/// A `.row` flex container holding `children`.
+#[doc = include_str!("scene.doc/row.md")]
 fn row(children: Vec<ViewNode>) -> ViewNode {
     el("row", children)
 }
 
-/// Wraps a widget's rendered root node, tagging it with a unique `id` (so the
-/// headless proof can hit-test it by identity) and an additional `class`.
+#[doc = include_str!("scene.doc/widget_ctl.md")]
 fn widget_ctl(id: &str, class: &str, view: View) -> ViewNode {
     first_node(view)
         .with_prop(ViewProperty::new(ID, ViewValue::Text(id.into())))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// Builds a composed clickable element: a classed [`Container`] carrying a unique
-/// `id`, an `EVENT_CLICK` binding to `command`, optional reserved `CHECKED` /
-/// `DISABLED` structural-state attributes (driving `:checked` / `:disabled`), and
-/// `children`.
+#[doc = include_str!("scene.doc/clickable.md")]
 fn clickable(
     id: &str,
     class: &str,
@@ -457,7 +392,7 @@ fn clickable(
     node
 }
 
-/// A classed [`Container`] element node wrapping `children`.
+#[doc = include_str!("scene.doc/el.md")]
 fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
@@ -465,19 +400,19 @@ fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A classed [`Text`] node (the class carries color / size / weight).
+#[doc = include_str!("scene.doc/text.md")]
 fn text(class: &str, content: &str) -> ViewNode {
     Text::new(content.to_owned())
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A bare (class-less) [`Text`] node used as a control's label child.
+#[doc = include_str!("scene.doc/text_inline.md")]
 fn text_inline(content: &str) -> ViewNode {
     Text::new(content.to_owned()).into_view_node()
 }
 
-/// Pulls a widget's first rendered [`ViewNode`] out of the [`View`] it produces.
+#[doc = include_str!("scene.doc/first_node.md")]
 fn first_node(view: View) -> ViewNode {
     view.into_fragment().nodes().to_vec().remove(0)
 }

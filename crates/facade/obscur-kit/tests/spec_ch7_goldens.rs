@@ -1,7 +1,4 @@
-//! **SPECIFICATION-DERIVED** golden-test cases for obscur.kit §7.14.
-//!
-//! Written by an agent reading obscur.kit §7.14 with **no access to this
-//! repository's source**.
+#![doc = include_str!("spec_ch7_goldens.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch7_support/mod.rs"]
@@ -18,8 +15,7 @@ use support::{all_geom, all_nodes, drive, el, txt, view};
 
 const VW: f32 = 100.0;
 
-/// Two 100x100 RGBA rasters differing by exactly 2/255 in one channel of one
-/// pixel out of 10,000. The differing pixel is at `(37, 21)`.
+#[doc = include_str!("spec_ch7_goldens.doc/pair.md")]
 fn pair() -> (ImageSnapshot, ImageSnapshot, (u32, u32)) {
     const W: u32 = 100;
     const H: u32 = 100;
@@ -35,21 +31,7 @@ fn pair() -> (ImageSnapshot, ImageSnapshot, (u32, u32)) {
     )
 }
 
-/// §7.14, verbatim: "Raster golden tests are allowed with explicit tolerances
-/// for anti-aliasing and font/backend variation."
-///
-/// WEAKENED 2026-07-19: this originally required the mismatch to NAME THE
-/// DIFFERING PIXEL'S COORDINATE, (37, 21). §7.14 is two sentences — the list of
-/// preferred backend-independent snapshot kinds, then the sentence quoted above
-/// — and neither mentions what a raster failure reports. Pixel-coordinate
-/// reporting was derived from what a good diff tool does, not from this spec.
-/// The typed mismatch does carry the differing-pixel count, the total, the max
-/// channel delta and the tolerance that was allowed, and the assertions on the
-/// parts §7.14 does speak to — that the tolerance is EXPLICIT, that it decides
-/// pass from fail, and that a failure is a typed value rather than a bare bool
-/// — are kept. Candidate spec amendment: state what a raster golden failure must
-/// report, since "1 pixel differs by 2" is not enough to debug from and locating
-/// it by hand is the expensive part.
+#[doc = include_str!("spec_ch7_goldens.doc/a_raster_tolerance_must_be_explicit_and_a_failure_names_the_pixel.md")]
 #[test]
 fn a_raster_tolerance_must_be_explicit_and_a_failure_names_the_pixel() {
     let (golden, actual, (_x, _y)) = pair();
@@ -107,7 +89,7 @@ fn rich() -> obscur_kit::view::view::View {
     view(vec![el(1, "root", vec![el(2, "card", vec![txt("Hi")])])])
 }
 
-/// A comparable rendering of the backend-independent layers §7.14 names.
+#[doc = include_str!("spec_ch7_goldens.doc/structural.md")]
 fn structural(rt: &obscur_kit::runtime::UiRuntime) -> String {
     let commands: Vec<String> = rt
         .snapshot()
@@ -129,9 +111,7 @@ fn structural(rt: &obscur_kit::runtime::UiRuntime) -> String {
     )
 }
 
-/// §7.14, verbatim: "Golden tests should prefer backend-independent snapshots:"
-/// / "- UI IR;" / "- retained tree;" / "- computed style;" / "- layout;" /
-/// "- Scene/Paint;" / "- accessibility;".
+#[doc = include_str!("spec_ch7_goldens.doc/structural_goldens_do_not_move_when_a_backend_is_attached.md")]
 #[test]
 fn structural_goldens_do_not_move_when_a_backend_is_attached() {
     // (a) No backend at all.

@@ -1,32 +1,23 @@
-//! The formatting context a node establishes for its children.
+#![doc = include_str!("layout_display.doc/_module.md")]
 
-/// The formatting context / display mode of a layout node (spec §4.1).
-///
-/// Supports the flow (`Block`), `Flex`, and `Grid` formatting contexts, plus
-/// `None` for nodes that are laid out away (generate no box). Additional
-/// contexts such as table or positioning are introduced in later phases.
+#[doc = include_str!("layout_display.doc/LayoutDisplay.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayoutDisplay {
-    /// Normal flow: the node participates in block layout (the default).
+    #[doc = include_str!("layout_display.doc/Block.md")]
     #[default]
     Block,
-    /// Flex layout: the node establishes a flex formatting context.
+    #[doc = include_str!("layout_display.doc/Flex.md")]
     Flex,
-    /// Grid layout: the node establishes a grid formatting context (a uniform
-    /// fixed-column grid; see
-    /// [`GridLayout`](crate::algorithm::GridLayout)).
+    #[doc = include_str!("layout_display.doc/Grid.md")]
     Grid,
-    /// `display: contents`: the node generates no box of its own; its children
-    /// are hoisted into the parent's formatting context in its place (css-display-3
-    /// §2.5). Unlike [`None`], the subtree still participates in layout — only the
-    /// element's own box is absent.
+    #[doc = include_str!("layout_display.doc/Contents.md")]
     Contents,
-    /// The node generates no box and is excluded from layout.
+    #[doc = include_str!("layout_display.doc/None.md")]
     None,
 }
 
 impl LayoutDisplay {
-    /// Returns `true` if this is [`LayoutDisplay::None`].
+    #[doc = include_str!("layout_display.doc/is_none.md")]
     #[must_use]
     pub const fn is_none(self) -> bool {
         matches!(self, Self::None)

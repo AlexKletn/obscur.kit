@@ -1,57 +1,37 @@
-//! `GridLine`: one edge of a grid item's line-based placement.
+#![doc = include_str!("grid_line.doc/_module.md")]
 
-/// One placement edge of a grid item along a single axis (spec §4.13, a subset).
-///
-/// A CSS `grid-column` / `grid-row` is a `start / end` pair; each side is one
-/// `GridLine`. This models the three forms this crate supports:
-///
-/// * [`Auto`](GridLine::Auto) — no explicit line; the item is auto-placed on this
-///   edge (the initial value).
-/// * [`Line`](GridLine::Line) — a **1-based** grid line index (`grid-column: 2`
-///   is line `2`, i.e. the start of the second track). A **negative** index counts
-///   back from the end of the explicit grid (`-1` is the last line); it is resolved
-///   against the real track count during placement. A zero index is clamped to line
-///   `1`. Named lines are out of scope.
-/// * [`Span`](GridLine::Span) — `span N`: the edge is placed `N` tracks away from
-///   the opposite edge. A zero span is clamped to `1`.
-///
-/// # Determinism
-///
-/// `GridLine` is a plain `Copy` value with no interior mutability, so placement
-/// resolves deterministically from the item styles alone.
+#[doc = include_str!("grid_line.doc/GridLine.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridLine {
-    /// No explicit line on this edge; the item is auto-placed here.
+    #[doc = include_str!("grid_line.doc/Auto.md")]
     Auto,
-    /// A 1-based grid line index; a negative index counts back from the end of the
-    /// explicit grid (`-1` is the last line), resolved against the track count.
+    #[doc = include_str!("grid_line.doc/Line.md")]
     Line(i32),
-    /// `span N`: this edge is `N` tracks from the opposite edge (clamped ≥ 1).
+    #[doc = include_str!("grid_line.doc/Span.md")]
     Span(u16),
 }
 
 impl Default for GridLine {
-    /// The initial value: [`Auto`](GridLine::Auto) (pure auto-placement).
+    #[doc = include_str!("grid_line.doc/default.md")]
     fn default() -> Self {
         GridLine::Auto
     }
 }
 
 impl GridLine {
-    /// A 1-based line, clamped so a non-positive index becomes line `1`.
+    #[doc = include_str!("grid_line.doc/line.md")]
     #[must_use]
     pub fn line(index: i32) -> Self {
         GridLine::Line(index.max(1))
     }
 
-    /// A `span N`, clamped so a zero span becomes `1`.
+    #[doc = include_str!("grid_line.doc/span.md")]
     #[must_use]
     pub fn span(n: u16) -> Self {
         GridLine::Span(n.max(1))
     }
 
-    /// The 0-based track index this line refers to, clamped to `≥ 0`, if it is a
-    /// concrete [`Line`](GridLine::Line); `None` for `Auto` / `Span`.
+    #[doc = include_str!("grid_line.doc/track_index.md")]
     #[must_use]
     pub fn track_index(self) -> Option<usize> {
         match self {

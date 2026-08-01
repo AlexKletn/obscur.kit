@@ -1,87 +1,39 @@
-//! `GridTrack`: a style-local CSS-grid track sizing function.
-//!
-//! [`GridTrack`] is the `obscur-style` model of a single `grid-template-columns`
-//! / `grid-template-rows` track (spec §4.1). It is deliberately **style-local**:
-//! `obscur-style` is a pure domain crate that does not depend on `obscur-layout`,
-//! so authored templates are modelled here in style vocabulary and the runtime
-//! converts each [`GridTrack`] to the layout crate's own `TrackSize` when it
-//! bridges a computed style into a layout input.
-//!
-//! Unlike the layout crate's already-pixel-resolved track, a [`GridTrack::Fixed`]
-//! keeps its full [`Length`] (so `px`, `%`, `em`, … survive to the compute step
-//! and resolve against a `LengthContext` in the runtime); the `fr` fraction,
-//! `auto`, the content keywords, and `minmax(min, max)` mirror the layout track
-//! model exactly.
+#![doc = include_str!("grid_track.doc/_module.md")]
 
 use crate::property::Length;
 
-/// The sizing function for one grid track (a column or a row), in style terms.
-///
-/// This is the style-side twin of `obscur_layout`'s `TrackSize`; the runtime maps
-/// one to the other. The variants are the track sizing functions this stack
-/// supports:
-///
-/// * [`Fixed`](GridTrack::Fixed) — a fixed [`Length`] (`100px`, `50%`, `2em`, …).
-///   The length is resolved to pixels at the compute step, not here.
-/// * [`Fr`](GridTrack::Fr) — a flexible fraction (`fr`): shares leftover space.
-/// * [`Auto`](GridTrack::Auto) — content-sized.
-/// * [`MinContent`](GridTrack::MinContent) / [`MaxContent`](GridTrack::MaxContent)
-///   — the intrinsic track sizing keywords.
-/// * [`MinMax`](GridTrack::MinMax) — a `minmax(min, max)` clamp; each bound is
-///   itself a [`GridTrack`].
-/// * [`AutoRepeat`](GridTrack::AutoRepeat) — a `repeat(auto-fill | auto-fit,
-///   <track-list>)` auto-repetition. Its repetition count depends on the grid
-///   container's content extent, which is unknown at CSS-lowering time, so the
-///   pattern is carried symbolically here (in author order among the other
-///   tracks) and expanded by the layout algorithm.
-///
-/// Because [`Fixed`](GridTrack::Fixed) carries an `f32`-backed [`Length`] and
-/// [`Fr`](GridTrack::Fr) an `f32`, this derives [`PartialEq`] but not
-/// [`Eq`]/[`Hash`].
+#[doc = include_str!("grid_track.doc/GridTrack.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum GridTrack {
-    /// A fixed track length (`100px`, `50%`, `2em`, …), resolved to pixels later.
+    #[doc = include_str!("grid_track.doc/Fixed.md")]
     Fixed(Length),
-    /// A flexible fraction (`fr`): shares leftover space proportionally.
+    #[doc = include_str!("grid_track.doc/Fr.md")]
     Fr(f32),
-    /// Content-sized: as large as the biggest item placed in the track.
+    #[doc = include_str!("grid_track.doc/Auto.md")]
     Auto,
-    /// `min-content`: the largest of the items' min-content contributions — as
-    /// narrow as the track can be without its items overflowing (CSS Grid §7.2.3).
+    #[doc = include_str!("grid_track.doc/MinContent.md")]
     MinContent,
-    /// `max-content`: the largest of the items' max-content contributions — as
-    /// wide as the items want given unbounded space (CSS Grid §7.2.3).
+    #[doc = include_str!("grid_track.doc/MaxContent.md")]
     MaxContent,
-    /// `minmax(min, max)`: sized by `max`, floored at `min`. Each bound is itself
-    /// a [`GridTrack`].
+    #[doc = include_str!("grid_track.doc/MinMax.md")]
     MinMax(Box<GridTrack>, Box<GridTrack>),
-    /// A `repeat(auto-fill | auto-fit, <track-list>)` auto-repetition: `fill` is
-    /// `true` for `auto-fill` (empty tracks kept), `false` for `auto-fit` (empty
-    /// tracks collapse). `tracks` is one copy of the repeated pattern. The
-    /// repetition count is resolved against the container size inside layout.
+    #[doc = include_str!("grid_track.doc/AutoRepeat.md")]
     AutoRepeat {
-        /// `true` for `auto-fill`, `false` for `auto-fit`.
+        #[doc = include_str!("grid_track.doc/fill.md")]
         fill: bool,
-        /// One copy of the repeated track pattern.
+        #[doc = include_str!("grid_track.doc/tracks.md")]
         tracks: Box<[GridTrack]>,
     },
 }
 
 impl GridTrack {
-    /// Builds a [`MinMax`](GridTrack::MinMax) track from a `min` and `max` bound,
-    /// boxing each so callers need not.
+    #[doc = include_str!("grid_track.doc/minmax.md")]
     #[must_use]
     pub fn minmax(min: GridTrack, max: GridTrack) -> Self {
         GridTrack::MinMax(Box::new(min), Box::new(max))
     }
 
-    /// Returns `true` when this track's sizing function contains a `ch` term.
-    ///
-    /// `Fr`, `Auto` and the intrinsic keywords carry no length at all; `MinMax`
-    /// recurses into both
-    /// bounds, so `minmax(20ch, 1fr)` answers `true`, and `AutoRepeat` recurses
-    /// into the pattern it repeats — `repeat(auto-fill, 20ch)` sizes every
-    /// repetition from the `0` glyph. See [`Length::is_ch`].
+    #[doc = include_str!("grid_track.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {

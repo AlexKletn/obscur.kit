@@ -1,34 +1,25 @@
-//! Where a layer surface is in its life (spec §6.5).
+#![doc = include_str!("layer_surface_state.doc/_module.md")]
 
-/// The state a layer surface is in, as a host can actually observe it.
-///
-/// Deliberately smaller than the full protocol dance. A surface being *created*
-/// is not observable from outside — the call that creates one either returns a
-/// window or an error — and *failed* is carried by that error rather than by a
-/// state a caller could poll. What remains is what a running application can
-/// meaningfully branch on.
+#[doc = include_str!("layer_surface_state.doc/LayerSurfaceState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerSurfaceState {
-    /// Created and committed, waiting for the compositor's first configure.
-    ///
-    /// **Nothing may be drawn yet.** Attaching a buffer before the first
-    /// configure is a protocol error, not a race.
+    #[doc = include_str!("layer_surface_state.doc/Configuring.md")]
     #[default]
     Configuring,
-    /// Configured: the size is real and the surface can be drawn to.
+    #[doc = include_str!("layer_surface_state.doc/Ready.md")]
     Ready,
-    /// The compositor closed it. Every handle is dead and the host should stop.
+    #[doc = include_str!("layer_surface_state.doc/Closed.md")]
     Closed,
 }
 
 impl LayerSurfaceState {
-    /// Whether the surface may be drawn to.
+    #[doc = include_str!("layer_surface_state.doc/is_drawable.md")]
     #[must_use]
     pub const fn is_drawable(self) -> bool {
         matches!(self, Self::Ready)
     }
 
-    /// Whether the surface is gone for good.
+    #[doc = include_str!("layer_surface_state.doc/is_closed.md")]
     #[must_use]
     pub const fn is_closed(self) -> bool {
         matches!(self, Self::Closed)

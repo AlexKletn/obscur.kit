@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** scene-model, paint-order, clipping and diagnostic
-//! cases for obscur.kit §5.1 ("Scene and Paint"), §5.2 ("Renderer abstraction")
-//! and §5.8 ("Clips and masks").
-//!
-//! Every expected value below was produced by an agent reading the specification
-//! — obscur.kit §5 and the W3C css-backgrounds-3 / css-images-3 / compositing-1
-//! text it normatively cites — with **no access to this repository's source**. A
-//! failure here is a defect report about the engine, and must not be "corrected"
-//! by editing the expected value.
+#![doc = include_str!("spec_ch5_paint_order.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(feature = "render-cpu")]
 
@@ -26,10 +18,10 @@ use support::{
     Raster, commands, describe, drive, el, leaves, rasterize, rgb8_of, runtime, txt, view,
 };
 
-/// The viewport every case in this file renders under.
+#[doc = include_str!("spec_ch5_paint_order.doc/VW.md")]
 const VW: f32 = 200.0;
 
-/// A diagnostic sink that records every diagnostic the runtime emits.
+#[doc = include_str!("spec_ch5_paint_order.doc/Recorder.md")]
 #[derive(Default)]
 struct Recorder {
     seen: Rc<RefCell<Vec<Diagnostic>>>,
@@ -41,27 +33,7 @@ impl DiagnosticSink for Recorder {
     }
 }
 
-/// css-backgrounds-3 §6.1.3: "In terms of stacking contexts and the painting
-/// order, the outer box-shadows of an element are drawn immediately below the
-/// background of that element, and the inner shadows of an element are drawn
-/// immediately above the background of that element (below the borders and border
-/// image, if any)." §5.2 "Must match across backends: … - paint order;".
-///
-/// WEAKENED 2026-07-19: this asserted `ops.len() == 5` and then read the five
-/// commands BY INDEX. The engine paints eight leaves, because it lowers the
-/// four border sides to four separate fills rather than one border command — a
-/// legitimate lowering choice, and the paint ORDER those eight are in is exactly
-/// the order the quoted clause requires. Neither css-backgrounds-3 §6.1.3 nor
-/// §5.2's "- paint order;" says anything about how many draw commands an
-/// element decomposes into; only about their relative order. The case now
-/// asserts the four ordering relations directly, which is both closer to the
-/// clause and stronger against a reordering regression than positional indices
-/// were — an implementation that painted the inset shadow above the border still
-/// fails. Candidate spec amendment: if the number of leaves matters (it would,
-/// for a Scene/Paint golden compared across backends — §5.2 lists
-/// "- Scene/Paint snapshots;" under "Must match"), state whether border sides
-/// are one command or four, because two conforming backends currently need not
-/// agree.
+#[doc = include_str!("spec_ch5_paint_order.doc/sc_01_paint_order_within_one_element.md")]
 #[test]
 fn sc_01_paint_order_within_one_element() {
     let rt = drive(
@@ -122,9 +94,7 @@ fn sc_01_paint_order_within_one_element() {
     );
 }
 
-/// css-backgrounds-3 §6.1: "The shadow is drawn outside the border edge only: it
-/// is clipped inside the border-box of the element." §5.2 "Must match across
-/// backends: … - scene geometry;".
+#[doc = include_str!("spec_ch5_paint_order.doc/sc_02_outer_shadow_is_clipped_out_of_the_border_box.md")]
 #[test]
 fn sc_02_outer_shadow_is_clipped_out_of_the_border_box() {
     // The box sits at (20,20) so the 5px spread ring is inside the raster.
@@ -164,7 +134,7 @@ fn sc_02_outer_shadow_is_clipped_out_of_the_border_box() {
     );
 }
 
-/// §5.1 "Common vector model: … - linear/radial/conic gradients;".
+#[doc = include_str!("spec_ch5_paint_order.doc/sc_05_conic_gradient_is_a_scene_brush_and_rasterizes.md")]
 #[test]
 fn sc_05_conic_gradient_is_a_scene_brush_and_rasterizes() {
     let rt = drive(
@@ -202,9 +172,7 @@ fn sc_05_conic_gradient_is_a_scene_brush_and_rasterizes() {
     assert_eq!(rgb_at(&px, 75, 75), "rgb(0,0,255)", "135deg is blue");
 }
 
-/// §5.1 "Common vector model: … - blend modes;". The channel values are chosen so
-/// `multiply` gives exactly 0 in every channel, making the answer identical in
-/// linear and gamma space — this case tests the *existence* of blending.
+#[doc = include_str!("spec_ch5_paint_order.doc/sc_06_mix_blend_mode_multiply_exists.md")]
 #[test]
 fn sc_06_mix_blend_mode_multiply_exists() {
     let rt = drive(
@@ -238,9 +206,7 @@ fn sc_06_mix_blend_mode_multiply_exists() {
     assert_eq!(rgb_at(&px, 50, 50), "rgb(0,0,0)", "cyan x red = black");
 }
 
-/// §5.8 "Rules: … - offscreen passes are created only when required;" together
-/// with §5.8 "Supported: … - rounded clips;" — a rounded clip is a first-class
-/// clip, not a mask, so it needs no layer.
+#[doc = include_str!("spec_ch5_paint_order.doc/sc_08_plain_and_rounded_clips_need_no_offscreen_pass.md")]
 #[test]
 fn sc_08_plain_and_rounded_clips_need_no_offscreen_pass() {
     let rect_clip = drive(
@@ -277,10 +243,7 @@ fn sc_08_plain_and_rounded_clips_need_no_offscreen_pass() {
     );
 }
 
-/// §5.2 "Must match across backends: … - Scene/Paint snapshots;", contrasted with
-/// "Allowed differences: - rasterization; - anti-aliasing; …". The snapshot is the
-/// backend-independent artifact, so it must be reproducible with **zero**
-/// tolerance and must not have lowered typed geometry into flattened paths.
+#[doc = include_str!("spec_ch5_paint_order.doc/sc_09_the_scene_snapshot_is_reproducible_and_stays_typed.md")]
 #[test]
 fn sc_09_the_scene_snapshot_is_reproducible_and_stays_typed() {
     const CSS: &str = ".c{position:absolute;left:0;top:0;width:120px;height:120px;\
@@ -341,31 +304,7 @@ fn sc_09_the_scene_snapshot_is_reproducible_and_stays_typed() {
     );
 }
 
-/// §5.2 "Unsupported effects and fallbacks are explicit diagnostics." Diagnostic
-/// shape from §1.6: "diagnostics include severity, subsystem, stable code,
-/// node/resource/window context and recovery action."
-///
-/// OBSERVATION MOVED + WEAKENED 2026-07-19.
-///
-/// The requirement is met, and the case was watching the wrong wire. It read the
-/// UiRuntime's `DiagnosticSink` after `render_now`, but the runtime does not
-/// rasterize and therefore cannot know what a backend will refuse. The report is
-/// the RENDERER's: `unsupported_effects(&renderer, list)` asks the backend's
-/// capability table what it cannot honour, and `EffectFallbackReporter::report`
-/// emits one `Diagnostic` per effect — code `UNSUPPORTED_EFFECT`, severity
-/// Warning, subsystem Render, recovery Fallback, deduplicated so a per-frame
-/// effect is reported once rather than once a frame
-/// (obscur-render/src/renderer/effect_report.rs:204-247). The case's own
-/// `rasterize()` helper drove `CpuRenderer::render` directly, bypassing that
-/// entirely. The observation now sits where the report is produced.
-///
-/// DROPPED: `d.context.node.is_some()`. A `SceneEffect` is a property of the
-/// display list, not of a node — nothing at that layer knows which node asked
-/// for the blur — and §1.6's phrase is "node/resource/window context", a
-/// disjunction, not a demand for all three on every diagnostic. Candidate spec
-/// amendment: say which of the three contexts is required for a render-class
-/// diagnostic, and if node context is wanted for unsupported effects, carry the
-/// originating node on the scene command so it can be.
+#[doc = include_str!("spec_ch5_paint_order.doc/sc_10_an_unsupported_effect_emits_exactly_one_diagnostic.md")]
 #[test]
 fn sc_10_an_unsupported_effect_emits_exactly_one_diagnostic() {
     let seen: Rc<RefCell<Vec<Diagnostic>>> = Rc::default();
@@ -432,8 +371,7 @@ fn sc_10_an_unsupported_effect_emits_exactly_one_diagnostic() {
     );
 }
 
-/// The number of `PushLayer` commands in the last frame — the observable proxy
-/// for "an offscreen pass was created".
+#[doc = include_str!("spec_ch5_paint_order.doc/pushed_layers.md")]
 fn pushed_layers(rt: &obscur_kit::runtime::UiRuntime) -> usize {
     commands(rt)
         .iter()
@@ -441,7 +379,7 @@ fn pushed_layers(rt: &obscur_kit::runtime::UiRuntime) -> usize {
         .count()
 }
 
-/// The `rgb(r,g,b)` string of a raster pixel, for readable assertions.
+#[doc = include_str!("spec_ch5_paint_order.doc/rgb_at.md")]
 fn rgb_at(px: &Raster, x: u32, y: u32) -> String {
     let (r, g, b, _) = px.at(x, y);
     format!("rgb({r},{g},{b})")

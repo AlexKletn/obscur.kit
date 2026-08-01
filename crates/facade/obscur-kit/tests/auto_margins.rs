@@ -1,17 +1,4 @@
-//! End-to-end: **`auto` margins** absorb leftover inline space, and the
-//! **logical axis shorthands** reach layout (spec §4.2, §4.13, CSS 2.1 §10.3.3).
-//!
-//! `margin: 0 auto` is the single most-written centring idiom in CSS, and it used
-//! to do nothing here: the layout model stored margins as four `f32`s, so `auto`
-//! was folded to `0` before layout ever saw it. It cannot be folded early —
-//! `auto` means *"take what is left over"*, and the leftover is not known until
-//! the box has been measured.
-//!
-//! Everything below asserts a real arranged box. The container is 300px wide and
-//! the box 100px, so a centred box sits at exactly 100 — a number that is wrong
-//! for every other outcome (0 if `auto` were dropped, 200 if the edges were
-//! swapped).
-
+#![doc = include_str!("auto_margins.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -23,7 +10,7 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// The page is 300 wide; a 100-wide box centres at 100.
+#[doc = include_str!("auto_margins.doc/PAGE.md")]
 const PAGE: f32 = 300.0;
 const BOX: f32 = 100.0;
 const CENTRED: f32 = (PAGE - BOX) / 2.0;
@@ -34,7 +21,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The `.item`'s arranged `(x, width)` under an `.item` declaration block.
+#[doc = include_str!("auto_margins.doc/item_box.md")]
 fn item_box(item_css: &str) -> (f32, f32) {
     let sheet = compile(&format!(
         ".page {{ width: {PAGE}px; height: 300px; font-size: 16px }}\n.item {{ {item_css} }}"

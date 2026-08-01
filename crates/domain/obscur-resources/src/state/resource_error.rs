@@ -1,39 +1,26 @@
-//! Why a resource failed to load, decode, or compile (spec §5.15 failed state).
+#![doc = include_str!("resource_error.doc/_module.md")]
 
-/// The reason a resource failed to load, decode, or compile (spec §5.15).
-///
-/// A [`crate::state::ResourceState::Failed`] carries one of these to explain why
-/// the resource could not be made ready. Each variant is a pure, backend-agnostic
-/// value; the informational variants carry a human-readable reason describing the
-/// specific failure. This type implements [`std::error::Error`] so it composes
-/// with the standard error ecosystem, while remaining I/O-free.
+#[doc = include_str!("resource_error.doc/ResourceError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResourceError {
-    /// The requested resource could not be located at its source.
+    #[doc = include_str!("resource_error.doc/NotFound.md")]
     NotFound,
-    /// The resource's format is unknown or unsupported by the available loaders
-    /// (spec §5.15); the payload names the offending format or reason.
+    #[doc = include_str!("resource_error.doc/Unsupported.md")]
     Unsupported(Box<str>),
-    /// Decoding the resource's bytes into a CPU representation failed (spec
-    /// §5.15); the payload describes the decode failure.
+    #[doc = include_str!("resource_error.doc/DecodeFailed.md")]
     DecodeFailed(Box<str>),
-    /// Compiling the resource (for example a shader) failed (spec §5.15); the
-    /// payload describes the compilation failure.
+    #[doc = include_str!("resource_error.doc/CompileFailed.md")]
     CompileFailed(Box<str>),
-    /// A safety limit was exceeded, such as a maximum dimension or byte budget
-    /// (spec §5.16); the payload describes the limit that was hit.
+    #[doc = include_str!("resource_error.doc/LimitExceeded.md")]
     LimitExceeded(Box<str>),
-    /// The resource's backing source became unavailable during loading (spec
-    /// §5.15); the payload describes the source failure.
+    #[doc = include_str!("resource_error.doc/SourceUnavailable.md")]
     SourceUnavailable(Box<str>),
-    /// The load job was cancelled, typically because a newer version superseded
-    /// it (spec §5.15 stale-job rejection).
+    #[doc = include_str!("resource_error.doc/Cancelled.md")]
     Cancelled,
 }
 
 impl ResourceError {
-    /// Returns whether this error is [`ResourceError::Cancelled`] (spec §5.15
-    /// stale-job rejection).
+    #[doc = include_str!("resource_error.doc/is_cancelled.md")]
     #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)

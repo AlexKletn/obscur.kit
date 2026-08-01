@@ -1,6 +1,6 @@
-//! Wasmtime `PluginExecutor` adapter.
+#![doc = include_str!("lib.doc/_module.md")]
 
-/// Failures at this layer.
+#[doc = include_str!("lib.doc/error.md")]
 pub mod error;
-/// Running a plugin as a WebAssembly module.
+#[doc = include_str!("lib.doc/executor.md")]
 pub mod executor;

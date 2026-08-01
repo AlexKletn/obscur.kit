@@ -1,20 +1,8 @@
-//! The CLDR tables mapping a script — or a language whose script is implied — to
-//! a base writing direction (spec §7.2 RTL integration).
-//!
-//! Both tables are data, transcribed or derived from pinned CLDR release-48
-//! sources under `specs/cldr/`. Neither is a judgement call and neither should be
-//! edited by hand: refresh them by re-running the derivation in
-//! `specs/cldr/README.md` against a newer release.
+#![doc = include_str!("script_direction.doc/_module.md")]
 
 use obscur_text::shaping::TextDirection;
 
-/// Every script CLDR marks right-to-left, sorted for binary search.
-///
-/// Transcribed verbatim from field 6 (`RTL`) of `specs/cldr/scriptMetadata.txt`
-/// (CLDR release-48), whose header defines the field as *"YES if the script is
-/// RTL — derived from whether the script contains RTL letters according to the
-/// Bidi_Class property"*. All 37 of them; the list is exhaustive, not a
-/// selection of the popular ones.
+#[doc = include_str!("script_direction.doc/RTL_SCRIPTS.md")]
 static RTL_SCRIPTS: &[&str] = &[
     "Adlm", "Arab", "Armi", "Avst", "Chrs", "Cprt", "Elym", "Gara", "Hatr", "Hebr", "Hung", "Khar",
     "Lydi", "Mand", "Mani", "Mend", "Merc", "Mero", "Narb", "Nbat", "Nkoo", "Orkh", "Ougr", "Palm",
@@ -22,22 +10,7 @@ static RTL_SCRIPTS: &[&str] = &[
     "Yezi",
 ];
 
-/// Every language whose *likely* script is right-to-left, sorted for binary
-/// search.
-///
-/// This table is what makes a bare `ar` — which is how a locale is actually
-/// spelled; nobody writes `ar-Arab` — resolve to
-/// [`TextDirection::RightToLeft`]. It is **derived**, not transcribed: it is
-/// every bare language subtag in CLDR release-48's `likelySubtags.xml` whose
-/// likely script appears in [`RTL_SCRIPTS`]. That file is not vendored (900 KB,
-/// and no line of it is quoted); `specs/cldr/README.md` records the pinned URL
-/// and the exact derivation.
-///
-/// All 258 of them, including the deprecated aliases CLDR still carries (`iw`
-/// for `he`, `ji` for `yi`, `in` is *not* here because Indonesian is LTR). A
-/// hand-picked shortlist would have been the Anglocentric failure in a different
-/// costume: it would have covered Arabic, Hebrew and Persian and quietly laid out
-/// Sindhi, N'Ko and Dhivehi backwards.
+#[doc = include_str!("script_direction.doc/RTL_LANGUAGES.md")]
 static RTL_LANGUAGES: &[&str] = &[
     "aao", "abh", "abv", "acm", "acq", "acw", "acx", "adf", "ae", "aeb", "aec", "aee", "aeq",
     "afb", "aib", "aii", "aij", "aiq", "amw", "apc", "apd", "ar", "arc", "arq", "ars", "ary",
@@ -61,12 +34,7 @@ static RTL_LANGUAGES: &[&str] = &[
     "ydg", "yhd", "yi", "yih", "yud", "zba", "zdj", "zrp", "zum",
 ];
 
-/// Returns the base [`TextDirection`] for an ISO-15924 `script` code.
-///
-/// The comparison is exact and case-sensitive against CLDR's canonical
-/// title-case spelling (`Arab`, not `arab`); callers hand this the already
-/// canonicalised subtag that
-/// [`LanguageTag::parse`](crate::locale::LanguageTag::parse) produced.
+#[doc = include_str!("script_direction.doc/script_direction.md")]
 #[must_use]
 pub fn script_direction(script: &str) -> TextDirection {
     if RTL_SCRIPTS.binary_search(&script).is_ok() {
@@ -76,13 +44,7 @@ pub fn script_direction(script: &str) -> TextDirection {
     }
 }
 
-/// Returns the base [`TextDirection`] implied by a `language` subtag alone, for
-/// a tag that names no script.
-///
-/// This is CLDR's likely-script inference collapsed to the one bit this layer
-/// needs. An unlisted language answers [`TextDirection::LeftToRight`] — which is
-/// a *guess*, and the reason [`LanguageTag::parse`](crate::locale::LanguageTag::parse)
-/// keeps an explicit script subtag when the caller supplies one.
+#[doc = include_str!("script_direction.doc/language_direction.md")]
 #[must_use]
 pub fn language_direction(language: &str) -> TextDirection {
     if RTL_LANGUAGES.binary_search(&language).is_ok() {

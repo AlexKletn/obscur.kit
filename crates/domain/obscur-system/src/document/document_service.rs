@@ -1,25 +1,20 @@
-//! The replaceable port for document read/write/create/enumerate (spec §6.10).
+#![doc = include_str!("document_service.doc/_module.md")]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::document::{DirectoryHandle, DocumentHandle, DocumentMetadata, DocumentPermission};
 
-/// Why a [`DocumentService`] operation failed (spec §6.10).
-///
-/// Each variant is a pure, backend-agnostic value; the informational variants
-/// carry a human-readable reason. This type implements [`std::error::Error`] so
-/// it composes with the standard error ecosystem while remaining I/O-free.
+#[doc = include_str!("document_service.doc/DocumentError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocumentError {
-    /// No document or directory matched the handle's token.
+    #[doc = include_str!("document_service.doc/NotFound.md")]
     NotFound,
-    /// The operation was not permitted — for example a write to a read-only
-    /// handle (spec §6.10 permission token).
+    #[doc = include_str!("document_service.doc/PermissionDenied.md")]
     PermissionDenied,
-    /// The backend does not support this operation; the payload names what.
+    #[doc = include_str!("document_service.doc/Unsupported.md")]
     Unsupported(Box<str>),
-    /// An underlying I/O operation failed; the payload describes the failure.
+    #[doc = include_str!("document_service.doc/Io.md")]
     Io(Box<str>),
 }
 
@@ -36,78 +31,43 @@ impl std::fmt::Display for DocumentError {
 
 impl std::error::Error for DocumentError {}
 
-/// The replaceable port for accessing documents behind opaque handles
-/// (spec §6.10 read/write/create/enumerate).
-///
-/// The pure domain models document access as this object-safe trait: an adapter
-/// implements it once per host (a real filesystem, a portal, a cloud provider, a
-/// virtual filesystem) and the domain drives it as `Box<dyn DocumentService>`.
-/// The trait is synchronous and returns [`Result`]; asynchronous and real I/O
-/// concerns belong to the adapter, not here (spec §5.15).
-///
-/// Read-only operations take `&self`; mutating ones take `&mut self`. A write to
-/// a handle that is not writable must fail with [`DocumentError::PermissionDenied`]
-/// rather than silently succeeding.
+#[doc = include_str!("document_service.doc/DocumentService.md")]
 pub trait DocumentService {
-    /// Reads the full byte contents of the document behind `handle`
-    /// (spec §6.10).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DocumentError::NotFound`] when the token resolves to nothing.
+    #[doc = include_str!("document_service.doc/read_bytes.md")]
     fn read_bytes(&self, handle: &DocumentHandle) -> Result<Arc<[u8]>, DocumentError>;
 
-    /// Writes `bytes` to the document behind `handle` (spec §6.10).
-    ///
-    /// # Errors
-    ///
-    /// Must return [`DocumentError::PermissionDenied`] when the handle is not
-    /// writable ([`DocumentHandle::can_write`]).
+    #[doc = include_str!("document_service.doc/write_bytes.md")]
     fn write_bytes(&mut self, handle: &DocumentHandle, bytes: &[u8]) -> Result<(), DocumentError>;
 
-    /// Enumerates the documents contained in `dir` (spec §6.10 enumerate).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DocumentError::NotFound`] when the directory token is unknown.
+    #[doc = include_str!("document_service.doc/list.md")]
     fn list(&self, dir: &DirectoryHandle) -> Result<Vec<DocumentHandle>, DocumentError>;
 
-    /// Returns the metadata for the document behind `handle` (spec §6.10).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DocumentError::NotFound`] when the token resolves to nothing.
+    #[doc = include_str!("document_service.doc/metadata.md")]
     fn metadata(&self, handle: &DocumentHandle) -> Result<DocumentMetadata, DocumentError>;
 }
 
-/// A reference, in-memory [`DocumentService`] — a deterministic virtual
-/// filesystem (spec §6.10).
-///
-/// `MemoryDocumentService` is the honest headless default: it stores document
-/// bytes keyed by their opaque token and directory membership as token lists,
-/// with no real I/O, clock, or randomness. It exists to exercise the port and to
-/// give tests and headless runs a working document backend.
+#[doc = include_str!("document_service.doc/MemoryDocumentService.md")]
 #[derive(Debug, Default, Clone)]
 pub struct MemoryDocumentService {
-    /// Document bytes keyed by document token.
+    #[doc = include_str!("document_service.doc/files.md")]
     files: BTreeMap<Box<str>, Arc<[u8]>>,
-    /// Directory membership: directory token to its child document tokens.
+    #[doc = include_str!("document_service.doc/dirs.md")]
     dirs: BTreeMap<Box<str>, Vec<Box<str>>>,
 }
 
 impl MemoryDocumentService {
-    /// Creates an empty in-memory document service (spec §6.10).
+    #[doc = include_str!("document_service.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Seeds a document's bytes under `token` (test/adapter helper).
+    #[doc = include_str!("document_service.doc/insert_file.md")]
     pub fn insert_file(&mut self, token: impl Into<Box<str>>, bytes: impl Into<Arc<[u8]>>) {
         self.files.insert(token.into(), bytes.into());
     }
 
-    /// Seeds a directory `token` with its child document tokens (test helper).
+    #[doc = include_str!("document_service.doc/insert_dir.md")]
     pub fn insert_dir(&mut self, token: impl Into<Box<str>>, children: Vec<Box<str>>) {
         self.dirs.insert(token.into(), children);
     }

@@ -1,45 +1,21 @@
-//! [`TransactionValidator`]: stateless structural validation of UI transactions (spec §3.2).
+#![doc = include_str!("transaction_validator.doc/_module.md")]
 
 use super::transaction_error::TransactionError;
 use super::ui_operation::UiOperation;
 use super::ui_transaction::UiTransaction;
 
-/// A stateless validator for [`UiTransaction`]s.
-///
-/// Per spec §3.2, normal UI commits are *validated before application*. This
-/// validator performs the **structural** checks that require only the batch
-/// itself — it never mutates anything and holds no state:
-///
-/// - at most one [`UiOperation::ReplaceRoot`] per batch, otherwise
-///   [`TransactionError::ConflictingRootReplacement`] (a frame can reconcile at
-///   most one new root);
-/// - a node is not targeted twice by the same kind of operation within the
-///   batch, otherwise [`TransactionError::DuplicateNodeOperation`].
-///
-/// **Liveness** validation — checking that targeted nodes actually exist in the
-/// tree — is deliberately *not* done here; it is applied later in the frame
-/// pipeline, where the live tree is available. Keeping this validator
-/// tree-agnostic is what lets it stay stateless and reusable for provisional
-/// (commit/cancel) systems.
-///
-/// [`UiTransaction`]: crate::transaction::UiTransaction
+#[doc = include_str!("transaction_validator.doc/TransactionValidator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TransactionValidator;
 
 impl TransactionValidator {
-    /// Creates a new validator. The validator is zero-sized and stateless.
+    #[doc = include_str!("transaction_validator.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Validates that `tx` is structurally well-formed without mutating it.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Ok(())` if the batch may be committed, or the first
-    /// [`TransactionError`] encountered otherwise. Because validation is
-    /// side-effect free, a rejected transaction leaves every domain untouched.
+    #[doc = include_str!("transaction_validator.doc/validate.md")]
     pub fn validate(&self, tx: &UiTransaction) -> Result<(), TransactionError> {
         let mut root_replacements = 0usize;
         // (discriminant tag, node) pairs already seen, used to detect a node
@@ -69,8 +45,7 @@ impl TransactionValidator {
         Ok(())
     }
 
-    /// Returns a stable discriminant tag for the node-targeting operation kinds,
-    /// used only to compare "same kind" during duplicate detection.
+    #[doc = include_str!("transaction_validator.doc/kind_tag.md")]
     const fn kind_tag(op: &UiOperation) -> u8 {
         match op {
             UiOperation::ReplaceRoot => 0,

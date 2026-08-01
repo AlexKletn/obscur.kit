@@ -1,16 +1,4 @@
-//! The compiler entry point: a parsed stylesheet into native structures (§4.12).
-//!
-//! [`StylesheetCompiler`] walks a [`ParsedStylesheet`] and lowers it into a
-//! [`CompiledStylesheet`] of `obscur-style` cascade declarations and custom
-//! properties, `obscur-motion` keyframe tracks and transition templates, and the
-//! conditional (`@media` / `@container`) groups that gate them — carrying
-//! forward the parser's own errors and unsupported-feature diagnostics (§4.13).
-//!
-//! Because `obscur_identity::InternedSymbol` is an opaque handle with no shared
-//! global interner, the compiler owns its own [`CssSymbolInterner`]: every
-//! keyword, custom-property name and animation name is interned here, and the
-//! resulting table travels inside the [`CompiledStylesheet`] so consumers can
-//! resolve a symbol back to its text.
+#![doc = include_str!("stylesheet_compiler.doc/_module.md")]
 
 use std::collections::HashMap;
 
@@ -28,19 +16,13 @@ use obscur_style::selector::{SelectorList, SelectorSpecificity};
 use super::animation_compiler::{AnimationCompiler, AnimationRef};
 use super::condition_lowering::lower_condition;
 use super::keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
+use super::longhand_catalog::{keyword_value_is_foreign, property_id_from_name};
 use super::motion_rule::{CompiledAnimation, CompiledMotionRule};
-use super::property_compiler::{
-    CompiledDeclaration, PropertyCompiler, keyword_value_is_foreign, property_id_from_name,
-};
+use super::property_compiler::{CompiledDeclaration, PropertyCompiler};
 use super::selector_compiler::SelectorCompiler;
 use super::transition_compiler::{CompiledTransition, TransitionCompiler};
 
-/// A string interner mapping CSS text to opaque [`InternedSymbol`] handles.
-///
-/// The kit exposes no shared global interner, so the CSS compiler owns this one.
-/// Symbols are minted with sequential raw ids and deduplicated, so equal strings
-/// always intern to the same symbol. The reverse table lets consumers
-/// [`resolve`](CssSymbolInterner::resolve) a symbol back to its text.
+#[doc = include_str!("stylesheet_compiler.doc/CssSymbolInterner.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CssSymbolInterner {
     lookup: HashMap<Box<str>, InternedSymbol>,
@@ -48,13 +30,13 @@ pub struct CssSymbolInterner {
 }
 
 impl CssSymbolInterner {
-    /// Creates an empty interner.
+    #[doc = include_str!("stylesheet_compiler.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Interns `text`, returning its symbol; equal strings share a symbol.
+    #[doc = include_str!("stylesheet_compiler.doc/intern.md")]
     pub fn intern(&mut self, text: &str) -> InternedSymbol {
         if let Some(&symbol) = self.lookup.get(text) {
             return symbol;
@@ -67,8 +49,7 @@ impl CssSymbolInterner {
         symbol
     }
 
-    /// Resolves a previously interned symbol back to its text, or [`None`] if the
-    /// symbol was not minted by this interner.
+    #[doc = include_str!("stylesheet_compiler.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, symbol: InternedSymbol) -> Option<&str> {
         usize::try_from(symbol.raw())
@@ -78,87 +59,54 @@ impl CssSymbolInterner {
     }
 }
 
-/// The condition gating a [`CompiledConditionalGroup`].
-///
-/// The parser's normalized query is carried verbatim: evaluating it against a
-/// live environment is a later (runtime) concern.
+#[doc = include_str!("stylesheet_compiler.doc/CompiledCondition.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompiledCondition {
-    /// An `@media` condition.
+    #[doc = include_str!("stylesheet_compiler.doc/Media.md")]
     Media(ParsedMediaQueryList),
-    /// An `@container` condition.
+    #[doc = include_str!("stylesheet_compiler.doc/Container.md")]
     Container(ParsedContainerQuery),
 }
 
-/// A conditional group: declarations gated behind an `@media`/`@container`
-/// condition (§4.15/§4.16).
-///
-/// The declarations inside the block are fully compiled; the group simply pairs
-/// them with the condition under which they apply.
+#[doc = include_str!("stylesheet_compiler.doc/CompiledConditionalGroup.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledConditionalGroup {
-    /// The condition under which the grouped declarations apply.
+    #[doc = include_str!("stylesheet_compiler.doc/condition.md")]
     pub condition: CompiledCondition,
-    /// The standard declarations inside the conditional block.
+    #[doc = include_str!("stylesheet_compiler.doc/declarations.md")]
     pub declarations: Vec<Declaration>,
-    /// The custom properties inside the conditional block.
+    #[doc = include_str!("stylesheet_compiler.doc/custom_properties.md")]
     pub custom_properties: Vec<CustomProperty>,
-    /// The transition templates inside the conditional block.
+    #[doc = include_str!("stylesheet_compiler.doc/transitions.md")]
     pub transitions: Vec<CompiledTransition>,
 }
 
-/// The fully compiled stylesheet: the native structures the rest of the kit
-/// consumes (spec: "Выход — структуры obscur-style и obscur-motion").
+#[doc = include_str!("stylesheet_compiler.doc/CompiledStylesheet.md")]
 #[derive(Debug, Clone)]
 pub struct CompiledStylesheet {
-    /// Top-level standard cascade declarations, in source order.
+    #[doc = include_str!("stylesheet_compiler.doc/declarations_2.md")]
     pub declarations: Vec<Declaration>,
-    /// Top-level custom-property declarations.
+    #[doc = include_str!("stylesheet_compiler.doc/custom_properties_2.md")]
     pub custom_properties: Vec<CustomProperty>,
-    /// Conditional (`@media` / `@container`) groups.
+    #[doc = include_str!("stylesheet_compiler.doc/conditional_groups.md")]
     pub conditional_groups: Vec<CompiledConditionalGroup>,
-    /// Compiled `@keyframes` rules.
+    #[doc = include_str!("stylesheet_compiler.doc/keyframes.md")]
     pub keyframes: Vec<CompiledKeyframes>,
-    /// Top-level `transition` templates.
+    #[doc = include_str!("stylesheet_compiler.doc/transitions_2.md")]
     pub transitions: Vec<CompiledTransition>,
-    /// Selector-associated motion: per style rule, the `transition` templates
-    /// and resolved `@keyframes` animations that rule declares, paired with the
-    /// selector list the runtime matches against the retained tree (§4.17).
-    ///
-    /// This is the wiring input the runtime consumes to drive CSS transitions and
-    /// animations: unlike the flat [`transitions`](Self::transitions) /
-    /// [`keyframes`](Self::keyframes) outputs, each entry keeps the association
-    /// between a selector and the motion it declares, so a transition fires only
-    /// on the nodes its rule matched and a `@keyframes` plays only on elements
-    /// that reference it via `animation`/`animation-name`.
+    #[doc = include_str!("stylesheet_compiler.doc/motion_rules.md")]
     pub motion_rules: Vec<CompiledMotionRule>,
-    /// The interner backing every [`InternedSymbol`] in this stylesheet.
+    #[doc = include_str!("stylesheet_compiler.doc/symbols.md")]
     pub symbols: CssSymbolInterner,
-    /// The runtime-matchable stylesheet: every style rule lowered into the
-    /// `obscur-style` selector + [`BlockDeclaration`] model the
-    /// [`StyleMatcher`](obscur_style::matching::StyleMatcher) consumes (§4.13).
-    ///
-    /// This is an *additional* output alongside [`declarations`](Self::declarations)
-    /// (which pre-resolve the cascade context per selector): here each rule keeps
-    /// its authored selector list and block, and the matcher supplies specificity,
-    /// origin and source order at match time. Only standard longhand declarations
-    /// enter a block; custom properties and unsupported declarations are recorded
-    /// on the other fields, not here. Style rules nested inside `@media` /
-    /// `@container` groups are lowered with their group's condition **attached**
-    /// as an `obscur-style`
-    /// [`RuleCondition`](obscur_style::matching::RuleCondition), so the matcher
-    /// only lets them contribute when that condition holds against the runtime
-    /// environment (§4.13); the condition is *also* modelled, alongside the
-    /// group's flat declarations, in [`conditional_groups`](Self::conditional_groups).
+    #[doc = include_str!("stylesheet_compiler.doc/matchable.md")]
     pub matchable: Stylesheet,
-    /// Recognised-but-unsupported features (from parsing and compiling).
+    #[doc = include_str!("stylesheet_compiler.doc/unsupported.md")]
     pub unsupported: Vec<UnsupportedCssFeature>,
-    /// Syntax errors carried forward from parsing.
+    #[doc = include_str!("stylesheet_compiler.doc/errors.md")]
     pub errors: Vec<CssParseError>,
 }
 
-/// The staging buffer a rule list compiles into before it is lifted into the
-/// [`CompiledStylesheet`] (or wrapped in a [`CompiledConditionalGroup`]).
+#[doc = include_str!("stylesheet_compiler.doc/Accumulator.md")]
 #[derive(Default)]
 struct Accumulator {
     declarations: Vec<Declaration>,
@@ -171,23 +119,14 @@ struct Accumulator {
     unsupported: Vec<UnsupportedCssFeature>,
 }
 
-/// A style rule's motion before `@keyframes` names are resolved to tracks: the
-/// rule's selector list, its transition templates, and its (still-by-name)
-/// animation references. Resolved into a [`CompiledMotionRule`] in
-/// [`StylesheetCompiler::compile`], where every `@keyframes` rule is known.
+#[doc = include_str!("stylesheet_compiler.doc/PendingMotionRule.md")]
 struct PendingMotionRule {
     selectors: SelectorList,
     transitions: Vec<CompiledTransition>,
     animations: Vec<AnimationRef>,
 }
 
-/// Compiles a [`ParsedStylesheet`] into a [`CompiledStylesheet`] (§4.12).
-///
-/// The compiler owns the string interner, the selector-id counter and the
-/// document-order counter used to rank declarations (§4.14). Construct one, set
-/// the [`CascadeOrigin`] with [`with_origin`](StylesheetCompiler::with_origin)
-/// if the default (`GlobalApp`) is not right, then
-/// [`compile`](StylesheetCompiler::compile).
+#[doc = include_str!("stylesheet_compiler.doc/StylesheetCompiler.md")]
 #[derive(Debug)]
 pub struct StylesheetCompiler {
     interner: CssSymbolInterner,
@@ -201,7 +140,7 @@ pub struct StylesheetCompiler {
 }
 
 impl StylesheetCompiler {
-    /// Creates a compiler that assigns declarations the `GlobalApp` origin.
+    #[doc = include_str!("stylesheet_compiler.doc/new_2.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -216,15 +155,14 @@ impl StylesheetCompiler {
         }
     }
 
-    /// Sets the [`CascadeOrigin`] every compiled declaration is tagged with.
+    #[doc = include_str!("stylesheet_compiler.doc/with_origin.md")]
     #[must_use]
     pub const fn with_origin(mut self, origin: CascadeOrigin) -> Self {
         self.origin = origin;
         self
     }
 
-    /// Compiles `sheet` into a [`CompiledStylesheet`], consuming this compiler's
-    /// interner into the result.
+    #[doc = include_str!("stylesheet_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(mut self, sheet: &ParsedStylesheet) -> CompiledStylesheet {
         let mut acc = Accumulator::default();
@@ -258,7 +196,7 @@ impl StylesheetCompiler {
         }
     }
 
-    /// Compiles a list of rules into `acc`, recursing into conditional groups.
+    #[doc = include_str!("stylesheet_compiler.doc/compile_rules.md")]
     fn compile_rules(&mut self, rules: &[ParsedRule], acc: &mut Accumulator) {
         for rule in rules {
             match rule {
@@ -285,8 +223,7 @@ impl StylesheetCompiler {
         }
     }
 
-    /// Compiles a style rule: one declaration set per matched selector, plus the
-    /// rule's `transition` templates (compiled once, being selector-independent).
+    #[doc = include_str!("stylesheet_compiler.doc/compile_style_rule.md")]
     fn compile_style_rule(&mut self, style: &ParsedStyleRule, acc: &mut Accumulator) {
         let selectors = self
             .selectors
@@ -345,14 +282,7 @@ impl StylesheetCompiler {
         acc.matchable_rules.push(rule);
     }
 
-    /// Builds the runtime-matchable [`StyleRule`] for a parsed style rule: the
-    /// lowered selector list paired with a block of authored [`BlockDeclaration`]s.
-    ///
-    /// The block is built once per rule (it is selector-independent). Motion
-    /// declarations are routed away as they are elsewhere, and only standard
-    /// longhands become block declarations; custom properties and unsupported
-    /// values are handled by the flat cascade path (their diagnostics are raised
-    /// there, so they are silently skipped here to avoid double reporting).
+    #[doc = include_str!("stylesheet_compiler.doc/lower_matchable_rule.md")]
     fn lower_matchable_rule(&mut self, style: &ParsedStyleRule) -> StyleRule {
         let mut block = Vec::new();
         // The longhands this rule authored whose value could not be parsed: they
@@ -407,17 +337,7 @@ impl Default for StylesheetCompiler {
     }
 }
 
-/// Lifts an inner accumulator into `acc`: nested keyframes, conditional groups
-/// and diagnostics rise to the enclosing scope, while the flat declarations and
-/// transitions are wrapped in a [`CompiledConditionalGroup`] under `condition`.
-///
-/// The nested style rules also rise into the enclosing matchable set, but each
-/// is now **gated** by `condition`: its `condition` is lowered into an
-/// `obscur-style` [`RuleCondition`](obscur_style::matching::RuleCondition) and
-/// attached to the rule, so the runtime matcher only lets it contribute when the
-/// condition holds against the live environment (§4.13). A rule that already
-/// carries a condition (it came from a group nested inside this one) is gated by
-/// the conjunction of the outer and inner conditions.
+#[doc = include_str!("stylesheet_compiler.doc/lift_group.md")]
 fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Accumulator) {
     acc.keyframes.append(&mut inner.keyframes);
     acc.conditional_groups.append(&mut inner.conditional_groups);
@@ -443,14 +363,7 @@ fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Ac
     });
 }
 
-/// Resolves a [`PendingMotionRule`]'s `animation` references against the
-/// stylesheet's compiled `@keyframes`, producing a [`CompiledMotionRule`], or
-/// [`None`] when the rule ends up carrying no drivable motion.
-///
-/// Each [`AnimationRef`] is matched by interned name to a [`CompiledKeyframes`]
-/// (the names share one interner, so equal names intern equal); an unknown name
-/// resolves to nothing. A rule with neither transitions nor a resolvable
-/// animation is dropped.
+#[doc = include_str!("stylesheet_compiler.doc/resolve_motion_rule.md")]
 fn resolve_motion_rule(
     pending: PendingMotionRule,
     keyframes: &[CompiledKeyframes],
@@ -483,14 +396,13 @@ fn resolve_motion_rule(
     })
 }
 
-/// Returns whether a declaration name is any `transition-*`/`animation-*`
-/// property (routed away from ordinary property compilation).
+#[doc = include_str!("stylesheet_compiler.doc/is_motion_decl.md")]
 fn is_motion_decl(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.starts_with("transition") || lower.starts_with("animation")
 }
 
-/// Returns whether a declaration is exactly the `transition` shorthand.
+#[doc = include_str!("stylesheet_compiler.doc/is_transition_shorthand.md")]
 fn is_transition_shorthand(name: &str) -> bool {
     name.eq_ignore_ascii_case("transition")
 }

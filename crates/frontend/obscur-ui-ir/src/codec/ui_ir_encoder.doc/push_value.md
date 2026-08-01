@@ -1,0 +1,1 @@
+Writes a literal value.

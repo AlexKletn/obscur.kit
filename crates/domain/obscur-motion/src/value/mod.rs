@@ -1,4 +1,4 @@
-//! Value module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod interpolatable;
 pub use interpolatable::{Interpolatable, lerp_f32};
 mod interpolation_result;

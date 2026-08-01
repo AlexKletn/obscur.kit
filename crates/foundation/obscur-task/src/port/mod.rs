@@ -1,4 +1,4 @@
-//! Port module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod blocking_executor;
 mod local_spawner;
 mod spawner;

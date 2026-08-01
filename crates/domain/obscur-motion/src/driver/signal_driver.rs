@@ -1,34 +1,20 @@
-//! The [`SignalDriver`] value-driven motion source (spec §4.17).
+#![doc = include_str!("signal_driver.doc/_module.md")]
 
 use crate::driver::MotionDriver;
 
-/// A value-driven [`MotionDriver`]: a continuous external signal mapped onto
-/// `[0, 1]` (spec §4.17 "value-driven motion; drag/cursor/gesture signals").
-///
-/// The driver maps a raw signal `value` — a drag distance, cursor coordinate or
-/// gesture magnitude — from an input domain `[min, max]` onto normalized
-/// progress via `(value - min) / (max - min)`, clamped to `[0, 1]`. The domain
-/// endpoints do not have to be ordered: an **inverted** domain (`min > max`)
-/// normalizes correctly, mapping `value == min` to progress `0` and
-/// `value == max` to progress `1`, so a signal that runs high-to-low still
-/// drives forward. A degenerate domain (`min == max`) has no width to normalize
-/// against and yields progress `0`.
+#[doc = include_str!("signal_driver.doc/SignalDriver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SignalDriver {
-    /// The current raw signal value.
+    #[doc = include_str!("signal_driver.doc/value.md")]
     value: f32,
-    /// The input-domain endpoint mapped to progress `0`.
+    #[doc = include_str!("signal_driver.doc/min.md")]
     min: f32,
-    /// The input-domain endpoint mapped to progress `1`.
+    #[doc = include_str!("signal_driver.doc/max.md")]
     max: f32,
 }
 
 impl SignalDriver {
-    /// Creates a driver over the input domain `[min, max]`, starting with its
-    /// `value` at `min` (progress `0`).
-    ///
-    /// The endpoints may be inverted (`min > max`); see the type docs. If they
-    /// are equal the domain is degenerate and progress is always `0`.
+    #[doc = include_str!("signal_driver.doc/new.md")]
     #[must_use]
     pub const fn new(min: f32, max: f32) -> Self {
         Self {
@@ -38,35 +24,31 @@ impl SignalDriver {
         }
     }
 
-    /// Returns this driver with its current signal set to `value`.
+    #[doc = include_str!("signal_driver.doc/with_value.md")]
     #[must_use]
     pub const fn with_value(mut self, value: f32) -> Self {
         self.value = value;
         self
     }
 
-    /// Sets the current raw signal value (spec §4.17).
-    ///
-    /// This is the interaction subsystem's write path: a drag/cursor/gesture
-    /// reports its latest reading here and the driver re-normalizes it on the
-    /// next [`progress`](MotionDriver::progress) read.
+    #[doc = include_str!("signal_driver.doc/set_value.md")]
     pub fn set_value(&mut self, value: f32) {
         self.value = value;
     }
 
-    /// Returns the current raw signal value.
+    #[doc = include_str!("signal_driver.doc/value_2.md")]
     #[must_use]
     pub const fn value(&self) -> f32 {
         self.value
     }
 
-    /// Returns the input-domain endpoint mapped to progress `0`.
+    #[doc = include_str!("signal_driver.doc/min_2.md")]
     #[must_use]
     pub const fn min(&self) -> f32 {
         self.min
     }
 
-    /// Returns the input-domain endpoint mapped to progress `1`.
+    #[doc = include_str!("signal_driver.doc/max_2.md")]
     #[must_use]
     pub const fn max(&self) -> f32 {
         self.max
@@ -74,10 +56,7 @@ impl SignalDriver {
 }
 
 impl MotionDriver for SignalDriver {
-    /// Returns `((value - min) / (max - min)).clamp(0.0, 1.0)` (spec §4.17).
-    ///
-    /// A degenerate domain (`min == max`) has no width and yields `0.0`; an
-    /// inverted domain normalizes correctly (see the type docs).
+    #[doc = include_str!("signal_driver.doc/progress.md")]
     fn progress(&self) -> f32 {
         let span = self.max - self.min;
         if span == 0.0 {
@@ -86,7 +65,7 @@ impl MotionDriver for SignalDriver {
         ((self.value - self.min) / span).clamp(0.0, 1.0)
     }
 
-    /// Always `true`: a live drag/cursor/gesture signal can move at any time.
+    #[doc = include_str!("signal_driver.doc/is_active.md")]
     fn is_active(&self) -> bool {
         true
     }

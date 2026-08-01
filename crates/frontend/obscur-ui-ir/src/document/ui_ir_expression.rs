@@ -1,94 +1,76 @@
-//! `UiIrExpression`: a value binding in the IR — a literal or dynamic
-//! reference (spec §2.5).
+#![doc = include_str!("ui_ir_expression.doc/_module.md")]
 
-/// A literal value carried by a [`UiIrExpression::Literal`] (spec §2.5).
-///
-/// This mirrors the runtime `ViewValue`: the same closed set of scalar kinds a
-/// property can hold, but as the serializable compile artifact rather than the
-/// live desired-tree value. Because the [`Float`](UiIrValue::Float) variant
-/// carries an `f64`, this enum derives only `Debug`, `Clone`, and `PartialEq`
-/// — not `Eq`/`Hash` (floats are not totally ordered and have `NaN`).
+#[doc = include_str!("ui_ir_expression.doc/UiIrValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiIrValue {
-    /// Absence of a value.
+    #[doc = include_str!("ui_ir_expression.doc/Null.md")]
     Null,
-    /// A boolean value.
+    #[doc = include_str!("ui_ir_expression.doc/Bool.md")]
     Bool(bool),
-    /// A signed integer value.
+    #[doc = include_str!("ui_ir_expression.doc/Int.md")]
     Int(i64),
-    /// A floating-point value. Prevents deriving `Eq`/`Hash` on this enum.
+    #[doc = include_str!("ui_ir_expression.doc/Float.md")]
     Float(f64),
-    /// An owned text value.
+    #[doc = include_str!("ui_ir_expression.doc/Text.md")]
     Text(Box<str>),
 }
 
 impl UiIrValue {
-    /// Returns whether this value is [`Null`](UiIrValue::Null).
+    #[doc = include_str!("ui_ir_expression.doc/is_null.md")]
     #[must_use]
     pub const fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
 }
 
-/// A value binding in the UI IR: either a literal or a dynamic reference
-/// (spec §2.5).
-///
-/// Expressions are the serializable compile artifact a property's or event's
-/// value lowers to. A [`Literal`](UiIrExpression::Literal) is a baked-in
-/// constant; a [`Binding`](UiIrExpression::Binding) is a path into component
-/// state or props resolved at runtime; a [`Call`](UiIrExpression::Call) applies
-/// a named function or formatter to argument expressions.
-///
-/// Because [`UiIrValue`] contains an `f64`, this enum derives only `Debug`,
-/// `Clone`, and `PartialEq`.
+#[doc = include_str!("ui_ir_expression.doc/UiIrExpression.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiIrExpression {
-    /// A literal, baked-in value.
+    #[doc = include_str!("ui_ir_expression.doc/Literal.md")]
     Literal(UiIrValue),
-    /// A path into component state or props, e.g. `"user.name"`, resolved at
-    /// runtime.
+    #[doc = include_str!("ui_ir_expression.doc/Binding.md")]
     Binding(Box<str>),
-    /// A function or formatter call applied to argument expressions.
+    #[doc = include_str!("ui_ir_expression.doc/Call.md")]
     Call {
-        /// The name of the function or formatter being called.
+        #[doc = include_str!("ui_ir_expression.doc/name.md")]
         name: Box<str>,
-        /// The argument expressions, in order.
+        #[doc = include_str!("ui_ir_expression.doc/args.md")]
         args: Vec<UiIrExpression>,
     },
 }
 
 impl UiIrExpression {
-    /// Creates a literal expression from `value`.
+    #[doc = include_str!("ui_ir_expression.doc/literal.md")]
     #[must_use]
     pub const fn literal(value: UiIrValue) -> Self {
         Self::Literal(value)
     }
 
-    /// Creates a literal text expression.
+    #[doc = include_str!("ui_ir_expression.doc/text.md")]
     #[must_use]
     pub fn text(value: impl Into<Box<str>>) -> Self {
         Self::Literal(UiIrValue::Text(value.into()))
     }
 
-    /// Creates a literal boolean expression.
+    #[doc = include_str!("ui_ir_expression.doc/bool.md")]
     #[must_use]
     pub const fn bool(value: bool) -> Self {
         Self::Literal(UiIrValue::Bool(value))
     }
 
-    /// Creates a literal integer expression.
+    #[doc = include_str!("ui_ir_expression.doc/int.md")]
     #[must_use]
     pub const fn int(value: i64) -> Self {
         Self::Literal(UiIrValue::Int(value))
     }
 
-    /// Creates a binding expression from a path into component state or props.
+    #[doc = include_str!("ui_ir_expression.doc/binding.md")]
     #[must_use]
     pub fn binding(path: impl Into<Box<str>>) -> Self {
         Self::Binding(path.into())
     }
 
-    /// Creates a call expression applying `name` to `args`.
+    #[doc = include_str!("ui_ir_expression.doc/call.md")]
     #[must_use]
     pub fn call(name: impl Into<Box<str>>, args: Vec<UiIrExpression>) -> Self {
         Self::Call {
@@ -97,14 +79,13 @@ impl UiIrExpression {
         }
     }
 
-    /// Returns whether this expression is a [`Literal`](UiIrExpression::Literal).
+    #[doc = include_str!("ui_ir_expression.doc/is_literal.md")]
     #[must_use]
     pub const fn is_literal(&self) -> bool {
         matches!(self, Self::Literal(_))
     }
 
-    /// Returns the literal value if this expression is a
-    /// [`Literal`](UiIrExpression::Literal), otherwise `None`.
+    #[doc = include_str!("ui_ir_expression.doc/as_literal.md")]
     #[must_use]
     pub const fn as_literal(&self) -> Option<&UiIrValue> {
         match self {
@@ -113,8 +94,7 @@ impl UiIrExpression {
         }
     }
 
-    /// Returns the binding path if this expression is a
-    /// [`Binding`](UiIrExpression::Binding), otherwise `None`.
+    #[doc = include_str!("ui_ir_expression.doc/as_binding.md")]
     #[must_use]
     pub fn as_binding(&self) -> Option<&str> {
         match self {

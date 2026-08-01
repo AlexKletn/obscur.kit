@@ -1,12 +1,4 @@
-//! **SPECIFICATION-DERIVED** transaction and persistence-restore cases for
-//! obscur.kit §3.2 ("Mutations are normalized into validated `UiOps` and
-//! committed atomically between frames") and §3.8 ("scroll positions" restored
-//! via "Optional versioned helpers may serialize and restore").
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §3
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the runtime, and must not be "corrected" by editing the expected
-//! value.
+#![doc = include_str!("spec_ch3_transactions.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch3_support/mod.rs"]
@@ -15,26 +7,7 @@ mod support;
 use obscur_kit::runtime::transaction::{TransactionValidator, UiOperation, UiTransaction};
 use support::{approx, at, drain_frames, el, geom, runtime, view};
 
-/// §3.2 — "Mutations are normalized into validated `UiOps` and committed
-/// atomically between frames."
-///
-/// A batch whose *second* op is invalid must be rejected as a whole: the first
-/// op's effect must not appear, and no frame is requested.
-///
-/// WEAKENED 2026-07-19: the batch's invalid op used to be an
-/// `InvalidateLayout` aimed at a NodeId that is not in the tree, and the case
-/// asserted that a dead target rejects the batch. §3.2 says "Mutations are
-/// normalized into validated `UiOps` and committed atomically between frames."
-/// and "- normal UI commits are validated before application;" — it says commits
-/// ARE validated, and nowhere enumerates what validation checks. Target liveness
-/// is not among the things the text requires, and `TransactionValidator` is by
-/// construction stateless and tree-less, so it could not check it. The invalid
-/// op is now one the spec's own vocabulary does cover — a normalized batch that
-/// contradicts itself — so the case still tests the property it is named for:
-/// atomicity. Candidate spec amendment: state what §3.2 validation is obliged to
-/// check, and in particular whether an op targeting a node that no longer exists
-/// is rejected, dropped, or applied as a no-op — three defensible answers with
-/// very different consequences for an app that mutates across a frame boundary.
+#[doc = include_str!("spec_ch3_transactions.doc/a_batch_with_one_invalid_op_applies_none_of_it.md")]
 #[test]
 fn a_batch_with_one_invalid_op_applies_none_of_it() {
     const CSS: &str = ".page { width: 300px; height: 300px } \
@@ -84,16 +57,7 @@ fn a_batch_with_one_invalid_op_applies_none_of_it() {
     );
 }
 
-/// §3.8 — "scroll positions" restored via "Optional versioned helpers may
-/// serialize and restore".
-///
-/// A persisted offset of 1500 restored into a session whose content is now only
-/// 600px tall (400px viewport → max scroll 200) must clamp to **200** — not
-/// 1500, and not 0.
-///
-/// Translation note: the kit exposes no persistence-snapshot round trip, so the
-/// restore is expressed as writing the persisted offset into the scroll state,
-/// which is what a restore helper would do.
+#[doc = include_str!("spec_ch3_transactions.doc/a_restored_scroll_offset_is_clamped_to_the_new_content_extent.md")]
 #[test]
 fn a_restored_scroll_offset_is_clamped_to_the_new_content_extent() {
     const CSS: &str = ".scroller { width: 300px; height: 400px; overflow: auto } \

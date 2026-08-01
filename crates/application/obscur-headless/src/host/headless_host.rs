@@ -1,4 +1,4 @@
-//! The deterministic headless driver: [`HeadlessHost`].
+#![doc = include_str!("headless_host.doc/_module.md")]
 
 use std::fmt;
 use std::sync::Arc;
@@ -16,89 +16,36 @@ use crate::deterministic::{DeterministicClock, DeterministicExecutor};
 
 use super::{HeadlessConfig, VirtualWindow};
 
-/// Nanoseconds in one logical second — the conversion between the clock's unit
-/// and the motion scheduler's.
+#[doc = include_str!("headless_host.doc/NANOS_PER_SECOND.md")]
 const NANOS_PER_SECOND: f32 = 1_000_000_000.0;
 
-/// The official windowless, GPU-less entry point for reproducible tests
-/// (spec §7.4).
-///
-/// A `HeadlessHost` drives a real [`UiRuntime`] — the same integrator a windowed
-/// app runs — with no OS window and no GPU, and adds the two facilities §7.4
-/// names: a [`DeterministicClock`] and a [`DeterministicExecutor`]. Construct
-/// it, [`render_styled`](Self::render_styled) desired view trees, and inspect the
-/// resulting scene and tree.
-///
-/// # What "deterministic" means here
-///
-/// The host owns time and background work, and **a rendered frame goes through
-/// both**:
-///
-/// - [`advance_time`](Self::advance_time) advances the clock and hands the same
-///   delta to the runtime's motion scheduler, so an animation's sampled value
-///   reaches the *next* frame's paint. Time never moves on its own: with no
-///   `advance_time` call, repeated renders are byte-identical.
-/// - The host installs its executor as the runtime's blocking-work port
-///   ([`UiRuntime::set_blocking_executor`]), so a frame's resource loads are
-///   *queued* rather than run inline. [`run_tasks`](Self::run_tasks) runs them
-///   and applies the completions — §7.4's "controlled async completion".
-///
-/// The same sequence of calls with the same inputs always produces the same
-/// results, because every stage is deterministic and neither time nor background
-/// work advances unless the test drives it.
-///
-/// # Example flow
-///
-/// 1. `let mut host = HeadlessHost::new(runtime_id);`
-/// 2. `let result = host.render_styled(&desired, &sheets);` — one frame.
-/// 3. Inspect `result` (phase flags, snapshot) or [`snapshot`](Self::snapshot) /
-///    [`tree`](Self::tree) for the current committed state.
-///
-/// Anything the host does not wrap is reachable through
-/// [`runtime_mut`](Self::runtime_mut) — motion registration, resource providers,
-/// synthetic input, and the rest of the runtime's surface.
+#[doc = include_str!("headless_host.doc/HeadlessHost.md")]
 pub struct HeadlessHost {
-    /// The viewport/DPI configuration frames are produced under.
+    #[doc = include_str!("headless_host.doc/config.md")]
     config: HeadlessConfig,
-    /// The windowless mapping of the host's single window.
+    #[doc = include_str!("headless_host.doc/window.md")]
     window: VirtualWindow,
-    /// The real runtime this host drives; it owns the tree, scene, motion and
-    /// frame counter, so a headless frame and a windowed frame are the same
-    /// frame.
+    #[doc = include_str!("headless_host.doc/runtime.md")]
     runtime: UiRuntime,
-    /// The manually-advanced virtual clock. It is the host's single source of
-    /// time: [`advance_time`](HeadlessHost::advance_time) derives the motion
-    /// delta from it rather than from its own argument.
+    #[doc = include_str!("headless_host.doc/clock.md")]
     clock: DeterministicClock,
-    /// The manually-driven deterministic job runner, also installed on `runtime`
-    /// as its blocking-work port. Held as an [`Arc`] because the runtime holds
-    /// the other end.
+    #[doc = include_str!("headless_host.doc/executor.md")]
     executor: Arc<DeterministicExecutor>,
-    /// The clock reading the motion scheduler was last advanced to, so time is
-    /// handed to motion exactly once.
+    #[doc = include_str!("headless_host.doc/motion_at.md")]
     motion_at: Instant,
 }
 
 impl HeadlessHost {
-    /// The identity of the single virtual window a host owns.
+    #[doc = include_str!("headless_host.doc/WINDOW_ID.md")]
     const WINDOW_ID: WindowId = WindowId::from_raw(0);
 
-    /// Creates a headless host with the default [`HeadlessConfig`].
-    ///
-    /// The host starts with a fresh runtime (empty tree and scene), a clock at
-    /// time zero, an idle executor already installed as the runtime's blocking
-    /// port, and a virtual window sized to the configuration's viewport. The
-    /// first produced frame will be [`FrameId::FIRST`].
+    #[doc = include_str!("headless_host.doc/new.md")]
     #[must_use]
     pub fn new(runtime_id: RuntimeId) -> Self {
         Self::with_config(runtime_id, HeadlessConfig::default())
     }
 
-    /// Creates a headless host with an explicit [`HeadlessConfig`].
-    ///
-    /// The virtual window and the runtime's viewport are both sized to the
-    /// configuration, and all cross-frame state is fresh, exactly as in
-    /// [`new`](Self::new).
+    #[doc = include_str!("headless_host.doc/with_config.md")]
     #[must_use]
     pub fn with_config(runtime_id: RuntimeId, config: HeadlessConfig) -> Self {
         let window = VirtualWindow::new(Self::WINDOW_ID, config.viewport(), config.scale());
@@ -119,42 +66,18 @@ impl HeadlessHost {
         }
     }
 
-    /// Renders one deterministic frame that **matches authored stylesheets**
-    /// against the reconciled tree, and returns its [`FrameResult`].
-    ///
-    /// This is the headless equivalent of a frame: it force-renders the runtime
-    /// ([`UiRuntime::render_now`]) over the host-owned state, running
-    /// `View -> reconcile -> match -> style -> motion overlay -> layout -> scene`
-    /// synchronously, and advances the frame counter. No OS or GPU is involved.
-    ///
-    /// The frame reflects the clock: any motion registered on the runtime is
-    /// overlaid at the progress [`advance_time`](Self::advance_time) has driven
-    /// it to. Two calls with the same view, sheets, and clock reading produce the
-    /// same display list.
-    ///
-    /// `sheets` must be ordered by ascending cascade origin (system-default
-    /// first, inline last). An empty `sheets` slice matches nothing.
+    #[doc = include_str!("headless_host.doc/render_styled.md")]
     pub fn render_styled(&mut self, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
         self.runtime.render_now(desired, sheets)
     }
 
-    /// Returns an immutable snapshot of the current scene.
-    ///
-    /// This is the scene as of the most recent [`render_styled`](Self::render_styled);
-    /// a renderer (or a test) consumes the snapshot's display list without
-    /// touching the mutable scene.
+    #[doc = include_str!("headless_host.doc/snapshot.md")]
     #[must_use]
     pub fn snapshot(&self) -> SceneSnapshot {
         self.runtime.snapshot()
     }
 
-    /// Advances the deterministic clock by `nanos` nanoseconds **and drives the
-    /// runtime's motion by the same amount**.
-    ///
-    /// Time in a headless run only moves when the test asks it to. The delta
-    /// handed to motion is derived from the clock's own readings rather than from
-    /// `nanos`, so the clock — not this argument — is what a frame's animation
-    /// progress follows.
+    #[doc = include_str!("headless_host.doc/advance_time.md")]
     pub fn advance_time(&mut self, nanos: u64) {
         self.clock.advance(nanos);
         let now = self.clock.now();
@@ -166,78 +89,60 @@ impl HeadlessHost {
         self.runtime.advance_motion(delta as f32 / NANOS_PER_SECOND);
     }
 
-    /// Drives all queued deterministic jobs to completion and applies whatever
-    /// they finished, returning how many resource completions were applied.
-    ///
-    /// Background work never runs on its own in a headless run: the runtime
-    /// queued each load on this host's executor, and it runs in FIFO order
-    /// exactly when the test calls this. Draining the finished loads into the
-    /// runtime is the second half — without it the jobs would run but their
-    /// results would never reach a frame.
+    #[doc = include_str!("headless_host.doc/run_tasks.md")]
     pub fn run_tasks(&mut self) -> usize {
         self.executor.run();
         self.runtime.poll_resource_tasks()
     }
 
-    /// Returns the retained tree carried across frames.
+    #[doc = include_str!("headless_host.doc/tree.md")]
     #[must_use]
     pub fn tree(&self) -> &RetainedTree {
         self.runtime.tree()
     }
 
-    /// Returns the mutable scene's current state (as a shared reference).
+    #[doc = include_str!("headless_host.doc/scene.md")]
     #[must_use]
     pub fn scene(&self) -> &Scene {
         self.runtime.scene()
     }
 
-    /// Returns the runtime this host drives, for reads the host does not wrap
-    /// (computed styles, layout boxes, animation counts, ...).
+    #[doc = include_str!("headless_host.doc/runtime_2.md")]
     #[must_use]
     pub fn runtime(&self) -> &UiRuntime {
         &self.runtime
     }
 
-    /// Returns the runtime this host drives, for configuration and driving the
-    /// host does not wrap — registering motion ([`UiRuntime::animate`],
-    /// [`UiRuntime::set_css_motion`]), installing resource providers, or queueing
-    /// synthetic input.
-    ///
-    /// The clock and executor stay in charge of time and background work: the
-    /// executor is already installed as the runtime's blocking port, and motion
-    /// registered here is advanced by [`advance_time`](Self::advance_time).
-    /// Calling [`UiRuntime::advance_motion`] through this handle bypasses the
-    /// clock and forfeits that guarantee.
+    #[doc = include_str!("headless_host.doc/runtime_mut.md")]
     pub fn runtime_mut(&mut self) -> &mut UiRuntime {
         &mut self.runtime
     }
 
-    /// Returns the deterministic clock driving this host.
+    #[doc = include_str!("headless_host.doc/clock_2.md")]
     #[must_use]
     pub fn clock(&self) -> &DeterministicClock {
         &self.clock
     }
 
-    /// Returns the deterministic executor driving this host's background work —
-    /// the same one the runtime holds as its blocking port.
+    #[doc = include_str!("headless_host.doc/executor_2.md")]
     #[must_use]
     pub fn executor(&self) -> &DeterministicExecutor {
         &self.executor
     }
 
-    /// Returns the viewport/DPI configuration this host renders under.
+    #[doc = include_str!("headless_host.doc/config_2.md")]
     #[must_use]
     pub fn config(&self) -> HeadlessConfig {
         self.config
     }
 
-    /// Returns the host's virtual window.
+    #[doc = include_str!("headless_host.doc/window_2.md")]
     #[must_use]
     pub fn window(&self) -> VirtualWindow {
         self.window
     }
 
-    /// Returns the identity of the host this driver stands in for.
+    #[doc = include_str!("headless_host.doc/runtime_id.md")]
     #[must_use]
     pub fn runtime_id(&self) -> RuntimeId {
         self.runtime.id()
@@ -245,9 +150,7 @@ impl HeadlessHost {
 }
 
 impl fmt::Debug for HeadlessHost {
-    /// Reports the stable identity of the host — its runtime id and
-    /// configuration — without touching the opaque runtime, clock, or executor
-    /// internals.
+    #[doc = include_str!("headless_host.doc/fmt.md")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HeadlessHost")
             .field("runtime_id", &self.runtime_id())

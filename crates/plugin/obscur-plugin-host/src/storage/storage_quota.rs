@@ -1,6 +1,5 @@
-//! `StorageQuota` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("storage_quota.doc/_module.md")]
 
-/// Placeholder for the `StorageQuota` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("storage_quota.doc/StorageQuota.md")]
 #[derive(Debug)]
 pub struct StorageQuota;

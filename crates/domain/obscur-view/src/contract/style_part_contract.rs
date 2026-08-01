@@ -1,30 +1,24 @@
-//! `StylePartContract`: an exported style part and its states (spec §2.12).
+#![doc = include_str!("style_part_contract.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
-/// The exported contract for one style part of a component (spec §2.12).
-///
-/// A style part is a named, addressable region of a component that stylesheets
-/// may target (for example a "track" or "thumb"). Alongside its name it
-/// exports the set of visual states it can be in (for example "hover" or
-/// "disabled"). Both the part name and every state are interned handles, so
-/// styling references them by identity rather than by string.
+#[doc = include_str!("style_part_contract.doc/StylePartContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StylePartContract {
-    /// Interned name of the exported style part.
+    #[doc = include_str!("style_part_contract.doc/name.md")]
     pub name: InternedSymbol,
-    /// Interned names of the visual states this part can expose.
+    #[doc = include_str!("style_part_contract.doc/states.md")]
     pub states: Vec<InternedSymbol>,
 }
 
 impl StylePartContract {
-    /// Creates a style part contract with `name` exposing `states`.
+    #[doc = include_str!("style_part_contract.doc/new.md")]
     #[must_use]
     pub fn new(name: InternedSymbol, states: Vec<InternedSymbol>) -> Self {
         Self { name, states }
     }
 
-    /// Creates a style part contract that exposes no visual states.
+    #[doc = include_str!("style_part_contract.doc/stateless.md")]
     #[must_use]
     pub const fn stateless(name: InternedSymbol) -> Self {
         Self {
@@ -33,7 +27,7 @@ impl StylePartContract {
         }
     }
 
-    /// Returns whether the part exports the given visual `state`.
+    #[doc = include_str!("style_part_contract.doc/exposes.md")]
     #[must_use]
     pub fn exposes(&self, state: InternedSymbol) -> bool {
         self.states.contains(&state)

@@ -1,28 +1,8 @@
-//! Clamping a node's own content-axis size into its authored min/max (spec §4.2).
-//!
-//! A node's resolved content width/height must be clamped into its
-//! `min-`/`max-` bounds for that axis before its border box is formed. Every
-//! formatting context (flow, flex, grid) needs the same rule for the node's
-//! *own* box, so it lives here rather than being duplicated (and, historically,
-//! dropped) per algorithm.
+#![doc = include_str!("size_clamp.doc/_module.md")]
 
 use crate::model::{BoxSizing, Dimension};
 
-/// Clamps a resolved content-axis `extent` into the authored `min`/`max` for
-/// that axis.
-///
-/// Each bound is resolved against `available` and mapped through `box_sizing`
-/// (an authored min/max is a border-box length under `border-box`), matching how
-/// the explicit size is resolved. An [`Auto`](Dimension::Auto) bound imposes no
-/// limit. The max is applied before the min, so a min larger than the max wins
-/// (per CSS). The result is never negative.
-///
-/// An **intrinsic** bound (`min-width: min-content`, …) has no arithmetic value,
-/// so this — which only resolves — imposes no limit for one. A formatting context
-/// that can measure its content passes the measured value through
-/// [`clamp_content_measured`]; one that cannot degrades the bound to `auto`, the
-/// same fallback [`Dimension::resolve`] gives every algorithm without intrinsic
-/// support.
+#[doc = include_str!("size_clamp.doc/clamp_content.md")]
 #[must_use]
 pub(crate) fn clamp_content(
     extent: f32,
@@ -35,14 +15,7 @@ pub(crate) fn clamp_content(
     clamp_content_measured(extent, (min, None), (max, None), available, bp, box_sizing)
 }
 
-/// [`clamp_content`], with the intrinsic keywords already **measured** by the
-/// caller (spec §4.2, CSS Sizing 3 §4.1).
-///
-/// Each bound is paired with the content-axis length it measured to, which is
-/// [`Some`] only when that bound is an intrinsic keyword — the one case
-/// [`Dimension::resolve`] cannot answer, because the answer lives in the content.
-/// A caller that hands `(bound, None)` for a non-intrinsic bound loses nothing:
-/// the length is resolved from the bound itself, exactly as in [`clamp_content`].
+#[doc = include_str!("size_clamp.doc/clamp_content_measured.md")]
 #[must_use]
 pub(crate) fn clamp_content_measured(
     extent: f32,
@@ -62,19 +35,7 @@ pub(crate) fn clamp_content_measured(
     value.max(0.0)
 }
 
-/// One `(bound, measured)` pair as a **content**-axis length, or [`None`] when it
-/// imposes no limit (an `auto` bound, or an intrinsic one the caller could not
-/// measure).
-///
-/// # `box-sizing` applies to the authored length, not to the measured one
-///
-/// An authored `min-width: 200px` is a border-box length under
-/// `box-sizing: border-box`, so it is mapped through `box_sizing` like every other
-/// authored length. `min-width: min-content` authors no length at all: what came
-/// back from measuring is already a content width, so there is nothing for
-/// `box-sizing` to reinterpret — the same split
-/// [`intrinsic_inline_size`](super::intrinsic_inline_size) makes for an intrinsic
-/// `width`.
+#[doc = include_str!("size_clamp.doc/bound_content.md")]
 fn bound_content(
     (bound, measured): (Dimension, Option<f32>),
     available: f32,

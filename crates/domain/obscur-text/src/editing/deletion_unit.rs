@@ -1,38 +1,26 @@
-//! The granularity of a delete operation in the editing engine (spec §5.11).
+#![doc = include_str!("deletion_unit.doc/_module.md")]
 
-/// The granularity of a deletion, i.e. how much text one delete step removes
-/// (spec §5.11 editing engine — deletion semantics).
-///
-/// A [`DeletionUnit`] answers "how much?" for a delete; it pairs with an
-/// [`EditDirection`](crate::editing::EditDirection) in
-/// [`EditCommand::Delete`](crate::editing::EditCommand::Delete) so the same unit
-/// covers both the backward (Backspace) and forward (Delete) forms. When the
-/// selection is non-empty the engine deletes the selection instead and the unit
-/// is ignored; the unit governs the collapsed-caret case.
+#[doc = include_str!("deletion_unit.doc/DeletionUnit.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeletionUnit {
-    /// One extended grapheme cluster — Backspace (backward) / Delete (forward).
+    #[doc = include_str!("deletion_unit.doc/Grapheme.md")]
     Grapheme,
-    /// One word — Ctrl+Backspace (backward) / Ctrl+Delete (forward).
+    #[doc = include_str!("deletion_unit.doc/Word.md")]
     Word,
-    /// The whole line the caret sits on.
+    #[doc = include_str!("deletion_unit.doc/Line.md")]
     Line,
-    /// From the caret to the start of its line — e.g. Cmd+Backspace on macOS.
+    #[doc = include_str!("deletion_unit.doc/ToLineStart.md")]
     ToLineStart,
-    /// From the caret to the end of its line — e.g. Ctrl+K.
+    #[doc = include_str!("deletion_unit.doc/ToLineEnd.md")]
     ToLineEnd,
-    /// From the caret to the start of the document.
+    #[doc = include_str!("deletion_unit.doc/ToDocumentStart.md")]
     ToDocumentStart,
-    /// From the caret to the end of the document.
+    #[doc = include_str!("deletion_unit.doc/ToDocumentEnd.md")]
     ToDocumentEnd,
 }
 
 impl DeletionUnit {
-    /// Returns whether this unit is resolved relative to the caret's line — the
-    /// engine needs the current line's extent to compute the deleted range.
-    ///
-    /// True for [`Line`](Self::Line), [`ToLineStart`](Self::ToLineStart), and
-    /// [`ToLineEnd`](Self::ToLineEnd).
+    #[doc = include_str!("deletion_unit.doc/is_line_relative.md")]
     #[must_use]
     pub const fn is_line_relative(&self) -> bool {
         matches!(self, Self::Line | Self::ToLineStart | Self::ToLineEnd)

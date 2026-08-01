@@ -1,12 +1,4 @@
-//! A filesystem-backed [`ResourceLoader`] adapter (spec §5.15 sources, §2.7
-//! adapters — "Filesystem loader").
-//!
-//! Spec §5.15 lists `file` among a resource's sources, and states the kit's core
-//! performs no filesystem access itself — an interface adapter does. This module
-//! is that adapter: [`FsResourceLoader`] implements the pure
-//! [`ResourceLoader`] port using only `std`, reading the encoded bytes behind a
-//! [`ResourceSource::File`] from disk. An optional sandbox root confines resolved
-//! paths to a directory subtree (spec §2.7 adapters keep host reach explicit).
+#![doc = include_str!("fs_resource_loader.doc/_module.md")]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,36 +7,21 @@ use obscur_resources::port::{LoadedBytes, ResourceLoader};
 use obscur_resources::source::ResourceSource;
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-/// A filesystem-backed [`ResourceLoader`] that reads bytes for
-/// [`ResourceSource::File`] paths from disk (spec §5.15 file, §2.7 filesystem
-/// loader).
-///
-/// This adapter handles only filesystem paths: the bytes-in-hand kinds
-/// ([`ResourceSource::Embedded`], [`ResourceSource::Memory`]) are the
-/// `InlineLoader`'s job, and [`ResourceSource::Url`] / [`ResourceSource::Document`]
-/// require a host loader. When constructed with a sandbox root via
-/// [`FsResourceLoader::with_root`], `File` paths resolve relative to that root and
-/// may not escape it through `..` traversal; without a root ([`FsResourceLoader::new`])
-/// the path is used as given (absolute or relative to the process working
-/// directory).
+#[doc = include_str!("fs_resource_loader.doc/FsResourceLoader.md")]
 #[derive(Debug, Clone)]
 pub struct FsResourceLoader {
-    /// The optional sandbox root. When `Some`, `File` paths resolve relative to
-    /// it and must stay within its canonicalized subtree.
+    #[doc = include_str!("fs_resource_loader.doc/root.md")]
     root: Option<PathBuf>,
 }
 
 impl FsResourceLoader {
-    /// Creates a loader with no sandbox root: `File` paths are used as-is
-    /// (absolute, or relative to the process working directory).
+    #[doc = include_str!("fs_resource_loader.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self { root: None }
     }
 
-    /// Creates a loader confined to `root`: every `File` path resolves relative
-    /// to `root` and is rejected if it escapes the canonicalized root subtree
-    /// (spec §5.15 file, §2.7).
+    #[doc = include_str!("fs_resource_loader.doc/with_root.md")]
     #[must_use]
     pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
@@ -54,7 +31,7 @@ impl FsResourceLoader {
 }
 
 impl Default for FsResourceLoader {
-    /// The default loader is [`FsResourceLoader::new`] (no sandbox root).
+    #[doc = include_str!("fs_resource_loader.doc/default.md")]
     fn default() -> Self {
         Self::new()
     }
@@ -108,11 +85,7 @@ impl ResourceLoader for FsResourceLoader {
     }
 }
 
-/// Maps a filesystem [`std::io::Error`] onto a [`ResourceError`] (spec §5.15
-/// failed state): a missing file is [`ResourceError::NotFound`], a permission
-/// failure is a [`ResourceError::SourceUnavailable`] with a fixed reason, and any
-/// other I/O failure is [`ResourceError::SourceUnavailable`] carrying the I/O
-/// error's own message.
+#[doc = include_str!("fs_resource_loader.doc/map_io_error.md")]
 fn map_io_error(err: &std::io::Error) -> ResourceError {
     match err.kind() {
         std::io::ErrorKind::NotFound => ResourceError::NotFound,
@@ -123,14 +96,7 @@ fn map_io_error(err: &std::io::Error) -> ResourceError {
     }
 }
 
-/// Returns a MIME type for a file `extension`, or `None` when it is not in this
-/// minimal map.
-///
-/// This is a deliberately small, best-effort table covering the common UI asset
-/// extensions this adapter is expected to serve (images, vector art, stylesheets,
-/// JSON, plain text, and web fonts). It is not a comprehensive MIME registry;
-/// callers that need authoritative typing should sniff the bytes. The lookup is
-/// case-insensitive.
+#[doc = include_str!("fs_resource_loader.doc/mime_for_extension.md")]
 fn mime_for_extension(extension: &str) -> Option<&'static str> {
     let lower = extension.to_ascii_lowercase();
     let mime = match lower.as_str() {

@@ -1,27 +1,22 @@
-//! A request to show the OS system/window menu at a point (spec §6.4).
+#![doc = include_str!("system_menu_request.doc/_module.md")]
 
 use obscur_geometry::Point;
 
-/// A request to pop the platform's system (window) menu at a point (spec §6.4).
-///
-/// The position is in window-local logical pixels — typically the cursor
-/// location of a right-click on a custom title bar. On platforms without a
-/// system menu this request is a no-op that the backend reports via a
-/// `WindowOperationResult`; that reporting is not modeled here.
+#[doc = include_str!("system_menu_request.doc/SystemMenuRequest.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SystemMenuRequest {
-    /// The window-local point at which to pop the system menu.
+    #[doc = include_str!("system_menu_request.doc/position.md")]
     pub position: Point,
 }
 
 impl SystemMenuRequest {
-    /// Creates a request to show the system menu at `position`.
+    #[doc = include_str!("system_menu_request.doc/at.md")]
     #[must_use]
     pub const fn at(position: Point) -> Self {
         Self { position }
     }
 
-    /// Returns the window-local point at which to pop the menu.
+    #[doc = include_str!("system_menu_request.doc/position_2.md")]
     #[must_use]
     pub const fn position(&self) -> Point {
         self.position

@@ -1,0 +1,17 @@
+CLDR `<pluralRules locales="ru uk">`:
+
+```text
+one:    v = 0 and i % 10 = 1 and i % 100 != 11
+          @integer 1, 21, 31, 41, 51, 61, 71, 81, 101, 1001, …
+few:    v = 0 and i % 10 = 2..4 and i % 100 != 12..14
+          @integer 2~4, 22~24, 32~34, 42~44, 52~54, 62, 102, 1002, …
+many:   v = 0 and i % 10 = 0 or v = 0 and i % 10 = 5..9 or v = 0 and i % 100 = 11..14
+          @integer 0, 5~19, 100, 1000, 10000, 100000, 1000000, …
+other:    @decimal 0.0~1.5, 10.0, 100.0, 1000.0, …
+```
+
+The rule §7.2 names. Read what it keys on: **not** the value, and **not** the
+last digit alone. 21 is `one` and 11 is `many` though both end in 1; 111 is
+`many` though it ends in 1 *and* `i % 10 = 1`, because `i % 100 = 11`. And
+every one of the three conditions is guarded by `v = 0`, which is why `1.5`
+файла is `other` and not `one`.

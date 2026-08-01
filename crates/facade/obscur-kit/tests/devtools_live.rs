@@ -1,13 +1,4 @@
-//! End-to-end: an external DevTools client reads a **live** runtime's real tree
-//! over the socket (spec §7.6). A headless `UiRuntime` renders a scene, the
-//! facade bridges it into a `SnapshotInspectSource`, a `DevToolsEndpoint` serves
-//! it over a real loopback socket, and a `SocketClient` handshakes and inspects
-//! — proving the observe half of the agent loop works for an external process,
-//! not just in-process.
-//!
-//! The lower half covers the **pushed** direction (§7-C): a subscriber over the
-//! same real socket receives events a live runtime genuinely produced, and a host
-//! that cannot push denies the subscription instead of granting it.
+#![doc = include_str!("devtools_live.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::thread;
@@ -39,11 +30,10 @@ use obscur_kit::view::component::{
 };
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// A component whose `step` prop decodes only from an integer — so a text value
-/// fails its render and drives the runtime's real §1.6 failure path.
+#[doc = include_str!("devtools_live.doc/GUARDED.md")]
 const GUARDED: ComponentId = ComponentId::from_raw(0x00C0_FFEE);
 
-/// A non-reserved prop symbol, resolved the way the view tree resolves it.
+#[doc = include_str!("devtools_live.doc/step.md")]
 fn step() -> InternedSymbol {
     InternedSymbol::from_raw(0x8000_0021)
 }
@@ -88,7 +78,7 @@ impl ComponentFactory for GuardedFactory {
     }
 }
 
-/// A `<Guarded step=...>` element; `step` decodes only when it is an int.
+#[doc = include_str!("devtools_live.doc/guarded_view.md")]
 fn guarded_view(step_value: ViewValue) -> View {
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(GUARDED).with_prop(ViewProperty::new(step(), step_value)),
@@ -101,7 +91,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A `.row` flex container with three cards `.a`, `.b`, `.c`.
+#[doc = include_str!("devtools_live.doc/view.md")]
 fn view() -> View {
     let container = ComponentId::from_raw(0x00C0_0001);
     let card = |class: &str| {
@@ -195,22 +185,7 @@ fn external_client_inspects_the_live_tree_over_the_socket() {
     handle.join().expect("join");
 }
 
-/// §7.6 + §2.3 trust gate: an external client with an Inject token can push a
-/// click over the socket, and the host dispatches it — it hit-tests the button
-/// and moves interaction state — but because an injected event is UNTRUSTED, its
-/// **gated default action** (§2.3 step 4: activating the control and firing its
-/// bound command) does NOT run. An Inject-scoped agent drives *observation*, not
-/// consequential actions; only a platform-vouched (trusted) gesture does that.
-///
-/// REWRITTEN 2026-07-21 (owner-authorized, non-spec). The prior version asserted
-/// the injected click ran the button command (`clicked == true`). That encoded
-/// the pre-enforcement assumption that an external inject acts. Under the now-real
-/// trust gate — and consistent with this file's sibling
-/// `injected_pointer_is_not_trusted_but_a_platform_event_is`, which still passes —
-/// an untrusted inject is dispatched and observed but its default action is
-/// suppressed. The untrusted-flag, acknowledgement, queue-drain and hit-test
-/// assertions are unchanged; only the "command ran" expectation is inverted to
-/// the enforced truth.
+#[doc = include_str!("devtools_live.doc/external_client_inject_is_observed_but_its_gated_action_is_suppressed.md")]
 #[test]
 fn external_client_inject_is_observed_but_its_gated_action_is_suppressed() {
     use std::cell::Cell;
@@ -330,22 +305,7 @@ fn external_client_inject_is_observed_but_its_gated_action_is_suppressed() {
     );
 }
 
-/// The security property §2.3's trusted flag exists for, asserted against the
-/// real inject path rather than a mock: `apply_injected` — the function §7.6's
-/// agent loop reaches — must produce untrusted input, while the same click made
-/// the way a platform adapter makes it is trusted.
-///
-/// This is deliberately a *contrast*, not an existence check: asserting only that
-/// the field is readable would pass with `trust` wired to a constant. Here the
-/// two events differ in exactly one respect — who built them — and the runtime
-/// must report a different verdict for each.
-///
-/// The trusted half of the pair against the *real* producer (the winit converter,
-/// which is not reachable from this crate) is
-/// `a_converted_os_event_is_trusted` in `obscur-window-winit`'s
-/// `conversion::pointer_converter`. The two fail disjointly: adding
-/// `.as_trusted()` to `apply_injected` fails only this test; deleting it from the
-/// converter fails only that one.
+#[doc = include_str!("devtools_live.doc/injected_pointer_is_not_trusted_but_a_platform_event_is.md")]
 #[test]
 fn injected_pointer_is_not_trusted_but_a_platform_event_is() {
     use obscur_kit::devtools::apply_injected;
@@ -401,9 +361,7 @@ fn injected_pointer_is_not_trusted_but_a_platform_event_is() {
     );
 }
 
-/// The disjoint half of the test above: an inspect-only host — one that serves
-/// real live state but installs no injection sink — refuses the click instead of
-/// acknowledging it (§7-C).
+#[doc = include_str!("devtools_live.doc/an_inspect_only_host_refuses_an_injected_click_over_the_socket.md")]
 #[test]
 fn an_inspect_only_host_refuses_an_injected_click_over_the_socket() {
     use obscur_kit::devtools_protocol::error::ProtocolError;
@@ -461,7 +419,7 @@ fn an_inspect_only_host_refuses_an_injected_click_over_the_socket() {
     handle.join().expect("join");
 }
 
-/// Every §7.6 inspect target the runtime can genuinely answer, from a live tree.
+#[doc = include_str!("devtools_live.doc/every_target_the_runtime_knows_reports_real_state_not_a_default.md")]
 #[test]
 fn every_target_the_runtime_knows_reports_real_state_not_a_default() {
     // The audit's §7 finding: only Tree/Layout/Styles/Focus/Rendering were
@@ -517,8 +475,7 @@ fn every_target_the_runtime_knows_reports_real_state_not_a_default() {
 
 // ---- the pushed half: a subscription that delivers (§7-C) --------------------
 
-/// Binds a loopback host that serves ONE session with `scopes`, pushing whatever
-/// the host thread puts on `events`. Returns its address and the server thread.
+#[doc = include_str!("devtools_live.doc/spawn_pushing_host.md")]
 fn spawn_pushing_host(
     events: EventQueue,
     scopes: ScopeSet,
@@ -542,7 +499,7 @@ fn dev_handshake() -> HandshakeRequest {
     HandshakeRequest::new(VersionRange::exact(ProtocolVersion::CURRENT), "dev")
 }
 
-/// Subscribes `client` to `topic` and returns the granted record.
+#[doc = include_str!("devtools_live.doc/subscribe.md")]
 fn subscribe(client: &mut SocketClient, id: u64, topic: Topic) -> Subscription {
     let reply = client
         .command(&CommandMessage::new(
@@ -556,7 +513,7 @@ fn subscribe(client: &mut SocketClient, id: u64, topic: Topic) -> Subscription {
     subscription
 }
 
-/// Blocks for one pushed event, failing rather than hanging if none arrives.
+#[doc = include_str!("devtools_live.doc/next_event.md")]
 fn next_event(client: &mut SocketClient) -> ProtocolEvent {
     client
         .set_read_timeout(Some(Duration::from_secs(5)))

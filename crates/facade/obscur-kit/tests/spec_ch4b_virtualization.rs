@@ -1,7 +1,4 @@
-//! §4.9 Virtualization and collections — spec-derived conformance cases.
-//!
-//! Expected values come from the specification text quoted on each test. They
-//! must not be edited to make a case pass.
+#![doc = include_str!("spec_ch4b_virtualization.doc/_module.md")]
 
 mod spec_ch4b_support;
 
@@ -10,7 +7,7 @@ use obscur_kit::layout::virtualization::{OverscanPolicy, SizeEstimator, VirtualL
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 use spec_ch4b_support::harness::{approx, at, compile, el, geom, runtime, txt};
 
-/// A keyed row: the materialized node backing item `key`.
+#[doc = include_str!("spec_ch4b_virtualization.doc/row.md")]
 fn row(key: &str, toggled: bool) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(0x4B_0001))
         .with_key(key)
@@ -25,13 +22,7 @@ fn row(key: &str, toggled: bool) -> ViewNode {
         .with_children(ViewFragment::from_nodes(vec![txt(key)]))
 }
 
-/// §4.9: "Virtualized layout supports:" / "- stable item identity;"
-///
-/// A virtualized list keyed `["b","c","d","e","f"]` has the row for key `"d"`
-/// toggled on. Prepending key `"a"` moves `"d"` from index 2 to index 3. The
-/// row for `"d"` must still be the toggled one and must be backed by the **same
-/// node identity** — recycling keyed by viewport slot or item index would move
-/// the toggle to `"c"`.
+#[doc = include_str!("spec_ch4b_virtualization.doc/ch4_9_a_item_identity_is_keyed_not_indexed.md")]
 #[test]
 fn ch4_9_a_item_identity_is_keyed_not_indexed() {
     // The per-row toggle is observable as geometry: a toggled row is 70px tall.
@@ -81,13 +72,7 @@ fn ch4_9_a_item_identity_is_keyed_not_indexed() {
     );
 }
 
-/// §4.9: "Virtualized layout supports:" / "- scroll anchoring;" /
-/// "- estimated geometry;"
-///
-/// 100 items of 50px (content extent 5000px), viewport 500px, scrolled to 2500
-/// so item 50 is flush with the viewport top. Growing item 10 (above the
-/// viewport, at content y 500..550) from 50px to 150px must keep item 50 flush:
-/// the offset becomes 2600, the extent 5100, and the visible items stay 50..59.
+#[doc = include_str!("spec_ch4b_virtualization.doc/ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport.md")]
 #[test]
 fn ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport() {
     let mut layout = VirtualLayout::with_default_extent(50.0);
@@ -139,12 +124,7 @@ fn ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport() {
     );
 }
 
-/// §4.9: "Virtualized layout supports:" / "- materialization;" / "- overscan;"
-///
-/// 1000 items of 50px, viewport 500px, offset 0. Items 0..9 intersect the
-/// viewport. The materialized range must cover them, extend **strictly past**
-/// index 9 in the scroll direction (or blank rows pop on every scroll), and
-/// stay far below 1000 (no virtualization at all).
+#[doc = include_str!("spec_ch4b_virtualization.doc/ch4_9_c_materialization_overscans_past_the_visible_range.md")]
 #[test]
 fn ch4_9_c_materialization_overscans_past_the_visible_range() {
     // CORRECTED 2026-07-20 by the owner: this built the layout with

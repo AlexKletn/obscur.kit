@@ -1,4 +1,4 @@
-//! Diagnostic module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod diagnostic;
 mod diagnostic_code;
 mod diagnostic_context;

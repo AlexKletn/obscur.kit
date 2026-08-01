@@ -1,17 +1,4 @@
-//! End-to-end verification that the **§5.19 cache tier runs on the live frame
-//! path**: the runtime's decoded-image cache admits through a [`CacheBudget`],
-//! evicts by an [`EvictionPolicy`], scores victims by [`VisibilityPriority`], and
-//! reports [`CacheStatistics`] — driven by real PNGs on disk, the real
-//! `FsResourceLoader`, the real `image`-crate decoder, and a real `render_now`
-//! frame (spec §5.19 *memory budgets; eviction; visibility priority; `DevTools`
-//! metrics*).
-//!
-//! This closes audit finding 5-C ("§5.19 is a complete, tested, entirely unused
-//! subsystem" — a bounded tier nothing called, next to an unbounded `HashMap`
-//! everything called). The point of these tests is that **nothing here touches the
-//! cache directly**: every insert and every eviction is a side effect of composing
-//! a frame over authored CSS, which is the only evidence that the tier is on the
-//! production path rather than merely unit-tested.
+#![doc = include_str!("image_cache_budget.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![cfg(all(feature = "resource-fs", feature = "resource-decode"))]
 
@@ -33,26 +20,23 @@ use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue};
 
-/// The fixed viewport every test renders under, so geometry is deterministic.
+#[doc = include_str!("image_cache_budget.doc/VIEWPORT.md")]
 const VIEWPORT: f32 = 64.0;
 
-/// Every decoded image below is this 2×2 opaque-red PNG, so each costs an
-/// identical `2 × 2 × 4 = 16` RGBA8 bytes and the budget arithmetic is exact.
+#[doc = include_str!("image_cache_budget.doc/RED_2X2_PNG.md")]
 const RED_2X2_PNG: &[u8] = &[
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
     0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 218, 99, 248, 207, 192, 0, 68, 12,
     16, 10, 0, 31, 238, 3, 253, 99, 94, 187, 91, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
 
-/// One decoded 2×2 RGBA8 image, in bytes — the unit every budget here is a
-/// multiple of.
+#[doc = include_str!("image_cache_budget.doc/IMAGE_BYTES.md")]
 const IMAGE_BYTES: u64 = 2 * 2 * 4;
 
-/// Process-unique counter so concurrent tests never collide on a temp name.
+#[doc = include_str!("image_cache_budget.doc/COUNTER.md")]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A fresh temp directory holding `a.png`, `b.png` and `c.png` — three distinct
-/// URLs with identical bytes — returned as the loader's sandbox root.
+#[doc = include_str!("image_cache_budget.doc/temp_asset_dir.md")]
 fn temp_asset_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
@@ -66,31 +50,28 @@ fn temp_asset_dir() -> PathBuf {
     dir
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("image_cache_budget.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// An [`Image`] primitive for `src`, classed `class` so CSS can place it.
+#[doc = include_str!("image_cache_budget.doc/img.md")]
 fn img(src: &str, class: &str) -> obscur_kit::view::view::ViewNode {
     Image::new(src)
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A runtime wired with the real filesystem loader + image decoder, rooted at
-/// `dir`.
+#[doc = include_str!("image_cache_budget.doc/runtime_at.md")]
 fn runtime_at(dir: &PathBuf) -> UiRuntime {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     KitBootstrap::new().install_image_resources(&mut runtime, dir);
     runtime
 }
 
-/// Whether the frame painted an image whose region starts at `y` — the way a test
-/// asks "did *that* image survive eviction?" from the outside, through paint,
-/// rather than by reaching into the cache.
+#[doc = include_str!("image_cache_budget.doc/painted_at_y.md")]
 fn painted_at_y(result: &obscur_kit::runtime::frame::FrameResult, y: f32) -> bool {
     result
         .snapshot()
@@ -103,8 +84,7 @@ fn painted_at_y(result: &obscur_kit::runtime::frame::FrameResult, y: f32) -> boo
         })
 }
 
-/// A byte budget that only fits two of three referenced images must evict on the
-/// **live frame path** — no test touches the cache; composing the frame does it.
+#[doc = include_str!("image_cache_budget.doc/a_byte_budget_evicts_while_composing_a_real_frame.md")]
 #[test]
 fn a_byte_budget_evicts_while_composing_a_real_frame() {
     let dir = temp_asset_dir();
@@ -152,11 +132,7 @@ fn a_byte_budget_evicts_while_composing_a_real_frame() {
     );
 }
 
-/// §5.19 requires the cache metrics to be *reportable*, and a getter nothing calls
-/// is not a report. The runtime's own `image_cache_statistics()` had no production
-/// consumer: the DevTools `Caches` inspectable built its payload from the resident
-/// counts alone, so an eviction reached no client and a host could not tell a cold
-/// cache from a thrashing one.
+#[doc = include_str!("image_cache_budget.doc/the_devtools_caches_inspectable_reports_what_the_budget_did.md")]
 #[test]
 fn the_devtools_caches_inspectable_reports_what_the_budget_did() {
     let dir = temp_asset_dir();
@@ -194,9 +170,7 @@ fn the_devtools_caches_inspectable_reports_what_the_budget_did() {
     );
 }
 
-/// With no budget the runtime keeps every decoded image — the default is
-/// unlimited, so a host that never asks for a budget sees exactly the behaviour it
-/// had before the cache was bounded.
+#[doc = include_str!("image_cache_budget.doc/the_default_budget_is_unlimited_and_never_evicts.md")]
 #[test]
 fn the_default_budget_is_unlimited_and_never_evicts() {
     let dir = temp_asset_dir();
@@ -244,15 +218,7 @@ fn the_default_budget_is_unlimited_and_never_evicts() {
     assert!((stats.hit_rate() - 0.5).abs() < 1e-6, "3 hits of 6 lookups");
 }
 
-/// Eviction drops the image **nobody can see** rather than the one the frame is
-/// showing, even when the off-screen image was looked up more recently (spec §5.19
-/// visibility priority).
-///
-/// The recency order is forced, not incidental: the resolve pass walks the tree in
-/// document order, so `b.png` — placed 5000px down, far outside the 64px viewport
-/// — is touched *after* the on-screen `a.png` every frame and is therefore always
-/// the more recent of the two. A cache that ordered victims by recency alone would
-/// evict the visible `a.png`; only reading [`VisibilityPriority`] saves it.
+#[doc = include_str!("image_cache_budget.doc/eviction_takes_the_offscreen_image_not_the_visible_one.md")]
 #[test]
 fn eviction_takes_the_offscreen_image_not_the_visible_one() {
     let dir = temp_asset_dir();
@@ -304,10 +270,7 @@ fn eviction_takes_the_offscreen_image_not_the_visible_one() {
     );
 }
 
-/// An evicted image is not lost forever: a later frame that still references it
-/// loads it again. Eviction has to release the hub bookkeeping to make that true —
-/// the "already requested, do not retry" guard would otherwise silently retire the
-/// URL for the life of the process.
+#[doc = include_str!("image_cache_budget.doc/an_evicted_image_reloads_when_referenced_again.md")]
 #[test]
 fn an_evicted_image_reloads_when_referenced_again() {
     let dir = temp_asset_dir();

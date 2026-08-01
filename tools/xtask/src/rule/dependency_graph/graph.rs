@@ -1,5 +1,4 @@
-//! The workspace dependency graph, built by scanning member manifests, plus
-//! DFS cycle detection.
+#![doc = include_str!("graph.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::fs;
@@ -8,15 +7,14 @@ use std::path::Path;
 use super::crate_node::CrateNode;
 use super::layer::Layer;
 
-/// The full set of workspace crate nodes and their `obscur-*` edges.
+#[doc = include_str!("graph.doc/WorkspaceGraph.md")]
 pub(crate) struct WorkspaceGraph {
-    /// All member crates discovered under `crates/*/*` and `tools/*`.
+    #[doc = include_str!("graph.doc/nodes.md")]
     pub(crate) nodes: Vec<CrateNode>,
 }
 
 impl WorkspaceGraph {
-    /// Builds the graph by scanning every workspace member manifest under
-    /// `crates/<layer>/<crate>/Cargo.toml` and `tools/<crate>/Cargo.toml`.
+    #[doc = include_str!("graph.doc/from_root.md")]
     pub(crate) fn from_root(root: &Path) -> Self {
         let mut nodes = Vec::new();
 
@@ -53,14 +51,12 @@ impl WorkspaceGraph {
         Self { nodes }
     }
 
-    /// Looks up a node by crate name.
+    #[doc = include_str!("graph.doc/node.md")]
     pub(crate) fn node(&self, name: &str) -> Option<&CrateNode> {
         self.nodes.iter().find(|n| n.name == name)
     }
 
-    /// Returns the first dependency cycle found (as an ordered path of crate
-    /// names, closing back on the first), or `None` if the graph is acyclic.
-    /// Only edges between known workspace nodes are followed.
+    #[doc = include_str!("graph.doc/find_cycle.md")]
     pub(crate) fn find_cycle(&self) -> Option<Vec<String>> {
         let mut color: HashMap<&str, Mark> = self
             .nodes
@@ -78,7 +74,7 @@ impl WorkspaceGraph {
         None
     }
 
-    /// Recursive DFS helper for [`find_cycle`](Self::find_cycle).
+    #[doc = include_str!("graph.doc/visit.md")]
     fn visit<'a>(
         &'a self,
         name: &'a str,
@@ -112,14 +108,14 @@ impl WorkspaceGraph {
     }
 }
 
-/// DFS visitation state.
+#[doc = include_str!("graph.doc/Mark.md")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mark {
-    /// Unvisited.
+    #[doc = include_str!("graph.doc/White.md")]
     White,
-    /// On the current DFS stack.
+    #[doc = include_str!("graph.doc/Gray.md")]
     Gray,
-    /// Fully explored.
+    #[doc = include_str!("graph.doc/Black.md")]
     Black,
 }
 

@@ -1,33 +1,24 @@
-//! A linear (axial) gradient brush.
+#![doc = include_str!("linear_gradient.doc/_module.md")]
 
 use obscur_geometry::Point;
 
 use super::{ExtendMode, GradientStop};
 
-/// A gradient whose color varies linearly along the axis from `start` to `end`
-/// in user space (spec §5.1).
-///
-/// The gradient runs from `start` (offset `0.0`) to `end` (offset `1.0`); the
-/// color at any point is found by projecting it onto that axis. Behavior for
-/// projected positions outside `[0, 1]` is governed by the [`ExtendMode`].
-///
-/// Stops are stored in ascending `offset` order (callers supply them sorted;
-/// see [`GradientStop`]).
+#[doc = include_str!("linear_gradient.doc/LinearGradient.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearGradient {
-    /// Axis start, mapping to gradient offset `0.0`.
+    #[doc = include_str!("linear_gradient.doc/start.md")]
     pub start: Point,
-    /// Axis end, mapping to gradient offset `1.0`.
+    #[doc = include_str!("linear_gradient.doc/end.md")]
     pub end: Point,
-    /// Color stops, ordered by ascending offset.
+    #[doc = include_str!("linear_gradient.doc/stops.md")]
     pub stops: Vec<GradientStop>,
-    /// How the gradient extends beyond its `[0, 1]` range.
+    #[doc = include_str!("linear_gradient.doc/extend.md")]
     pub extend: ExtendMode,
 }
 
 impl LinearGradient {
-    /// Creates a linear gradient from `start` to `end` with `stops` and the
-    /// default [`ExtendMode::Pad`] extend mode.
+    #[doc = include_str!("linear_gradient.doc/new.md")]
     #[must_use]
     pub fn new(start: Point, end: Point, stops: Vec<GradientStop>) -> Self {
         Self {
@@ -38,32 +29,32 @@ impl LinearGradient {
         }
     }
 
-    /// Returns a copy of this gradient with its extend mode set to `mode`.
+    #[doc = include_str!("linear_gradient.doc/with_extend.md")]
     #[must_use]
     pub fn with_extend(mut self, mode: ExtendMode) -> Self {
         self.extend = mode;
         self
     }
 
-    /// Returns the axis start point (gradient offset `0.0`).
+    #[doc = include_str!("linear_gradient.doc/start_2.md")]
     #[must_use]
     pub const fn start(&self) -> Point {
         self.start
     }
 
-    /// Returns the axis end point (gradient offset `1.0`).
+    #[doc = include_str!("linear_gradient.doc/end_2.md")]
     #[must_use]
     pub const fn end(&self) -> Point {
         self.end
     }
 
-    /// Returns the gradient's color stops.
+    #[doc = include_str!("linear_gradient.doc/stops_2.md")]
     #[must_use]
     pub fn stops(&self) -> &[GradientStop] {
         &self.stops
     }
 
-    /// Returns the gradient's extend mode.
+    #[doc = include_str!("linear_gradient.doc/extend_2.md")]
     #[must_use]
     pub const fn extend(&self) -> ExtendMode {
         self.extend

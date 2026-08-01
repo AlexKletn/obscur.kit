@@ -1,31 +1,4 @@
-//! **Headless capabilities demo → PNG (faithful GPU render via Vello).**
-//!
-//! The GPU sibling of `capabilities_png.rs`: it renders the *very same* shared
-//! [`capabilities`] scene through **Vello/wgpu** into an offscreen texture that
-//! is read back to CPU pixels and encoded to `target/capabilities_vello.png` —
-//! with no window on screen. This is the *faithful* render: the GPU-class effects
-//! the CPU backend only approximates paint for real here.
-//!
-//! Concretely:
-//!
-//! - the **Oklab gradient** card (§2) paints a real `linear-gradient(90deg,
-//!   #f00, #0f0)` interpolated in Oklab — a vivid yellow-green midpoint, not the
-//!   muddy sRGB blend and not the CPU's flat first stop;
-//! - the **linearRGB blur** card (§3) paints a real Gaussian blur convolved in
-//!   linear light (the CPU PNG shows only a coarse approximation);
-//! - everything else (layout, color parsing, radius/spread, stacking, flex/grid,
-//!   margins, text, the interpolated `rotate(45°)` square) renders as on the CPU,
-//!   but at full GPU fidelity.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter (a display is available here). In a truly headless
-//! environment with no adapter it prints a diagnostic and exits cleanly (no
-//! panic); it never fabricates a device.
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example capabilities_vello_png \
-//!   --features "render-vello text-harfrust text-unicode"`
+#![doc = include_str!("capabilities_vello_png.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -47,8 +20,7 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "capabilities/scene.rs"]
 mod capabilities;
 
-/// The logical layout viewport: identical to `capabilities_png.rs` so the two
-/// renders (CPU approximation vs faithful Vello) frame the exact same scene.
+#[doc = include_str!("capabilities_vello_png.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(1440.0, 1076.0);
 
 fn main() {
@@ -136,14 +108,7 @@ fn main() {
     );
 }
 
-/// The render scale: `CAP_SCALE` clamped to `1.0..=4.0`, **default 2.0**.
-///
-/// The Vello filter pass composites each filtered subtree in *device* space, and
-/// the scene converter now maps the filter bounds + gaussian radius through the
-/// root `device_scale` transform — so the `filter: blur()` card (§3) paints for
-/// real at any HiDPI scale (it previously dropped out under `device_scale > 1`).
-/// Supersampling at 2.0 renders everything crisply and also exercises that
-/// device-scale filter path. `CAP_SCALE=1` renders 1:1.
+#[doc = include_str!("capabilities_vello_png.doc/render_scale.md")]
 fn render_scale() -> f32 {
     std::env::var("CAP_SCALE")
         .ok()
@@ -152,8 +117,7 @@ fn render_scale() -> f32 {
         .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
-/// Acquires a **headless** wgpu device + queue (no surface). Returns [`None`] when
-/// no compatible adapter/device is available, so the caller exits cleanly.
+#[doc = include_str!("capabilities_vello_png.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -165,14 +129,14 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("capabilities_vello_png.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("capabilities_vello_png.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -180,8 +144,7 @@ fn output_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Wires the full text stack and registers `bytes` under `sans-serif` on both the
-/// resolver and the Vello renderer (identical id↔bytes mapping).
+#[doc = include_str!("capabilities_vello_png.doc/wire_text_stack.md")]
 fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes: Vec<u8>) {
     let mut registry = FontRegistry::new();
     let id = registry.register(
@@ -199,12 +162,12 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes:
     runtime.set_text_shaper(Box::new(shaper));
 }
 
-/// The scene font handle (`u32`) for a resolved [`FontId`].
+#[doc = include_str!("capabilities_vello_png.doc/font_handle.md")]
 fn font_handle(id: FontId) -> u32 {
     u32::try_from(id.index()).unwrap_or(0)
 }
 
-/// Loads a system font's raw bytes, scanning well-known locations (best effort).
+#[doc = include_str!("capabilities_vello_png.doc/load_system_font.md")]
 fn load_system_font() -> Option<Vec<u8>> {
     const CANDIDATES: &[&str] = &[
         "/usr/share/fonts/TTF/DejaVuSans.ttf",

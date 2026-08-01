@@ -1,4 +1,4 @@
-//! Space module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod local_space;
 pub use local_space::LocalSpace;
 mod parent_space;

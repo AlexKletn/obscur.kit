@@ -1,10 +1,4 @@
-//! **SPECIFICATION-DERIVED** frame-pipeline cases for obscur.kit §3.4 ("The
-//! conceptual pipeline"), §3.2 ("commit"), and §3.4's determinism requirement.
-//!
-//! Every expected value below was produced by an agent reading obscur.kit §3
-//! with **no access to this repository's source**. A failure here is a defect
-//! report about the runtime, and must not be "corrected" by editing the expected
-//! value.
+#![doc = include_str!("spec_ch3_pipeline.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 #[path = "spec_ch3_support/mod.rs"]
@@ -72,11 +66,7 @@ fn mouse(kind: PointerEventKind, x: f32, y: f32) -> InputEvent {
     )
 }
 
-/// §3.4 Conceptual pipeline — "3. dispatch input/events;" then "4. commit
-/// state/tree transaction;" then "6. resolve styles;".
-///
-/// A click handler that commits `class active` must reach paint in the **same**
-/// frame that dispatched the click: one frame, red text.
+#[doc = include_str!("spec_ch3_pipeline.doc/a_click_handlers_commit_is_painted_by_the_frame_that_dispatched_it.md")]
 #[test]
 fn a_click_handlers_commit_is_painted_by_the_frame_that_dispatched_it() {
     const CSS: &str = ".target { width: 100px; height: 50px; color: rgb(0, 0, 255) } \
@@ -126,11 +116,7 @@ fn a_click_handlers_commit_is_painted_by_the_frame_that_dispatched_it() {
     );
 }
 
-/// §3.4 Conceptual pipeline — "7. sample pre-layout motion;" then "8. perform
-/// incremental layout;".
-///
-/// A `width` animation halfway through must be 200px **in that frame's layout**,
-/// with the next sibling in normal flow starting at x = 200.
+#[doc = include_str!("spec_ch3_pipeline.doc/a_width_animation_reaches_layout_in_the_same_frame_it_is_sampled.md")]
 #[test]
 fn a_width_animation_reaches_layout_in_the_same_frame_it_is_sampled() {
     const CSS: &str = ".row { display: flex; width: 600px; height: 40px } \
@@ -175,11 +161,7 @@ fn a_width_animation_reaches_layout_in_the_same_frame_it_is_sampled() {
     approx(geom(&rt, b).0, 200.0, "the next sibling's laid-out x");
 }
 
-/// §3.4 Conceptual pipeline — "9. resolve post-layout motion;" (with §4.17
-/// "pre-layout and post-layout phases").
-///
-/// A `transform` animation moves the scene, never the layout, and does not
-/// re-run layout.
+#[doc = include_str!("spec_ch3_pipeline.doc/a_transform_animation_moves_paint_without_re_running_layout.md")]
 #[test]
 fn a_transform_animation_moves_paint_without_re_running_layout() {
     const CSS: &str = ".box { width: 100px; height: 100px; background-color: #ff0000; \
@@ -228,7 +210,7 @@ fn a_transform_animation_moves_paint_without_re_running_layout() {
     approx(translate_x(&rt), 100.0, "scene translateX at t=1000");
 }
 
-/// The x-translation of the last frame's outermost non-identity transform.
+#[doc = include_str!("spec_ch3_pipeline.doc/translate_x.md")]
 fn translate_x(rt: &UiRuntime) -> f32 {
     transforms(rt)
         .iter()
@@ -237,11 +219,7 @@ fn translate_x(rt: &UiRuntime) -> f32 {
         .unwrap_or(0.0)
 }
 
-/// §3.4 Conceptual pipeline — "4. commit state/tree transaction;" then
-/// "5. classify invalidation;" (with §4.3 "typed invalidation reasons").
-///
-/// A colour-only commit is a **paint** invalidation: no relayout, byte-identical
-/// geometry, new colour painted.
+#[doc = include_str!("spec_ch3_pipeline.doc/a_colour_only_commit_does_not_re_run_layout.md")]
 #[test]
 fn a_colour_only_commit_does_not_re_run_layout() {
     // Translation note: `UiOperation` carries no values, so "the transaction that
@@ -297,10 +275,7 @@ fn a_colour_only_commit_does_not_re_run_layout() {
     );
 }
 
-/// §3.4 — "The synchronous frame phase must stay short and deterministic."
-///
-/// Two identical scripted sessions in one process must produce byte-identical
-/// snapshots frame for frame, for all 100 frames.
+#[doc = include_str!("spec_ch3_pipeline.doc/two_identical_scripted_sessions_produce_identical_frames.md")]
 #[test]
 fn two_identical_scripted_sessions_produce_identical_frames() {
     const CSS: &str = ".page { width: 300px; height: 300px } \
@@ -342,11 +317,7 @@ fn two_identical_scripted_sessions_produce_identical_frames() {
     }
 }
 
-/// §3.4 — "The synchronous frame phase must stay short" (with §5.15 "async
-/// load/decode/compile", §5.21 "placeholders and fallback first").
-///
-/// A custom resource loader must never be invoked while the synchronous frame
-/// phase is in progress.
+#[doc = include_str!("spec_ch3_pipeline.doc/a_custom_loader_is_never_invoked_inside_the_frame_phase.md")]
 #[test]
 fn a_custom_loader_is_never_invoked_inside_the_frame_phase() {
     const CSS: &str = ".page { width: 200px; height: 200px; background-image: url(\"probe.png\") }";
@@ -423,6 +394,6 @@ fn a_custom_loader_is_never_invoked_inside_the_frame_phase() {
     );
 }
 
-/// Keeps the shared fragment helpers referenced from one place.
+#[doc = include_str!("spec_ch3_pipeline.doc/_fragment_helpers.md")]
 #[allow(dead_code)]
 fn _fragment_helpers(_: ViewFragment) {}

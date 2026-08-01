@@ -1,28 +1,28 @@
-//! A structured diagnostic record.
+#![doc = include_str!("diagnostic.doc/_module.md")]
 
 use super::{
     DiagnosticCode, DiagnosticContext, DiagnosticSeverity, DiagnosticSubsystem, RecoveryAction,
 };
 
-/// A structured, typed diagnostic — not a plain log line (spec §1.6, §7.8).
+#[doc = include_str!("diagnostic.doc/Diagnostic.md")]
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
-    /// Stable diagnostic code.
+    #[doc = include_str!("diagnostic.doc/code.md")]
     pub code: DiagnosticCode,
-    /// Severity.
+    #[doc = include_str!("diagnostic.doc/severity.md")]
     pub severity: DiagnosticSeverity,
-    /// Originating subsystem.
+    #[doc = include_str!("diagnostic.doc/subsystem.md")]
     pub subsystem: DiagnosticSubsystem,
-    /// Human-readable message.
+    #[doc = include_str!("diagnostic.doc/message.md")]
     pub message: String,
-    /// Identity context.
+    #[doc = include_str!("diagnostic.doc/context.md")]
     pub context: DiagnosticContext,
-    /// Recovery action taken or recommended.
+    #[doc = include_str!("diagnostic.doc/recovery.md")]
     pub recovery: RecoveryAction,
 }
 
 impl Diagnostic {
-    /// Creates a diagnostic with empty context and no recovery action.
+    #[doc = include_str!("diagnostic.doc/new.md")]
     #[must_use]
     pub fn new(
         code: DiagnosticCode,
@@ -40,7 +40,7 @@ impl Diagnostic {
         }
     }
 
-    /// Sets the recovery action taken or recommended for this diagnostic.
+    #[doc = include_str!("diagnostic.doc/with_recovery.md")]
     #[must_use]
     pub const fn with_recovery(mut self, recovery: RecoveryAction) -> Self {
         self.recovery = recovery;

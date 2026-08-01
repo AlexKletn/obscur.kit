@@ -1,5 +1,4 @@
-//! Resolves a text node's computed typography into shaping inputs:
-//! [`attributes_for`] (weight + slant) and [`direction_for`] (base direction).
+#![doc = include_str!("text_attributes.doc/_module.md")]
 
 use std::borrow::Cow;
 
@@ -12,22 +11,7 @@ use obscur_text::span::{FontSlant, FontWeight};
 
 use super::EditingView;
 
-/// Builds the [`FontAttributes`] (weight + slant) for a text node from its
-/// computed `font-weight` and `font-style` (§4.14, §5.10).
-///
-/// Reads [`PropertyId::FontWeight`] — a bare [`PropertyValue::Number`] on the CSS
-/// `1..=1000` axis — into a [`FontWeight`] (clamped by [`FontWeight::new`]), and
-/// [`PropertyId::FontStyle`] — a [`PropertyValue::Keyword`] backed by one of the
-/// reserved [`layout_keyword`] handles — into a [`FontSlant`]
-/// (`FONT_STYLE_ITALIC` → [`FontSlant::Italic`], `FONT_STYLE_OBLIQUE` →
-/// [`FontSlant::Oblique`], everything else including an absent property →
-/// [`FontSlant::Normal`]). When both properties are absent this returns
-/// [`FontAttributes::default`] — byte-for-byte the behaviour before per-node
-/// weight/style resolution.
-///
-/// This helper feeds **both** the layout measure/arrange path and the scene
-/// compose path so the attributes a text box is measured with are the attributes
-/// it is painted with.
+#[doc = include_str!("text_attributes.doc/attributes_for.md")]
 #[must_use]
 pub(crate) fn attributes_for(computed: Option<&ComputedStyle>) -> FontAttributes {
     let mut attributes = FontAttributes::default();
@@ -47,10 +31,7 @@ pub(crate) fn attributes_for(computed: Option<&ComputedStyle>) -> FontAttributes
     attributes
 }
 
-/// Narrows a CSS numeric weight into a [`FontWeight`] on the `1..=1000` axis.
-///
-/// The value is rounded and clamped to the representable range; [`FontWeight::new`]
-/// clamps again, so an out-of-range author value never panics.
+#[doc = include_str!("text_attributes.doc/weight_from.md")]
 fn weight_from(weight: f32) -> FontWeight {
     // The weight is rounded to the nearest whole step and clamped into the
     // `1..=1000` axis before the (already-clamping) `FontWeight::new`.
@@ -59,8 +40,7 @@ fn weight_from(weight: f32) -> FontWeight {
     FontWeight::new(value)
 }
 
-/// Maps a reserved `font-style` keyword handle to its [`FontSlant`]; any other
-/// symbol (including a stray interned keyword) resolves to [`FontSlant::Normal`].
+#[doc = include_str!("text_attributes.doc/slant_from.md")]
 fn slant_from(symbol: obscur_identity::InternedSymbol) -> FontSlant {
     if symbol == layout_keyword::FONT_STYLE_ITALIC {
         FontSlant::Italic
@@ -71,43 +51,7 @@ fn slant_from(symbol: obscur_identity::InternedSymbol) -> FontSlant {
     }
 }
 
-/// Resolves a text node's base [`TextDirection`] from its computed `direction`
-/// (§4.14, §5.10).
-///
-/// Reads [`PropertyId::Direction`] — a [`PropertyValue::Keyword`] backed by one
-/// of the reserved [`layout_keyword`] handles — returning
-/// [`TextDirection::RightToLeft`] when it is `DIRECTION_RTL` and
-/// [`TextDirection::LeftToRight`] otherwise (including `DIRECTION_LTR` and an
-/// absent property). The itemizer uses this as the paragraph's base direction
-/// and assigns bidi levels from it; the same value drives both the measure and
-/// compose shaping passes so they agree.
-///
-/// # An absent `direction` ignores the locale, and that is a known gap
-///
-/// §7.2 requires localization to integrate with RTL, and
-/// [`LanguageTag::direction`](obscur_localization::locale::LanguageTag::direction)
-/// answers what a locale's base direction *is* — but nothing here asks it. An
-/// application whose locale is `ar` and whose stylesheet never mentions
-/// `direction` still lays its Arabic out left-to-right.
-///
-/// It is not wired because the honest fix is not small, and a half-wired base
-/// direction is worse than none: this helper feeds **both** the measure pass
-/// (`layout_coordinator`) and the compose pass (`scene_coordinator`), and a
-/// locale default that reached one and not the other would size boxes for one
-/// direction and paint the other into them. The two candidate fixes are
-/// (a) thread the locale direction into `direction_for` — the measure path reaches
-/// this only through `layout_coordinator`'s recursive `measure` chain, so each of
-/// the 21 functions there that already thread `&ParagraphShaper` would have to
-/// thread the direction beside it, plus the ~35 sites that forward it; or
-/// (b) seed the root node's cascaded
-/// `direction` so the existing inheritance carries it (`PropertyId::Direction` is
-/// in the resolver's inherited set), which needs `StyleInputs` to distinguish a
-/// UA-level default from the author cascade that owns it today. Neither is this
-/// change's size.
-///
-/// The locale's language *is* wired, through
-/// [`UiRuntime::set_locale`](crate::runtime::UiRuntime::set_locale) →
-/// [`ParagraphShaper::set_language`](obscur_text::shaping::ParagraphShaper::set_language).
+#[doc = include_str!("text_attributes.doc/direction_for.md")]
 #[must_use]
 pub(crate) fn direction_for(computed: Option<&ComputedStyle>) -> TextDirection {
     let symbol = computed
@@ -123,16 +67,7 @@ pub(crate) fn direction_for(computed: Option<&ComputedStyle>) -> TextDirection {
     }
 }
 
-/// Resolves a text node's line [`TextAlignment`] from its computed `text-align`
-/// (§4.14, §5.10).
-///
-/// Reads [`PropertyId::TextAlign`] — a [`PropertyValue::Keyword`] backed by one of
-/// the reserved [`layout_keyword`] handles — mapping each `TEXT_ALIGN_*` handle to
-/// its [`TextAlignment`] variant. An absent property (or any unrecognised keyword)
-/// resolves to [`TextAlignment::Start`], byte-for-byte the hardcoded behaviour
-/// before per-node alignment resolution. The same value drives both the layout
-/// measure/arrange pass and the scene compose pass so the sized box and the
-/// painted lines agree.
+#[doc = include_str!("text_attributes.doc/alignment_for.md")]
 #[must_use]
 pub(crate) fn alignment_for(computed: Option<&ComputedStyle>) -> TextAlignment {
     let symbol = computed
@@ -152,15 +87,7 @@ pub(crate) fn alignment_for(computed: Option<&ComputedStyle>) -> TextAlignment {
     }
 }
 
-/// Resolves a text node's [`TextOverflow`] policy from its computed
-/// `text-overflow` (§4.14, §5.10).
-///
-/// Reads [`PropertyId::TextOverflow`] — a [`PropertyValue::Keyword`] backed by one
-/// of the reserved [`layout_keyword`] handles — mapping `TEXT_OVERFLOW_ELLIPSIS`
-/// to [`TextOverflow::Ellipsis`] and everything else (including `TEXT_OVERFLOW_CLIP`
-/// and an absent property) to [`TextOverflow::Clip`], the CSS initial. The same
-/// value drives both the layout measure/arrange pass and the scene compose pass so
-/// the sized box and the painted (possibly truncated) lines agree.
+#[doc = include_str!("text_attributes.doc/overflow_for.md")]
 #[must_use]
 pub(crate) fn overflow_for(computed: Option<&ComputedStyle>) -> TextOverflow {
     let symbol = computed
@@ -176,29 +103,7 @@ pub(crate) fn overflow_for(computed: Option<&ComputedStyle>) -> TextOverflow {
     }
 }
 
-/// Resolves a text node's authored `line-height` into a logical-pixel line box
-/// height from its computed `line-height`, the node's own `font_size`, and the
-/// document `root_font_size` (§4.14, §5.10).
-///
-/// Reads [`PropertyId::LineHeight`], returning:
-/// * `Some(multiple * font_size)` for a unitless [`PropertyValue::Number`]
-///   (a multiple of the font size, the common `line-height: 1.5` form);
-/// * `Some(px)` for a [`PropertyValue::Length`], with relative units resolved
-///   against the node's font context (CSS Values 4 §5.1.1): `px` verbatim
-///   (`line-height: 24px`), `em` × `font_size`, `rem` × `root_font_size`, and a
-///   percentage `pct% × font_size` (CSS 2.1 §10.8.1 / CSS Text 3 §8: a `%`
-///   line-height resolves against the element's own font size);
-/// * [`None`] for the initial `normal` keyword, an absent property, or any unit
-///   this metric does not resolve here (viewport units) — the caller then falls
-///   back to the font's natural (metric) line height, keeping the `normal`
-///   default byte-for-byte identical to pre-`line-height` behaviour.
-///
-/// The absolute-`px` path is unchanged (byte-identical to the previous
-/// `Length::as_px` reading); only the previously-dropped `em` / `rem` / `%`
-/// units now resolve instead of silently falling back.
-///
-/// The same value drives both the layout measure/arrange pass and the scene
-/// compose pass, so the sized box height and the painted line spacing agree.
+#[doc = include_str!("text_attributes.doc/line_height_for.md")]
 #[must_use]
 pub(crate) fn line_height_for(
     computed: Option<&ComputedStyle>,
@@ -215,17 +120,7 @@ pub(crate) fn line_height_for(
     }
 }
 
-/// Resolves a computed text-metric [`Length`] to logical pixels against the
-/// node's font context, per CSS Values 4 §5.1.1: `px` verbatim (byte-identical to
-/// the previous `Length::as_px` path), `em` × the node's own computed
-/// `font-size`, `rem` × the document root's computed `font-size`.
-///
-/// A percentage and the viewport units are **not** resolved here: `%` is
-/// property-specific (font-size-relative for `line-height` — handled by its
-/// caller — and invalid for `letter-spacing` / `word-spacing` / `tab-size`), and
-/// viewport units are a documented refinement, so both return [`None`] and each
-/// caller applies its own fallback (drop-to-`0`, the metric line height, or the
-/// initial tab size).
+#[doc = include_str!("text_attributes.doc/length_to_px.md")]
 fn length_to_px(length: Length, font_size: f32, root_font_size: f32) -> Option<f32> {
     match length {
         Length::Px(px) => Some(px.0),
@@ -235,20 +130,7 @@ fn length_to_px(length: Length, font_size: f32, root_font_size: f32) -> Option<f
     }
 }
 
-/// Resolves a text node's `letter-spacing` into extra per-cluster tracking, in
-/// logical pixels, from its computed `letter-spacing` (CSS Text 3 §8.1).
-///
-/// Reads [`PropertyId::LetterSpacing`]: a [`PropertyValue::Length`] resolves to
-/// its pixel value (which may be negative) — `px` verbatim, `em` × the node's
-/// `font_size`, `rem` × `root_font_size` (CSS Values 4 §5.1.1); the initial
-/// `normal` keyword, an absent property, a percentage (letter-spacing does **not**
-/// accept `%` per CSS Text 3 §8.1 — dropped), or any other value resolves to
-/// `0.0`, so an unauthored text node adds no tracking and shapes byte-for-byte as
-/// before.
-///
-/// The same value feeds **both** the layout measure/arrange pass and the scene
-/// compose pass (through the shared [`apply_spacing`](obscur_text::shaping::apply_spacing)
-/// seam) so the measured box width and the painted advances agree.
+#[doc = include_str!("text_attributes.doc/letter_spacing_for.md")]
 #[must_use]
 pub(crate) fn letter_spacing_for(
     computed: Option<&ComputedStyle>,
@@ -263,15 +145,7 @@ pub(crate) fn letter_spacing_for(
     )
 }
 
-/// Resolves a text node's `word-spacing` into extra per-separator spacing, in
-/// logical pixels, from its computed `word-spacing` (CSS Text 3 §8.2).
-///
-/// Reads [`PropertyId::WordSpacing`] with the same rules as
-/// [`letter_spacing_for`]: a length (possibly negative) resolves verbatim — `px`
-/// verbatim, `em` × `font_size`, `rem` × `root_font_size` (CSS Values 4 §5.1.1);
-/// `normal` / absent / a percentage (CSS Text 3 §8.2 — dropped) / other → `0.0`.
-/// Fed to the shared spacing seam on both the measure and compose passes so they
-/// cannot drift.
+#[doc = include_str!("text_attributes.doc/word_spacing_for.md")]
 #[must_use]
 pub(crate) fn word_spacing_for(
     computed: Option<&ComputedStyle>,
@@ -281,11 +155,7 @@ pub(crate) fn word_spacing_for(
     length_px_of(computed, PropertyId::WordSpacing, font_size, root_font_size)
 }
 
-/// Reads `property` off `computed` as a [`PropertyValue::Length`] resolved to
-/// logical pixels against the node's font context (`px` / `em` / `rem`, via
-/// [`length_to_px`]), or `0.0` for an absent property, a non-length value, or a
-/// unit not resolved for spacing (`%` — invalid for letter-/word-spacing — and
-/// the viewport units).
+#[doc = include_str!("text_attributes.doc/length_px_of.md")]
 fn length_px_of(
     computed: Option<&ComputedStyle>,
     property: PropertyId,
@@ -303,30 +173,20 @@ fn length_px_of(
     }
 }
 
-/// The CSS Text 3 `text-transform` casing operation (§2.1).
-///
-/// Only the closed case-mapping keyword set is modelled; `full-width` /
-/// `full-size-kana` are documented omissions.
+#[doc = include_str!("text_attributes.doc/TextTransform.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextTransform {
-    /// `none` (the initial): the text is shaped unchanged.
+    #[doc = include_str!("text_attributes.doc/None.md")]
     None,
-    /// `uppercase`: every character is mapped to uppercase.
+    #[doc = include_str!("text_attributes.doc/Uppercase.md")]
     Uppercase,
-    /// `lowercase`: every character is mapped to lowercase.
+    #[doc = include_str!("text_attributes.doc/Lowercase.md")]
     Lowercase,
-    /// `capitalize`: the first typographic letter of each word is uppercased.
+    #[doc = include_str!("text_attributes.doc/Capitalize.md")]
     Capitalize,
 }
 
-/// Resolves a text node's [`TextTransform`] from its computed `text-transform`
-/// (CSS Text 3 §2.1).
-///
-/// Reads [`PropertyId::TextTransform`] — a [`PropertyValue::Keyword`] backed by
-/// one of the reserved [`layout_keyword`] handles — mapping each
-/// `TEXT_TRANSFORM_*` handle to its variant. An absent property (or any
-/// unrecognised keyword) resolves to [`TextTransform::None`], so an unauthored
-/// text node's string is shaped unchanged.
+#[doc = include_str!("text_attributes.doc/text_transform_for.md")]
 #[must_use]
 pub(crate) fn text_transform_for(computed: Option<&ComputedStyle>) -> TextTransform {
     let symbol = computed
@@ -344,21 +204,7 @@ pub(crate) fn text_transform_for(computed: Option<&ComputedStyle>) -> TextTransf
     }
 }
 
-/// Applies `transform` to `content` **before** shaping (CSS Text 3 §2.1),
-/// returning the cased string.
-///
-/// This is the pre-shape seam: the transformed string flows through itemization,
-/// shaping, and the paragraph cache key, so a transformed node is a distinct
-/// cache entry and the measure and compose passes — which both run `content`
-/// through this same function — shape identical text.
-///
-/// [`TextTransform::None`] borrows `content` unchanged (zero-copy,
-/// byte-identical). `uppercase`/`lowercase` use Rust's Unicode-aware
-/// [`str::to_uppercase`]/[`str::to_lowercase`]. `capitalize` uppercases the first
-/// **cased letter** of each whitespace-delimited word (the first letter, not a
-/// leading symbol or digit), leaving the rest untouched. Locale-tailored casing
-/// (e.g. Turkish dotless *i*) and the full grapheme/word-boundary subtleties are
-/// documented refinements over this common Unicode path.
+#[doc = include_str!("text_attributes.doc/transform_text.md")]
 #[must_use]
 pub(crate) fn transform_text(content: &str, transform: TextTransform) -> Cow<'_, str> {
     match transform {
@@ -369,14 +215,7 @@ pub(crate) fn transform_text(content: &str, transform: TextTransform) -> Cow<'_,
     }
 }
 
-/// Uppercases the first cased letter of each whitespace-bounded word (§2.1
-/// `capitalize`).
-///
-/// A word boundary is any Unicode whitespace run; within a word the first
-/// character for which [`char::is_alphabetic`] holds is title/upper-cased and the
-/// rest are copied verbatim. Leading punctuation or digits do not consume the
-/// "first letter", matching the spec intent that `capitalize` targets the first
-/// *letter* of the word.
+#[doc = include_str!("text_attributes.doc/capitalize.md")]
 fn capitalize(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     // `at_word_start` is set at the string start and after every whitespace run;
@@ -396,14 +235,7 @@ fn capitalize(content: &str) -> String {
     out
 }
 
-/// Resolves a text node's [`WhiteSpace`] mode from its computed `white-space`
-/// (CSS Text 3 §3).
-///
-/// Reads [`PropertyId::WhiteSpace`] — a [`PropertyValue::Keyword`] backed by one
-/// of the reserved [`layout_keyword`] handles — mapping each `WHITE_SPACE_*`
-/// handle to its variant. An absent property (or any unrecognised keyword)
-/// resolves to [`WhiteSpace::Normal`], the CSS initial, so an unauthored text
-/// node collapses whitespace and soft-wraps.
+#[doc = include_str!("text_attributes.doc/white_space_for.md")]
 #[must_use]
 pub(crate) fn white_space_for(computed: Option<&ComputedStyle>) -> WhiteSpace {
     let symbol = computed
@@ -422,14 +254,7 @@ pub(crate) fn white_space_for(computed: Option<&ComputedStyle>) -> WhiteSpace {
     }
 }
 
-/// Resolves a text node's [`OverflowWrap`] from its computed `overflow-wrap`
-/// (the legacy `word-wrap` alias lowers to the same property; CSS Text 3 §5.2).
-///
-/// Reads [`PropertyId::OverflowWrap`] — a [`PropertyValue::Keyword`] backed by an
-/// `OVERFLOW_WRAP_*` reserved handle — mapping each handle to its variant. An
-/// absent property (or any unrecognised keyword) resolves to
-/// [`OverflowWrap::Normal`], the CSS initial, so an over-wide word overflows
-/// exactly as before the property existed.
+#[doc = include_str!("text_attributes.doc/overflow_wrap_for.md")]
 #[must_use]
 pub(crate) fn overflow_wrap_for(computed: Option<&ComputedStyle>) -> OverflowWrap {
     let symbol = computed
@@ -446,13 +271,7 @@ pub(crate) fn overflow_wrap_for(computed: Option<&ComputedStyle>) -> OverflowWra
     }
 }
 
-/// Resolves a text node's [`WordBreak`] from its computed `word-break`
-/// (CSS Text 3 §5.2).
-///
-/// Reads [`PropertyId::WordBreak`] — a [`PropertyValue::Keyword`] backed by a
-/// `WORD_BREAK_*` reserved handle — mapping each handle to its variant. An absent
-/// property (or any unrecognised keyword) resolves to [`WordBreak::Normal`], the
-/// CSS initial.
+#[doc = include_str!("text_attributes.doc/word_break_for.md")]
 #[must_use]
 pub(crate) fn word_break_for(computed: Option<&ComputedStyle>) -> WordBreak {
     let symbol = computed
@@ -469,27 +288,7 @@ pub(crate) fn word_break_for(computed: Option<&ComputedStyle>) -> WordBreak {
     }
 }
 
-/// Applies the CSS Text 3 white-space processing rules (§4.1.1) to `content`
-/// **before** shaping, returning the processed string.
-///
-/// This is the pre-shape collapsing seam (the string-extraction point). Under a
-/// collapsing mode ([`WhiteSpace::collapses_spaces`]): each run of collapsible
-/// spaces/tabs (U+0020, U+0009) collapses to a single U+0020; a segment break
-/// (`\n`, with `\r\n` / `\r` first normalised to one `\n`) is either preserved as
-/// a forced break (when [`WhiteSpace::preserves_segment_breaks`], i.e. `pre-line`)
-/// or removed and treated as a collapsible space (`normal` / `nowrap`); and
-/// leading/trailing collapsible whitespace of the block — plus the collapsible
-/// whitespace immediately around each preserved forced break — is trimmed. Under
-/// a preserving mode (`pre` / `pre-wrap`) spaces, tabs, and segment breaks are
-/// kept verbatim (only `\r` is normalised).
-///
-/// Full per-line hanging-whitespace trimming after wrap is a documented
-/// refinement; this does the block-level and around-forced-break trim. The
-/// processed string flows through itemization, shaping, and the paragraph cache
-/// key, so a collapsed node is a distinct cache entry and the measure/compose
-/// passes — which both run `content` through this same function — shape identical
-/// text. A [`Cow::Borrowed`] is returned whenever the rules leave `content`
-/// byte-for-byte unchanged (the common single-line, single-spaced case).
+#[doc = include_str!("text_attributes.doc/collapse_white_space.md")]
 #[must_use]
 pub(crate) fn collapse_white_space(content: &str, white_space: WhiteSpace) -> Cow<'_, str> {
     if !white_space.collapses_spaces() {
@@ -558,12 +357,7 @@ pub(crate) fn collapse_white_space(content: &str, white_space: WhiteSpace) -> Co
     Cow::Owned(out)
 }
 
-/// Runs `content` through `text-transform` (§2.1) and then `white-space`
-/// collapsing (§4.1.1), returning the fully processed pre-shape string.
-///
-/// The two pre-shape rewrites compose in spec order: casing first (producing the
-/// *transformed text*), then whitespace processing. When both are no-ops the
-/// original `content` is returned borrowed (zero-copy, byte-for-byte identical).
+#[doc = include_str!("text_attributes.doc/process_text.md")]
 #[must_use]
 pub(crate) fn process_text(
     content: &str,
@@ -579,24 +373,7 @@ pub(crate) fn process_text(
     }
 }
 
-/// The string a text node **shapes** on a frame, unifying the layout
-/// (measure/arrange) and scene (compose) passes so both size and paint the
-/// *same* characters (CSS Text 3 §4.1.1).
-///
-/// When `active` is the [`EditingView`] of the focused editable whose text this
-/// node carries, the **live session buffer** is shaped RAW — `text-transform`
-/// (§2.1) and `white-space` collapsing (§4.1.1) are deliberately **skipped** so
-/// the caret's byte offsets stay exact — with any IME preedit spliced in at its
-/// anchor for DISPLAY only (the buffer is untouched, spec §5.12). Otherwise the
-/// retained `content` flows through the normal pre-shape pipeline: casing first
-/// (§2.1), then whitespace processing (§4.1.1).
-///
-/// Passing the identical `active` view to **both** passes is what guarantees the
-/// measured box height (line count) equals the painted line count while editing a
-/// multi-line / collapsible field: the retained tree lags the session by a
-/// keystroke, so a pass reading the retained value would size the box for the old
-/// text while the other painted the new. With no active session (`None`) this is
-/// exactly [`process_text`] — byte-for-byte the non-editing behaviour.
+#[doc = include_str!("text_attributes.doc/display_text.md")]
 #[must_use]
 pub(crate) fn display_text<'a>(
     content: &'a str,
@@ -632,19 +409,17 @@ pub(crate) fn display_text<'a>(
     }
 }
 
-/// The resolved `tab-size` value (CSS Text 3 §4.3): a `<number>` multiple of the
-/// space advance, or a fixed `<length>` tab-stop width in logical pixels.
+#[doc = include_str!("text_attributes.doc/TabSize.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TabSize {
-    /// `tab-size: <number>` — the tab stop is `factor` × the advance of a space.
+    #[doc = include_str!("text_attributes.doc/Factor.md")]
     Factor(f32),
-    /// `tab-size: <length>` — the tab stop is this fixed pixel width.
+    #[doc = include_str!("text_attributes.doc/Length.md")]
     Length(f32),
 }
 
 impl TabSize {
-    /// Resolves the tab-stop width in logical pixels given the `space_advance` of
-    /// the node's primary font.
+    #[doc = include_str!("text_attributes.doc/resolve.md")]
     #[must_use]
     pub(crate) fn resolve(self, space_advance: f32) -> f32 {
         match self {
@@ -654,19 +429,7 @@ impl TabSize {
     }
 }
 
-/// Resolves a text node's [`TabSize`] from its computed `tab-size` (CSS Text 3
-/// §4.3).
-///
-/// Reads [`PropertyId::TabSize`]: a unitless [`PropertyValue::Number`] resolves to
-/// [`TabSize::Factor`] (a multiple of the space advance), a [`PropertyValue::Length`]
-/// to [`TabSize::Length`] with relative units resolved against the node's font
-/// context — `px` verbatim, `em` × `font_size`, `rem` × `root_font_size` (CSS
-/// Values 4 §5.1.1). An absent property, the initial, a percentage (invalid for
-/// `tab-size` per CSS Text 3 §4.3 — `<number>` or `<length>` only), or a viewport
-/// unit resolves to the initial `8` spaces
-/// ([`TabSize::Factor(8.0)`](TabSize::Factor)). Tabs only take effect under a
-/// preserving `white-space` mode (`pre` / `pre-wrap`); under a collapsing mode a
-/// tab has already become a space, so this value is unused.
+#[doc = include_str!("text_attributes.doc/tab_size_for.md")]
 #[must_use]
 pub(crate) fn tab_size_for(
     computed: Option<&ComputedStyle>,

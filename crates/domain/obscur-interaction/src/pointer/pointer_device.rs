@@ -1,67 +1,39 @@
-//! The [`PointerDevice`] kinds that can produce pointer input (spec §4.7).
+#![doc = include_str!("pointer_device.doc/_module.md")]
 
-/// The kind of physical device that produced a pointer event (spec §4.7).
-///
-/// Pointer routing is device-agnostic, but handlers sometimes need to adapt to
-/// the source: whether it reports pressure, or whether it is a direct
-/// (touch-the-target) rather than indirect (move-a-cursor) manipulation.
+#[doc = include_str!("pointer_device.doc/PointerDevice.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PointerDevice {
-    /// An indirect pointing device that drives an on-screen cursor.
+    #[doc = include_str!("pointer_device.doc/Mouse.md")]
     #[default]
     Mouse,
-    /// A direct touchscreen contact.
+    #[doc = include_str!("pointer_device.doc/Touch.md")]
     Touch,
-    /// A stylus or digital pen.
+    #[doc = include_str!("pointer_device.doc/Pen.md")]
     Pen,
-    /// An indirect trackpad surface driving an on-screen cursor.
+    #[doc = include_str!("pointer_device.doc/Trackpad.md")]
     Trackpad,
 }
 
 impl PointerDevice {
-    /// Returns whether this device reports a meaningful contact pressure
-    /// ([`Pen`](Self::Pen) or [`Touch`](Self::Touch)).
+    #[doc = include_str!("pointer_device.doc/supports_pressure.md")]
     #[must_use]
     pub const fn supports_pressure(self) -> bool {
         matches!(self, Self::Pen | Self::Touch)
     }
 
-    /// Returns whether this device is a *direct* manipulation device — the user
-    /// touches the target itself ([`Touch`](Self::Touch), [`Pen`](Self::Pen)) —
-    /// rather than an indirect device that moves a cursor
-    /// ([`Mouse`](Self::Mouse), [`Trackpad`](Self::Trackpad)).
+    #[doc = include_str!("pointer_device.doc/is_direct.md")]
     #[must_use]
     pub const fn is_direct(self) -> bool {
         matches!(self, Self::Touch | Self::Pen)
     }
 
-    /// Returns whether this device is a touchscreen contact ([`Touch`](Self::Touch)).
-    ///
-    /// Distinct from [`is_direct`](Self::is_direct), which a pen shares: §2.4
-    /// treats touch as its own *source* — *"Touch does not synthesize persistent
-    /// hover"* — so the two cases separate wherever a contact and a stylus behave
-    /// differently, and this names that one device rather than the class.
+    #[doc = include_str!("pointer_device.doc/is_touchscreen.md")]
     #[must_use]
     pub const fn is_touchscreen(self) -> bool {
         matches!(self, Self::Touch)
     }
 
-    /// Returns §2.4's default **hover capability** for this device: whether it can
-    /// be *over* a target without touching it.
-    ///
-    /// §2.4 rules two of the four cases outright — *"Touch does not synthesize
-    /// persistent hover. Pen hover depends on device capability."* — so
-    /// [`Touch`](Self::Touch) is `false` and [`Pen`](Self::Pen) is `false` **by
-    /// default only**: a pen's answer is a property of the tablet, not of the
-    /// enum, so a platform that knows its digitizer reports hover says so per
-    /// event with
-    /// [`PointerEvent::with_hover_capability`](super::PointerEvent::with_hover_capability).
-    /// Defaulting the pen to `false` fails in the direction that costs a hover
-    /// highlight rather than the one that invents a hover the device never
-    /// reported.
-    ///
-    /// A [`Mouse`](Self::Mouse) and a [`Trackpad`](Self::Trackpad) drive a resting
-    /// cursor, so both hover by construction.
+    #[doc = include_str!("pointer_device.doc/hovers_by_default.md")]
     #[must_use]
     pub const fn hovers_by_default(self) -> bool {
         matches!(self, Self::Mouse | Self::Trackpad)

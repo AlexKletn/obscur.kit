@@ -1,51 +1,35 @@
-//! The boolean and tri-state flags of an accessibility node (spec §7.1).
+#![doc = include_str!("semantic_state.doc/_module.md")]
 
-/// The state flags of an accessibility node (spec §7.1 state, selection, focus).
-///
-/// These flags carry the changeable condition of a node — whether it can take
-/// focus and currently holds it, whether it is disabled, programmatically
-/// hidden, selected, busy, required, invalid, or read-only — plus two tri-state
-/// conditions expressed as [`Option<bool>`]: [`checked`](Self::checked) (where
-/// `None` means the node is not checkable) and [`expanded`](Self::expanded)
-/// (where `None` means it is not expandable).
-///
-/// The [`hidden`](Self::hidden) flag means *programmatically* hidden (e.g. an
-/// `aria-hidden` node), distinct from the decorative hiding tracked on the
-/// owning [`SemanticNode`](super::SemanticNode).
-///
-/// The many independent boolean fields mirror the flat set of accessibility
-/// state flags in spec §7.1 and are deliberately kept as separate fields rather
-/// than folded into a bitflag type.
+#[doc = include_str!("semantic_state.doc/SemanticState.md")]
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SemanticState {
-    /// Whether the node can receive keyboard focus.
+    #[doc = include_str!("semantic_state.doc/focusable.md")]
     pub focusable: bool,
-    /// Whether the node currently holds focus.
+    #[doc = include_str!("semantic_state.doc/focused.md")]
     pub focused: bool,
-    /// Whether the node is disabled and cannot be operated.
+    #[doc = include_str!("semantic_state.doc/disabled.md")]
     pub disabled: bool,
-    /// Whether the node is programmatically hidden from assistive tech.
+    #[doc = include_str!("semantic_state.doc/hidden.md")]
     pub hidden: bool,
-    /// Whether the node is selected within its container.
+    #[doc = include_str!("semantic_state.doc/selected.md")]
     pub selected: bool,
-    /// Whether the node is busy updating and not yet stable.
+    #[doc = include_str!("semantic_state.doc/busy.md")]
     pub busy: bool,
-    /// Whether a value is required before the node is considered complete.
+    #[doc = include_str!("semantic_state.doc/required.md")]
     pub required: bool,
-    /// Whether the node's current value fails validation.
+    #[doc = include_str!("semantic_state.doc/invalid.md")]
     pub invalid: bool,
-    /// Whether the node's value can be read but not edited.
+    #[doc = include_str!("semantic_state.doc/readonly.md")]
     pub readonly: bool,
-    /// The checked state, or `None` if the node is not checkable.
+    #[doc = include_str!("semantic_state.doc/checked.md")]
     pub checked: Option<bool>,
-    /// The expanded state, or `None` if the node is not expandable.
+    #[doc = include_str!("semantic_state.doc/expanded.md")]
     pub expanded: Option<bool>,
 }
 
 impl SemanticState {
-    /// Creates the default state: every flag `false` and both tri-states
-    /// [`None`] (not checkable, not expandable) (spec §7.1).
+    #[doc = include_str!("semantic_state.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -63,86 +47,84 @@ impl SemanticState {
         }
     }
 
-    /// Returns a copy with the [`focusable`](Self::focusable) flag set.
+    #[doc = include_str!("semantic_state.doc/focusable_2.md")]
     #[must_use]
     pub const fn focusable(mut self, focusable: bool) -> Self {
         self.focusable = focusable;
         self
     }
 
-    /// Returns a copy with the [`focused`](Self::focused) flag set.
+    #[doc = include_str!("semantic_state.doc/focused_2.md")]
     #[must_use]
     pub const fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
         self
     }
 
-    /// Returns a copy with the [`disabled`](Self::disabled) flag set.
+    #[doc = include_str!("semantic_state.doc/disabled_2.md")]
     #[must_use]
     pub const fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Returns a copy with the [`hidden`](Self::hidden) flag set.
+    #[doc = include_str!("semantic_state.doc/hidden_2.md")]
     #[must_use]
     pub const fn hidden(mut self, hidden: bool) -> Self {
         self.hidden = hidden;
         self
     }
 
-    /// Returns a copy with the [`selected`](Self::selected) flag set.
+    #[doc = include_str!("semantic_state.doc/selected_2.md")]
     #[must_use]
     pub const fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
     }
 
-    /// Returns a copy with the [`busy`](Self::busy) flag set.
+    #[doc = include_str!("semantic_state.doc/busy_2.md")]
     #[must_use]
     pub const fn busy(mut self, busy: bool) -> Self {
         self.busy = busy;
         self
     }
 
-    /// Returns a copy with the [`required`](Self::required) flag set.
+    #[doc = include_str!("semantic_state.doc/required_2.md")]
     #[must_use]
     pub const fn required(mut self, required: bool) -> Self {
         self.required = required;
         self
     }
 
-    /// Returns a copy with the [`invalid`](Self::invalid) flag set.
+    #[doc = include_str!("semantic_state.doc/invalid_2.md")]
     #[must_use]
     pub const fn invalid(mut self, invalid: bool) -> Self {
         self.invalid = invalid;
         self
     }
 
-    /// Returns a copy with the [`readonly`](Self::readonly) flag set.
+    #[doc = include_str!("semantic_state.doc/readonly_2.md")]
     #[must_use]
     pub const fn readonly(mut self, readonly: bool) -> Self {
         self.readonly = readonly;
         self
     }
 
-    /// Returns a copy with the [`checked`](Self::checked) tri-state replaced.
+    #[doc = include_str!("semantic_state.doc/with_checked.md")]
     #[must_use]
     pub const fn with_checked(mut self, checked: Option<bool>) -> Self {
         self.checked = checked;
         self
     }
 
-    /// Returns a copy with the [`expanded`](Self::expanded) tri-state replaced.
+    #[doc = include_str!("semantic_state.doc/with_expanded.md")]
     #[must_use]
     pub const fn with_expanded(mut self, expanded: Option<bool>) -> Self {
         self.expanded = expanded;
         self
     }
 
-    /// Returns whether the node can currently be acted on: it is
-    /// [`focusable`](Self::focusable) and not [`disabled`](Self::disabled)
-    /// (spec §7.1).
+    #[doc = include_str!("semantic_state.doc/is_actionable.md")]
     #[must_use]
     pub const fn is_actionable(&self) -> bool {
         self.focusable && !self.disabled

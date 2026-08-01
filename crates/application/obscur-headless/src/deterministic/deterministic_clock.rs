@@ -1,24 +1,23 @@
-//! A fully deterministic, manually-advanced clock (spec §3.3, §7.4).
+#![doc = include_str!("deterministic_clock.doc/_module.md")]
 
 use std::cell::Cell;
 
 use obscur_task::{Clock, Instant};
 
-/// A clock whose time only moves when [`advance`](Self::advance) is called,
-/// giving headless tests reproducible timing.
+#[doc = include_str!("deterministic_clock.doc/DeterministicClock.md")]
 #[derive(Debug, Default)]
 pub struct DeterministicClock {
     nanos: Cell<u64>,
 }
 
 impl DeterministicClock {
-    /// Creates a clock at time zero.
+    #[doc = include_str!("deterministic_clock.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Advances virtual time by `nanos` nanoseconds (saturating).
+    #[doc = include_str!("deterministic_clock.doc/advance.md")]
     pub fn advance(&self, nanos: u64) {
         self.nanos.set(self.nanos.get().saturating_add(nanos));
     }

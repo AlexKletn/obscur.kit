@@ -1,4 +1,4 @@
-//! Window module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod window;
 pub use window::Window;
 mod window_constraints;

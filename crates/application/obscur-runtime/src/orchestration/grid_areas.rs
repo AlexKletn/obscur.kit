@@ -1,22 +1,4 @@
-//! Resolves a grid item's `grid-area: <name>` against its container's
-//! `grid-template-areas`, patching the item's [`LayoutStyle`] placement.
-//!
-//! Named-area placement is the one grid feature that cannot be resolved on a
-//! single node in isolation: a child's `grid-area: header` names a rectangle that
-//! is defined on its **container**'s `grid-template-areas`, so the area's line
-//! numbers are only knowable with the tree in hand. The CSS layer therefore
-//! carries the child's reference unresolved — a [`PropertyId::GridArea`] marker
-//! ([`PropertyValue::GridAreaName`]) — and this pass, which runs after
-//! [`layout_styles_from`](super::LayoutCoordinator::layout_styles_from) has built
-//! the per-node [`LayoutStyle`] table, looks each marker up against the parent's
-//! parsed [`GridAreaTemplate`] and overwrites the item's
-//! [`grid_placement`](LayoutStyle::grid_placement) with the concrete line-based
-//! [`GridPlacement`] the area spans (spec §4.2).
-//!
-//! A child with no marker is untouched, and a marker that names an area absent
-//! from the container's template (or a child whose parent authored no template)
-//! is left at its all-[`GridLine::Auto`] default, so it simply auto-places —
-//! keeping every non-named layout byte-for-byte identical.
+#![doc = include_str!("grid_areas.doc/_module.md")]
 
 use obscur_layout::algorithm::{GridLine, GridPlacement};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
@@ -25,21 +7,7 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutStyles};
 
-/// Resolves every grid item's `grid-area: <name>` marker against its container's
-/// `grid-template-areas`, patching the item's [`LayoutStyle`] placement in place.
-///
-/// For each node carrying a [`PropertyId::GridArea`] name, the node's **logical
-/// parent** supplies the containing grid; its computed
-/// [`PropertyId::GridTemplateAreas`] template is looked up for the named area, and
-/// the area's line-number rectangle is written onto the item's `grid_placement`.
-/// A node without a marker, without a logical parent, whose parent authored no
-/// template, or that names an unknown area is left unchanged (auto placement).
-///
-/// This never adds or removes entries: it only overwrites the `grid_placement`
-/// field of items already present in `styles`, so it is a pure refinement of the
-/// table [`layout_styles_from`](super::LayoutCoordinator::layout_styles_from)
-/// built. Patches are independent per node, so the (unordered) iteration is
-/// deterministic in its result.
+#[doc = include_str!("grid_areas.doc/resolve_named_grid_areas.md")]
 pub fn resolve_named_grid_areas(
     styles: &mut LayoutStyles,
     tree: &RetainedTree,
@@ -65,8 +33,7 @@ pub fn resolve_named_grid_areas(
     }
 }
 
-/// Reads a node's `grid-area: <name>` marker, or [`None`] when the node authored
-/// no named-area placement (or the property is not a name marker).
+#[doc = include_str!("grid_areas.doc/grid_area_name_of.md")]
 fn grid_area_name_of(computed: &ComputedStyle) -> Option<&str> {
     computed
         .get(PropertyId::GridArea)
@@ -74,8 +41,7 @@ fn grid_area_name_of(computed: &ComputedStyle) -> Option<&str> {
         .and_then(PropertyValue::as_grid_area_name)
 }
 
-/// Reads a container's parsed `grid-template-areas`, or [`None`] when it authored
-/// none (or the property is not a template value).
+#[doc = include_str!("grid_areas.doc/grid_areas_of.md")]
 fn grid_areas_of(computed: &ComputedStyle) -> Option<&GridAreaTemplate> {
     computed
         .get(PropertyId::GridTemplateAreas)
@@ -83,8 +49,7 @@ fn grid_areas_of(computed: &ComputedStyle) -> Option<&GridAreaTemplate> {
         .and_then(PropertyValue::as_grid_areas)
 }
 
-/// Converts a named area's 1-based line rectangle into a concrete
-/// [`GridPlacement`] (a definite `start / end` line on both axes).
+#[doc = include_str!("grid_areas.doc/placement_from_area.md")]
 fn placement_from_area(rect: GridAreaRect) -> GridPlacement {
     GridPlacement::new(
         GridLine::Line(line(rect.column_start)),
@@ -94,8 +59,7 @@ fn placement_from_area(rect: GridAreaRect) -> GridPlacement {
     )
 }
 
-/// Narrows a 1-based `u32` grid line into the `i32` [`GridLine::Line`] carries,
-/// saturating so a pathologically large line cannot wrap.
+#[doc = include_str!("grid_areas.doc/line.md")]
 fn line(value: u32) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }

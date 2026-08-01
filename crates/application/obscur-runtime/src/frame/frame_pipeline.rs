@@ -1,4 +1,4 @@
-//! The synchronous, deterministic frame driver: [`FramePipeline`].
+#![doc = include_str!("frame_pipeline.doc/_module.md")]
 
 use obscur_scene::scene::Scene;
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
@@ -14,42 +14,23 @@ use crate::transaction::ReconcileEnactor;
 
 use super::{FrameContext, FrameResult};
 
-/// The synchronous, deterministic driver that runs one frame's core pipeline
-/// (spec §3.4).
-///
-/// The pipeline is **orchestration glue only**: it owns a [`Reconciler`] and the
-/// three stateless coordinators and calls them in a fixed order. It reimplements
-/// no domain logic — reconciliation, the cascade, layout, and scene composition
-/// each live entirely in their own crates.
-///
-/// Cross-frame state is *not* held here. The retained [`RetainedTree`] and the
-/// mutable [`Scene`] are owned by the caller (the runtime) and passed into
-/// [`run`](Self::run) by mutable reference, so the same pipeline value drives
-/// every frame while the runtime keeps the evolving state.
-///
-/// # Phase-1 scope
-///
-/// [`run`](Self::run) executes the deterministic **core**: reconcile the desired
-/// tree → resolve styles → layout → compose the scene → publish a snapshot. The
-/// remaining §3.4 stages — input dispatch, motion sampling (pre- and
-/// post-layout), render-graph construction, submission, and post-frame
-/// notifications — are wired in later phases.
+#[doc = include_str!("frame_pipeline.doc/FramePipeline.md")]
 // Not `Clone`: it owns a `SceneCoordinator`, which holds a `Box<dyn TextShaper>`
 // (a replaceable, non-cloneable shaping port) and so cannot be cloned.
 #[derive(Debug, Default)]
 pub struct FramePipeline {
-    /// Turns the desired view tree into retained-tree structure.
+    #[doc = include_str!("frame_pipeline.doc/reconciler.md")]
     reconciler: Reconciler,
-    /// Resolves computed styles over the retained tree.
+    #[doc = include_str!("frame_pipeline.doc/style.md")]
     style: StyleCoordinator,
-    /// Drives layout over the retained tree.
+    #[doc = include_str!("frame_pipeline.doc/layout.md")]
     layout: LayoutCoordinator,
-    /// Composes the paint-ordered display list.
+    #[doc = include_str!("frame_pipeline.doc/scene.md")]
     scene: SceneCoordinator,
 }
 
 impl FramePipeline {
-    /// Creates a pipeline with fresh coordinators and a fresh reconciler.
+    #[doc = include_str!("frame_pipeline.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -60,33 +41,7 @@ impl FramePipeline {
         }
     }
 
-    /// Runs one synchronous frame over caller-owned state and returns its
-    /// [`FrameResult`].
-    ///
-    /// The frame is short and **deterministic** (spec §3.4): for a given
-    /// `(tree state, desired, inputs, viewport)` it always produces the same
-    /// snapshot and the same flags. It never allocates cross-frame state of its
-    /// own and never panics.
-    ///
-    /// The phases, in order:
-    ///
-    /// 1. **Reconcile** — the desired [`View`] is reconciled into `tree`,
-    ///    updating retained structure, identity, and text while preserving node
-    ///    ids across reorders. `reconciled` is set when the returned plan is
-    ///    non-empty (the tree changed).
-    /// 2. **Style** — computed styles are resolved for every node reachable from
-    ///    the root, inheriting parent-first. `restyled` is set when any style was
-    ///    resolved.
-    /// 3. **Layout** — the computed styles are mapped to layout styles and the
-    ///    tree is arranged under [`FrameContext::viewport`], producing absolute
-    ///    boxes. `relaid_out` is set when any box was produced.
-    /// 4. **Compose** — a paint-ordered display list is composed from the styled,
-    ///    laid-out tree, installed as the scene root (advancing the scene
-    ///    generation), and published as an immutable snapshot. `composed` is
-    ///    always set: a scene is composed every frame, even if empty.
-    ///
-    /// Input dispatch, motion sampling, and render submission are not part of
-    /// this core and are wired in later phases.
+    #[doc = include_str!("frame_pipeline.doc/run.md")]
     #[must_use]
     pub fn run(
         &self,
@@ -104,22 +59,7 @@ impl FramePipeline {
         self.finish_frame(tree, scene, ctx, reconciled, inputs)
     }
 
-    /// Runs one synchronous frame that **matches authored stylesheets** against
-    /// the reconciled tree instead of taking pre-cascaded [`StyleInputs`].
-    ///
-    /// This is the integrating path that lets authored CSS reach paint. It runs
-    /// the same phases as [`run`](Self::run) with one change to the style stage:
-    ///
-    /// 1. **Reconcile** — identical to [`run`](Self::run).
-    /// 2. **Match** — the [`StyleMatchingCoordinator`] matches `sheets` against
-    ///    the just-reconciled tree, cascading each element's winning per-property
-    ///    values into the [`StyleInputs`] that [`run`](Self::run) would otherwise
-    ///    receive from the caller.
-    /// 3. **Style / Layout / Compose** — identical to [`run`](Self::run).
-    ///
-    /// `sheets` must be ordered by ascending cascade origin (system-default
-    /// first, inline last). With an empty `sheets` slice no rule matches, the
-    /// inputs are empty, and the result matches `run` with empty inputs.
+    #[doc = include_str!("frame_pipeline.doc/run_matched.md")]
     #[must_use]
     pub fn run_matched(
         &self,
@@ -142,21 +82,7 @@ impl FramePipeline {
         self.finish_frame(tree, scene, ctx, reconciled, &inputs)
     }
 
-    /// Reconciles `tree` toward `desired` **through** the atomic transaction
-    /// commit boundary (spec §3.2) and returns whether the tree changed.
-    ///
-    /// This is the single per-frame tree-mutation point. Rather than calling
-    /// [`Reconciler::reconcile_root`] directly, it hands the reconcile to a
-    /// [`ReconcileEnactor`], which stages it as a validated
-    /// [`UiTransaction`](crate::transaction::UiTransaction), commits it
-    /// atomically, and (on a real change) advances the commit version — with the
-    /// reconcile itself as the commit's effect. The retained tree and every
-    /// downstream result are therefore **identical** to the previous direct call;
-    /// only the commit path differs.
-    ///
-    /// The pipeline holds no cross-frame state, so the enactor is constructed per
-    /// call; the runtime ([`UiRuntime`](crate::UiRuntime)) owns a
-    /// persistent enactor whose version advances across frames.
+    #[doc = include_str!("frame_pipeline.doc/commit_reconcile.md")]
     fn commit_reconcile(&self, tree: &mut RetainedTree, desired: &View) -> bool {
         let (commit, _plan) = ReconcileEnactor::new()
             .commit_root(&self.reconciler, tree, desired)
@@ -166,13 +92,7 @@ impl FramePipeline {
         !commit.is_empty()
     }
 
-    /// Runs the shared style → layout → compose tail of a frame over an
-    /// already-reconciled `tree` and a resolved set of `inputs`, publishing the
-    /// snapshot and returning the [`FrameResult`].
-    ///
-    /// Both [`run`](Self::run) and [`run_matched`](Self::run_matched) call this
-    /// after their reconcile step so the deterministic core stays identical; the
-    /// two entry points differ only in how they obtain `inputs`.
+    #[doc = include_str!("frame_pipeline.doc/finish_frame.md")]
     fn finish_frame(
         &self,
         tree: &mut RetainedTree,

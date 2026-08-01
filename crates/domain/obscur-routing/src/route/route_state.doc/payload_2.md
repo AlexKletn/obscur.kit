@@ -1,0 +1,1 @@
+Returns the serialized payload.

@@ -1,51 +1,36 @@
-//! A semantic window-drag area and its double-click action (spec §6.4).
+#![doc = include_str!("drag_region.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect};
 
-/// The action taken when the user double-clicks a drag region (spec §6.4).
-///
-/// This is the platform-conventional title-bar double-click action.
-/// `DoubleClickAction` is a tightly-coupled part of [`DragRegion`]: it only has
-/// meaning as the action of a drag area, so it is colocated here rather than
-/// given its own module.
-///
-/// The enum's own default is [`DoubleClickAction::None`] so that a bare value
-/// is inert. A freshly constructed [`DragRegion`] likewise starts with `None`;
-/// callers pick the platform-conventional [`DoubleClickAction::Maximize`]
-/// explicitly via [`DragRegion::with_double_click_action`].
+#[doc = include_str!("drag_region.doc/DoubleClickAction.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DoubleClickAction {
-    /// Double-clicking does nothing.
+    #[doc = include_str!("drag_region.doc/None.md")]
     None,
-    /// Double-clicking toggles the window maximized (the conventional action on
-    /// most platforms).
+    #[doc = include_str!("drag_region.doc/Maximize.md")]
     Maximize,
-    /// Double-clicking minimizes the window.
+    #[doc = include_str!("drag_region.doc/Minimize.md")]
     Minimize,
 }
 
 impl Default for DoubleClickAction {
-    /// The default action is [`DoubleClickAction::None`].
+    #[doc = include_str!("drag_region.doc/default.md")]
     fn default() -> Self {
         Self::None
     }
 }
 
-/// A semantic window-drag area, such as a custom title bar (spec §6.4).
-///
-/// A compositor treats clicks within [`Self::bounds`] as a request to move the
-/// window, and double-clicks as the configured [`DoubleClickAction`].
-/// Coordinates are in window-local logical pixels.
+#[doc = include_str!("drag_region.doc/DragRegion.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DragRegion {
-    /// The window-local area treated as draggable.
+    #[doc = include_str!("drag_region.doc/bounds.md")]
     pub bounds: Rect,
-    /// The action taken on a double-click within the region.
+    #[doc = include_str!("drag_region.doc/double_click_action.md")]
     pub double_click_action: DoubleClickAction,
 }
 
 impl DragRegion {
-    /// Creates a drag region over `bounds` with no double-click action.
+    #[doc = include_str!("drag_region.doc/new.md")]
     #[must_use]
     pub const fn new(bounds: Rect) -> Self {
         Self {
@@ -54,26 +39,26 @@ impl DragRegion {
         }
     }
 
-    /// Sets the double-click action, returning the updated region.
+    #[doc = include_str!("drag_region.doc/with_double_click_action.md")]
     #[must_use]
     pub const fn with_double_click_action(mut self, action: DoubleClickAction) -> Self {
         self.double_click_action = action;
         self
     }
 
-    /// Returns the window-local draggable area.
+    #[doc = include_str!("drag_region.doc/bounds_2.md")]
     #[must_use]
     pub const fn bounds(&self) -> Rect {
         self.bounds
     }
 
-    /// Returns the action taken on a double-click within the region.
+    #[doc = include_str!("drag_region.doc/double_click_action_2.md")]
     #[must_use]
     pub const fn double_click_action(&self) -> DoubleClickAction {
         self.double_click_action
     }
 
-    /// Returns whether the window-local point lies within the drag region.
+    #[doc = include_str!("drag_region.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, point: Point) -> bool {
         self.bounds.contains(point)

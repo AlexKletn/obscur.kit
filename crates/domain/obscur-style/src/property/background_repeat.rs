@@ -1,40 +1,27 @@
-//! The computed value of CSS `background-repeat` (spec §5.2, CSS Backgrounds §3).
+#![doc = include_str!("background_repeat.doc/_module.md")]
 
-/// The computed value of `background-repeat`: whether the sized image tile is
-/// repeated (tiled) along each axis to fill the painted box.
-///
-/// The scene coordinator turns this into a pair of per-axis repeat flags
-/// (`repeat_x` / `repeat_y`) at paint time:
-///
-/// * [`BackgroundRepeat::Repeat`] — tile on both axes (the CSS initial).
-/// * [`BackgroundRepeat::NoRepeat`] — a single tile, no tiling.
-/// * [`BackgroundRepeat::RepeatX`] — tile horizontally only.
-/// * [`BackgroundRepeat::RepeatY`] — tile vertically only.
-///
-/// The CSS `space` and `round` keywords are **folded to** [`BackgroundRepeat::Repeat`]
-/// (a documented approximation): their gap-distribution / integer-fit behaviour is
-/// not modelled, so they tile like plain `repeat`.
+#[doc = include_str!("background_repeat.doc/BackgroundRepeat.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackgroundRepeat {
-    /// Tile on both axes (the CSS initial). `space` / `round` fold here.
+    #[doc = include_str!("background_repeat.doc/Repeat.md")]
     #[default]
     Repeat,
-    /// A single tile, no tiling on either axis.
+    #[doc = include_str!("background_repeat.doc/NoRepeat.md")]
     NoRepeat,
-    /// Tile horizontally only (a single row of tiles).
+    #[doc = include_str!("background_repeat.doc/RepeatX.md")]
     RepeatX,
-    /// Tile vertically only (a single column of tiles).
+    #[doc = include_str!("background_repeat.doc/RepeatY.md")]
     RepeatY,
 }
 
 impl BackgroundRepeat {
-    /// Whether the tile repeats along the horizontal (x) axis.
+    #[doc = include_str!("background_repeat.doc/repeat_x.md")]
     #[must_use]
     pub const fn repeat_x(self) -> bool {
         matches!(self, Self::Repeat | Self::RepeatX)
     }
 
-    /// Whether the tile repeats along the vertical (y) axis.
+    #[doc = include_str!("background_repeat.doc/repeat_y.md")]
     #[must_use]
     pub const fn repeat_y(self) -> bool {
         matches!(self, Self::Repeat | Self::RepeatY)

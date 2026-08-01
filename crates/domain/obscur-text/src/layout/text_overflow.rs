@@ -1,28 +1,19 @@
-//! What happens to text that does not fit its available width (spec §5.10).
+#![doc = include_str!("text_overflow.doc/_module.md")]
 
-/// How a line that overflows its available width is handled (spec §5.10).
-///
-/// This is a *policy* — the layout records the intent, and a downstream painter
-/// (an adapter) enforces it when rasterising. [`Visible`](Self::Visible) lets the
-/// overflow spill past the edge, [`Clip`](Self::Clip) hard-cuts it at the
-/// boundary, and [`Ellipsis`](Self::Ellipsis) replaces the trailing overflow with
-/// an ellipsis. `Clip` and `Ellipsis` both truncate, which callers test with
-/// [`is_truncating`](Self::is_truncating).
+#[doc = include_str!("text_overflow.doc/TextOverflow.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextOverflow {
-    /// Let overflowing text spill visibly past the available width.
+    #[doc = include_str!("text_overflow.doc/Visible.md")]
     Visible,
-    /// Hard-clip overflowing text at the boundary. The default.
+    #[doc = include_str!("text_overflow.doc/Clip.md")]
     #[default]
     Clip,
-    /// Truncate overflowing text and mark the cut with an ellipsis.
+    #[doc = include_str!("text_overflow.doc/Ellipsis.md")]
     Ellipsis,
 }
 
 impl TextOverflow {
-    /// Returns whether this policy truncates overflowing text — true for
-    /// [`Clip`](Self::Clip) and [`Ellipsis`](Self::Ellipsis), false for
-    /// [`Visible`](Self::Visible) (spec §5.10).
+    #[doc = include_str!("text_overflow.doc/is_truncating.md")]
     #[must_use]
     pub const fn is_truncating(&self) -> bool {
         matches!(self, Self::Clip | Self::Ellipsis)

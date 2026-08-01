@@ -1,57 +1,29 @@
-//! The port that picks a covering font for one itemized run (spec §5.10).
+#![doc = include_str!("font_resolver.doc/_module.md")]
 
 use crate::font::{FontFace, FontId, FontResolveRequest, ResolvedFont};
 use crate::shaping::ScriptTag;
 
-/// The replaceable port that chooses a font for one itemized run (spec §5.10
-/// font fallback).
-///
-/// Given a [`FontResolveRequest`] — a fallback chain, the requested attributes,
-/// and the run's text and script — a resolver returns the **first** font in the
-/// chain that can render the run, as a [`ResolvedFont`]. `None` means nothing in
-/// the chain covers the run, leaving the caller to fall back to a default face.
-///
-/// The domain holds a resolver as `Box<dyn FontResolver>`, so the trait is
-/// deliberately **object-safe** — no generic or `Self`-returning methods. The
-/// colocated [`MockFontResolver`] is a deterministic reference implementation
-/// that maps scripts to fonts directly; the real, coverage-driven resolver that
-/// inspects a font's character map lives outside the domain.
+#[doc = include_str!("font_resolver.doc/FontResolver.md")]
 pub trait FontResolver {
-    /// Resolves `request` to the first covering font in its chain, or `None`
-    /// when nothing in the chain can render the run (spec §5.10).
+    #[doc = include_str!("font_resolver.doc/resolve.md")]
     #[must_use]
     fn resolve(&self, request: &FontResolveRequest) -> Option<ResolvedFont>;
 }
 
-/// A deterministic reference [`FontResolver`] that maps a script directly to a
-/// registered font (spec §5.10).
-///
-/// `MockFontResolver` ignores real glyph coverage entirely: it holds a table of
-/// `ScriptTag -> (FontId, FontFace)` entries populated with
-/// [`register`](Self::register), and [`resolve`](FontResolver::resolve) returns
-/// the entry keyed by [`request.script()`](FontResolveRequest::script), or
-/// `None` when the script is unregistered. This lets tests model a fallback
-/// picture like "Latin uses font 0, Cyrillic uses font 1" without any font
-/// tables; the coverage-based resolver arrives in a later step. Re-registering a
-/// script replaces its previous entry (the last registration wins).
+#[doc = include_str!("font_resolver.doc/MockFontResolver.md")]
 #[derive(Debug, Default, Clone)]
 pub struct MockFontResolver {
     entries: Vec<(ScriptTag, FontId, FontFace)>,
 }
 
 impl MockFontResolver {
-    /// Creates an empty resolver with no registered scripts; every
-    /// [`resolve`](FontResolver::resolve) returns `None` until a script is
-    /// registered.
+    #[doc = include_str!("font_resolver.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registers `face` (issued as `font`) as the font to use for `script`.
-    ///
-    /// Registering a script that is already present replaces its entry, so the
-    /// most recent registration for a script wins.
+    #[doc = include_str!("font_resolver.doc/register.md")]
     pub fn register(&mut self, script: ScriptTag, font: FontId, face: FontFace) {
         if let Some(entry) = self.entries.iter_mut().find(|(s, _, _)| *s == script) {
             entry.1 = font;

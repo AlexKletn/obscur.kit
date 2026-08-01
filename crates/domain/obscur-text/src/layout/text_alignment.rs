@@ -1,56 +1,27 @@
-//! How a line's glyphs are positioned horizontally within the paragraph width
-//! (spec §5.10).
+#![doc = include_str!("text_alignment.doc/_module.md")]
 
 use crate::shaping::TextDirection;
 
-/// The horizontal alignment applied to each laid-out line within the available
-/// paragraph width (spec §5.10).
-///
-/// [`Start`](Self::Start) and [`End`](Self::End) are *direction-relative*: they
-/// resolve to the leading or trailing edge according to the run's
-/// [`TextDirection`], so `Start` hugs the left edge in left-to-right text and the
-/// right edge in right-to-left text. [`Left`](Self::Left) and
-/// [`Right`](Self::Right) are *absolute* and ignore direction.
-/// [`Center`](Self::Center) centres the line, and [`Justify`](Self::Justify)
-/// stretches inter-glyph spacing to fill the line (so its start offset is `0`).
+#[doc = include_str!("text_alignment.doc/TextAlignment.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextAlignment {
-    /// Align to the leading edge: left under left-to-right, right under
-    /// right-to-left. The default.
+    #[doc = include_str!("text_alignment.doc/Start.md")]
     #[default]
     Start,
-    /// Align to the trailing edge: right under left-to-right, left under
-    /// right-to-left.
+    #[doc = include_str!("text_alignment.doc/End.md")]
     End,
-    /// Align to the absolute left edge, regardless of direction.
+    #[doc = include_str!("text_alignment.doc/Left.md")]
     Left,
-    /// Align to the absolute right edge, regardless of direction.
+    #[doc = include_str!("text_alignment.doc/Right.md")]
     Right,
-    /// Centre the line within the available width.
+    #[doc = include_str!("text_alignment.doc/Center.md")]
     Center,
-    /// Stretch inter-glyph spacing to fill the available width; the line's start
-    /// offset is `0`.
+    #[doc = include_str!("text_alignment.doc/Justify.md")]
     Justify,
 }
 
 impl TextAlignment {
-    /// Computes the horizontal start offset (in logical pixels) for a line of
-    /// width `line_width` within `available_width`, under base `direction`
-    /// (spec §5.10).
-    ///
-    /// The result is the x position of the line's leading glyph relative to the
-    /// paragraph's left edge:
-    ///
-    /// - [`Left`](Self::Left) and [`Justify`](Self::Justify) return `0`.
-    /// - [`Right`](Self::Right) returns `available_width - line_width`.
-    /// - [`Center`](Self::Center) returns half of the remaining space.
-    /// - [`Start`](Self::Start) returns `0` under left-to-right and the
-    ///   right-aligned offset under right-to-left; [`End`](Self::End) is the
-    ///   mirror of `Start`.
-    ///
-    /// When the line is wider than the available width the raw offset would be
-    /// negative; it is clamped up to `0` so the line never starts left of the
-    /// paragraph edge.
+    #[doc = include_str!("text_alignment.doc/x_offset.md")]
     #[must_use]
     pub const fn x_offset(
         self,

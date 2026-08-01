@@ -1,4 +1,4 @@
-//! Port module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod diagnostic_sink;
 
 pub use diagnostic_sink::{DiagnosticSink, NullDiagnosticSink};

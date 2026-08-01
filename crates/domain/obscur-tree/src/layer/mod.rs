@@ -1,4 +1,4 @@
-//! Layer module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod layer;
 pub use layer::Layer;
 mod layer_id;

@@ -1,69 +1,49 @@
-//! What to open via the platform shell (spec §6.11 — shell integration).
+#![doc = include_str!("shell_target.doc/_module.md")]
 
 use crate::document::DocumentHandle;
 
-/// The typed activation category of a shell target (spec §6.11).
-///
-/// The toolkit surfaces typed activation events for files, URIs, and deep links
-/// (spec §6.11); this enum names those three categories so an application can
-/// route an incoming activation without re-parsing the target.
+#[doc = include_str!("shell_target.doc/ActivationKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivationKind {
-    /// A file or resolved document handle.
+    #[doc = include_str!("shell_target.doc/File.md")]
     File,
-    /// A conventional URI (an `http`, `https`, `mailto`, or `file` scheme).
+    #[doc = include_str!("shell_target.doc/Uri.md")]
     Uri,
-    /// A custom/app-scheme URI used as a deep link into the application.
+    #[doc = include_str!("shell_target.doc/DeepLink.md")]
     DeepLink,
 }
 
-/// What to open through the platform shell (spec §6.11).
-///
-/// A [`ShellProvider`](crate::shell::ShellProvider) opens a target and reports a
-/// [`ShellResult`](crate::shell::ShellResult). A target is a pure value naming a
-/// file, an arbitrary URI, or an opaque document token — never a live handle to
-/// the platform. File-association, MIME/protocol registration, and single-instance
-/// concerns are the app/installer's responsibility and stay out of this type
-/// (spec §6.11).
+#[doc = include_str!("shell_target.doc/ShellTarget.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ShellTarget {
-    /// An opaque document handle to reveal or open (spec §6.10).
+    #[doc = include_str!("shell_target.doc/File_2.md")]
     File(DocumentHandle),
-    /// An arbitrary URI to hand to the shell.
+    #[doc = include_str!("shell_target.doc/Uri_2.md")]
     Uri(Box<str>),
-    /// An opaque document token to open through the shell.
+    #[doc = include_str!("shell_target.doc/Document.md")]
     Document(Box<str>),
 }
 
 impl ShellTarget {
-    /// Creates a target that opens the document behind `handle` (spec §6.11).
+    #[doc = include_str!("shell_target.doc/file.md")]
     #[must_use]
     pub const fn file(handle: DocumentHandle) -> Self {
         Self::File(handle)
     }
 
-    /// Creates a target that opens the given `uri` (spec §6.11).
+    #[doc = include_str!("shell_target.doc/uri.md")]
     #[must_use]
     pub fn uri(uri: impl Into<Box<str>>) -> Self {
         Self::Uri(uri.into())
     }
 
-    /// Creates a target that opens the given opaque document `token`
-    /// (spec §6.11).
+    #[doc = include_str!("shell_target.doc/document.md")]
     #[must_use]
     pub fn document(token: impl Into<Box<str>>) -> Self {
         Self::Document(token.into())
     }
 
-    /// Returns the typed activation category of this target (spec §6.11).
-    ///
-    /// A [`File`](Self::File) or [`Document`](Self::Document) activates as
-    /// [`ActivationKind::File`]. A [`Uri`](Self::Uri) is classified by its scheme:
-    /// the conventional `http`, `https`, `mailto`, and `file` schemes are
-    /// [`ActivationKind::Uri`], and every other (custom/app) scheme is treated as
-    /// a [`ActivationKind::DeepLink`]. This is the simplified §6.11 rule: rather
-    /// than consult a registry, any non-standard scheme is assumed to be an app
-    /// deep link.
+    #[doc = include_str!("shell_target.doc/activation_kind.md")]
     #[must_use]
     pub fn activation_kind(&self) -> ActivationKind {
         match self {
@@ -78,8 +58,7 @@ impl ShellTarget {
         }
     }
 
-    /// Returns the URI string when this target is a [`Uri`](Self::Uri), else
-    /// `None` (spec §6.11).
+    #[doc = include_str!("shell_target.doc/as_uri.md")]
     #[must_use]
     pub fn as_uri(&self) -> Option<&str> {
         match self {

@@ -1,60 +1,4 @@
-//! The **interactive Wireframe-Kit** scene — authored once, driven by both the
-//! live windowed Vello example (`wireframe_live_window.rs`) and the headless
-//! CPU→PNG proof (`wireframe_live_headless.rs`).
-//!
-//! # The point
-//!
-//! Every control here is **BARE**: a real [`Button`] / [`Input`] / [`Checkbox`] /
-//! [`Radio`] / [`Select`] (or a raw `<a>`), carrying **no** author CSS for its
-//! appearance. All of the control look — the paper fill, the 1.5px ink border, the
-//! 2px radius, the hover fill shift, the dashed focus ring, the inverted `:active`,
-//! the checkbox `✓` box, the radio dot, the select `▼`/`▲` — comes entirely from
-//! the kit's **UA default stylesheet** ([`obscur_kit::ua_stylesheet`]), which the
-//! two drivers install on the runtime. This demo therefore *proves* the UA look:
-//! remove the installed default sheet and every control goes unstyled.
-//!
-//! The scene authors only the **LAYOUT CHROME** — the graph-paper page, the
-//! centered column, the masthead card (title + mono subtitle + description + the
-//! five state-legend chips), the numbered section cards, the captions, and the
-//! footer — via `.wf-*` classes. It never writes a `button { … }` / `input { … }` /
-//! `checkbox { … }` / `.checkbox-box { … }` / `a { … }` rule, so the UA default
-//! shows through unmodified.
-//!
-//! Like the other shared scenes it is **backend-pure**: it names only the toolkit's
-//! view / widget / primitive / CSS authoring surfaces (`obscur_kit::*`) and never a
-//! renderer, window, or GPU type, so the same [`view`] + [`stylesheet`] feed a
-//! software rasterizer and a GPU surface unchanged.
-//!
-//! # Sections (all LIVE bare controls)
-//!
-//! 1. **Button** `<button>` — a live [`Button`] (`:hover` fill shift, `:active`
-//!    invert, `:focus` ring; a click bumps the status counter) beside a disabled one.
-//! 2. **Text Field** `<input>` — a live [`Input`] (click → focus ring + caret,
-//!    type → text) beside a **read-only** one (`.readonly(true)`, HTML `readonly`:
-//!    focusable + selectable but not editable).
-//! 3. **Textarea** `<textarea>` — a live **multi-line** [`Input`]
-//!    (`.multiline(true)`), which emits the reserved CSS type `textarea`. The UA
-//!    sheet makes a bare `input` **single-line** (`white-space: nowrap`) but a
-//!    `textarea` **multi-line** (`white-space: pre-wrap`), so this field WRAPS at
-//!    its author `.wf-area` `360×96` box AND preserves newlines — a real textarea:
-//!    Enter inserts `\n`, ArrowUp/ArrowDown move between lines, all on the UA base.
-//! 4. **Select** `<select>` — a live [`Select`] state machine. Closed, the header
-//!    shows the current label + ▼. Open, the widget emits a real **dropdown popup**
-//!    — a `.select-list` of stacked `.select-option` rows positioned directly BELOW
-//!    the header (arrow ▲), the selected row inverted. A click while open picks the
-//!    next option and closes. Per-**option** hit-routing is NOT a bare-`Select`
-//!    capability (the widget bubbles one event for the whole control), so "pick" is
-//!    a cycle-to-next; noted. Beside it a disabled one.
-//! 5. **Checkbox** `<input type=checkbox>` — a live [`Checkbox`] (box `✓` on click),
-//!    a tri-state one, and a disabled one.
-//! 6. **Radio** `<input type=radio>` — a live group of three [`Radio`]s sharing one
-//!    selection (the chosen one shows the filled dot), plus a disabled one.
-//! 7. **Text Link** `<a>` — a bare `<a>` element showing the UA underline and the
-//!    `:hover` bold.
-//!
-//! The purely-static spec-only groups from the source kit (range / progress / meter
-//! / file / color / fieldset / table / scrollbar) are **skipped** — this demo
-//! prioritises the genuinely interactive controls.
+#![doc = include_str!("scene.doc/_module.md")]
 // Both examples share this module via `#[path]`; each uses a subset of it, so some
 // items look dead/unreachable-pub inside a single example binary.
 #![allow(dead_code, unreachable_pub)]
@@ -77,89 +21,76 @@ use obscur_kit::widgets::select::Select;
 // only compares symbols, so the app-owned command identity must agree.
 // ---------------------------------------------------------------------------
 
-/// The enabled push-button's click command (bumps the click counter).
+#[doc = include_str!("scene.doc/CMD_BTN.md")]
 pub const CMD_BTN: InternedSymbol = InternedSymbol::from_raw(0x7100_0001);
-/// The **disabled** button's command — deliberately left without a handler so a
-/// click resolves to a genuine no-op.
+#[doc = include_str!("scene.doc/CMD_BTN_OFF.md")]
 pub const CMD_BTN_OFF: InternedSymbol = InternedSymbol::from_raw(0x7100_0002);
-/// The editable text field's per-keystroke text command.
+#[doc = include_str!("scene.doc/CMD_FIELD.md")]
 pub const CMD_FIELD: InternedSymbol = InternedSymbol::from_raw(0x7100_0003);
-/// The **readonly** field's command — no handler needed: a readonly field is
-/// focusable and its text selectable, but its value can never change, so its
-/// `change`/`input` never fire (WHATWG HTML §attr-input-readonly).
+#[doc = include_str!("scene.doc/CMD_FIELD_OFF.md")]
 pub const CMD_FIELD_OFF: InternedSymbol = InternedSymbol::from_raw(0x7100_0004);
-/// The textarea (a live `Input`) per-keystroke text command.
+#[doc = include_str!("scene.doc/CMD_AREA.md")]
 pub const CMD_AREA: InternedSymbol = InternedSymbol::from_raw(0x7100_0005);
-/// The select's command (open when closed; pick-next + close when open).
+#[doc = include_str!("scene.doc/CMD_SEL.md")]
 pub const CMD_SEL: InternedSymbol = InternedSymbol::from_raw(0x7100_0006);
-/// The **disabled** select's command — no handler, so it is a no-op.
+#[doc = include_str!("scene.doc/CMD_SEL_OFF.md")]
 pub const CMD_SEL_OFF: InternedSymbol = InternedSymbol::from_raw(0x7100_0007);
-/// The plain checkbox's change command (toggles it).
+#[doc = include_str!("scene.doc/CMD_CHK.md")]
 pub const CMD_CHK: InternedSymbol = InternedSymbol::from_raw(0x7100_0008);
-/// The tri-state checkbox's change command (advances mixed → checked → …).
+#[doc = include_str!("scene.doc/CMD_TRI.md")]
 pub const CMD_TRI: InternedSymbol = InternedSymbol::from_raw(0x7100_0009);
-/// The **disabled** checkbox's command — no handler, so it is a no-op.
+#[doc = include_str!("scene.doc/CMD_CHK_OFF.md")]
 pub const CMD_CHK_OFF: InternedSymbol = InternedSymbol::from_raw(0x7100_000A);
-/// The **disabled** radio's command — no handler, so it is a no-op.
+#[doc = include_str!("scene.doc/CMD_RADIO_OFF.md")]
 pub const CMD_RADIO_OFF: InternedSymbol = InternedSymbol::from_raw(0x7100_000B);
-/// The text link's click command (updates the status line).
+#[doc = include_str!("scene.doc/CMD_LINK.md")]
 pub const CMD_LINK: InternedSymbol = InternedSymbol::from_raw(0x7100_000C);
 
-/// The number of radio options in the group.
+#[doc = include_str!("scene.doc/RADIO_COUNT.md")]
 pub const RADIO_COUNT: usize = 3;
-/// The base command for the radio group; option `i` fires `CMD_RADIO_BASE + i`.
+#[doc = include_str!("scene.doc/CMD_RADIO_BASE.md")]
 pub const CMD_RADIO_BASE: u32 = 0x7100_0020;
-/// The number of select options.
+#[doc = include_str!("scene.doc/SELECT_COUNT.md")]
 pub const SELECT_COUNT: usize = 3;
 
-/// The command a radio option at `index` fires (on `EVENT_CHANGE`).
+#[doc = include_str!("scene.doc/radio_command.md")]
 #[must_use]
 pub fn radio_command(index: usize) -> InternedSymbol {
     InternedSymbol::from_raw(CMD_RADIO_BASE + index as u32)
 }
 
-/// The human labels of the radio options.
+#[doc = include_str!("scene.doc/RADIO_LABELS.md")]
 pub const RADIO_LABELS: [&str; RADIO_COUNT] = ["Small", "Medium", "Large"];
-/// The human labels of the select options. Single tokens on purpose: a BARE
-/// `Select` is `display: flex` (label + arrow), and under this engine its flexible
-/// label item resolves to a narrow intrinsic width, so a two-word label ("Option
-/// one") wraps and spills below the box. Single-word options render the field
-/// cleanly with no restyling (the whole point — no author CSS on the control).
+#[doc = include_str!("scene.doc/SELECT_LABELS.md")]
 pub const SELECT_LABELS: [&str; SELECT_COUNT] = ["One", "Two", "Three"];
-/// A single-token prompt used as the *disabled* select's sole option, so its
-/// header reads "Choose…" (the enabled select's header shows its own current label
-/// — the first option until one is picked). Single token so it never wraps.
+#[doc = include_str!("scene.doc/SELECT_PROMPT.md")]
 pub const SELECT_PROMPT: &str = "Choose…";
 
-/// The `<a>` element's stable component id (a raw semantic element the demo emits
-/// directly — the widgets crate has no anchor widget; the UA `a { … }` rule styles
-/// it purely by its CSS type).
+#[doc = include_str!("scene.doc/ANCHOR_ID.md")]
 const ANCHOR_ID: ComponentId = ComponentId::from_raw(0x7100_00A0);
 
 // ---------------------------------------------------------------------------
 // The shared interaction state.
 // ---------------------------------------------------------------------------
 
-/// The live interaction state the view is parameterized by. Both drivers own one
-/// behind an `Rc<RefCell<_>>`: the command / text-input handlers mutate it, and the
-/// reactive [`view`] builder reads it back to rebuild every frame.
+#[doc = include_str!("scene.doc/WireState.md")]
 #[derive(Debug, Clone)]
 pub struct WireState {
-    /// How many times the enabled button has been clicked.
+    #[doc = include_str!("scene.doc/clicks.md")]
     pub clicks: u32,
-    /// A short human description of the last interaction (status line).
+    #[doc = include_str!("scene.doc/last_event.md")]
     pub last_event: String,
-    /// The editable text field's current text, mirrored from the editing session.
+    #[doc = include_str!("scene.doc/field.md")]
     pub field: String,
-    /// The textarea's current text (a live `Input`), mirrored from editing.
+    #[doc = include_str!("scene.doc/area.md")]
     pub area: String,
-    /// The plain checkbox (real widget state machine).
+    #[doc = include_str!("scene.doc/check.md")]
     pub check: Checkbox,
-    /// The tri-state checkbox (starts indeterminate).
+    #[doc = include_str!("scene.doc/tri.md")]
     pub tri: Checkbox,
-    /// The radio group's selected index.
+    #[doc = include_str!("scene.doc/radio.md")]
     pub radio: usize,
-    /// The dropdown (real widget: open/selected state machine).
+    #[doc = include_str!("scene.doc/select.md")]
     pub select: Select,
 }
 
@@ -189,14 +120,7 @@ impl Default for WireState {
 // masthead chips, NOT controls.
 // ---------------------------------------------------------------------------
 
-/// The layout-chrome stylesheet: masthead, section cards, captions, the legend
-/// swatches, and the graph-paper page. Returned as `&'static str` so both drivers
-/// compile it through the real `obscur-css` frontend.
-///
-/// Palette matches the source kit: ink `#2b2a27`, muted `#5a584f`, faint `#9b998f`,
-/// disabled-ink `#b7b5ad`, page `#eceae5`, surface `#faf9f6`, hover `#e4e2db`,
-/// disabled-fill `#f2f0ea`. Fonts are the host's (no IBM Plex), so only sizes and
-/// weights are set — mono captions/subtitles read in the host font by design.
+#[doc = include_str!("scene.doc/stylesheet.md")]
 #[must_use]
 pub fn stylesheet() -> &'static str {
     "\
@@ -266,11 +190,7 @@ pub fn stylesheet() -> &'static str {
 // The view builder.
 // ---------------------------------------------------------------------------
 
-/// Builds the full wireframe view tree from `state`: the graph-paper page holding
-/// a centered column of the masthead, the seven live-control section cards, and the
-/// footer. Pure view/widget/primitive construction — no backend types — so both
-/// drivers call it identically. The controls are BARE; only the UA sheet styles
-/// them.
+#[doc = include_str!("scene.doc/view.md")]
 #[must_use]
 pub fn view(state: &WireState) -> View {
     let column = el(
@@ -298,8 +218,7 @@ pub fn view(state: &WireState) -> View {
     View::single(app)
 }
 
-/// The masthead card: title + mono subtitle, the description paragraph, the live
-/// status line, and the five state-legend chips.
+#[doc = include_str!("scene.doc/masthead.md")]
 fn masthead(state: &WireState) -> ViewNode {
     let title_row = el(
         "wf-mast-row",
@@ -337,13 +256,13 @@ fn masthead(state: &WireState) -> ViewNode {
     el("wf-masthead", vec![title_row, desc, status, legend])
 }
 
-/// One legend chip: a state swatch beside its mono label.
+#[doc = include_str!("scene.doc/chip.md")]
 fn chip(label: &str, swatch_variant: &str) -> ViewNode {
     let swatch = el(&format!("wf-sw {swatch_variant}"), vec![]);
     el("wf-chip", vec![swatch, text("wf-chip-label", label)])
 }
 
-/// The footer: two mono lines at opposite ends.
+#[doc = include_str!("scene.doc/footer.md")]
 fn footer() -> ViewNode {
     el(
         "wf-footer",
@@ -358,7 +277,7 @@ fn footer() -> ViewNode {
 // Section bodies — each holds one or more BARE controls.
 // ---------------------------------------------------------------------------
 
-/// 01 · Button: a live button beside a disabled one.
+#[doc = include_str!("scene.doc/button_body.md")]
 fn button_body() -> ViewNode {
     body(vec![
         slot(
@@ -375,15 +294,7 @@ fn button_body() -> ViewNode {
     ])
 }
 
-/// 02 · Text Field: a live input beside a **read-only** one.
-///
-/// The read-only field is `Input::with_value(..).readonly(true)` (HTML `readonly`,
-/// WHATWG HTML §attr-input-readonly): unlike a `disabled(true)` field it CAN be
-/// focused and its "read only" text selected / copied — it just cannot be edited
-/// (typing / Backspace / IME / paste are no-ops and its `change` never fires). The
-/// text is its real value. It reuses `wf-field` (no distinct read-only styling: the
-/// selector engine has no `:read-only` pseudo-class yet, so a read-only field looks
-/// like a normal field here — an author would add a class for a muted look).
+#[doc = include_str!("scene.doc/field_body.md")]
 fn field_body(state: &WireState) -> ViewNode {
     body(vec![
         slot(
@@ -409,10 +320,7 @@ fn field_body(state: &WireState) -> ViewNode {
     ])
 }
 
-/// 03 · Textarea: a live **multi-line** [`Input`] (`.multiline(true)`), which
-/// emits the reserved CSS type `textarea` so the UA `textarea { … }` rules bind
-/// (`white-space: pre-wrap` — it wraps at the box AND preserves `\n`). Enter inserts
-/// a newline and ArrowUp/ArrowDown move between wrapped lines (runtime MULTILINE).
+#[doc = include_str!("scene.doc/area_body.md")]
 fn area_body(state: &WireState) -> ViewNode {
     body(vec![slot(
         "MULTILINE · LIVE",
@@ -427,7 +335,7 @@ fn area_body(state: &WireState) -> ViewNode {
     )])
 }
 
-/// 04 · Select: a live dropdown beside a disabled one.
+#[doc = include_str!("scene.doc/select_body.md")]
 fn select_body(state: &WireState) -> ViewNode {
     body(vec![
         slot(
@@ -448,17 +356,12 @@ fn select_body(state: &WireState) -> ViewNode {
     ])
 }
 
-/// The live select's bare view — now rendered entirely by the real [`Select`]
-/// widget: the header (current label + ▼/▲ arrow) plus, while open, a real
-/// `.select-list` dropdown popup of `.select-option` rows below it (the selected
-/// one inverted). No proxy is needed any more — the widget renders its own list —
-/// so this simply defers to [`Select::view`]. A click fires [`CMD_SEL`]: open when
-/// closed, or pick-next + close when open, via the single shared handler.
+#[doc = include_str!("scene.doc/select_widget.md")]
 fn select_widget(state: &WireState) -> View {
     state.select.view()
 }
 
-/// 05 · Checkbox: a live one, a tri-state one, and a disabled one.
+#[doc = include_str!("scene.doc/checkbox_body.md")]
 fn checkbox_body(state: &WireState) -> ViewNode {
     body(vec![
         slot("LIVE", control("chk", state.check.view())),
@@ -476,7 +379,7 @@ fn checkbox_body(state: &WireState) -> ViewNode {
     ])
 }
 
-/// 06 · Radio: a live group of three sharing one selection, plus a disabled one.
+#[doc = include_str!("scene.doc/radio_body.md")]
 fn radio_body(state: &WireState) -> ViewNode {
     let mut slots: Vec<ViewNode> = (0..RADIO_COUNT)
         .map(|i| {
@@ -502,7 +405,7 @@ fn radio_body(state: &WireState) -> ViewNode {
     body(slots)
 }
 
-/// 07 · Text Link: a bare `<a>` element (UA underline + `:hover` bold).
+#[doc = include_str!("scene.doc/link_body.md")]
 fn link_body() -> ViewNode {
     body(vec![slot("DEFAULT · LIVE", anchor("link", "Text link"))])
 }
@@ -511,8 +414,7 @@ fn link_body() -> ViewNode {
 // Small view helpers.
 // ---------------------------------------------------------------------------
 
-/// A numbered section card: the mono `NN` + `<h2>` title + `<tag>` code header
-/// (with a bottom rule) over the group body.
+#[doc = include_str!("scene.doc/section.md")]
 fn section(num: &str, title: &str, tag: &str, body_node: ViewNode) -> ViewNode {
     let head = el(
         "wf-head",
@@ -525,36 +427,29 @@ fn section(num: &str, title: &str, tag: &str, body_node: ViewNode) -> ViewNode {
     el("wf-card", vec![head, body_node])
 }
 
-/// A `.wf-body` flex row holding the section's control slots.
+#[doc = include_str!("scene.doc/body.md")]
 fn body(slots: Vec<ViewNode>) -> ViewNode {
     el("wf-body", slots)
 }
 
-/// One control slot: the bare control above a mono caption.
+#[doc = include_str!("scene.doc/slot.md")]
 fn slot(caption: &str, control: ViewNode) -> ViewNode {
     el("wf-slot", vec![control, text("wf-cap", caption)])
 }
 
-/// Tags a bare widget's rendered root node with a unique `id` (so the headless
-/// proof can hit-test it by identity). It carries **no** class, so nothing but the
-/// UA sheet styles it.
+#[doc = include_str!("scene.doc/control.md")]
 fn control(id: &str, view: View) -> ViewNode {
     first_node(view).with_prop(ViewProperty::new(ID, ViewValue::Text(id.into())))
 }
 
-/// Like [`control`], but also attaches an author `class` to the control's root
-/// node — used to give the text fields / textarea their DEFINITE size (a real form
-/// sizes its fields). The control's *look* still comes entirely from the UA sheet;
-/// the class only sets width/height/white-space, not appearance.
+#[doc = include_str!("scene.doc/control_sized.md")]
 fn control_sized(id: &str, class: &str, view: View) -> ViewNode {
     first_node(view)
         .with_prop(ViewProperty::new(ID, ViewValue::Text(id.into())))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A bare `<a>` anchor element: a semantic element carrying the stable CSS type
-/// `a` (so the UA `a { … }` / `a:hover { … }` rules match), a click binding, a
-/// unique `id`, and the link text as its child.
+#[doc = include_str!("scene.doc/anchor.md")]
 fn anchor(id: &str, label: &str) -> ViewNode {
     ViewNode::element(ANCHOR_ID)
         .with_prop(ViewProperty::new(TYPE, ViewValue::from("a")))
@@ -563,7 +458,7 @@ fn anchor(id: &str, label: &str) -> ViewNode {
         .with_children(ViewFragment::from_nodes(vec![text_inline(label)]))
 }
 
-/// Wraps `children` in a classed [`Container`] element node.
+#[doc = include_str!("scene.doc/el.md")]
 fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
@@ -571,19 +466,19 @@ fn el(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A classed [`Text`] node (the class carries colour / size / weight).
+#[doc = include_str!("scene.doc/text.md")]
 fn text(class: &str, content: &str) -> ViewNode {
     Text::new(content.to_owned())
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// A bare (class-less) [`Text`] node used as a control's / anchor's label child.
+#[doc = include_str!("scene.doc/text_inline.md")]
 fn text_inline(content: &str) -> ViewNode {
     Text::new(content.to_owned()).into_view_node()
 }
 
-/// Pulls a widget's first rendered [`ViewNode`] out of the [`View`] it produces.
+#[doc = include_str!("scene.doc/first_node.md")]
 fn first_node(view: View) -> ViewNode {
     view.into_fragment().nodes().to_vec().remove(0)
 }

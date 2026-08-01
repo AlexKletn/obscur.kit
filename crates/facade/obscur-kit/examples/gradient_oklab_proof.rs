@@ -1,35 +1,4 @@
-//! **Proof: CSS gradients interpolate in Oklab (CSS Images 4 default) via Vello.**
-//!
-//! Per **CSS Images Module Level 4 §3.4**, a gradient with no authored
-//! `in <color-space>` interpolates its color stops in **Oklab** — the default
-//! rectangular interpolation space (CSS Color 4 §12). Today's fix sets
-//! `Gradient::interpolation_cs = Oklab` on the peniko builders in
-//! `brush_converter.rs`; this example proves Vello actually *honors* that field
-//! during rasterization.
-//!
-//! It drives two horizontal 256 × 64 bands end-to-end through the real
-//! `obscur-css` frontend + [`UiRuntime`], then renders them headless through
-//! Vello/wgpu into `target/gradient_oklab_proof.png`:
-//!
-//! 1. `linear-gradient(to right, red, green)` — the naive sRGB-gamma midpoint is
-//!    a dark muddy olive (~`(128, 64, 0)`-ish once premultiplied over sRGB). The
-//!    **Oklab** midpoint is a distinctly *lighter*, more vivid yellow-green: its
-//!    green channel and overall luminance are meaningfully higher. The example
-//!    **self-asserts** the sampled midpoint green channel clears a threshold that
-//!    the sRGB-gamma mix could never reach — the machine-checked proof that Vello
-//!    interpolated in Oklab.
-//! 2. `linear-gradient(to right, blue, yellow)` — rendered for visual comparison.
-//!
-//! On the CPU backend every gradient flattens to its first stop per the GPU-class
-//! effect policy; the faithful interpolation is the Vello proof.
-//!
-//! # Environment note
-//!
-//! Needs a usable GPU adapter. With none it prints a diagnostic and exits cleanly
-//! (never a fabricated device / panic).
-//!
-//! Run it:
-//! `cargo run -p obscur-kit --example gradient_oklab_proof --features render-vello`
+#![doc = include_str!("gradient_oklab_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
@@ -47,10 +16,10 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewProperty, ViewValue};
 
-/// The output image extent: two stacked 256-wide bands.
+#[doc = include_str!("gradient_oklab_proof.doc/VIEWPORT.md")]
 const VIEWPORT: Size = Size::new(256.0, 128.0);
 
-/// The authored stylesheet: two 256 × 64 horizontal gradient bands.
+#[doc = include_str!("gradient_oklab_proof.doc/CSS.md")]
 const CSS: &str = r"
 .app {
     display: block;
@@ -159,9 +128,7 @@ fn main() {
     );
 }
 
-/// Samples the un-premultiplied-looking RGBA8 bytes at `(x, y)`. The read-back is
-/// premultiplied RGBA8, but the bands are fully opaque (alpha 255) so the stored
-/// channels equal the display color.
+#[doc = include_str!("gradient_oklab_proof.doc/sample.md")]
 fn sample(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
     [
@@ -172,7 +139,7 @@ fn sample(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     ]
 }
 
-/// Builds the two-band `.app` view: a red→green band and a blue→yellow band.
+#[doc = include_str!("gradient_oklab_proof.doc/build_view.md")]
 fn build_view() -> View {
     let band = |class: &str| {
         Container::new()
@@ -186,15 +153,14 @@ fn build_view() -> View {
     View::single(app)
 }
 
-/// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].
+#[doc = include_str!("gradient_oklab_proof.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
     let parsed = StylesheetParser::new(&src).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// Acquires a headless wgpu device + queue (no surface), or [`None`] when no
-/// adapter/device is available so the caller exits cleanly instead of panicking.
+#[doc = include_str!("gradient_oklab_proof.doc/init_headless_gpu.md")]
 fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -206,7 +172,7 @@ fn init_headless_gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
-/// The workspace-relative output path `target/<name>`.
+#[doc = include_str!("gradient_oklab_proof.doc/output_path.md")]
 fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

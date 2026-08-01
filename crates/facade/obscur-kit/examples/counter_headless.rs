@@ -1,32 +1,4 @@
-//! End-to-end **headless** capstone for the `obscur-kit` facade.
-//!
-//! This example drives the whole toolkit through its public umbrella crate only
-//! (`obscur_kit::*`) — no individual crate is named — with **no display and no
-//! GPU**. It is deterministic and CI-friendly: every stage is exercised through
-//! the real pipeline and guarded with `assert!`/`assert_eq!`, so a regression
-//! fails the run rather than printing wrong numbers.
-//!
-//! It walks the full authoring-to-scene path in five acts:
-//!
-//! 1. **Styling frontend** — author a small CSS stylesheet and compile it via
-//!    the CSS frontend (`source -> parse -> compile`), proving the frontend
-//!    composes and surfaces unsupported features as diagnostics rather than
-//!    crashing.
-//! 2. **Components tier** — build a "counter" UI (a container tagged with the
-//!    `counter` class, holding a text label and two buttons) from the
-//!    primitives + widgets tier.
-//! 3. **Pipeline** — boot a deterministic [`HeadlessHost`] via `KitBootstrap`
-//!    and render one frame with the compiled stylesheet through
-//!    `reconcile -> selector-match -> style -> layout -> scene`. The `.counter`
-//!    rule matches the tagged container, so the frame paints a real fill: the
-//!    display list is asserted non-empty.
-//! 4. **Determinism** — render the identical view + stylesheet again and assert
-//!    the display-list commands are byte-identical.
-//! 5. **State change** — drive a [`Button`]'s headless state machine (press +
-//!    release), rebuild the view, render again, and show the frame id advanced.
-//!
-//! Run it with:
-//! `cargo run -p obscur-kit --example counter_headless`
+#![doc = include_str!("counter_headless.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::bootstrap::KitBootstrap;
@@ -41,11 +13,7 @@ use obscur_kit::runtime::frame::FrameId;
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 
-/// A small authored stylesheet that exercises several CSS features at once:
-/// a `:root` custom property, a flex container, a `var()` reference, a
-/// `:hover`-gated declaration, an `@keyframes` animation, and — on purpose —
-/// two things the frontend does not support (`@import` and `float`) so we can
-/// show they are reported as diagnostics instead of aborting the compile.
+#[doc = include_str!("counter_headless.doc/STYLESHEET.md")]
 const STYLESHEET: &str = "\
 @import \"reset.css\";\n\
 :root { --accent: #3366ff; }\n\
@@ -60,7 +28,7 @@ button { float: left; }\n\
 @keyframes pulse { from { opacity: 0.5; } to { opacity: 1.0; } }\n\
 ";
 
-/// Commands the two buttons fire when activated (interned symbol handles).
+#[doc = include_str!("counter_headless.doc/CMD_DECREMENT.md")]
 const CMD_DECREMENT: InternedSymbol = InternedSymbol::from_raw(0x1001);
 const CMD_INCREMENT: InternedSymbol = InternedSymbol::from_raw(0x1002);
 
@@ -185,11 +153,7 @@ fn main() {
     println!("== all pipeline invariants held; exiting 0 ==");
 }
 
-/// Compiles [`STYLESHEET`] through the CSS frontend (`source -> parse ->
-/// compile`) and prints a one-line summary of the resulting native structures.
-///
-/// This proves the styling frontend composes end-to-end and that recognised-but-
-/// unsupported features surface as diagnostics rather than errors or panics.
+#[doc = include_str!("counter_headless.doc/compile_stylesheet.md")]
 fn compile_stylesheet() -> CompiledStylesheet {
     // 1. Wrap the authored text in a source (carries id + name for diagnostics).
     let source = CssSource::anonymous(STYLESHEET);
@@ -243,12 +207,7 @@ fn compile_stylesheet() -> CompiledStylesheet {
     compiled
 }
 
-/// Builds the counter UI: a [`Container`] grouping a text label and the two
-/// buttons' element nodes, returned as a single-root [`View`].
-///
-/// A widget exposes its desired output as a [`View`]; to nest a button inside a
-/// container we need its [`ViewNode`]s, which we pull out of the button's root
-/// fragment.
+#[doc = include_str!("counter_headless.doc/build_counter_view.md")]
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
     // Each child is wrapped in a container carrying a class the stylesheet
     // paints; the `.counter` panel stacks them (flow layout, top-to-bottom).
@@ -267,8 +226,7 @@ fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> Vie
     View::single(container)
 }
 
-/// Wraps `children` in a container element tagged with the space-separated
-/// `class` string, so an authored rule (e.g. `.btn`) matches and paints it.
+#[doc = include_str!("counter_headless.doc/tagged.md")]
 fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
@@ -276,13 +234,12 @@ fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// Extracts a button's desired [`ViewNode`]s from the [`View`] it renders,
-/// so they can be composed as children of another element.
+#[doc = include_str!("counter_headless.doc/button_nodes.md")]
 fn button_nodes(button: &Button) -> Vec<ViewNode> {
     button.view().into_fragment().nodes().to_vec()
 }
 
-/// Prints a one-line summary of a rendered frame's stats.
+#[doc = include_str!("counter_headless.doc/print_frame.md")]
 fn print_frame(tag: &str, frame: &FrameResult, tree_nodes: usize, commands: usize) {
     println!(
         "{tag}: id={} reconciled={} composed={} balanced={} | tree nodes={tree_nodes} \

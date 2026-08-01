@@ -1,6 +1,5 @@
-//! `AbiString` (skeleton stub for the spec-defined entity; not yet implemented).
+#![doc = include_str!("abi_string.doc/_module.md")]
 
-/// Placeholder for the `AbiString` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
+#[doc = include_str!("abi_string.doc/AbiString.md")]
 #[derive(Debug)]
 pub struct AbiString;

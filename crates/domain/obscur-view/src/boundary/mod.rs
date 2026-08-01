@@ -1,4 +1,4 @@
-//! Boundary module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod component_failure;
 pub use component_failure::ComponentFailure;
 mod error_boundary;

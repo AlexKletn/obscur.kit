@@ -1,4 +1,4 @@
-//! The host-driven AccessKit implementation of `AccessibilityBridge` (§7.1).
+#![doc = include_str!("accesskit_bridge.doc/_module.md")]
 
 use accesskit::TreeUpdate;
 use obscur_accessibility::event::{AccessibilityAction, AccessibilityFocus};
@@ -8,23 +8,7 @@ use obscur_identity::NodeId;
 
 use crate::conversion::TreeUpdateConverter;
 
-/// A host-driven [`AccessibilityBridge`] backed by AccessKit (spec §7.1, §2.7).
-///
-/// This adapter **converts** the domain semantic tree into AccessKit types and
-/// **stores** the latest [`TreeUpdate`]; it does not own a platform accessibility
-/// connection itself. The platform push lives in the host: an `accesskit_winit`
-/// or `accesskit_unix` adapter belongs to the windowing host, which feeds this
-/// bridge's [`last_tree_update`](Self::last_tree_update) into that platform
-/// adapter and, in the opposite direction, converts each inbound
-/// [`accesskit::ActionRequest`] (via
-/// [`ActionConverter::from_accesskit`](crate::conversion::ActionConverter::from_accesskit))
-/// into an [`AccessibilityAction`] it enqueues with [`push_action`](Self::push_action).
-/// Keeping the platform loop in the host preserves the adapter layering
-/// (`adapter → foundation + domain port + external implementation`) and keeps
-/// this crate free of any OS or event-loop dependency.
-///
-/// The determinism boundary of spec §7.1 lives in the conversion: identical
-/// snapshots always produce identical [`TreeUpdate`]s regardless of platform.
+#[doc = include_str!("accesskit_bridge.doc/AccessKitBridge.md")]
 #[derive(Debug, Default)]
 pub struct AccessKitBridge {
     converter: TreeUpdateConverter,
@@ -36,48 +20,30 @@ pub struct AccessKitBridge {
 }
 
 impl AccessKitBridge {
-    /// Creates an empty bridge with no stored update, focus, or queued work.
+    #[doc = include_str!("accesskit_bridge.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns the latest converted [`TreeUpdate`], which the host feeds to its
-    /// platform AccessKit adapter, or [`None`] if none has been produced yet.
-    ///
-    /// A push whose snapshot had no root produces no update (the conversion's
-    /// [`MissingRoot`](crate::error::AccessKitBridgeError::MissingRoot) is
-    /// swallowed here); the previous update, if any, is retained.
+    #[doc = include_str!("accesskit_bridge.doc/last_tree_update.md")]
     #[must_use]
     pub const fn last_tree_update(&self) -> Option<&TreeUpdate> {
         self.last_update.as_ref()
     }
 
-    /// Returns whether an incremental [`apply_update`](Self::apply_update)
-    /// arrived since the last full push.
-    ///
-    /// This adapter does not synthesise incremental AccessKit updates; a dirty
-    /// bridge signals the host to re-push a fresh [`SemanticSnapshot`] through
-    /// [`update_tree`](Self::update_tree), which clears the flag.
+    #[doc = include_str!("accesskit_bridge.doc/is_dirty.md")]
     #[must_use]
     pub const fn is_dirty(&self) -> bool {
         self.dirty
     }
 
-    /// Enqueues an inbound assistive-technology `action` for the domain to
-    /// drain via [`poll_actions`](AccessibilityBridge::poll_actions).
-    ///
-    /// The host calls this after translating a platform
-    /// [`accesskit::ActionRequest`] into a domain [`AccessibilityAction`].
+    #[doc = include_str!("accesskit_bridge.doc/push_action.md")]
     pub fn push_action(&mut self, action: AccessibilityAction) {
         self.pending_actions.push(action);
     }
 
-    /// Drains and returns the buffered live-region announcements in arrival
-    /// order, each paired with its `assertive` flag.
-    ///
-    /// The host consumes these and raises the corresponding AccessKit live
-    /// events on the platform.
+    #[doc = include_str!("accesskit_bridge.doc/take_announcements.md")]
     #[must_use]
     pub fn take_announcements(&mut self) -> Vec<(Box<str>, bool)> {
         std::mem::take(&mut self.announcements)

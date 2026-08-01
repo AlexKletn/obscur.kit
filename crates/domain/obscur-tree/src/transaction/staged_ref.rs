@@ -1,55 +1,42 @@
-//! `StagedRef`: a transaction-local reference to a node.
+#![doc = include_str!("staged_ref.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// A reference to a node *within a staged transaction*.
-///
-/// While a [`TreeTransaction`](super::TreeTransaction) is being built its
-/// changes have not touched the live tree yet, so a node that the transaction
-/// itself will create does not have a [`NodeId`] until commit time. A
-/// `StagedRef` bridges that gap: it is either an [`Existing`](Self::Existing)
-/// live node, or a [`New`](Self::New) placeholder naming the *i*-th node staged
-/// for creation in this transaction (0-based, in stage order).
-///
-/// At [`commit`](super::TreeTransaction::commit) each `New(i)` is resolved to
-/// the concrete `NodeId` returned by the *i*-th allocation, so a node created
-/// earlier in the batch can be referenced (e.g. as a parent) by later changes.
+#[doc = include_str!("staged_ref.doc/StagedRef.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StagedRef {
-    /// A node that already exists in the live tree, addressed by its `NodeId`.
+    #[doc = include_str!("staged_ref.doc/Existing.md")]
     Existing(NodeId),
-    /// The *i*-th node staged for creation in this transaction (0-based, in
-    /// stage order). Resolves to a concrete `NodeId` only at commit.
+    #[doc = include_str!("staged_ref.doc/New.md")]
     New(u32),
 }
 
 impl StagedRef {
-    /// Creates a reference to an already-live node.
+    #[doc = include_str!("staged_ref.doc/existing.md")]
     #[must_use]
     pub const fn existing(id: NodeId) -> Self {
         Self::Existing(id)
     }
 
-    /// Creates a placeholder for the `index`-th node staged for creation.
+    #[doc = include_str!("staged_ref.doc/new.md")]
     #[must_use]
     pub const fn new(index: u32) -> Self {
         Self::New(index)
     }
 
-    /// Returns `true` if this refers to an already-live node.
+    #[doc = include_str!("staged_ref.doc/is_existing.md")]
     #[must_use]
     pub const fn is_existing(self) -> bool {
         matches!(self, Self::Existing(_))
     }
 
-    /// Returns `true` if this is a placeholder for a not-yet-created node.
+    #[doc = include_str!("staged_ref.doc/is_new.md")]
     #[must_use]
     pub const fn is_new(self) -> bool {
         matches!(self, Self::New(_))
     }
 
-    /// Returns the underlying live `NodeId` if this is an
-    /// [`Existing`](Self::Existing) reference.
+    #[doc = include_str!("staged_ref.doc/existing_id.md")]
     #[must_use]
     pub const fn existing_id(self) -> Option<NodeId> {
         match self {
@@ -58,7 +45,7 @@ impl StagedRef {
         }
     }
 
-    /// Returns the creation index if this is a [`New`](Self::New) placeholder.
+    #[doc = include_str!("staged_ref.doc/new_index.md")]
     #[must_use]
     pub const fn new_index(self) -> Option<u32> {
         match self {

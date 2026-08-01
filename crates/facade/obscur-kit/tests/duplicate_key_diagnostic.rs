@@ -1,12 +1,4 @@
-//! Reusing one key across siblings must be *reported*, not merely slow.
-//!
-//! Keyed identity assumes a key names one child (§2.4). When several claim it the
-//! matcher keeps the first and the rest find no partner: they are inserted as new
-//! while their predecessors are removed, every frame. The UI still looks right — it
-//! is only an order of magnitude slower — so without a diagnostic an author has no
-//! way to connect the symptom to the cause. This was found the hard way: a probe
-//! blanked the string a `<For>` used as its key, and the resulting churn read as a
-//! layout pathology in the engine for several rounds of investigation.
+#![doc = include_str!("duplicate_key_diagnostic.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::cell::RefCell;
@@ -22,7 +14,7 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{View, ViewFragment, ViewNode};
 
-/// Collects everything reported, for the assertions below.
+#[doc = include_str!("duplicate_key_diagnostic.doc/Collected.md")]
 #[derive(Clone, Default)]
 struct Collected(Rc<RefCell<Vec<Diagnostic>>>);
 
@@ -38,7 +30,7 @@ fn compile(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
-/// A list of `count` rows; `distinct` decides whether their keys differ.
+#[doc = include_str!("duplicate_key_diagnostic.doc/list.md")]
 fn list(count: u64, distinct: bool) -> View {
     let rows: Vec<ViewNode> = (0..count)
         .map(|i| {
@@ -57,8 +49,7 @@ fn list(count: u64, distinct: bool) -> View {
     )
 }
 
-/// Renders `view` twice (the second frame is the one that reconciles against a
-/// retained tree) and returns everything reported.
+#[doc = include_str!("duplicate_key_diagnostic.doc/diagnostics_for.md")]
 fn diagnostics_for(view: &View) -> Vec<Diagnostic> {
     let sheet = compile("* { width: 10px; height: 10px }");
     let sheets = std::slice::from_ref(&sheet);

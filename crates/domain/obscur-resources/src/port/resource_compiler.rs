@@ -1,30 +1,10 @@
-//! The hexagonal port for compiling a CPU representation into a backend/GPU
-//! artifact (spec §5.15).
-//!
-//! This module defines [`ResourceCompiler`], the port that turns a decoded CPU
-//! representation into a backend/GPU artifact ready for the runtime and its
-//! backend/GPU cache (spec §5.15 compile). Because the GPU artifact itself is
-//! adapter-specific — a texture, an uploaded font atlas, a compiled shader
-//! pipeline — the domain never holds it directly: the compiler returns the
-//! colocated [`CompiledResource`] descriptor, which records the artifact's
-//! backend footprint (for cache budgeting) and its [`ResourceMetadata`]. The
-//! colocated [`NullCompiler`] is the honest default that compiles nothing.
-//!
-//! Compilation is modeled **synchronously** at the domain level: an adapter that
-//! uploads on a render thread wraps its own async and calls this port with the
-//! result.
+#![doc = include_str!("resource_compiler.doc/_module.md")]
 
 use crate::handle::ResourceKind;
 use crate::port::DecodedResource;
 use crate::state::{ResourceError, ResourceMetadata};
 
-/// A descriptor of a backend/GPU artifact compiled from a resource (spec §5.15).
-///
-/// This is the output of [`ResourceCompiler::compile`]. The compiled artifact
-/// (texture, pipeline, uploaded atlas) lives inside the adapter that produced it;
-/// the domain keeps only this opaque descriptor, recording the artifact's
-/// backend/GPU `byte_size` — the footprint used for backend-cache budgeting (spec
-/// §5.15) — alongside the [`ResourceMetadata`] carried through the pipeline.
+#[doc = include_str!("resource_compiler.doc/CompiledResource.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledResource {
     byte_size: u64,
@@ -32,8 +12,7 @@ pub struct CompiledResource {
 }
 
 impl CompiledResource {
-    /// Creates a compiled-resource descriptor from the artifact's backend/GPU
-    /// `byte_size` and its `metadata`.
+    #[doc = include_str!("resource_compiler.doc/new.md")]
     #[must_use]
     pub fn new(byte_size: u64, metadata: ResourceMetadata) -> Self {
         Self {
@@ -42,42 +21,26 @@ impl CompiledResource {
         }
     }
 
-    /// Returns the backend/GPU footprint in bytes, used for cache budgeting (spec
-    /// §5.15).
+    #[doc = include_str!("resource_compiler.doc/byte_size.md")]
     #[must_use]
     pub const fn byte_size(&self) -> u64 {
         self.byte_size
     }
 
-    /// Returns the metadata carried through compilation (spec §5.15).
+    #[doc = include_str!("resource_compiler.doc/metadata.md")]
     #[must_use]
     pub fn metadata(&self) -> &ResourceMetadata {
         &self.metadata
     }
 }
 
-/// The hexagonal port for compiling a CPU representation into a backend/GPU
-/// artifact (spec §5.15 compile, backend/GPU cache).
-///
-/// An adapter implements this once per backend, and the domain stores it as
-/// `Box<dyn ResourceCompiler>`; the trait is therefore deliberately
-/// **object-safe** — no generic methods and no `Self`-returning methods — so
-/// compilers can be held polymorphically. A compiler reports failure through
-/// [`ResourceError`] rather than panicking.
+#[doc = include_str!("resource_compiler.doc/ResourceCompiler.md")]
 pub trait ResourceCompiler {
-    /// Returns whether this compiler can compile resources of `kind` (spec
-    /// §5.15).
+    #[doc = include_str!("resource_compiler.doc/supports.md")]
     #[must_use]
     fn supports(&self, kind: ResourceKind) -> bool;
 
-    /// Compiles `decoded` of the given `kind` into a backend/GPU artifact (spec
-    /// §5.15), returning its [`CompiledResource`] descriptor.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ResourceError`] on failure — [`ResourceError::Unsupported`]
-    /// for a kind this compiler does not handle, or
-    /// [`ResourceError::CompileFailed`] when compilation itself fails.
+    #[doc = include_str!("resource_compiler.doc/compile.md")]
     fn compile(
         &self,
         kind: ResourceKind,
@@ -85,19 +48,12 @@ pub trait ResourceCompiler {
     ) -> Result<CompiledResource, ResourceError>;
 }
 
-/// An honest reference [`ResourceCompiler`] that compiles nothing (spec §5.15).
-///
-/// Adapters provide the real compilers that upload textures or build pipelines;
-/// `NullCompiler` is the honest default a hub uses before any compiler is
-/// registered. It reports [`ResourceCompiler::supports`] `== false` for every
-/// [`ResourceKind`] and returns [`ResourceError::CompileFailed`] from
-/// [`ResourceCompiler::compile`]. Its refusals are correct behavior, not stubs
-/// waiting to be filled in.
+#[doc = include_str!("resource_compiler.doc/NullCompiler.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NullCompiler;
 
 impl NullCompiler {
-    /// Creates a [`NullCompiler`].
+    #[doc = include_str!("resource_compiler.doc/new_2.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self

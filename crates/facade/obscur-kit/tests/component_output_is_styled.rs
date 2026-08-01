@@ -1,46 +1,4 @@
-//! Both halves of §4.15, on real frames: a component's rendered output is
-//! **scoped by default**, an "explicitly open" component's output is styled by
-//! the document exactly as authored content is, and the system default (UA)
-//! sheet reaches inside either.
-//!
-//! # What this file was written from
-//!
-//! The external consumer audit's second-pass finding 2-1 — "a component-rendered
-//! subtree is matched by no selector". Its control experiment is
-//! [`the_documents_selectors_stop_at_a_scoped_components_boundary`] below, and it
-//! reproduced exactly as reported: one screen, one sheet, one frame, two nodes
-//! identical apart from provenance, and only the authored one is styled.
-//!
-//! It is not, however, matching that is broken. The mechanism is deliberate:
-//! `orchestration::style_scoping::component_host` finds the nearest
-//! `NodeFlags::COMPONENT_HOST` ancestor and the style-matching coordinator hands
-//! any node that has one to `scoped_internal_declarations`, where only an
-//! exported `::part()` crosses. That is §4.15's "component stylesheets are
-//! scoped by default", and `spec_ch2_contracts.rs` pins it. (The audit's grep
-//! looked for it under `crates/domain/obscur-style/src/matching/` and came up
-//! empty because the boundary is a *retained-tree* fact, which the pure matcher
-//! deliberately cannot see.)
-//!
-//! What was genuinely missing is everything the closing half implies but nothing
-//! provided:
-//!
-//! * §4.15's other bullet — "**explicitly open/global scopes are possible**" —
-//!   had no implementation, so no component could opt out;
-//! * there is no producer for the `ComponentModule` cascade origin, so a
-//!   component cannot ship a scoped sheet of its own either;
-//! * the system default sheet was scoped out with the author sheets, so a
-//!   `<button>` a component rendered was not a button.
-//!
-//! Together those made the tier unusable for anything visual, which is the
-//! audit's verdict and it stands. `StyleScope::Open` and the UA crossing are
-//! what close it; the default is untouched.
-//!
-//! # Why a computed style and not rendered text
-//!
-//! `okui_user_component.rs` and its siblings assert on rendered **text**, which
-//! is why this survived: text proves a component mounted and that its props
-//! decoded, and says nothing about whether the nodes it produced are visible to
-//! the cascade. Every assertion here reads a computed value off the runtime.
+#![doc = include_str!("component_output_is_styled.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use obscur_kit::bootstrap::CssPipeline;
@@ -59,43 +17,38 @@ use obscur_kit::view::component::{
 };
 use obscur_kit::view::view::{CLASS, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-/// One class, one declaration, matched against two nodes that both carry it —
-/// plus a descendant rule whose ancestor is always authored by the application
-/// and whose subject may not be.
+#[doc = include_str!("component_output_is_styled.doc/STYLESHEET.md")]
 const STYLESHEET: &str = "\
 .counter { background-color: rgb(30, 38, 54); }\n\
 .shell .label { color: rgb(200, 10, 10); }\n\
 ";
 
-/// What `.counter` paints.
+#[doc = include_str!("component_output_is_styled.doc/FILL.md")]
 const FILL: (f32, f32, f32) = (30.0 / 255.0, 38.0 / 255.0, 54.0 / 255.0);
-/// What `.shell .label` inks.
+#[doc = include_str!("component_output_is_styled.doc/INK.md")]
 const INK: (f32, f32, f32) = (200.0 / 255.0, 10.0 / 255.0, 10.0 / 255.0);
-/// The colour the cascade lands on when nothing at all matched: the initial
-/// value of both properties involved is transparent/black.
+#[doc = include_str!("component_output_is_styled.doc/NOTHING.md")]
 const NOTHING: (f32, f32, f32) = (0.0, 0.0, 0.0);
-/// The UA sheet's `button { color: #2b2a27 }` ink.
+#[doc = include_str!("component_output_is_styled.doc/UA_BUTTON_INK.md")]
 const UA_BUTTON_INK: (f32, f32, f32) = (
     0x2b as f32 / 255.0,
     0x2a as f32 / 255.0,
     0x27 as f32 / 255.0,
 );
 
-/// An element with a CSS type and a class, so a type selector, a class selector
-/// and a descendant selector all have something to bite on.
+#[doc = include_str!("component_output_is_styled.doc/element.md")]
 fn element(local_name: &str, class: &str) -> ViewNode {
     ViewNode::element(name_binding::CONTAINER)
         .with_prop(ViewProperty::new(TYPE, ViewValue::Text(local_name.into())))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// `<div class="…">`.
+#[doc = include_str!("component_output_is_styled.doc/div.md")]
 fn div(class: &str) -> ViewNode {
     element("div", class)
 }
 
-/// The markup both the components and the authored control render:
-/// `<div class="counter"><div class="label">…</div><button/></div>`.
+#[doc = include_str!("component_output_is_styled.doc/body.md")]
 fn body(label: &str) -> ViewNode {
     div("counter").with_children(ViewFragment::from_nodes(vec![
         div("label").with_children(ViewFragment::from_nodes(vec![ViewNode::text(label)])),
@@ -105,30 +58,24 @@ fn body(label: &str) -> ViewNode {
 
 // --- Two components, identical but for their declared scope. -------------
 
-/// A component that says nothing about its style scope, so §4.15's default
-/// applies and its output is encapsulated.
+#[doc = include_str!("component_output_is_styled.doc/ScopedProps.md")]
 #[derive(Contract)]
 #[contract(name = "ScopedCounter")]
 struct ScopedProps {
-    /// The text it renders, so "did not mount" reads differently from "was not
-    /// styled".
+    #[doc = include_str!("component_output_is_styled.doc/label.md")]
     label: String,
 }
 
-/// The same component with `#[contract(style_scope = open)]` — §4.15's
-/// "explicitly open/global scopes are possible", declared where the promise
-/// about the internals is made.
+#[doc = include_str!("component_output_is_styled.doc/OpenProps.md")]
 #[derive(Contract)]
 #[contract(name = "OpenCounter")]
 #[contract(style_scope = open)]
 struct OpenProps {
-    /// See [`ScopedProps::label`].
+    #[doc = include_str!("component_output_is_styled.doc/label_2.md")]
     label: String,
 }
 
-/// A component that renders [`body`] and nothing else. Generic over its props so
-/// the scoped and open variants are provably the same component but for the
-/// contract.
+#[doc = include_str!("component_output_is_styled.doc/Counter.md")]
 struct Counter<P>(std::marker::PhantomData<P>);
 
 impl Component for Counter<ScopedProps> {
@@ -185,12 +132,7 @@ impl ComponentFactory for OpenFactory {
 
 // --- The screen and the frame. -------------------------------------------
 
-/// `<div class="shell"><Counter label="…"/><div class="counter">…</div></div>`,
-/// where `Counter` is whichever of the two components `kind` names.
-///
-/// The authored sibling is not scenery: it is the control. It carries the same
-/// classes, the same nesting and the same `<button>`, so the only difference
-/// between the two subtrees is which of them a component produced.
+#[doc = include_str!("component_output_is_styled.doc/screen.md")]
 fn screen(kind: ComponentId) -> View {
     // The prop symbol is the interned prop *name* — the scheme
     // `#[derive(Contract)]` and both front ends compute.
@@ -203,8 +145,7 @@ fn screen(kind: ComponentId) -> View {
     )]))
 }
 
-/// A runtime with both components registered, one frame of [`screen`] rendered,
-/// and — when `ua` — the toolkit's UA default sheet installed.
+#[doc = include_str!("component_output_is_styled.doc/settled.md")]
 fn settled(kind: ComponentId, ua: bool) -> UiRuntime {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0));
     runtime
@@ -238,7 +179,7 @@ fn colour(runtime: &UiRuntime, node: NodeId, property: PropertyId) -> (f32, f32,
         .expect("every element node resolves a computed colour")
 }
 
-/// The node at `path`, walking child indices from the root.
+#[doc = include_str!("component_output_is_styled.doc/at.md")]
 fn at(runtime: &UiRuntime, path: &[usize]) -> NodeId {
     let mut node = runtime.tree().root().expect("a root");
     for &index in path {
@@ -247,9 +188,9 @@ fn at(runtime: &UiRuntime, path: &[usize]) -> NodeId {
     node
 }
 
-/// The component's `div.counter`, its `div.label` and its `<button>`.
+#[doc = include_str!("component_output_is_styled.doc/INSIDE.md")]
 const INSIDE: (&[usize], &[usize], &[usize]) = (&[0, 0, 0], &[0, 0, 0, 0], &[0, 0, 0, 1]);
-/// The authored control's same three nodes.
+#[doc = include_str!("component_output_is_styled.doc/CONTROL.md")]
 const CONTROL: (&[usize], &[usize], &[usize]) = (&[0, 1], &[0, 1, 0], &[0, 1, 1]);
 
 // --- §4.15, half one: scoped by default. ---------------------------------
@@ -377,8 +318,7 @@ fn the_system_default_sheet_reaches_inside_a_scoped_component() {
 
 // --- Composition: opening yourself is not opening somebody else. ---------
 
-/// A scoped wrapper that renders an `<OpenCounter/>` inside its own output, so
-/// the open component sits *below* a closed boundary.
+#[doc = include_str!("component_output_is_styled.doc/WrapperProps.md")]
 #[derive(Contract)]
 #[contract(name = "ScopedWrapper")]
 struct WrapperProps {}

@@ -1,38 +1,25 @@
-//! The input describing one uniformly-styled run to be shaped (spec §5.10).
+#![doc = include_str!("shaping_request.doc/_module.md")]
 
 use crate::font::FontFace;
 use crate::shaping::TextDirection;
 
-/// The input to shape a single run of uniformly-styled text (spec §5.10).
-///
-/// A request carries the text plus everything a shaper needs to turn it into
-/// glyphs: the resolved [`FontFace`], the font size in logical pixels, the base
-/// [`TextDirection`], and an optional BCP-47 language hint. The run is assumed to
-/// be **already itemized**: a single face and a single direction apply to the
-/// whole text. Splitting mixed-script, mixed-style, or mixed-direction text into
-/// uniform runs (itemization and bidi splitting) happens *before* shaping, so the
-/// shaper never has to re-segment its input.
-///
-/// Embedding an `f32` font size means this type derives `PartialEq` but not
-/// `Eq`.
+#[doc = include_str!("shaping_request.doc/ShapingRequest.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapingRequest {
-    /// The run's source text, owned so the request is self-contained.
+    #[doc = include_str!("shaping_request.doc/text.md")]
     text: Box<str>,
-    /// The resolved face to shape with.
+    #[doc = include_str!("shaping_request.doc/face.md")]
     face: FontFace,
-    /// The font size, in logical pixels.
+    #[doc = include_str!("shaping_request.doc/font_size.md")]
     font_size: f32,
-    /// The base (paragraph) direction of the run.
+    #[doc = include_str!("shaping_request.doc/direction.md")]
     direction: TextDirection,
-    /// An optional BCP-47 language tag hint; `None` means auto-detect.
+    #[doc = include_str!("shaping_request.doc/language.md")]
     language: Option<Box<str>>,
 }
 
 impl ShapingRequest {
-    /// Creates a request to shape `text` with `face` at `font_size` logical
-    /// pixels, defaulting the direction to [`TextDirection::LeftToRight`] and the
-    /// language hint to `None`.
+    #[doc = include_str!("shaping_request.doc/new.md")]
     #[must_use]
     pub fn new(text: impl Into<Box<str>>, face: FontFace, font_size: f32) -> Self {
         Self {
@@ -44,51 +31,51 @@ impl ShapingRequest {
         }
     }
 
-    /// Returns this request with its base [`TextDirection`] set to `direction`.
+    #[doc = include_str!("shaping_request.doc/with_direction.md")]
     #[must_use]
     pub fn with_direction(mut self, direction: TextDirection) -> Self {
         self.direction = direction;
         self
     }
 
-    /// Returns this request with its BCP-47 `language` hint set.
+    #[doc = include_str!("shaping_request.doc/with_language.md")]
     #[must_use]
     pub fn with_language(mut self, language: impl Into<Box<str>>) -> Self {
         self.language = Some(language.into());
         self
     }
 
-    /// Returns the run's source text.
+    #[doc = include_str!("shaping_request.doc/text_2.md")]
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Returns the resolved face to shape with.
+    #[doc = include_str!("shaping_request.doc/face_2.md")]
     #[must_use]
     pub const fn face(&self) -> &FontFace {
         &self.face
     }
 
-    /// Returns the font size, in logical pixels.
+    #[doc = include_str!("shaping_request.doc/font_size_2.md")]
     #[must_use]
     pub const fn font_size(&self) -> f32 {
         self.font_size
     }
 
-    /// Returns the base (paragraph) direction of the run.
+    #[doc = include_str!("shaping_request.doc/direction_2.md")]
     #[must_use]
     pub const fn direction(&self) -> TextDirection {
         self.direction
     }
 
-    /// Returns the BCP-47 language tag hint, or `None` for auto-detect.
+    #[doc = include_str!("shaping_request.doc/language_2.md")]
     #[must_use]
     pub fn language(&self) -> Option<&str> {
         self.language.as_deref()
     }
 
-    /// Returns whether the run's source text is empty.
+    #[doc = include_str!("shaping_request.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()

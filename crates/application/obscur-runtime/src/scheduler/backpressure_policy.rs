@@ -1,45 +1,29 @@
-//! Admission control for pending frames under load (spec §3.5):
-//! [`BackpressurePolicy`] and [`BackpressureDecision`].
+#![doc = include_str!("backpressure_policy.doc/_module.md")]
 
-/// The decision a [`BackpressurePolicy`] reaches for an incoming frame request
-/// (spec §3.5).
+#[doc = include_str!("backpressure_policy.doc/BackpressureDecision.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BackpressureDecision {
-    /// Admit the request; there is room in the pending set.
+    #[doc = include_str!("backpressure_policy.doc/Admit.md")]
     Admit,
-    /// Coalesce the request into an already-pending one for the same reason
-    /// (§3.5 "updates are coalesced"); nothing new is queued.
+    #[doc = include_str!("backpressure_policy.doc/Coalesce.md")]
     Coalesce,
-    /// Drop a stale queued frame so a fresher one can take its place
-    /// (§3.5 "stale intermediate frames may be skipped"). Applies when the
-    /// pending set is full and the policy is allowed to skip stale frames.
+    #[doc = include_str!("backpressure_policy.doc/DropStale.md")]
     DropStale,
-    /// Reject the request outright: the pending set is full and stale-skipping
-    /// is disabled, so the request cannot be admitted right now.
+    #[doc = include_str!("backpressure_policy.doc/Reject.md")]
     Reject,
 }
 
-/// The policy for admitting frame requests under load (spec §3.5).
-///
-/// The scheduler is event-driven and must stay bounded: it caps the number of
-/// pending frames and may skip stale intermediate frames rather than let work
-/// pile up (§3.5). This value captures those two knobs and is a pure function of
-/// them — [`decide`](BackpressurePolicy::decide) never touches wall-clock or
-/// randomness.
+#[doc = include_str!("backpressure_policy.doc/BackpressurePolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BackpressurePolicy {
-    /// The maximum number of pending frames, or `None` for unbounded.
+    #[doc = include_str!("backpressure_policy.doc/max_pending.md")]
     max_pending: Option<usize>,
-    /// Whether a stale queued frame may be dropped to admit a fresher one
-    /// (§3.5 "stale intermediate frames may be skipped").
+    #[doc = include_str!("backpressure_policy.doc/skip_stale.md")]
     skip_stale: bool,
 }
 
 impl BackpressurePolicy {
-    /// Creates an unbounded policy that skips stale frames.
-    ///
-    /// This is also the [`Default`]: no cap on pending frames and stale-skipping
-    /// enabled.
+    #[doc = include_str!("backpressure_policy.doc/unbounded.md")]
     #[must_use]
     pub const fn unbounded() -> Self {
         Self {
@@ -48,7 +32,7 @@ impl BackpressurePolicy {
         }
     }
 
-    /// Creates a policy that caps pending frames at `max` and skips stale frames.
+    #[doc = include_str!("backpressure_policy.doc/bounded.md")]
     #[must_use]
     pub const fn bounded(max: usize) -> Self {
         Self {
@@ -57,34 +41,26 @@ impl BackpressurePolicy {
         }
     }
 
-    /// Returns this policy with stale-skipping set to `skip_stale`.
+    #[doc = include_str!("backpressure_policy.doc/with_skip_stale.md")]
     #[must_use]
     pub const fn with_skip_stale(mut self, skip_stale: bool) -> Self {
         self.skip_stale = skip_stale;
         self
     }
 
-    /// Returns the pending-frame cap, or `None` if unbounded.
+    #[doc = include_str!("backpressure_policy.doc/max_pending_2.md")]
     #[must_use]
     pub const fn max_pending(self) -> Option<usize> {
         self.max_pending
     }
 
-    /// Returns whether this policy skips stale intermediate frames.
+    #[doc = include_str!("backpressure_policy.doc/skip_stale_2.md")]
     #[must_use]
     pub const fn skip_stale(self) -> bool {
         self.skip_stale
     }
 
-    /// Decides how to admit an incoming request.
-    ///
-    /// - If a request for the same reason is `already_queued`, the incoming one
-    ///   coalesces into it ([`BackpressureDecision::Coalesce`]).
-    /// - Otherwise, if the pending set is at or over the cap, the policy either
-    ///   drops a stale frame ([`BackpressureDecision::DropStale`]) when
-    ///   stale-skipping is enabled, or rejects the request
-    ///   ([`BackpressureDecision::Reject`]) when it is not.
-    /// - Otherwise the request is admitted ([`BackpressureDecision::Admit`]).
+    #[doc = include_str!("backpressure_policy.doc/decide.md")]
     #[must_use]
     pub const fn decide(&self, already_queued: bool, queue_len: usize) -> BackpressureDecision {
         if already_queued {
@@ -104,7 +80,7 @@ impl BackpressurePolicy {
 }
 
 impl Default for BackpressurePolicy {
-    /// The default policy is [`BackpressurePolicy::unbounded`].
+    #[doc = include_str!("backpressure_policy.doc/default.md")]
     fn default() -> Self {
         Self::unbounded()
     }

@@ -1,4 +1,4 @@
-//! A live subscription to the diagnostics channel.
+#![doc = include_str!("diagnostic_subscription.doc/_module.md")]
 
 use std::collections::VecDeque;
 
@@ -6,31 +6,25 @@ use super::diagnostic_buffer_policy::{DiagnosticBufferPolicy, OverflowStrategy};
 use super::diagnostic_filter::DiagnosticFilter;
 use crate::diagnostic::Diagnostic;
 
-/// A stable identifier for a [`DiagnosticSubscription`], minted by the
-/// [`DiagnosticChannel`](crate::DiagnosticChannel).
+#[doc = include_str!("diagnostic_subscription.doc/SubscriptionId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SubscriptionId(u64);
 
 impl SubscriptionId {
-    /// Creates a subscription id from a raw value.
+    #[doc = include_str!("diagnostic_subscription.doc/new.md")]
     #[must_use]
     pub const fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw value.
+    #[doc = include_str!("diagnostic_subscription.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// A live subscription to the diagnostics channel (spec §7.8).
-///
-/// A subscription admits diagnostics matching its [`DiagnosticFilter`], buffers
-/// them under its [`DiagnosticBufferPolicy`] (with per-subscription
-/// backpressure), and can be independently disabled. Buffered diagnostics are
-/// consumed with [`drain`](Self::drain).
+#[doc = include_str!("diagnostic_subscription.doc/DiagnosticSubscription.md")]
 #[derive(Debug, Clone)]
 pub struct DiagnosticSubscription {
     id: SubscriptionId,
@@ -41,8 +35,7 @@ pub struct DiagnosticSubscription {
 }
 
 impl DiagnosticSubscription {
-    /// Creates an enabled subscription with the given id, filter and buffer
-    /// policy.
+    #[doc = include_str!("diagnostic_subscription.doc/new_2.md")]
     #[must_use]
     pub fn new(
         id: SubscriptionId,
@@ -58,44 +51,36 @@ impl DiagnosticSubscription {
         }
     }
 
-    /// Returns this subscription's id.
+    #[doc = include_str!("diagnostic_subscription.doc/id.md")]
     #[must_use]
     pub fn id(&self) -> SubscriptionId {
         self.id
     }
 
-    /// Returns this subscription's filter.
+    #[doc = include_str!("diagnostic_subscription.doc/filter.md")]
     #[must_use]
     pub fn filter(&self) -> DiagnosticFilter {
         self.filter
     }
 
-    /// Returns this subscription's buffer policy.
+    #[doc = include_str!("diagnostic_subscription.doc/policy.md")]
     #[must_use]
     pub fn policy(&self) -> DiagnosticBufferPolicy {
         self.policy
     }
 
-    /// Returns whether this subscription is currently enabled.
+    #[doc = include_str!("diagnostic_subscription.doc/is_enabled.md")]
     #[must_use]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Enables or disables this subscription. A disabled subscription rejects
-    /// all offered diagnostics (spec §7.8 "disabled").
+    #[doc = include_str!("diagnostic_subscription.doc/set_enabled.md")]
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
 
-    /// Offers `diagnostic` to this subscription, returning whether it was
-    /// accepted into the buffer.
-    ///
-    /// A diagnostic is rejected when the subscription is disabled or the
-    /// diagnostic does not pass the filter. Otherwise it is buffered under the
-    /// policy: at capacity, the [`OverflowStrategy`] decides whether the oldest
-    /// entry is evicted, the newcomer is dropped, or the diagnostic is
-    /// coalesced with a matching buffered entry.
+    #[doc = include_str!("diagnostic_subscription.doc/offer.md")]
     pub fn offer(&mut self, diagnostic: &Diagnostic) -> bool {
         if !self.enabled || !self.filter.admits(diagnostic) {
             return false;
@@ -138,19 +123,18 @@ impl DiagnosticSubscription {
         }
     }
 
-    /// Removes and returns all buffered diagnostics in arrival order, leaving
-    /// the buffer empty.
+    #[doc = include_str!("diagnostic_subscription.doc/drain.md")]
     pub fn drain(&mut self) -> Vec<Diagnostic> {
         self.buffer.drain(..).collect()
     }
 
-    /// Returns the number of buffered diagnostics.
+    #[doc = include_str!("diagnostic_subscription.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.buffer.len()
     }
 
-    /// Returns whether the buffer is empty.
+    #[doc = include_str!("diagnostic_subscription.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()

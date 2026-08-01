@@ -1,52 +1,26 @@
-//! The typed classification of a change (Obscur Kit 2 specs §4.3).
+#![doc = include_str!("invalidation_kind.doc/_module.md")]
 
-/// The typed classification of a change, ordered from shallow to deep.
-///
-/// A deeper kind implies all the (shallower) work of the kinds above it:
-/// changing a node's tree structure ([`Tree`](InvalidationKind::Tree)) implies
-/// re-styling, re-laying-out, re-painting and re-composing, whereas a
-/// composition-only change ([`CompositionOnly`](InvalidationKind::CompositionOnly))
-/// only requires the scene to be re-composed. The predicate methods
-/// ([`needs_restyle`](InvalidationKind::needs_restyle),
-/// [`needs_relayout`](InvalidationKind::needs_relayout),
-/// [`needs_repaint`](InvalidationKind::needs_repaint),
-/// [`needs_recompose`](InvalidationKind::needs_recompose)) answer what work a
-/// classified change requires.
-///
-/// The [`Ord`] instance orders variants by depth (shallow < deep), matching the
-/// declaration order below.
+#[doc = include_str!("invalidation_kind.doc/InvalidationKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum InvalidationKind {
-    /// Only the scene composition changed (e.g. layer ordering / transform);
-    /// no repaint, relayout or restyle is required, only a recompose.
+    #[doc = include_str!("invalidation_kind.doc/CompositionOnly.md")]
     CompositionOnly,
-    /// A paint-level change (e.g. colour/opacity of already-laid-out content);
-    /// requires a repaint (and recompose) but no relayout or restyle.
+    #[doc = include_str!("invalidation_kind.doc/Paint.md")]
     Paint,
-    /// Text / intrinsic content changed; requires relayout (content affects
-    /// sizing), repaint and recompose, but no restyle.
+    #[doc = include_str!("invalidation_kind.doc/Text.md")]
     Text,
-    /// A node's computed style changed; requires restyle. Because layout style
-    /// is derived from computed style, in Phase 1 this also requires relayout
-    /// (and hence repaint + recompose).
+    #[doc = include_str!("invalidation_kind.doc/Style.md")]
     Style,
-    /// Layout inputs changed (e.g. constraints); requires relayout, repaint and
-    /// recompose, but no restyle.
+    #[doc = include_str!("invalidation_kind.doc/Layout.md")]
     Layout,
-    /// The node tree changed (children added/removed); requires restyle,
-    /// relayout, repaint and recompose.
+    #[doc = include_str!("invalidation_kind.doc/Tree.md")]
     Tree,
-    /// The window/environment changed (viewport, DPI); the deepest kind,
-    /// requiring restyle, relayout, repaint and recompose across the tree.
+    #[doc = include_str!("invalidation_kind.doc/Environment.md")]
     Environment,
 }
 
 impl InvalidationKind {
-    /// Returns whether a change of this kind requires a restyle pass.
-    ///
-    /// True for style-affecting kinds: [`Style`](InvalidationKind::Style),
-    /// [`Tree`](InvalidationKind::Tree) and
-    /// [`Environment`](InvalidationKind::Environment).
+    #[doc = include_str!("invalidation_kind.doc/needs_restyle.md")]
     #[must_use]
     pub fn needs_restyle(self) -> bool {
         matches!(
@@ -55,13 +29,7 @@ impl InvalidationKind {
         )
     }
 
-    /// Returns whether a change of this kind requires a relayout pass.
-    ///
-    /// True for [`Text`](InvalidationKind::Text),
-    /// [`Style`](InvalidationKind::Style) (layout style is derived from computed
-    /// style, so a style change feeds layout), [`Layout`](InvalidationKind::Layout),
-    /// [`Tree`](InvalidationKind::Tree) and
-    /// [`Environment`](InvalidationKind::Environment).
+    #[doc = include_str!("invalidation_kind.doc/needs_relayout.md")]
     #[must_use]
     pub fn needs_relayout(self) -> bool {
         matches!(
@@ -74,19 +42,13 @@ impl InvalidationKind {
         )
     }
 
-    /// Returns whether a change of this kind requires a repaint pass.
-    ///
-    /// True for [`Paint`](InvalidationKind::Paint) and every deeper kind. A
-    /// [`CompositionOnly`](InvalidationKind::CompositionOnly) change needs only a
-    /// recompose and therefore returns `false`.
+    #[doc = include_str!("invalidation_kind.doc/needs_repaint.md")]
     #[must_use]
     pub fn needs_repaint(self) -> bool {
         !matches!(self, InvalidationKind::CompositionOnly)
     }
 
-    /// Returns whether a change of this kind requires a scene recomposition.
-    ///
-    /// Always `true`: every classified change ultimately re-composes the scene.
+    #[doc = include_str!("invalidation_kind.doc/needs_recompose.md")]
     #[must_use]
     pub fn needs_recompose(self) -> bool {
         true

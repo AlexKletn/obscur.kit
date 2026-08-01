@@ -1,4 +1,4 @@
-//! View module.
+#![doc = include_str!("mod.doc/_module.md")]
 mod view;
 pub use view::View;
 mod view_event_binding;

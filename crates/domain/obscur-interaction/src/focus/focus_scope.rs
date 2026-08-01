@@ -1,36 +1,26 @@
-//! The [`FocusScope`] focus-containment scope for dialogs and menus
-//! (spec §7.1 focus).
+#![doc = include_str!("focus_scope.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
-/// Opaque identifier for a [`FocusScope`] (spec §7.1).
-///
-/// A local newtype minted by the runtime to name focus scopes; the numeric
-/// value carries no meaning outside the subsystem that assigns it.
+#[doc = include_str!("focus_scope.doc/FocusScopeId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FocusScopeId(u64);
 
 impl FocusScopeId {
-    /// Wraps a raw handle value into a `FocusScopeId`.
+    #[doc = include_str!("focus_scope.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw handle value backing this identifier.
+    #[doc = include_str!("focus_scope.doc/raw.md")]
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// A focus-containment scope (spec §7.1).
-///
-/// A scope groups an ordered set of focusable members. Dialogs and menus open a
-/// scope and set `trap` so that tab navigation wraps within the scope's members
-/// instead of escaping to the surrounding UI — a *focus trap*. The scope itself
-/// is a pure description; the runtime applies trapping using this data together
-/// with the tab order and focus-restore stack.
+#[doc = include_str!("focus_scope.doc/FocusScope.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FocusScope {
     id: FocusScopeId,
@@ -39,7 +29,7 @@ pub struct FocusScope {
 }
 
 impl FocusScope {
-    /// Creates an empty, non-trapping scope with identifier `id`.
+    #[doc = include_str!("focus_scope.doc/new.md")]
     #[must_use]
     pub fn new(id: FocusScopeId) -> Self {
         Self {
@@ -49,60 +39,56 @@ impl FocusScope {
         }
     }
 
-    /// Sets whether this scope traps focus, returning the updated value.
-    ///
-    /// When trapping, tab navigation wraps within [`members`](Self::members)
-    /// rather than leaving the scope.
+    #[doc = include_str!("focus_scope.doc/trapping.md")]
     #[must_use]
     pub fn trapping(mut self, trap: bool) -> Self {
         self.trap = trap;
         self
     }
 
-    /// Appends `node` as the next member of this scope, returning the updated
-    /// value.
+    #[doc = include_str!("focus_scope.doc/with_member.md")]
     #[must_use]
     pub fn with_member(mut self, node: NodeId) -> Self {
         self.members.push(node);
         self
     }
 
-    /// Appends `node` as the next member of this scope.
+    #[doc = include_str!("focus_scope.doc/add_member.md")]
     pub fn add_member(&mut self, node: NodeId) {
         self.members.push(node);
     }
 
-    /// Returns this scope's identifier.
+    #[doc = include_str!("focus_scope.doc/id.md")]
     #[must_use]
     pub const fn id(&self) -> FocusScopeId {
         self.id
     }
 
-    /// Returns whether this scope traps focus.
+    #[doc = include_str!("focus_scope.doc/traps.md")]
     #[must_use]
     pub const fn traps(&self) -> bool {
         self.trap
     }
 
-    /// Returns this scope's ordered members.
+    #[doc = include_str!("focus_scope.doc/members.md")]
     #[must_use]
     pub fn members(&self) -> &[NodeId] {
         &self.members
     }
 
-    /// Returns whether `node` is a member of this scope.
+    #[doc = include_str!("focus_scope.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.members.contains(&node)
     }
 
-    /// Returns the number of members in this scope.
+    #[doc = include_str!("focus_scope.doc/len.md")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.members.len()
     }
 
-    /// Returns whether this scope has no members.
+    #[doc = include_str!("focus_scope.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()

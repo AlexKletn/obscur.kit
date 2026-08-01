@@ -1,48 +1,25 @@
-//! The Vello backend's typed failure, mapped into the domain's `RendererError`
-//! (spec §5.2 explicit diagnostics; §2.7 the vello adapter owns its own errors).
+#![doc = include_str!("vello_render_error.doc/_module.md")]
 
 use obscur_render::frame::{DeviceLoss, DeviceLossReason};
 use obscur_render::renderer::RendererError;
 
-/// A typed failure raised inside the Vello/wgpu backend (spec §5.2, §2.7).
-///
-/// Spec §5.2 requires backend failures to surface as explicit diagnostics rather
-/// than silent fallbacks or panics. This enum names the distinct causes the
-/// Vello adapter can hit while bringing up wgpu, configuring a surface, or
-/// submitting a frame. It is local to this crate (§2.7): callers outside the
-/// adapter see only the domain [`RendererError`] produced by
-/// [`VelloRenderError::into_renderer_error`].
-///
-/// The mapping into [`RendererError`] treats an *unusable device* — creation
-/// failure or a total absence of a GPU adapter — as a
-/// [`RendererError::DeviceLost`], since in both cases there is no device to draw
-/// with. Surface and frame failures map to the generic
-/// [`RendererError::Backend`], each carrying its human-readable reason.
+#[doc = include_str!("vello_render_error.doc/VelloRenderError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VelloRenderError {
-    /// Creating the wgpu device (or queue) failed, with a human-readable reason.
+    #[doc = include_str!("vello_render_error.doc/DeviceCreation.md")]
     DeviceCreation(Box<str>),
-    /// The render surface was lost and must be reconfigured before the next
-    /// frame, with a human-readable reason.
+    #[doc = include_str!("vello_render_error.doc/SurfaceLost.md")]
     SurfaceLost(Box<str>),
-    /// Configuring the render surface (format, size, present mode) failed, with
-    /// a human-readable reason.
+    #[doc = include_str!("vello_render_error.doc/SurfaceConfiguration.md")]
     SurfaceConfiguration(Box<str>),
-    /// Submitting or presenting a rendered frame failed, with a human-readable
-    /// reason.
+    #[doc = include_str!("vello_render_error.doc/RenderFailed.md")]
     RenderFailed(Box<str>),
-    /// No GPU adapter compatible with the backend's requirements was found.
+    #[doc = include_str!("vello_render_error.doc/NoGpuAdapter.md")]
     NoGpuAdapter,
 }
 
 impl VelloRenderError {
-    /// Maps this backend failure into the domain [`RendererError`] (spec §5.2).
-    ///
-    /// A failed device creation and a missing adapter both mean there is no
-    /// usable GPU device, so they become a fatal
-    /// [`RendererError::DeviceLost`]. The surface and frame failures are generic
-    /// backend faults and become [`RendererError::Backend`], preserving their
-    /// reason text.
+    #[doc = include_str!("vello_render_error.doc/into_renderer_error.md")]
     #[must_use]
     pub fn into_renderer_error(self) -> RendererError {
         match self {

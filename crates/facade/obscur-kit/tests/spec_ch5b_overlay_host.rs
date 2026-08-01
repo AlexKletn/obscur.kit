@@ -1,29 +1,21 @@
-//! §5.4 Overlay host mode — specification-derived conformance cases.
-//!
-//! Every expected value here was derived from the specification text quoted in
-//! each test's doc comment, not from this repository's source. A failure is a
-//! claim about the implementation.
+#![doc = include_str!("spec_ch5b_overlay_host.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 mod spec_ch5b_support;
 
 use spec_ch5b_support::harness::{MockOverlayHost, approx, el, view};
 
-/// A 100x50 filled rectangle, the whole mounted tree.
+#[doc = include_str!("spec_ch5b_overlay_host.doc/RECT_CSS.md")]
 const RECT_CSS: &str = ".rect { width: 100px; height: 50px; background-color: rgb(255,0,0); }\n";
 
-/// A 1000 ms linear opacity animation from 1.0 to 0.0.
+#[doc = include_str!("spec_ch5b_overlay_host.doc/FADE_CSS.md")]
 const FADE_CSS: &str = "\
 .rect { width: 100px; height: 50px; background-color: rgb(255,0,0); }\n\
 @keyframes fade { from { opacity: 1.0; } to { opacity: 0.0; } }\n\
 .rect { animation: fade 1s linear; }\n\
 ";
 
-/// §5.4: "External engines may own: window; event loop; render graph; lifecycle;
-/// frame callback." and "It returns render commands, pass descriptions or
-/// textures through `RenderHost`/`OverlayHost`."
-///
-/// Case `5.4-a-render-without-kit-owned-window-or-loop`.
+#[doc = include_str!("spec_ch5b_overlay_host.doc/a_frame_is_obtainable_without_a_kit_owned_window_or_event_loop.md")]
 #[test]
 fn a_frame_is_obtainable_without_a_kit_owned_window_or_event_loop() {
     let mut host = MockOverlayHost::new(800.0, 600.0);
@@ -70,10 +62,7 @@ fn a_frame_is_obtainable_without_a_kit_owned_window_or_event_loop() {
     );
 }
 
-/// §5.4: "The kit receives: viewport; input; clock; render target; frame
-/// scheduling hooks."
-///
-/// Case `5.4-b-host-clock-drives-time-not-wall-clock`.
+#[doc = include_str!("spec_ch5b_overlay_host.doc/animation_time_follows_the_host_clock_not_the_wall_clock.md")]
 #[test]
 fn animation_time_follows_the_host_clock_not_the_wall_clock() {
     let mut host = MockOverlayHost::new(800.0, 600.0);
@@ -115,10 +104,7 @@ fn animation_time_follows_the_host_clock_not_the_wall_clock() {
     approx(sampled_end, 0.0, 0.01, "the ramp ends at opacity 0.0");
 }
 
-/// §5.4: "The kit receives: … frame scheduling hooks." and "External engines may
-/// own: … frame callback."
-///
-/// Case `5.4-c-frame-requested-through-host-scheduling-hook`.
+#[doc = include_str!("spec_ch5b_overlay_host.doc/the_kit_asks_the_host_to_schedule_the_next_animation_frame.md")]
 #[test]
 fn the_kit_asks_the_host_to_schedule_the_next_animation_frame() {
     let mut host = MockOverlayHost::new(800.0, 600.0);

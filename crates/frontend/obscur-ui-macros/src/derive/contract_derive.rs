@@ -1,113 +1,15 @@
-//! `ContractDerive`: expansion logic for `#[derive(Contract)]` (spec §2.13).
-//!
-//! This module turns a props struct into an inherent `impl` exposing a
-//! `contract()` associated function that builds a fully-typed
-//! `ComponentContract`. The macro crate emits leading-`::` paths as tokens, so
-//! the *generated* code names obscur-view's and obscur-identity's types while
-//! this crate depends on neither.
-//!
-//! # Which crate the generated paths name
-//!
-//! Through the `obscur-kit` facade — `::obscur_kit::view::…` and
-//! `::obscur_kit::identity::…` — for the reason
-//! [`CodegenRoot`](obscur_okui_compiler::codegen::CodegenRoot) spells out for the
-//! *other* macro: a `::`-prefixed path resolves in the extern prelude, which
-//! holds the calling crate's **direct** dependencies, and an application's only
-//! direct dependency is the facade. This derive emitted `::obscur_view::…` and
-//! `::obscur_identity::…` until it was found from outside the workspace (audit
-//! finding 2-2, the residue of 1-A): every `#[derive(Contract)]` in this
-//! repository lives in `obscur-kit`'s own test targets, where both crates are
-//! reachable, so the failing path was never taken here and `#[derive(Contract)]`
-//! — the whole way a component declares its contract — could not be used by an
-//! application at all.
-//!
-//! Unlike `ViewCodegen`'s, this root is **not** an argument, and deliberately so:
-//! there is no caller who could pass a different one. `obscur-ui-macros` is
-//! `publish = false` and only `obscur-kit` depends on it, so the sole way to
-//! reach this derive is through the facade's re-export
-//! (`obscur_kit::ui_macros::Contract`) — a crate naming the derive necessarily
-//! has `obscur_kit` in its extern prelude. A `#[contract(crate = …)]` key would
-//! therefore be a knob with no possible turner. A crate that genuinely wants to
-//! stand on `obscur-view` alone does not use the derive: it writes the two
-//! builders by hand (`ComponentContract::new(…).with_prop(…)`,
-//! `ComponentSurface::new(…)`) plus its own `FromProps`, which is public API and
-//! is exactly what obscur-view's own tests do.
-//!
-//! # Stable-id scheme
-//!
-//! `InternedSymbol` and `ComponentId` are opaque `from_raw` handles, and there
-//! is no compile-time interner available during derive expansion, so every id is
-//! computed at expansion time and only the resulting integer literal is emitted.
-//!
-//! There are two *different* schemes here, and the distinction is load-bearing:
-//!
-//! - **Names that also exist in the desired view tree** — each prop/event field
-//!   name, the component's own name, and a slot's `child = "Tag"` — are resolved
-//!   through the shared `obscur_ui_ir::name_binding` registry ([`name_symbol`] /
-//!   [`event_name_symbol`] / [`component_id`]), because a contract's handle is
-//!   only useful if it equals the one a real node carries. `name_binding` maps
-//!   reserved names (`class`, `id`, `type`, `src`, `disabled`, `checked`;
-//!   `click`, `input`, `change`) to fixed low constants and everything else to
-//!   `fnv32(name) | 0x8000_0000`; a component name maps to its built-in's
-//!   `COMPONENT_ID` or to `fnv64(name) | 1<<63`. A bare `fnv32`/`fnv64` — which
-//!   this derive used to emit — agrees with that only by luck.
-//! - **Names that exist only inside the contract model** — the component name
-//!   symbol, each field's normalized *type* string, and a §2.12 slot's name —
-//!   have no view-tree counterpart to agree with, so they stay plain FNV-1a
-//!   ([`fnv32`]). A slot name is one of these because a `slot="header"` reaches
-//!   the tree as the *value* of a property, never as a symbol.
-//!
-//! # Slots (§2.12)
-//!
-//! A struct-level `#[contract(slot(name = "header", cardinality = one))]`
-//! declares one named slot; `cardinality` is `one`/`optional`/`many` (default
-//! `many`) and a repeatable `child = "Tag"` restricts what the slot admits.
-//!
-//! Both views are emitted from the one declaration, and only one of them is read
-//! today: the generated `contract_surface()` (a `ComponentSurface`) is what the
-//! `.okui` compiler and the `okui!` macro check a document against, while the
-//! typed `contract()`'s `slots` field has no production reader — as is true of
-//! its props and events. Emitting it anyway is not decoration: a component that
-//! declares a slot and whose typed contract reports `slots: []` would be *wrong*,
-//! and an unread field beats a lying one.
-//!
-//! # Style scope (§4.15)
-//!
-//! A struct-level `#[contract(style_scope = open)]` declares that the document's
-//! ordinary selectors reach the elements this component renders; `scoped` (the
-//! default, and what an unstated attribute means) keeps them out, so only an
-//! exported `::part()` crosses. This one *is* read in production — the runtime
-//! reads it at mount and stamps `NodeFlags::OPEN_STYLE_SCOPE` on the host, which
-//! is what the style pass's scope walk consults. Without it a component's output
-//! could be styled by nothing at all, which is what the external consumer audit
-//! recorded as finding 2-1.
+#![doc = include_str!("contract_derive.doc/_module.md")]
 
 use proc_macro2::{Literal, Span, TokenStream};
 use quote::{ToTokens, quote};
 use syn::{Data, DeriveInput, Fields, LitStr, Type, spanned::Spanned};
 
-/// Expander for `#[derive(Contract)]`.
-///
-/// Call [`ContractDerive::expand`] with the annotated item's tokens to obtain
-/// the generated inherent `impl` (or a [`syn::Error`] for unsupported inputs).
+#[doc = include_str!("contract_derive.doc/ContractDerive.md")]
 #[derive(Debug)]
 pub(crate) struct ContractDerive;
 
 impl ContractDerive {
-    /// Expands `#[derive(Contract)]` on a props struct into an inherent impl
-    /// producing an obscur-view `ComponentContract`, named through the facade as
-    /// `::obscur_kit::view::component::ComponentContract` (see the module docs).
-    ///
-    /// Only structs with named fields are supported; enums, unions and
-    /// tuple/unit structs produce a [`syn::Error`] at the input span. Unknown
-    /// `#[contract(...)]` keys are also errors (spec: unknown attributes are
-    /// compile errors).
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`syn::Error`] when the input cannot be parsed as a
-    /// [`syn::DeriveInput`], when the item is not a named-field struct, or when
-    /// an unrecognised `#[contract(...)]` attribute or value is encountered.
+    #[doc = include_str!("contract_derive.doc/expand.md")]
     pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, syn::Error> {
         let derive_input: DeriveInput = syn::parse2(input)?;
         let struct_ident = &derive_input.ident;
@@ -238,42 +140,39 @@ impl ContractDerive {
     }
 }
 
-/// Which `ChildContract` variant a `#[contract(children = ...)]` selects.
+#[doc = include_str!("contract_derive.doc/ChildrenKind.md")]
 #[derive(Debug, Clone, Copy)]
 enum ChildrenKind {
-    /// Any child component is accepted.
+    #[doc = include_str!("contract_derive.doc/Any.md")]
     Any,
-    /// No children are accepted.
+    #[doc = include_str!("contract_derive.doc/None.md")]
     None,
 }
 
-/// One `#[contract(slot(name = "…", cardinality = …, child = "…"))]` declaration
-/// (spec §2.12).
+#[doc = include_str!("contract_derive.doc/SlotModel.md")]
 #[derive(Debug)]
 struct SlotModel {
-    /// The slot's name — the value a child's `slot="…"` must match.
+    #[doc = include_str!("contract_derive.doc/name.md")]
     name: String,
-    /// How many children the slot accepts; `many` when unstated, the only
-    /// default that adds no obligation the author did not ask for.
+    #[doc = include_str!("contract_derive.doc/cardinality.md")]
     cardinality: SlotCardinality,
-    /// The child tags the slot admits; empty means any.
+    #[doc = include_str!("contract_derive.doc/children.md")]
     children: Vec<String>,
 }
 
-/// Which `SlotCardinality` variant a `#[contract(slot(cardinality = ...))]`
-/// selects.
+#[doc = include_str!("contract_derive.doc/SlotCardinality.md")]
 #[derive(Debug, Clone, Copy)]
 enum SlotCardinality {
-    /// Exactly one child.
+    #[doc = include_str!("contract_derive.doc/One.md")]
     One,
-    /// Zero or one child.
+    #[doc = include_str!("contract_derive.doc/Optional.md")]
     Optional,
-    /// Any number of children.
+    #[doc = include_str!("contract_derive.doc/Many.md")]
     Many,
 }
 
 impl SlotCardinality {
-    /// The `obscur_view::contract::SlotCardinality` variant this spells.
+    #[doc = include_str!("contract_derive.doc/variant.md")]
     fn variant(self) -> TokenStream {
         match self {
             Self::One => quote!(ExactlyOne),
@@ -284,7 +183,7 @@ impl SlotCardinality {
 }
 
 impl SlotModel {
-    /// Parses one `slot(...)` list from a struct-level `#[contract(...)]`.
+    #[doc = include_str!("contract_derive.doc/parse.md")]
     fn parse(meta: &syn::meta::ParseNestedMeta<'_>) -> Result<Self, syn::Error> {
         let mut name: Option<String> = None;
         let mut cardinality = SlotCardinality::Many;
@@ -321,17 +220,7 @@ impl SlotModel {
         })
     }
 
-    /// Lowers the slot into its `.with_slot(...)` entry on the **typed**
-    /// contract.
-    ///
-    /// Child tags are named through [`component_id`], the shared `name_binding`
-    /// resolution, so this agrees with `OtherProps::contract().id` **and** with
-    /// the `ComponentId` a front end emits for that tag. It used to agree with
-    /// only the first: a bare `fnv64` matched the typed model's internal spelling
-    /// while `name_binding::component_id_for` resolved every unregistered tag to
-    /// `Container`, so a slot's `child = "Tab"` named a handle no authored `<Tab/>`
-    /// ever carried. Closing that is the same change that makes `<Card/>` a
-    /// component at all.
+    #[doc = include_str!("contract_derive.doc/contract_tokens.md")]
     fn contract_tokens(&self) -> TokenStream {
         let name_sym = Literal::u32_unsuffixed(fnv32(&self.name));
         let cardinality = self.cardinality.variant();
@@ -355,9 +244,7 @@ impl SlotModel {
         }
     }
 
-    /// Lowers the slot into its `.with_slot(...)` entry on the **string**
-    /// surface, which is the one the `.okui` compiler and the `okui!` macro
-    /// actually check a document against.
+    #[doc = include_str!("contract_derive.doc/surface_tokens.md")]
     fn surface_tokens(&self) -> TokenStream {
         let name = LitStr::new(&self.name, Span::call_site());
         let cardinality = self.cardinality.variant();
@@ -377,32 +264,30 @@ impl SlotModel {
     }
 }
 
-/// Parsed struct-level `#[contract(...)]` configuration.
+#[doc = include_str!("contract_derive.doc/StructAttrs.md")]
 #[derive(Debug, Default)]
 struct StructAttrs {
-    /// Overridden component name string (else the struct ident is used).
+    #[doc = include_str!("contract_derive.doc/name_2.md")]
     name: Option<String>,
-    /// Allowed-children rule, if any was specified.
+    #[doc = include_str!("contract_derive.doc/children_2.md")]
     children: Option<ChildrenKind>,
-    /// The declared named slots, in declaration order (spec §2.12).
+    #[doc = include_str!("contract_derive.doc/slots.md")]
     slots: Vec<SlotModel>,
-    /// The declared §4.15 style scope, if the author stated one.
+    #[doc = include_str!("contract_derive.doc/style_scope.md")]
     style_scope: Option<StyleScopeKind>,
 }
 
-/// Which `StyleScope` variant a `#[contract(style_scope = ...)]` selects
-/// (spec §4.15).
+#[doc = include_str!("contract_derive.doc/StyleScopeKind.md")]
 #[derive(Debug, Clone, Copy)]
 enum StyleScopeKind {
-    /// The default: the document's ordinary selectors stop at the host.
+    #[doc = include_str!("contract_derive.doc/Scoped.md")]
     Scoped,
-    /// "Explicitly open/global scopes are possible": the component's rendered
-    /// elements are styled by the document's sheets like authored ones.
+    #[doc = include_str!("contract_derive.doc/Open.md")]
     Open,
 }
 
 impl StructAttrs {
-    /// Parses the struct-level `#[contract(...)]` attributes of `input`.
+    #[doc = include_str!("contract_derive.doc/parse_2.md")]
     fn parse(input: &DeriveInput) -> Result<Self, syn::Error> {
         let mut out = Self::default();
         for attr in &input.attrs {
@@ -454,42 +339,40 @@ impl StructAttrs {
     }
 }
 
-/// The parsed model of a single struct field for contract generation.
+#[doc = include_str!("contract_derive.doc/FieldModel.md")]
 #[derive(Debug)]
 struct FieldModel {
-    /// The field's actual Rust identifier, used to initialise it in the
-    /// generated `FromProps` impl (the authored `name` may be overridden and so
-    /// cannot stand in for it).
+    #[doc = include_str!("contract_derive.doc/ident.md")]
     ident: syn::Ident,
-    /// The name string used for hashing (field ident or `name = "..."` override).
+    #[doc = include_str!("contract_derive.doc/name_3.md")]
     name: String,
-    /// The normalized textual type string used for the payload/value-type hash.
+    #[doc = include_str!("contract_derive.doc/type_string.md")]
     type_string: String,
-    /// Whether the field is an `Option<...>` (implies optional + default).
+    #[doc = include_str!("contract_derive.doc/is_option.md")]
     is_option: bool,
-    /// Field-level attribute flags.
+    #[doc = include_str!("contract_derive.doc/attrs.md")]
     attrs: FieldAttrs,
 }
 
-/// Parsed field-level `#[contract(...)]` flags.
+#[doc = include_str!("contract_derive.doc/FieldAttrs.md")]
 #[derive(Debug, Default)]
 struct FieldAttrs {
-    /// Omit the field from the contract entirely.
+    #[doc = include_str!("contract_derive.doc/skip.md")]
     skip: bool,
-    /// Treat the field as an event rather than a prop.
+    #[doc = include_str!("contract_derive.doc/event.md")]
     event: bool,
-    /// (Events only) mark the event as bubbling.
+    #[doc = include_str!("contract_derive.doc/bubbles.md")]
     bubbles: bool,
-    /// (Events only) mark the event as cancelable.
+    #[doc = include_str!("contract_derive.doc/cancelable.md")]
     cancelable: bool,
-    /// Force the prop to carry a default (`.with_default()` and not required).
+    #[doc = include_str!("contract_derive.doc/default.md")]
     default: bool,
-    /// Overridden name string used for hashing.
+    #[doc = include_str!("contract_derive.doc/name_4.md")]
     name: Option<String>,
 }
 
 impl FieldModel {
-    /// Parses a named struct `field` into a [`FieldModel`].
+    #[doc = include_str!("contract_derive.doc/parse_3.md")]
     fn parse(field: &syn::Field) -> Result<Self, syn::Error> {
         let ident = field
             .ident
@@ -506,26 +389,7 @@ impl FieldModel {
         })
     }
 
-    /// Lowers the field into its `<ident>: <expr>` initialiser for the generated
-    /// [`FromProps`] impl.
-    ///
-    /// The three shapes mirror [`contract_tokens`](Self::contract_tokens) exactly,
-    /// so what the contract *declares* and what the decoder *reads* cannot drift:
-    ///
-    /// * a skipped or event field is not a prop at all, so it is not decoded — it
-    ///   takes its [`Default`]. (This is why deriving `Contract` on a struct with
-    ///   a non-`Default` skipped field is a compile error, which is the honest
-    ///   outcome: there is nothing to decode it from.)
-    /// * an `Option<T>` decodes optionally — absent or `Null` yields `None`, but a
-    ///   present-yet-unreadable value is still an error;
-    /// * a `#[contract(default)]` field falls back to its [`Default`] when absent;
-    /// * every other field is required.
-    ///
-    /// The target type is never named: it is inferred from the field being
-    /// initialised, so no `Option<T>` inner-type extraction is needed.
-    ///
-    /// [`FromProps`]: obscur_view::component::FromProps
-    /// [`Default`]: ::core::default::Default
+    #[doc = include_str!("contract_derive.doc/from_props_tokens.md")]
     fn from_props_tokens(&self) -> TokenStream {
         let ident = &self.ident;
 
@@ -559,8 +423,7 @@ impl FieldModel {
         }
     }
 
-    /// Lowers the field into its typed `.with_prop(...)` / `.with_event(...)`
-    /// builder call, or `None` when the field is skipped.
+    #[doc = include_str!("contract_derive.doc/contract_tokens_2.md")]
     fn contract_tokens(&self) -> Option<TokenStream> {
         if self.attrs.skip {
             return None;
@@ -607,16 +470,7 @@ impl FieldModel {
         Some(quote! { .with_prop(#prop) })
     }
 
-    /// Lowers the field into its string-surface builder call
-    /// (`.requiring_prop(...)` / `.allowing_prop(...)` / `.allowing_event(...)`),
-    /// or `None` when the field is skipped.
-    ///
-    /// The name is emitted as the raw string literal (before it is hashed for
-    /// the typed contract), so a string-keyed tool can match it against `.okui`
-    /// attribute/event names. Required vs. allowed mirrors
-    /// [`contract_tokens`](Self::contract_tokens): an `Option<...>` or
-    /// `#[contract(default)]` prop is allowed (optional); every other prop is
-    /// required; an event field becomes an allowed event.
+    #[doc = include_str!("contract_derive.doc/surface_tokens_2.md")]
     fn surface_tokens(&self) -> Option<TokenStream> {
         if self.attrs.skip {
             return None;
@@ -643,13 +497,7 @@ impl FieldModel {
     }
 }
 
-/// Classifies a prop field's normalized type string into the
-/// `PropTypeSurface` variant name it should carry (spec §2.8).
-///
-/// The check is on whole identifier tokens, not substrings, so a user type named
-/// `MyString` is `Other` rather than a string. An `Option<T>` classifies as its
-/// inner `T` — the `Option` token is simply not one of the ones looked for. Every
-/// unrecognised type is `Other`, which the compiler leaves untyped.
+#[doc = include_str!("contract_derive.doc/classify_prop_type.md")]
 fn classify_prop_type(type_string: &str) -> &'static str {
     let tokens: Vec<&str> = type_string
         .split(|c: char| !(c.is_alphanumeric() || c == '_'))
@@ -675,7 +523,7 @@ fn classify_prop_type(type_string: &str) -> &'static str {
 }
 
 impl FieldAttrs {
-    /// Parses the field-level `#[contract(...)]` attributes of `field`.
+    #[doc = include_str!("contract_derive.doc/parse_4.md")]
     fn parse(field: &syn::Field) -> Result<Self, syn::Error> {
         let mut out = Self::default();
         for attr in &field.attrs {
@@ -712,10 +560,7 @@ impl FieldAttrs {
     }
 }
 
-/// Returns whether `ty` is syntactically an `Option<...>`.
-///
-/// This is a purely textual check on the last path segment, matching `Option`,
-/// `std::option::Option` and `core::option::Option`.
+#[doc = include_str!("contract_derive.doc/type_is_option.md")]
 fn type_is_option(ty: &Type) -> bool {
     let Type::Path(type_path) = ty else {
         return false;
@@ -730,39 +575,18 @@ fn type_is_option(ty: &Type) -> bool {
         .is_some_and(|seg| seg.ident == "Option")
 }
 
-/// Returns the whitespace-normalized textual form of `ty`.
-///
-/// `ToTokens::to_token_stream().to_string()` already renders a single space
-/// between tokens; this collapses any runs and trims the ends so equal types
-/// hash identically regardless of the caller's source formatting.
+#[doc = include_str!("contract_derive.doc/normalized_type_string.md")]
 fn normalized_type_string(ty: &Type) -> String {
     let raw = ty.to_token_stream().to_string();
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// FNV-1a 32-bit hash of `s`, used to derive stable [`InternedSymbol`] ids.
-/// The [`InternedSymbol`] raw value a **property** name has in the desired view
-/// tree, resolved through the shared `name_binding` registry.
-///
-/// This must not be a bare hash. `name_binding::attr_symbol` maps a handful of
-/// reserved names (`class`, `id`, `type`, `src`, `disabled`, `checked`) to fixed
-/// low constants, and every other name to `fnv32(name) | 0x8000_0000`. A bare
-/// `fnv32` therefore disagrees with the real view symbol for every reserved name
-/// and for every other name whose hash does not already have the top bit set —
-/// i.e. it happens to agree about half the time, by luck. Resolving through the
-/// registry is what makes a contract's prop symbol comparable to the
-/// `ViewProperty::name()` a node actually carries.
-///
-/// [`InternedSymbol`]: obscur_identity::InternedSymbol
+#[doc = include_str!("contract_derive.doc/name_symbol.md")]
 fn name_symbol(name: &str) -> u32 {
     obscur_ui_ir::name_binding::attr_symbol(name).raw()
 }
 
-/// The [`InternedSymbol`] raw value an **event** name has in the desired view
-/// tree, resolved through the shared `name_binding` registry — the event-side
-/// mirror of [`name_symbol`], and reserved for `click`/`input`/`change`.
-///
-/// [`InternedSymbol`]: obscur_identity::InternedSymbol
+#[doc = include_str!("contract_derive.doc/event_name_symbol.md")]
 fn event_name_symbol(name: &str) -> u32 {
     obscur_ui_ir::name_binding::event_symbol(name).raw()
 }
@@ -778,18 +602,7 @@ fn fnv32(s: &str) -> u32 {
     hash
 }
 
-/// The [`ComponentId`] raw value a component **name** binds to, resolved through
-/// the shared `name_binding` registry — the component-side mirror of
-/// [`name_symbol`].
-///
-/// This is the id an authored `<Name/>` lowers to on both front ends, which is
-/// the only value a contract's `id` can usefully be: a host registers the
-/// component under `MyProps::contract().id`, and the runtime mounts it when a
-/// node carries that same handle. A separate hash here would agree with the tag
-/// only by luck — and for a name that happens to be a built-in's (`Button`), not
-/// even that.
-///
-/// [`ComponentId`]: obscur_identity::ComponentId
+#[doc = include_str!("contract_derive.doc/component_id.md")]
 fn component_id(name: &str) -> u64 {
     obscur_ui_ir::name_binding::component_id_for(
         name,

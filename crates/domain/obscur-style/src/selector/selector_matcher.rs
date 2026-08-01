@@ -1,4 +1,4 @@
-//! Selector matching against a [`MatchElement`]: [`SelectorMatcher`].
+#![doc = include_str!("selector_matcher.doc/_module.md")]
 
 use super::complex_selector::{Combinator, ComplexSelector};
 use super::compound_selector::CompoundSelector;
@@ -9,38 +9,18 @@ use super::selector_list::SelectorList;
 use super::selector_specificity::SelectorSpecificity;
 use super::simple_selector::{AttrMatch, AttributeSelector, SimpleSelector};
 
-/// The stateless engine that tests selectors against a [`MatchElement`].
-///
-/// Matching a complex selector is done **right-to-left**: the subject (rightmost)
-/// compound is tested against the element, then each combinator to its left is
-/// walked against parents or preceding siblings. Descendant and
-/// subsequent-sibling combinators backtrack — they try every candidate
-/// ancestor / preceding sibling and succeed if any lets the remaining prefix
-/// match — while child and next-sibling combinators consider only the single
-/// immediate parent / previous sibling.
+#[doc = include_str!("selector_matcher.doc/SelectorMatcher.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SelectorMatcher;
 
 impl SelectorMatcher {
-    /// Returns `true` if `element` matches `selector`.
-    ///
-    /// Evaluation starts at the subject compound and walks combinators leftward
-    /// with backtracking for descendant / subsequent-sibling combinators.
+    #[doc = include_str!("selector_matcher.doc/matches_complex.md")]
     #[must_use]
     pub fn matches_complex<E: MatchElement>(selector: &ComplexSelector, element: &E) -> bool {
         matches_at(selector, selector.tail().len(), element)
     }
 
-    /// Returns `true` if `element` satisfies every simple selector in
-    /// `compound`.
-    ///
-    /// Type selectors compare local names ASCII case-insensitively; ids and
-    /// classes compare exactly. Attribute selectors require the attribute to be
-    /// present and, when an operator is given, to satisfy it. Pseudo-elements
-    /// never match: the kit generates no box for them, so a compound containing
-    /// one is inert (see [`SimpleSelector::PseudoElement`]). Structural
-    /// pseudo-classes consult the element's position; state pseudo-classes
-    /// consult its [`PseudoState`]; unmodeled pseudo-classes never match.
+    #[doc = include_str!("selector_matcher.doc/matches_compound.md")]
     #[must_use]
     pub fn matches_compound<E: MatchElement>(compound: &CompoundSelector, element: &E) -> bool {
         compound
@@ -49,10 +29,7 @@ impl SelectorMatcher {
             .all(|simple| matches_simple(simple, element))
     }
 
-    /// Returns the highest specificity among the complex selectors in `list`
-    /// that match `element`, or [`None`] if none match.
-    ///
-    /// This is the value the cascade consumes to resolve competing rules.
+    #[doc = include_str!("selector_matcher.doc/matches_list.md")]
     #[must_use]
     pub fn matches_list<E: MatchElement>(
         list: &SelectorList,
@@ -65,19 +42,7 @@ impl SelectorMatcher {
             .max()
     }
 
-    /// Returns `true` if `selector`'s subject compound names the `pseudo`
-    /// pseudo-element (e.g. `before`) and `element` — the pseudo-element's
-    /// *originating* element — satisfies the rest of the compound and the
-    /// combinator prefix to its left (§4.16).
-    ///
-    /// The pseudo-element simple itself is a *target*, not an element
-    /// constraint, so it is skipped when testing the subject; the remaining
-    /// simples (`.badge` in `.badge::before`) plus any ancestor/sibling prefix
-    /// must still match the originating element. Declarations selected this way
-    /// belong to the generated box, never to the originating element's own box —
-    /// that separation is the caller's, which is why the ordinary
-    /// [`matches_complex`](Self::matches_complex) still fails closed on a
-    /// pseudo-element (see [`matches_simple`]).
+    #[doc = include_str!("selector_matcher.doc/matches_complex_for_pseudo.md")]
     #[must_use]
     pub fn matches_complex_for_pseudo<E: MatchElement>(
         selector: &ComplexSelector,
@@ -103,8 +68,7 @@ impl SelectorMatcher {
     }
 }
 
-/// Matches the compound at index `k` of `selector` against `element`, then
-/// recurses left through the preceding combinator. `k == 0` is the head.
+#[doc = include_str!("selector_matcher.doc/matches_at.md")]
 fn matches_at<E: MatchElement>(selector: &ComplexSelector, k: usize, element: &E) -> bool {
     let compound = compound_at(selector, k);
     if !SelectorMatcher::matches_compound(compound, element) {
@@ -113,12 +77,7 @@ fn matches_at<E: MatchElement>(selector: &ComplexSelector, k: usize, element: &E
     recurse_left(selector, k, element)
 }
 
-/// Walks the combinator immediately to the left of compound `k` (if any),
-/// backtracking for descendant / subsequent-sibling combinators. `k == 0` is the
-/// head, which has nothing to its left and always succeeds. Shared by
-/// [`matches_at`] and
-/// [`matches_complex_for_pseudo`](SelectorMatcher::matches_complex_for_pseudo)
-/// so both agree on combinator semantics.
+#[doc = include_str!("selector_matcher.doc/recurse_left.md")]
 fn recurse_left<E: MatchElement>(selector: &ComplexSelector, k: usize, element: &E) -> bool {
     if k == 0 {
         return true;
@@ -154,7 +113,7 @@ fn recurse_left<E: MatchElement>(selector: &ComplexSelector, k: usize, element: 
     }
 }
 
-/// Returns the compound at index `k`: `0` is the head, `k` is `tail[k - 1]`.
+#[doc = include_str!("selector_matcher.doc/compound_at.md")]
 fn compound_at(selector: &ComplexSelector, k: usize) -> &CompoundSelector {
     if k == 0 {
         selector.head()
@@ -163,7 +122,7 @@ fn compound_at(selector: &ComplexSelector, k: usize) -> &CompoundSelector {
     }
 }
 
-/// Tests a single simple selector against `element`.
+#[doc = include_str!("selector_matcher.doc/matches_simple.md")]
 fn matches_simple<E: MatchElement>(simple: &SimpleSelector, element: &E) -> bool {
     match simple {
         SimpleSelector::Type(name) => element
@@ -189,7 +148,7 @@ fn matches_simple<E: MatchElement>(simple: &SimpleSelector, element: &E) -> bool
     }
 }
 
-/// Tests an attribute selector against `element`.
+#[doc = include_str!("selector_matcher.doc/matches_attribute.md")]
 fn matches_attribute<E: MatchElement>(attr: &AttributeSelector, element: &E) -> bool {
     let Some(value) = element.attribute(&attr.name) else {
         return false;
@@ -215,7 +174,7 @@ fn matches_attribute<E: MatchElement>(attr: &AttributeSelector, element: &E) -> 
     }
 }
 
-/// Tests a pseudo-class against `element`.
+#[doc = include_str!("selector_matcher.doc/matches_pseudo_class.md")]
 fn matches_pseudo_class<E: MatchElement>(pseudo: &PseudoClassSelector, element: &E) -> bool {
     match pseudo {
         PseudoClassSelector::Hover => element.pseudo_state().contains(PseudoState::HOVER),
@@ -271,20 +230,14 @@ fn matches_pseudo_class<E: MatchElement>(pseudo: &PseudoClassSelector, element: 
     }
 }
 
-/// Returns `true` if `element` matches at least one complex selector in `list`.
+#[doc = include_str!("selector_matcher.doc/matches_any.md")]
 fn matches_any<E: MatchElement>(list: &SelectorList, element: &E) -> bool {
     list.selectors()
         .iter()
         .any(|selector| SelectorMatcher::matches_complex(selector, element))
 }
 
-/// Decides `:nth-child(An+B of S)` (selectors-4 §13.3.1): the element must match
-/// `S`, and its index is taken over the sibling list **filtered by `S` first**.
-///
-/// The filtered index is computed by walking preceding element siblings — the
-/// only backward navigation `MatchElement` offers — and counting those that
-/// match `S`; the element's own 1-based position in the filtered list is that
-/// count plus one.
+#[doc = include_str!("selector_matcher.doc/matches_nth_child_of.md")]
 fn matches_nth_child_of<E: MatchElement>(anb: AnB, list: &SelectorList, element: &E) -> bool {
     if !matches_any(list, element) {
         return false;
@@ -300,8 +253,7 @@ fn matches_nth_child_of<E: MatchElement>(anb: AnB, list: &SelectorList, element:
     anb.matches_index(one_based(index))
 }
 
-/// Converts a bounded 1-based `usize` index into the `i32` domain [`AnB`] uses,
-/// saturating rather than wrapping on the (practically impossible) overflow.
+#[doc = include_str!("selector_matcher.doc/one_based.md")]
 fn one_based(index: usize) -> i32 {
     i32::try_from(index).unwrap_or(i32::MAX)
 }

@@ -1,15 +1,4 @@
-//! Lowering `@keyframes` into native `obscur-motion` keyframe tracks (§4.17).
-//!
-//! [`KeyframeCompiler`] turns a parsed `@keyframes` rule into a
-//! [`CompiledKeyframes`]: one [`KeyframeTrack`] per animated property. Each
-//! keyframe selector (`from`, `to`, or a percentage) becomes a normalized offset
-//! in `[0, 1]`, and each declaration whose value lowers to a [`MotionValue`]
-//! contributes a [`Keyframe`] to its property's track.
-//!
-//! Only declarations that name one of the modelled [`PropertyId`] longhands and
-//! whose value lowers to a scalar `MotionValue` (a number, a `px` length, or a
-//! percentage) are animated; anything else is skipped, because a non-animatable
-//! value has no place on a track.
+#![doc = include_str!("keyframe_compiler.doc/_module.md")]
 
 use crate::parser::{KeyframeSelector, ParsedKeyframesRule, ParsedValue};
 
@@ -18,36 +7,31 @@ use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::value::MotionValue;
 use obscur_style::property::PropertyId;
 
-use super::property_compiler::{narrow_f32, property_id_from_name};
+use super::longhand_catalog::property_id_from_name;
+use super::property_compiler::narrow_f32;
 use super::stylesheet_compiler::CssSymbolInterner;
 
-/// A compiled `@keyframes` rule: an interned name and its per-property tracks.
-///
-/// `tracks` holds one entry per animated [`PropertyId`], in first-seen order,
-/// each paired with a [`KeyframeTrack`] whose keyframes are sorted by offset.
+#[doc = include_str!("keyframe_compiler.doc/CompiledKeyframes.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledKeyframes {
-    /// The interned animation name (the `@keyframes` identifier).
+    #[doc = include_str!("keyframe_compiler.doc/name.md")]
     pub name: InternedSymbol,
-    /// The animated properties, each with its keyframe track.
+    #[doc = include_str!("keyframe_compiler.doc/tracks.md")]
     pub tracks: Vec<(PropertyId, KeyframeTrack)>,
 }
 
-/// Lowers `@keyframes` rules into [`CompiledKeyframes`].
+#[doc = include_str!("keyframe_compiler.doc/KeyframeCompiler.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KeyframeCompiler;
 
 impl KeyframeCompiler {
-    /// Creates a keyframe compiler.
+    #[doc = include_str!("keyframe_compiler.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    /// Lowers `rule` into a [`CompiledKeyframes`], interning its name.
-    ///
-    /// Declarations whose property is not a modelled longhand, or whose value is
-    /// not an animatable scalar, are skipped.
+    #[doc = include_str!("keyframe_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(
         &self,
@@ -79,7 +63,7 @@ impl KeyframeCompiler {
     }
 }
 
-/// Maps a keyframe selector to its normalized `[0, 1]` offset.
+#[doc = include_str!("keyframe_compiler.doc/offset_of.md")]
 fn offset_of(selector: KeyframeSelector) -> f32 {
     match selector {
         KeyframeSelector::From => 0.0,
@@ -88,8 +72,7 @@ fn offset_of(selector: KeyframeSelector) -> f32 {
     }
 }
 
-/// Lowers a declaration value to an animatable scalar [`MotionValue`], or
-/// [`None`] for a non-animatable value.
+#[doc = include_str!("keyframe_compiler.doc/lower_motion.md")]
 fn lower_motion(values: &[ParsedValue]) -> Option<MotionValue> {
     match values.first()? {
         ParsedValue::Number(n) => Some(MotionValue::scalar(narrow_f32(*n))),
@@ -101,8 +84,7 @@ fn lower_motion(values: &[ParsedValue]) -> Option<MotionValue> {
     }
 }
 
-/// Appends `keyframe` to the track builder for `property`, creating it on first
-/// use so property order matches first appearance.
+#[doc = include_str!("keyframe_compiler.doc/push_keyframe.md")]
 fn push_keyframe(
     builders: &mut Vec<(PropertyId, Vec<Keyframe>)>,
     property: PropertyId,

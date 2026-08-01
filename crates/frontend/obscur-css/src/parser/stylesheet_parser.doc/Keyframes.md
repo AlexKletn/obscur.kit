@@ -1,0 +1,1 @@
+An `@keyframes` rule.

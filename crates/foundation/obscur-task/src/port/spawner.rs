@@ -1,14 +1,13 @@
-//! Spawner port for `Send` futures.
+#![doc = include_str!("spawner.doc/_module.md")]
 
 use std::future::Future;
 use std::pin::Pin;
 
-/// A boxed, `Send` future scheduled onto an executor adapter.
+#[doc = include_str!("spawner.doc/BoxFuture.md")]
 pub type BoxFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-/// Schedules `Send` work onto the platform executor. The core never depends on
-/// a concrete executor (spec §3.3, §4.8).
+#[doc = include_str!("spawner.doc/Spawner.md")]
 pub trait Spawner {
-    /// Spawns a future for execution.
+    #[doc = include_str!("spawner.doc/spawn.md")]
     fn spawn(&self, future: BoxFuture);
 }

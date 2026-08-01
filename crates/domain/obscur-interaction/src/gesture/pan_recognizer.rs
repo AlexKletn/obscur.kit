@@ -1,36 +1,10 @@
-//! The [`PanRecognizer`] turning one pointer's samples into a drag (spec §6.16
-//! `Pan`, §2.4 pointer/gesture behaviour).
+#![doc = include_str!("pan_recognizer.doc/_module.md")]
 
 use obscur_geometry::Point;
 
 use super::{GestureKind, GestureRecognizer, RecognizerId, RecognizerState};
 
-/// Recognizes a [`Pan`](GestureKind::Pan) — a one-finger drag — from the stream
-/// of positions a single pointer reports (spec §6.16).
-///
-/// A pan is not "the pointer moved". Every real contact jitters by a pixel or
-/// two while a finger presses and lifts, so a recognizer that began on the first
-/// move would turn every tap into a drag and every list would scroll a hair
-/// whenever it was touched. The recognizer therefore stays
-/// [`Possible`](RecognizerState::Possible) until the contact has travelled
-/// further than `slop` from where it started, and only then does it
-/// [`begin`](RecognizerState::Began) — the standard touch-slop rule. Once begun
-/// it reports the delta of each subsequent sample, so the consumer moves content
-/// one-to-one with the finger.
-///
-/// The slop is passed in rather than fixed here: it is a **policy** owned by
-/// whoever knows the display and the input device, not by this type.
-///
-/// Time is data, like everywhere else in this crate — the recognizer reads no
-/// clock, it is told the logical timestamp of each sample.
-///
-/// # Lifecycle
-///
-/// `Possible` → `Began` (slop crossed) → `Recognized` (the contact lifted) or
-/// `Cancelled` (the system, or a competing recognizer, took the sequence). A
-/// contact that lifts without ever crossing the slop
-/// [`Fails`](RecognizerState::Failed): it was a tap, and saying so is what lets
-/// the consumer treat it as one.
+#[doc = include_str!("pan_recognizer.doc/PanRecognizer.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanRecognizer {
     recognizer: GestureRecognizer,
@@ -44,9 +18,7 @@ pub struct PanRecognizer {
 }
 
 impl PanRecognizer {
-    /// Begins tracking `pointer`'s contact, which went down at `origin` at
-    /// logical time `micros`, with a movement threshold of `slop` (in the same
-    /// space as the points).
+    #[doc = include_str!("pan_recognizer.doc/new.md")]
     #[must_use]
     pub fn new(id: RecognizerId, origin: Point, micros: u64, slop: f32) -> Self {
         Self {
@@ -61,15 +33,7 @@ impl PanRecognizer {
         }
     }
 
-    /// Feeds a new sample at `at` (logical time `micros`) and returns the pan
-    /// delta `(dx, dy)` to apply, or [`None`] while the pan has not begun.
-    ///
-    /// The sample that *crosses* the slop returns the delta from the **origin**,
-    /// not from the previous sample, so no part of the finger's travel is
-    /// swallowed by the threshold: content that starts moving on the crossing
-    /// sample lines up with the finger instead of lagging it by one slop radius.
-    ///
-    /// A terminal recognizer ignores samples and returns [`None`].
+    #[doc = include_str!("pan_recognizer.doc/update.md")]
     pub fn update(&mut self, at: Point, micros: u64) -> Option<(f32, f32)> {
         if self.recognizer.state().is_terminal() {
             return None;
@@ -92,11 +56,7 @@ impl PanRecognizer {
         Some((at.x - from.x, at.y - from.y))
     }
 
-    /// Ends the sequence: the contact lifted.
-    ///
-    /// A pan that had begun is [`Recognized`](RecognizerState::Recognized); one
-    /// that never crossed the slop [`Fails`](RecognizerState::Failed), which is
-    /// how the consumer learns the contact was a tap rather than a drag.
+    #[doc = include_str!("pan_recognizer.doc/end.md")]
     pub fn end(&mut self) {
         if self.recognizer.state() == RecognizerState::Began {
             self.recognizer.recognize();
@@ -105,52 +65,42 @@ impl PanRecognizer {
         }
     }
 
-    /// Cancels the sequence — the system took it, or a competing recognizer won
-    /// the arena.
+    #[doc = include_str!("pan_recognizer.doc/cancel.md")]
     pub fn cancel(&mut self) {
         self.recognizer.cancel();
     }
 
-    /// Whether the slop has been crossed and the pan is driving content.
+    #[doc = include_str!("pan_recognizer.doc/has_begun.md")]
     #[must_use]
     pub fn has_begun(&self) -> bool {
         self.recognizer.state() == RecognizerState::Began
     }
 
-    /// The recognizer's lifecycle state.
+    #[doc = include_str!("pan_recognizer.doc/state.md")]
     #[must_use]
     pub fn state(&self) -> RecognizerState {
         self.recognizer.state()
     }
 
-    /// The recognizer's identity.
+    #[doc = include_str!("pan_recognizer.doc/id.md")]
     #[must_use]
     pub fn id(&self) -> RecognizerId {
         self.recognizer.id()
     }
 
-    /// Where the contact went down.
+    #[doc = include_str!("pan_recognizer.doc/origin.md")]
     #[must_use]
     pub fn origin(&self) -> Point {
         self.origin
     }
 
-    /// The logical time the contact went down, in microseconds.
+    #[doc = include_str!("pan_recognizer.doc/origin_micros.md")]
     #[must_use]
     pub fn origin_micros(&self) -> u64 {
         self.origin_micros
     }
 
-    /// The contact's velocity in px per second at the moment it lifted, given the
-    /// lift's logical timestamp `micros` — what a fling is thrown with.
-    ///
-    /// **Zero if the contact had come to rest**: a finger that stops and *then*
-    /// lifts has thrown nothing, however fast it was moving a moment earlier.
-    /// This needs saying explicitly because no event arrives while a finger rests,
-    /// so the last sample still holds the speed it had before the pause; a
-    /// recognizer that reported it would fling a list the user had deliberately
-    /// stopped — the classic touch-scrolling bug. `rest_micros` is how long
-    /// without a sample counts as stopped.
+    #[doc = include_str!("pan_recognizer.doc/velocity_at.md")]
     #[must_use]
     pub fn velocity_at(&self, micros: u64, rest_micros: u64) -> (f32, f32) {
         if micros.saturating_sub(self.last_micros) > rest_micros {
@@ -159,13 +109,7 @@ impl PanRecognizer {
         self.velocity
     }
 
-    /// Folds one sample into the running velocity estimate.
-    ///
-    /// A low-pass blend rather than the raw last-two-samples slope: touch
-    /// delivery jitters (two samples one millisecond apart, then one after
-    /// twenty), and the instantaneous slope across the short gap can be several
-    /// times the speed the finger is actually moving. Smoothing keeps a flick's
-    /// launch speed close to what the eye saw.
+    #[doc = include_str!("pan_recognizer.doc/sample_velocity.md")]
     fn sample_velocity(&mut self, at: Point, micros: u64) {
         let dt = micros.saturating_sub(self.last_micros) as f32 / 1_000_000.0;
         if dt <= 0.0 {
@@ -187,13 +131,13 @@ impl PanRecognizer {
         self.sampled = true;
     }
 
-    /// The straight-line distance from the origin to `at`.
+    #[doc = include_str!("pan_recognizer.doc/travel_from_origin.md")]
     fn travel_from_origin(&self, at: Point) -> f32 {
         (at.x - self.origin.x).hypot(at.y - self.origin.y)
     }
 }
 
-/// How much of the previous velocity estimate each new sample keeps.
+#[doc = include_str!("pan_recognizer.doc/SMOOTHING.md")]
 const SMOOTHING: f32 = 0.4;
 
 #[cfg(test)]
