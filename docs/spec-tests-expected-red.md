@@ -1,13 +1,22 @@
-# Spec-derived tests: the expected-red list
+# Spec-derived tests: the expected-red list — **closed**
 
-`cargo test --workspace --no-fail-fast` is **red on purpose**, and this file is what
-makes that legible. Everything below is a spec requirement with no implementation
-behind it yet. **Anything red that is not on this list is a regression.**
+> **Status (2026-07-31, measured at `cff9051`): the list below is empty of red.**
+> `cargo test --workspace --no-fail-fast` reports **6,013 passing, 0 failing, 9
+> ignored**, and every named case in "The list" still exists, still runs, and now
+> passes — none was deleted, none was weakened to green, none is `#[ignore]`d (the
+> single `#[ignore]` in the workspace is the attended winit window proof).
+> **Anything red is now a regression, full stop.** The rest of this file is kept
+> for the method it records, not as a live ledger.
 
-Use `--no-fail-fast`: without it cargo stops at the first failing target and the run
-reports ~1,374 of 5,327 tests, which reads like catastrophe and is an artefact.
+When this file was written, `cargo test --workspace --no-fail-fast` was **red on
+purpose**, and this file was what made that legible: everything below was a spec
+requirement with no implementation behind it yet.
 
-Current state at the pilot's landing: **5,304 passing, 128 failing.**
+Use `--no-fail-fast` regardless: without it cargo stops at the first failing target
+and the run reports a fraction of the suite, which reads like catastrophe and is an
+artefact.
+
+State at the pilot's landing: **5,304 passing, 128 failing.**
 
 ## Why these tests are different
 
@@ -57,7 +66,11 @@ case now asserts the *relationship* the spec states (a measurable `0` does not u
 0.5em substitute) instead of a constant, and it passes. Watch for expected values that
 could only have come from the code.
 
-## The list
+## The list — all closed
+
+Each of the 23 names below was red when this file was written and is green today.
+Verified by name, not by count: each `fn <name>` was located in `crates/` and the
+whole workspace ran with `--no-fail-fast` and zero failures.
 
 - `a_flex_grow_factor_sum_below_one_leaves_space_unfilled`
 - `a_max_width_violation_refreezes_and_redistributes`

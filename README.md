@@ -21,15 +21,17 @@ GPU through Vello — or on the CPU, with no display, into a PNG.
 ```
 crates/
   foundation/   (5)  identity, geometry, capability, task, diagnostics
-  domain/      (15)  view, tree, interaction, data-transfer, style, layout,
+  domain/      (16)  view, tree, interaction, data-transfer, style, layout,
                      text, motion, resources, scene, render, accessibility,
-                     windowing, system, routing
+                     windowing, system, routing, localization
   application/  (3)  runtime, headless, testkit
   frontend/     (5)  ui-ir, css, okui-syntax, okui-compiler, ui-macros
   components/   (3)  primitives, widgets, theme-system
-  adapters/    (12)  window-winit, render-vello, render-cpu,
+  adapters/    (18)  window-winit, shell-layer, render-vello, render-cpu,
                      accessibility-accesskit, task-smol, task-tokio,
-                     resource-fs, cache-fs, system-{linux,windows,macos,web}
+                     resource-fs, resource-decode, cache-fs,
+                     text-harfrust, text-unicode, text-hyphenation,
+                     font-fontconfig, system-{linux,windows,macos,web}
   diagnostics/  (2)  devtools-protocol, devtools-server
   plugin/       (9)  plugin-{model,api,abi,package,host,sdk,macros,
                      executor-wasm,executor-process}
@@ -63,7 +65,13 @@ Working, and uneven — which is stated here rather than left to be discovered.
 → style → layout → scene → paint), the CSS cascade over 119 longhands, flow /
 flex / grid layout, the text stack with system-font fallback, pointer and
 **multi-touch** input with pan / fling / long-press, virtual lists the runtime
-windows, CSS motion, `env()` safe-area insets, and both render backends.
+windows, CSS motion, `env()` safe-area insets, both render backends, the
+one-call `App` entry point (`examples/hello_app.rs` — 100 lines against
+`windowed_counter.rs`'s 891 for the same behaviour), `wlr-layer-shell` surfaces,
+and `.okui` compiled to ordinary Rust on both front ends.
+
+Measured at `cff9051` (2026-07-31): **6,013 tests passing, 0 failing**; `xtask
+check`, `xtask consumer` and `cargo fmt --all --check` clean.
 
 **Not wired:** several crates compile, pass their tests, and are called by
 nothing — routing, the windowing domain types, the testkit, the plugin tier. A

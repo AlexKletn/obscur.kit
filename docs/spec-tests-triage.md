@@ -1,14 +1,19 @@
 # Spec-derived tests: triage register
 
-`cargo test --workspace --no-fail-fast` is red on purpose. This file records **which
-red is which**, because they are not the same thing and must not be acted on the same
-way.
+This file records **which red is which**, because they were not the same thing and
+must not have been acted on the same way. It is now a closed register.
 
-State: **5,619 passing, 2 failing** (was 111 red at derivation; 19 at the start of the
-2026-07-20/21 campaign; the 2 remaining are the owner-deferred env safe-area tests — see
-the red list at the end). 310 cases were derived across §1–§7 and §9; §8 was skipped (67 sections of
-declared stubs, nothing to test). The current red list, with counting and baseline
-caveats, is at the end of this file.
+> **State (2026-07-31, measured at `cff9051`): 6,013 passing, 0 failing, 9 ignored.**
+> The suite is no longer red on purpose. The last two — the owner-deferred env
+> safe-area insets — were closed by `f11bb60`, which built the host→runtime inset
+> supply the deferral said was missing; both tests pass unmodified
+> (`crates/facade/obscur-kit/tests/spec_ch6b_insets.rs:53,82`). **Anything red is
+> now a regression.**
+
+History: **111 red at derivation**; 19 at the start of the 2026-07-20/21 campaign;
+2 after it; 0 today. 310 cases were derived across §1–§7 and §9; §8 was skipped (67
+sections of declared stubs, nothing to test). The former red list, with its counting
+and baseline caveats, is at the end of this file.
 
 ## Read this before closing anything
 
@@ -54,8 +59,10 @@ fixture got translated faithfully.
 
 **Anything red not on this list is a regression.** git-stash verified each batch.
 
-State: **5,619 passing, 2 failing** (2026-07-21). Every buildable red has been closed; the
-2 remaining are the owner-deferred env safe-area tests.
+State: **5,619 passing, 2 failing** (2026-07-21) — the campaign's landing. Every
+buildable red had been closed; the 2 remaining were the owner-deferred env safe-area
+tests, closed later by `f11bb60`. As of 2026-07-31 the list is empty: **6,013 passing,
+0 failing.**
 
 **Closed in the 19 → 2 campaign (2026-07-20/21), each by an implementation change with no
 spec assertion weakened:**
@@ -79,5 +86,5 @@ spec assertion weakened:**
 - `an_ungranted_required_capability_refuses_instantiation` — ComponentRegistry granted-set; create_instance refuses a Required-but-ungranted capability (a34ab2b).
 - `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run` — the click default action fires only for Trusted events; trust model = platform + first-party headless harness trusted, public programmatic API + external DevTools inject untrusted (a34ab2b).
 
-**The 2 remaining — owner-deferred:**
-- `env_safe_area_inset_top_resolves_to_the_host_inset`, `env_safe_area_inset_bottom_resolves_to_the_host_inset` — no host-inset supply API; env() correctly resolves to 0; §6.15 says 44/34 are the host's report. Owner ruled keep red, defer. Self-contradictory as written (needs a host→runtime typed-env injection API to close without editing the test).
+**The 2 remaining — owner-deferred, and since closed:**
+- ~~`env_safe_area_inset_top_resolves_to_the_host_inset`, `env_safe_area_inset_bottom_resolves_to_the_host_inset`~~ — the deferral read: no host-inset supply API; env() correctly resolves to 0; §6.15 says 44/34 are the host's report. Owner ruled keep red, defer. The entry named its own exit — "needs a host→runtime typed-env injection API to close without editing the test" — and `f11bb60` built exactly that. **Both green, neither test edited.**
