@@ -562,3 +562,134 @@ fn a_stray_outlet_is_refused_silently_where_there_is_no_diagnostics_channel() {
         "the refusal is the reconciler's, so it holds without a runtime"
     );
 }
+
+// --- §2.12: a slot name is checked against the contract. -----------------
+
+#[doc = include_str!("okui_slot_projection.doc/TypoCardProps.md")]
+#[derive(Contract)]
+#[contract(name = "TypoCard")]
+#[contract(slot(name = "header", cardinality = one))]
+struct TypoCardProps {}
+
+struct TypoCard;
+
+impl Component for TypoCard {
+    type Props = TypoCardProps;
+
+    #[doc = include_str!("okui_slot_projection.doc/render_3.md")]
+    fn render(&mut self, _ctx: &mut ComponentContext<'_>, _props: &Self::Props) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![region("hedaer")]))
+    }
+}
+
+#[derive(Debug)]
+struct TypoCardFactory;
+
+impl ComponentFactory for TypoCardFactory {
+    fn component_id(&self) -> ComponentId {
+        TypoCardProps::contract().id
+    }
+    fn contract(&self) -> ComponentContract {
+        TypoCardProps::contract()
+    }
+    fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
+        ComponentInstance::new(instance, TypoCardProps::contract().id)
+    }
+    fn create_component(&self) -> Box<dyn ErasedComponent> {
+        Box::new(TypoCard)
+    }
+}
+
+#[doc = include_str!("okui_slot_projection.doc/undeclared_slot_reports.md")]
+fn undeclared_slot_reports(collected: &Collected) -> Vec<String> {
+    collected
+        .0
+        .borrow()
+        .iter()
+        .filter(|d| d.code.as_str() == "view.undeclared_slot")
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+#[test]
+fn an_outlet_naming_a_slot_the_contract_does_not_declare_is_reported() {
+    // The open item this closes, and the exact spelling `docs/api/12-reality.md`
+    // used to carry: "a component rendering `<slot name="hedaer"/>` receives
+    // nothing, silently". Projection matches by name and drops what does not
+    // match, which is right — but on its own it means one typo is invisible for
+    // as long as it lives. The contract is what makes it checkable, because it
+    // is static: it says which slots exist regardless of what this frame
+    // rendered.
+    let collected = Collected::default();
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    runtime
+        .register_component(ComponentRegistration::new(
+            Box::new(TypoCardFactory),
+            ComponentVersion::INITIAL,
+        ))
+        .expect("TypoCard registers");
+    runtime.set_diagnostic_sink(Box::new(collected.clone()));
+
+    let usage = View::single(
+        ViewNode::element(TypoCardProps::contract().id).with_children(ViewFragment::from_nodes(
+            vec![ViewNode::element(container()).with_prop(ViewProperty::new(
+                obscur_kit::view::view::SLOT,
+                ViewValue::Text("header".into()),
+            ))],
+        )),
+    );
+    runtime.render_now(&usage, &[]);
+
+    let reports = undeclared_slot_reports(&collected);
+    assert_eq!(reports.len(), 1, "one outlet, one report: {reports:?}");
+    assert!(reports[0].contains("hedaer"), "{}", reports[0]);
+    assert!(
+        reports[0].contains("declares no slot called `hedaer`"),
+        "the report names what is missing, not just that something is: {}",
+        reports[0]
+    );
+    // And the behaviour it describes is unchanged: the outlet still receives
+    // nothing and is still substituted away rather than retained.
+    assert_eq!(
+        texts_in_region(&runtime, "region-hedaer"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn an_authored_child_naming_a_slot_the_contract_does_not_declare_is_reported() {
+    // The same fault written by the other person. `Card` declares `header` and
+    // `body`; a child asking for `hedaer` is dropped on projection exactly as
+    // before, and now says so. It is checked whatever the child contract reads,
+    // because no Rust builder ever writes `slot="…"` — only a person does.
+    let collected = Collected::default();
+    let mut runtime = runtime_with_card();
+    runtime.set_diagnostic_sink(Box::new(collected.clone()));
+
+    let usage: View = okui! {
+        <Card title="Hi"><span slot="hedaer"/><span slot="header"/></Card>
+    };
+    runtime.render_now(&usage, &[]);
+
+    let reports = undeclared_slot_reports(&collected);
+    assert_eq!(reports.len(), 1, "only the misspelled one: {reports:?}");
+    assert!(
+        reports[0].contains("asks for the slot `hedaer`"),
+        "{}",
+        reports[0]
+    );
+}
+
+#[test]
+fn a_contract_that_declares_what_it_renders_is_never_reported() {
+    // The negative half, and the reason the check reads the contract rather
+    // than the frame: `Card` declares `header` and `body`, and this usage fills
+    // only `header`. An empty slot is not a mismatch.
+    let collected = Collected::default();
+    let mut runtime = runtime_with_card();
+    runtime.set_diagnostic_sink(Box::new(collected.clone()));
+    let usage: View = okui! { <Card title="Hi"><span slot="header"/></Card> };
+    runtime.render_now(&usage, &[]);
+
+    assert_eq!(undeclared_slot_reports(&collected), Vec::<String>::new());
+}

@@ -1,20 +1,23 @@
-§2.12: "- named slots;" (the partitioning half)
+§2.12: "- named slots; - one default slot;" (the partitioning half)
 
-WEAKENED 2026-07-19: this originally also asserted that the two children
-carrying no `slot=` assignment land in an unnamed DEFAULT slot, in written
-order (`children(default).len() == 2`, classes `["d1", "d2"]`). §2.12's list
-is "- named slots; - allowed child contracts; - slot cardinality; - exported
-style parts; - exported visual states." — a default/unnamed slot is nowhere
-in it, and the case's own `ViewNode::slot("")` outlet is an invention of the
-test. The named-slot half, which the spec does state, is kept. Candidate spec
-amendment: state whether a component may declare a default (unnamed) slot,
-how it is spelled, and where unassigned children go when it is absent.
+A `SpecPanel` declares `header` and the default slot, and renders an outlet for
+each. Three children go in — one asking for `header`, two asking for nothing —
+and each half must land where it was addressed and nowhere else.
 
-NOTE 2026-08-02: the *implementation* now has one, because the base-element
-`<button>` could not be mounted without it — content that names no slot goes
-to the outlet that names none, an outlet nothing fills renders its own
-children as a fallback, and `ButtonProps::contract()` declares the slot under
-the reserved `DEFAULT_SLOT` name. The behaviour is pinned where it belongs,
-in `obscur-view`'s `slot` unit tests and in `tests/builtin_components.rs`.
-This case is deliberately NOT restored: it is a *spec* case, and the spec
-still does not state it. Amend §2.12 and it can be.
+WEAKENED 2026-07-19: the default half of this case was removed, because §2.12
+then listed only "- named slots;" and said nothing about an unnamed one. The
+`ViewNode::slot("")` outlet was the test inventing a mechanism, and a spec case
+may not assert an invention. The named half was kept.
+
+RESTORED 2026-08-02: §2.12 now states the default slot — what it is, why a text
+run makes it necessary rather than convenient, and that it is declared under a
+reserved symbol no author-written name can produce. `PanelProps` declares it
+with `#[contract(slot(default))]`, the spelling the derive gained in the same
+change, so the fixture no longer invents anything: it declares what the spec
+describes and asserts what the spec says happens.
+
+The implementation reached this before the spec did. It was built because the
+base-element `<button>` could not be mounted without it — `<button>Save</button>`
+states its text as a child, a text run can name no slot, and a control that could
+not project it would eat the author's markup. That is the order this project
+tries not to work in; `docs/component-tier.md` records how it happened.

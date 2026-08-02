@@ -39,15 +39,21 @@ content anyway, making the contract's `slots` field advisory.
 
 # What is NOT claimed
 
-* **No shipped component declares a slot**, because no shipped *widget is a
-  `Component`* at all — every `impl Component` in this repo is a test's. Slots
-  are toolkit API for a host's own components, exercised here exactly as a host
+* ~~**No shipped component declares a slot**, because no shipped *widget is a
+  `Component`* at all — every `impl Component` in this repo is a test's.~~
+  CLOSED. Five widgets are components and `Button` declares the §2.12 default
+  slot, which is how `<button>Save</button>` keeps its text. The named slots
+  this file drives are still exercised by a host's own components, as a host
   would. `Dialog` still takes one anonymous child list and is a view-builder,
   not a component; giving it slots means making it a component first.
-* **The outlet's name is not checked against the component's declaration.**
-  A component that renders `<slot name="hedaer"/>` silently receives nothing.
-  The declaration is on the contract, which `ComponentStore` holds at runtime;
-  no front end can reach it (see below) and nothing at runtime checks it.
+* ~~**The outlet's name is not checked against the component's declaration.**
+  A component that renders `<slot name="hedaer"/>` silently receives nothing.~~
+  CLOSED. `SlotMismatch::find` compares the render output and the retained
+  content against the contract, and `ComponentRenderPass` reports each
+  `view.undeclared_slot` — from both sides, the component's misspelled outlet
+  and the author's misspelled assignment. It runs where it is the only thing
+  that can: after the render, before projection substitutes the outlets away.
+  See the three tests at the end of this file.
 * **The outlet is not checked for being inside a component at all,
   at compile time.** It cannot be: `render` returns a `View` and `okui!`
   produces a `View`, so the same expansion is correct in one function and stray

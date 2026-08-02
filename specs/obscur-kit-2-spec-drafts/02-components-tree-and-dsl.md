@@ -201,10 +201,52 @@ Templates are stateless and lifecycle-free.
 Components may declare:
 
 - named slots;
+- one default slot;
 - allowed child contracts;
 - slot cardinality;
 - exported style parts;
 - exported visual states.
+
+A component states where an author's children go by rendering an *outlet* in its
+own output. An outlet names a slot; the children assigned to that slot replace
+it, in authored order. An outlet that nothing fills renders its own children as
+*fallback content*, and renders nothing at all when it has none — it is
+substituted away rather than retained, so an unfilled slot never becomes an
+empty box that lays out and paints.
+
+### The default slot
+
+An outlet that names no slot is the **default outlet**, and the slot it stands
+for is the **default slot**. Content that names no slot belongs to the default
+slot and to no named one; content that names a slot belongs to that slot and not
+to the default one. Naming a slot is how an author opts out of the default;
+rendering the unnamed outlet is how a component opts in.
+
+A default slot is required rather than convenient, because a text run carries no
+properties and therefore can never name a slot. Without it, the most ordinary
+content an author can write — the `Save` in `<button>Save</button>` — has no
+position it could reach, and any control mounted on that markup would eat it.
+
+A component declares the default slot under a **reserved symbol** that no
+author-written name can produce, so a slot literally named `"default"` and the
+slot that has no name stay distinct. The default slot has no authored spelling:
+content reaches it by naming nothing, which is why it appears in a component's
+typed contract and not in the string surface the front ends check `slot="…"`
+against.
+
+### Names are checked against the contract
+
+A slot name used on either side that the contract declares on neither is a
+diagnostic, not a silent drop:
+
+- a component whose render holds an outlet for a slot its own contract does not
+  declare — nothing can ever be assigned to that name;
+- an authored child that asks for a slot the component's contract does not
+  declare — the child is dropped on projection.
+
+The contract is what makes both checkable, because it is static: a slot the
+author left empty is not a mismatch, and neither is an outlet a component renders
+only under some condition.
 
 ## 2.13 Component contracts
 

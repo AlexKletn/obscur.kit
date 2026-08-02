@@ -85,6 +85,7 @@ struct MirrorInputProps {
 #[doc = include_str!("builtin_components.doc/MirrorButtonProps.md")]
 #[derive(Contract)]
 #[contract(name = "Button", children = any)]
+#[contract(slot(default))]
 #[expect(
     dead_code,
     reason = "the derive's OUTPUT is the subject: this struct exists so the \
@@ -234,23 +235,20 @@ fn the_derived_id_is_the_id_an_authored_button_carries() {
 }
 
 #[test]
-fn the_buttons_contract_is_the_derives_plus_a_slot_no_derive_can_spell() {
+fn the_buttons_contract_is_the_derives_output_whole_default_slot_included() {
     // `ButtonProps::contract()` is hand-written for the same §3.16 reason as the
-    // others, but unlike them it is NOT the derive's output whole: a `#[contract(
-    // slot(name = "…"))]` names a slot, and the one this control has is the
-    // unnamed one. Everything a derive CAN say is compared, so the hand-written
-    // part cannot drift; the difference is exactly the slot and nothing else.
+    // others: the derive expands to `::obscur_kit::…` paths and an internal
+    // crate may not depend on the facade.
+    //
+    // This assertion used to stop short of the slot, under the name
+    // "…plus_a_slot_no_derive_can_spell": `#[contract(slot(name = "…"))]` names
+    // a slot and this control's is the unnamed one, so the derive had no way to
+    // say it. It does now — §2.12 states the default slot and `slot(default)`
+    // is its spelling — so the two contracts are compared WHOLE, which is what
+    // the other four already were.
     let hand = ButtonProps::contract();
     let derived = MirrorButtonProps::contract();
-    assert_eq!(hand.id, derived.id);
-    assert_eq!(hand.name, derived.name);
-    assert_eq!(hand.props, derived.props);
-    assert_eq!(hand.allowed_children, derived.allowed_children);
-    assert_eq!(hand.style_scope, derived.style_scope);
-    assert!(
-        derived.slots.is_empty(),
-        "the derive cannot declare the default slot"
-    );
+    assert_eq!(hand, derived);
     assert_eq!(hand.slots.len(), 1);
     assert_eq!(hand.slots[0].name, obscur_kit::view::view::DEFAULT_SLOT);
 }

@@ -190,14 +190,20 @@ only way a `<button>Save</button>` can reach a mounted control at all. An outlet
 nothing fills renders its own children as **fallback** content, which is how one
 outlet serves both `<button>Save</button>` and `<button label="Save"/>`. The
 shipped `button` is the one component that uses either, and its contract
-declares the slot under the reserved `DEFAULT_SLOT` name.
+declares the slot under the reserved `DEFAULT_SLOT` name — spelled
+`#[contract(slot(default))]` on a derived contract.
 
-> **partial** — a user component authored as `<Card/>` in either front end does
-> mount and does receive its projected children. What is missing is checking: an
-> outlet's name is not verified against the component's own declaration, so a
-> `<slot name="hedaer"/>` silently receives nothing. And the default slot and
-> fallback content exist in the runtime only: `.okui` refuses `<slot/>` and
-> refuses children on an outlet, because neither has an authored spelling yet.
+A slot name is checked against the contract, from both sides: a component whose
+render holds an outlet for a slot it does not declare, and an authored child
+asking for a slot the component does not declare, are each reported as
+`view.undeclared_slot`. The contract is what makes this checkable, because it is
+static — a slot the author left empty is not a mismatch, and neither is an outlet
+rendered only under some condition.
+
+> **partial** — the default slot and fallback content exist in the runtime only:
+> `.okui` refuses `<slot/>` and refuses children on an outlet, because neither
+> has an authored spelling yet. Both diagnostics say that rather than saying the
+> feature does not exist.
 
 ## Building views in practice
 

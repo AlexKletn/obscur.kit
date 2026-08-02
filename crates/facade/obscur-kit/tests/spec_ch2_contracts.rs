@@ -381,6 +381,23 @@ fn a_default_slot_and_a_named_slot_partition_the_children() {
         1,
         "the header child is projected once, not duplicated"
     );
+
+    // RESTORED 2026-08-02, with §2.12 amended to state the default slot. The
+    // half below was removed on 2026-07-19 because the spec listed named slots
+    // only and this case's `ViewNode::slot("")` was the test inventing one.
+    let default = one_by_class(&rt, "region-default").expect("the default region is retained");
+    let default_classes: Vec<String> = children(&rt, default)
+        .iter()
+        .filter_map(|id| rt.tree().get(*id))
+        .filter_map(|n| n.attributes().classes().first().cloned())
+        .map(|c| c.to_string())
+        .collect();
+    assert_eq!(
+        default_classes,
+        ["d1", "d2"].map(str::to_owned).to_vec(),
+        "the two children naming no slot reach the default slot, in authored \
+         order — and the one that asked for `header` does not"
+    );
 }
 
 // DELETED 2026-07-19: `a_template_may_not_hold_state_or_a_lifecycle_hook`.
@@ -527,6 +544,7 @@ impl Component for Card {
 #[derive(Contract)]
 #[contract(name = "SpecPanel")]
 #[contract(slot(name = "header", cardinality = one))]
+#[contract(slot(default))]
 struct PanelProps {}
 
 struct Panel;

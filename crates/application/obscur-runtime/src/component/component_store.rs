@@ -4,7 +4,9 @@ use obscur_identity::{ComponentId, NodeId, SignalId};
 use obscur_tree::node::{NodeFlags, NodeKind};
 use obscur_tree::reconciliation::ReconciliationPlan;
 use obscur_tree::tree::{RetainedTree, SecondaryMap};
-use obscur_view::component::{ComponentRegistration, ComponentRegistry, InstanceId, RegistryError};
+use obscur_view::component::{
+    ComponentContract, ComponentRegistration, ComponentRegistry, InstanceId, RegistryError,
+};
 use obscur_view::state::SignalGenerations;
 
 use crate::component::MountedComponent;
@@ -50,6 +52,12 @@ impl ComponentStore {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.mounted.is_empty()
+    }
+
+    #[doc = include_str!("component_store.doc/contract.md")]
+    #[must_use]
+    pub fn contract(&self, component: ComponentId) -> Option<&ComponentContract> {
+        self.registry.contract(component)
     }
 
     #[doc = include_str!("component_store.doc/get.md")]

@@ -16,6 +16,8 @@ pub use slot::{
     DEFAULT_SLOT, SLOT, SLOT_OUTLET, assigns_slots, has_outlet, is_outlet, may_project_content,
     project_slots, slot_assignment,
 };
+mod slot_mismatch;
+pub use slot_mismatch::{SlotMismatch, slot_symbol};
 mod virtual_collection;
 pub use virtual_collection::{
     DEFAULT_VIRTUAL_ROW_EXTENT, VIRTUAL_COLLECTION, VIRTUAL_ITEM_COUNT, VIRTUAL_LIST_ID,

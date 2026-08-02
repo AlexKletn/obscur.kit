@@ -166,13 +166,18 @@ readable comma-separated `options="…"` when authored, U+001F-joined when
 `Select::view` emits it — which is what keeps `with_options(["a,b"])` rendering
 one row rather than two.
 
-**`spec_ch2_contracts`'s weakened assertions were not restored.**
+**`spec_ch2_contracts`'s weakened assertions were not restored — at the time.**
 `a_default_slot_and_a_named_slot_partition_the_children` had its default-side
-assertions deliberately removed on 2026-07-19, and its `.doc` asks for exactly
-the spec amendment this campaign's mechanism answers. It is a **spec** case and
-§2.12 still lists named slots only. A dated note was appended to that `.doc`
-saying the implementation now has a default slot and where the behaviour is
-pinned instead. Amending §2.12 is the one thing still missing.
+assertions deliberately removed on 2026-07-19, and its `.doc` asked for exactly
+the spec amendment this campaign's mechanism answers. Restoring it while §2.12
+still listed named slots only would have been a spec case asserting an
+invention, so the campaign closed with a dated note instead.
+
+> **CLOSED 2026-08-02.** §2.12 now states the default slot, `#[derive(Contract)]`
+> gained `slot(default)`, `PanelProps` declares what it renders, and the case is
+> restored to its full form. `ButtonProps`'s hand-written contract is compared to
+> the derive's output **whole** as a result — the exception this campaign carved
+> for it is gone.
 
 **The `.okui` front end still refuses `<slot/>` and children on an outlet.**
 The runtime has the mechanism; there is no authored spelling for the default
@@ -232,11 +237,15 @@ registers_builtin_components}`; `obscur-view`'s `DEFAULT_SLOT` and
 ## Where it still stops
 
 - **`<table>`** — the refusal above. A decision, not a gap.
-- **An outlet's name is checked against nothing.** A component rendering
-  `<slot name="hedaer"/>` receives nothing, silently.
-- **§2.12 does not state the default slot.** The mechanism is implemented and
-  pinned; the spec lists named slots only, and until it is amended
-  `spec_ch2_contracts`'s default-slot case stays in its weakened form.
+- ~~**An outlet's name is checked against nothing.**~~ **CLOSED 2026-08-02.**
+  `SlotMismatch::find` compares both sides against the contract and
+  `ComponentRenderPass` reports `view.undeclared_slot`. Closing it surfaced a
+  latent defect it had been hiding: the derive hashed slot names with a bare
+  FNV, high bit clear, which is *not* what `InternedSymbol::named` produces —
+  invisible for as long as nothing compared a contract's slot symbol to
+  anything.
+- ~~**§2.12 does not state the default slot.**~~ **CLOSED 2026-08-02.** Stated,
+  spelled `slot(default)` on a derived contract, and the spec case restored.
 - **No authored spelling for the default slot or for fallback content.** The
   `.okui` front end refuses both, now with diagnostics that say why.
 - **An unregistered or misspelled component tag mounts nothing with no

@@ -2,12 +2,16 @@
 
 use std::collections::HashSet;
 
-use obscur_diagnostics::{Diagnostic, DiagnosticSink, DiagnosticSubsystem, RecoveryAction};
+use obscur_diagnostics::{
+    Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSink, DiagnosticSubsystem,
+    RecoveryAction,
+};
 use obscur_identity::NodeId;
+use obscur_tree::node::{NodeKind, RetainedNode};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
-use obscur_view::view::{View, project_slots};
+use obscur_view::view::{SlotMismatch, View, project_slots};
 
 use super::FrameTelemetry;
 use crate::component::{ComponentStore, GuardedRender};
@@ -130,7 +134,14 @@ impl<'a> ComponentRenderPass<'a> {
                 // them until one takes children: `project_slots` scans for an
                 // outlet and returns the view untouched when there is none.
                 let view = match self.tree.get(host) {
-                    Some(retained) => project_slots(view, retained.slot_content()),
+                    Some(retained) => {
+                        // Before the outlets are substituted away, while both
+                        // halves still exist: a name used on either side that
+                        // the contract declares on neither is dropped in
+                        // silence, and this is what says so.
+                        self.report_slot_mismatches(host, &view, retained);
+                        project_slots(view, retained.slot_content())
+                    }
                     None => view,
                 };
 
@@ -159,6 +170,56 @@ impl<'a> ComponentRenderPass<'a> {
                 .count(DiagnosticSubsystem::Tree, "component.props_errors", errors);
         }
         changed
+    }
+
+    #[doc = include_str!("component_render_pass.doc/report_slot_mismatches.md")]
+    fn report_slot_mismatches(&self, node: NodeId, output: &View, retained: &RetainedNode) {
+        let NodeKind::Element { component } = retained.kind else {
+            return;
+        };
+        let Some(contract) = self.components.contract(component) else {
+            return;
+        };
+        for mismatch in SlotMismatch::find(contract, output, retained.slot_content()) {
+            let message = match &mismatch {
+                SlotMismatch::UndeclaredOutlet(name) if name.is_empty() => {
+                    "this component renders the default `<slot/>` outlet — the one \
+                     that takes every child naming no slot — but its contract \
+                     declares no default slot (spec §2.12, §2.13). Declare it with \
+                     `#[contract(slot(default))]`, or give the outlet the name of a \
+                     slot the contract does state"
+                        .to_owned()
+                }
+                SlotMismatch::UndeclaredOutlet(name) => format!(
+                    "this component renders a `<slot name=\"{name}\"/>` outlet, and \
+                     its contract declares no slot called `{name}` (spec §2.12, \
+                     §2.13). Nothing can ever be assigned to that name, so the \
+                     outlet renders its fallback if it has one and vanishes if it \
+                     does not — check the spelling against the contract"
+                ),
+                SlotMismatch::UndeclaredAssignment(name) if name.is_empty() => {
+                    "an authored child names no slot, and this component declares no \
+                     default slot to take it (spec §2.12), so it is dropped rather \
+                     than rendered. Assign the child to a slot the contract states \
+                     with `slot=\"…\"`, or declare the default slot on the component"
+                        .to_owned()
+                }
+                SlotMismatch::UndeclaredAssignment(name) => format!(
+                    "an authored child asks for the slot `{name}`, which this \
+                     component's contract does not declare (spec §2.12), so it is \
+                     dropped rather than rendered — check the spelling against the \
+                     component's declared slots"
+                ),
+            };
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::new("view.undeclared_slot"),
+                DiagnosticSeverity::Error,
+                contract.subsystem,
+                message,
+            );
+            diagnostic.context.node = Some(node);
+            self.diagnostics.emit(&diagnostic);
+        }
     }
 
     #[doc = include_str!("component_render_pass.doc/report_failure.md")]
