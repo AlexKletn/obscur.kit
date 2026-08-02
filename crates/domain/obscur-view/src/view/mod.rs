@@ -13,7 +13,8 @@ mod event_name;
 pub use event_name::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, EVENT_LONG_PRESS};
 mod slot;
 pub use slot::{
-    SLOT, SLOT_OUTLET, assigns_slots, has_outlet, is_outlet, project_slots, slot_assignment,
+    DEFAULT_SLOT, SLOT, SLOT_OUTLET, assigns_slots, has_outlet, is_outlet, may_project_content,
+    project_slots, slot_assignment,
 };
 mod virtual_collection;
 pub use virtual_collection::{
@@ -26,7 +27,8 @@ mod stable_selector;
 pub use stable_selector::{AUTOMATION_ID, TEST_ID};
 mod style_attribute;
 pub use style_attribute::{
-    CHECKED, CLASS, DISABLED, ID, PLACEHOLDER, READONLY, SRC, StyleAttributes, TYPE, VALUE,
+    CHECKED, CLASS, DISABLED, ID, LOCAL_NAME, PLACEHOLDER, READONLY, SRC, StyleAttributes, TYPE,
+    VALUE,
 };
 mod view_property;
 pub use view_property::ViewProperty;

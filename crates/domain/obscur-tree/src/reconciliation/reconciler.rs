@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::{NodeId, StableKey};
+use obscur_identity::{ComponentId, NodeId, StableKey};
 use obscur_view::view::{
     StyleAttributes, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, assigns_slots,
-    is_outlet,
+    is_outlet, may_project_content,
 };
 
 use crate::node::{LogicalParent, NodeFlags, NodeKind, VisualParent};
@@ -130,6 +130,7 @@ impl Reconciler {
                             }
                         }
                         ViewNode::Element {
+                            component,
                             props,
                             events,
                             children,
@@ -146,7 +147,7 @@ impl Reconciler {
                             // stale, and content that changed while the props did
                             // not (`<h1 slot="header">A</h1>` → `…B…`) must still
                             // re-render the host, or the projection stays stale.
-                            let slots_changed = apply_slot_content(tree, id, children);
+                            let slots_changed = apply_slot_content(tree, id, *component, children);
                             if props_changed || events_changed || slots_changed {
                                 plan.push(ReconciliationOp::Update { id });
                             }
@@ -167,6 +168,7 @@ impl Reconciler {
                     // this runs, and waiting for it would drop the authored content
                     // of every component's opening frame.
                     if let ViewNode::Element {
+                        component,
                         props,
                         events,
                         children,
@@ -175,7 +177,7 @@ impl Reconciler {
                     {
                         apply_props(tree, id, props);
                         apply_events(tree, id, events);
-                        apply_slot_content(tree, id, children);
+                        apply_slot_content(tree, id, *component, children);
                     }
                     plan.push(ReconciliationOp::Insert { id, parent, index });
                     id
@@ -334,7 +336,12 @@ fn apply_props(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> b
 }
 
 #[doc = include_str!("reconciler.doc/apply_slot_content.md")]
-fn apply_slot_content(tree: &mut RetainedTree, id: NodeId, children: &ViewFragment) -> bool {
+fn apply_slot_content(
+    tree: &mut RetainedTree,
+    id: NodeId,
+    component: ComponentId,
+    children: &ViewFragment,
+) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
     };
@@ -343,7 +350,7 @@ fn apply_slot_content(tree: &mut RetainedTree, id: NodeId, children: &ViewFragme
     // authored children are byte-for-byte what they already were. Cloning first
     // and comparing after would deep-copy the content's whole subtree on every one
     // of those frames to discover it had nothing to do.
-    if !assigns_slots(children.nodes()) {
+    if !assigns_slots(children.nodes()) && !may_project_content(component) {
         if node.slot_content().is_empty() {
             return false;
         }
@@ -569,11 +576,14 @@ mod tests {
 
     #[test]
     fn element_carries_style_attributes_after_reconcile() {
-        use obscur_view::view::{CLASS, ID, TYPE, ViewProperty, ViewValue};
+        use obscur_view::view::{CLASS, ID, LOCAL_NAME, ViewProperty, ViewValue};
 
         let (mut tree, root) = tree_with_root();
         let styled = el(1)
-            .with_prop(ViewProperty::new(TYPE, ViewValue::Text("container".into())))
+            .with_prop(ViewProperty::new(
+                LOCAL_NAME,
+                ViewValue::Text("container".into()),
+            ))
             .with_prop(ViewProperty::new(ID, ViewValue::Text("main".into())))
             .with_prop(ViewProperty::new(
                 CLASS,

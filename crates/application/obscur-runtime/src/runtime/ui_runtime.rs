@@ -764,10 +764,13 @@ mod tests {
     /// A 100x50 `button` with class `btn`, and the sheet that sizes it, so a
     /// press can actually hit it.
     fn sized_button() -> (View, Stylesheet) {
-        use obscur_view::view::TYPE;
+        use obscur_view::view::LOCAL_NAME;
         let view = View::from_fragment(ViewFragment::from_nodes(vec![
             ViewNode::element(ComponentId::from_raw(21))
-                .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+                .with_prop(ViewProperty::new(
+                    LOCAL_NAME,
+                    ViewValue::Text("button".into()),
+                ))
                 .with_prop(ViewProperty::new(CLASS, ViewValue::Text("btn".into())))
                 .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")])),
         ]));

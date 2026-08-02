@@ -177,7 +177,7 @@ unlisted is not rejected, it is just inert to those consumers.
 |---|---|---|
 | `class` | `CLASS` | `.class` selectors |
 | `id` | `ID` | `#id` selectors |
-| `type` | `TYPE` | type selectors — see below |
+| `type` | `TYPE` | `[type=…]` attribute selectors — see below |
 | `src` | `SRC` | the image/vector resource path |
 | `disabled` | `DISABLED` | `:disabled` |
 | `checked` | `CHECKED` | `:checked` |
@@ -239,21 +239,26 @@ after `on:`. Nowhere else could it: a `-` inside `{ … }` is subtraction, and a
 brace group reaches `syn::Expr` whole, so `<div title={count - 1}/>` means what it
 says.
 
-### `type` is two channels through one symbol
+### The tag and `type` are two channels, and two symbols
 
-Since `445b6bd` every authored **element** carries its tag as the reserved `TYPE`
-property — its CSS local name — so `button { … }` matches an authored `<button>`
-exactly as in HTML. `TYPE` is also what an authored `type="…"` binds to. There is
-one slot and two writers, and the **author wins**:
+Since `445b6bd` every authored **element** carries its tag as its CSS local name,
+so `button { … }` matches an authored `<button>` exactly as in HTML. HTML's own
+`type="…"` attribute is a *separate* thing — the tag says **what a thing is**,
+`type` says **which kind** — and it now travels under a separate reserved symbol
+(`LOCAL_NAME` for the tag, `TYPE` for the attribute). Both reach the cascade:
 
-- `<div type="card">` works as before: the node's CSS type is `card`, which is
-  what the sample above styles.
-- `<button type="submit">` costs the node its `button` type. It is an element
-  whose CSS type is `submit`, so the UA sheet's `button { … }` no longer reaches
-  it and neither does yours.
+- `<button type="submit">` is a `button` to a type selector **and** matches
+  `[type=submit]`. The UA sheet's `button { … }` reaches it, and so does yours.
+- `<div type="card">` is a `div` whose `type` attribute is `card`. Style it with
+  `[type=card] { … }`.
 
-If you want both, say so with a class. This is the price of the overload; it is
-not papered over.
+They shared one symbol until this change, and the author's value won it outright:
+`<button type="submit">` was an element whose CSS *type* was `submit`, so it
+matched no `button { … }` rule and silently lost the whole of its UA styling, and
+`[type=submit]` could not be written to mean the attribute because the attribute
+lookup returned the local name. **If your markup wrote `type="…"` on an element
+and styled it with a bare type selector (`card { … }`), rewrite that rule as
+`[type=card] { … }`.** Nothing else about `type` changed.
 
 ## Known tags
 
@@ -265,25 +270,75 @@ built-in, and are the same handle as their PascalCase form:
 
 | Element | Is |
 |---|---|
-| `button` | the `Button` widget's id — HTML has a `<button>`, so this has one |
+| `button` · `input` · `textarea` · `checkbox` · `radio` · `select` · `table` | the matching widget's id — every control the UA stylesheet styles by type |
 | `img` · `canvas` · `scroll` · `portal` · `layer` | the matching primitive |
 | `slot` | the §2.12 outlet. Reserved: not a component, and never retained |
 
 Every other lowercase tag — `div`, `span`, `header`, `td`, `something-custom` —
 is the generic `Container` box with its tag as its type.
 
-`button` is the only *control* with a base-element spelling. `<input>`,
-`<textarea>`, `<checkbox>`, `<radio>` and `<select>` bind to `Container` — but
-they pick up the UA stylesheet's rules for those types, and the accessibility
-projection derives a role from the local name, so they look and read like
-controls without being one. That asymmetry is worth knowing: styling and
-semantics follow the *name*, mounting follows the *id*.
+Those are exactly the controls the UA sheet has a rule for, and giving them all
+a base-element spelling is what makes **one** `checkbox { … }` rule mean one
+thing. `<checkbox>` used to bind to `Container`: it picked up the sheet's rules
+(styling follows the *name*) but not the control's identity (mounting follows
+the *id*), so markup produced a styled box standing beside the real control that
+`Checkbox::new()` produces, under one rule that reached both.
 
-An authored `<button>` is not a live `obscur_widgets::Button` either. Nothing
-registers a factory for the built-in widget ids by default, so the widget's own
-view — its pressed state, its synthesised label — does not run. What you get is a
-node with the widget's id, the `button` type, the UA sheet's padding and border,
-your children, and your `on:click`.
+`textarea` is the one spelling with no PascalCase twin. HTML's two text-entry
+tags are a single widget here — `<textarea>` binds to `Input::COMPONENT_ID`
+exactly as `<input>` does — and which of the two a node is stays readable from
+its local name, which is where the editing layer already looked: an `Enter` in a
+`<textarea>` inserts a newline and in an `<input>` does not.
+
+The widgets with no HTML element that means what they mean — `Menu`, `Dialog`,
+`Tabs`, `List`, `Tree`, `Docking` — keep their component spelling only.
+
+Five of those tags mount the real control, and the rest do not — a distinction
+worth reading carefully. `KitBootstrap` registers a factory for `<checkbox>`,
+`<radio>`, `<select>`, `<input>` and `<textarea>` by default, so an authored one
+runs the widget's own view: `<checkbox label="Agree" checked/>` renders the
+`.checkbox-box` indicator, `<radio label="One" checked/>` its `.radio-dot`,
+`<select options="Alpha, Beta" selected={1} open/>` its header row and its list
+of `.select-option` rows, and `<input value="abc"/>` its editable run. Their
+props are the widget's: `label` and the reserved `checked` for the two toggles;
+`options` (a comma-separated list of labels), `selected` (an index) and `open`
+(present = down) for the select; `value` for a field. In each case the *host*
+node is still yours — your `class`, your `on:input`, your `disabled` — and only
+what goes underneath is the control's.
+
+`<input>` and `<textarea>` are **one** registration under one id, and the
+difference between them is the local name on your node — which is also what
+decides multi-line editing, so `Enter` in a `<textarea>` still inserts a newline
+and in an `<input>` still does not. A field's `placeholder="…"` is not part of
+that output at all: it is a §4.16 synthetic part the runtime paints from the
+reserved attribute while the value is empty, styled through
+`input::part(placeholder)`.
+
+**A mounted control owns its children.** A component's output replaces its
+host's, so authored content under one of those five tags could never render —
+and rather than losing it silently, the compiler rejects it:
+
+```html
+<textarea>Hello</textarea>   <!-- rejected: a field's text is value="Hello" -->
+<select><option/></select>   <!-- rejected: use options="…" -->
+```
+
+`<button>` mounts too, and it is the exception that shows what "owning the
+content" means: its component renders the §2.12 **default slot** and nothing
+else, so your children are projected back into it untouched — text runs and
+elements alike — and `label="…"` is the fallback shown only when you write no
+content. Both spellings work, and writing both never loses your markup:
+
+```html
+<button on:click=save>Save</button>
+<button on:click=save label="Save"/>
+```
+
+An authored `<table>` is **not** a live widget: nothing registers a factory for
+that id, so `Table::view()`'s rows do not run. That is a decision — a table's
+rows and cells are the `tr`/`td`/`th` you write — and what you get is a node
+with the widget's id, the matching CSS type, the UA sheet's `table`/`tr`/`th`/
+`td` rules, **your children**, and your bindings.
 
 ### Component tags
 
@@ -363,7 +418,8 @@ mean two things. `Any`, `Only([tags])`, or `None` — and `None` is the state
 almost every shipped component wanted: eleven of the twelve widgets build their
 children inside their own `view()`, and `Image`/`Canvas`/`ForeignSurface` are
 leaves. So `<Button>OK</Button>` and `<Tabs><Tab/></Tabs>` are compile errors
-naming the tag, where they used to compile into markup nothing mounts. `Dialog`
+naming the tag, where they used to compile clean and say nothing the
+component's own spelling reads. `Dialog`
 is the one widget whose children *are* its content.
 
 That is a claim about the **component tag**, not about every spelling of the same

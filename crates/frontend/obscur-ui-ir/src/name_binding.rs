@@ -16,6 +16,10 @@ pub const SRC: InternedSymbol = InternedSymbol::from_raw(0x0000_0004);
 pub const DISABLED: InternedSymbol = InternedSymbol::from_raw(0x0000_0005);
 #[doc = include_str!("name_binding.doc/CHECKED.md")]
 pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
+#[doc = include_str!("name_binding.doc/PLACEHOLDER.md")]
+pub const PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_0009);
+#[doc = include_str!("name_binding.doc/LOCAL_NAME.md")]
+pub const LOCAL_NAME: InternedSymbol = InternedSymbol::from_raw(0x0000_000A);
 
 #[doc = include_str!("name_binding.doc/TEST_ID.md")]
 pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
@@ -102,25 +106,40 @@ pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
     let id = match tag {
         // The §2.12 slot outlet — a position, not a component (see above).
         OUTLET_TAG => SLOT_OUTLET,
-        // The one widget with a **base-element** spelling as well as a component
-        // one: HTML has a `<button>`, so this toolkit has one too, and it is the
-        // same control either way — `<button>` is not a user component that
-        // happens to be called that, and not a `div` (which is what it used to
-        // resolve to, by falling through to `CONTAINER`). Same "one handle, two
-        // spellings" rule the `Image`/`img` pairs below already follow.
+        // The controls with a **base-element** spelling as well as a component
+        // one: HTML has a `<button>`, an `<input>`, a `<select>`, so this toolkit
+        // has them too, and each is the same control either way — a lowercase tag
+        // is not a user component that happens to be spelled that, and not a
+        // `div` (which is what it used to resolve to, by falling through to
+        // `CONTAINER`). Same "one handle, two spellings" rule the `Image`/`img`
+        // pairs below already follow. These are exactly the controls the facade's
+        // UA stylesheet styles by type, which is what made the split visible:
+        // `<checkbox>` was a styled box with no behaviour while `Checkbox::new()`
+        // was the control, and the one `checkbox { … }` rule reached two
+        // different trees.
         "Button" | "button" => BUTTON,
-        // Widgets (PascalCase component spelling).
-        "Input" => INPUT,
-        "Checkbox" => CHECKBOX,
-        "Select" => SELECT,
+        // `textarea` is a third spelling of the one control: HTML's two tags are
+        // one widget here (`Input::multiline`), and *which* of them a node is
+        // stays readable from its local name rather than from a second id —
+        // `EditableField::is_multiline` already decides multi-line editing by
+        // `local_name() == "textarea"`, so the distinction the tags carry is
+        // carried, and nothing new had to be invented to carry it.
+        "Input" | "input" | "textarea" => INPUT,
+        "Checkbox" | "checkbox" => CHECKBOX,
+        "Radio" | "radio" => RADIO,
+        "Select" | "select" => SELECT,
+        "Table" | "table" => TABLE,
+        // Widgets with a component spelling only. The UA sheet styles none of
+        // them by type, and a lowercase tag no rule reaches would be vocabulary
+        // with nothing behind it; `Menu`, `Tabs`, `Tree`, `List` and `Docking`
+        // also have no HTML element that means what they mean, and `Dialog`'s
+        // does not (a `<dialog>` is a box, this is a titled widget).
         "Menu" => MENU,
         "Dialog" => DIALOG,
         "Tabs" => TABS,
         "List" => LIST,
         "Tree" => TREE,
-        "Table" => TABLE,
         "Docking" => DOCKING,
-        "Radio" => RADIO,
         // Non-container primitives (component and element spellings).
         "Image" | "img" => IMAGE,
         "Canvas" | "canvas" => CANVAS,
@@ -149,18 +168,11 @@ pub fn component_id_for(tag: &str, position: TagPosition) -> ComponentId {
 
 #[doc = include_str!("name_binding.doc/local_name_for.md")]
 #[must_use]
-pub fn local_name_for<'tag, 'attr>(
-    tag: &'tag str,
-    position: TagPosition,
-    authored_attributes: impl IntoIterator<Item = &'attr str>,
-) -> Option<&'tag str> {
+pub fn local_name_for(tag: &str, position: TagPosition) -> Option<&str> {
     if position != TagPosition::Element || tag == OUTLET_TAG {
         return None;
     }
-    let authored_type = authored_attributes
-        .into_iter()
-        .any(|name| attr_symbol_on(tag, name) == TYPE);
-    (!authored_type).then_some(tag)
+    Some(tag)
 }
 
 #[doc = include_str!("name_binding.doc/user_component_id.md")]
@@ -188,6 +200,14 @@ pub fn attr_symbol(name: &str) -> InternedSymbol {
         "src" => SRC,
         "disabled" => DISABLED,
         "checked" => CHECKED,
+        // The §4.16 placeholder hint. It is a *synthetic part* rather than a
+        // selector input: the runtime paints it straight off this symbol while the
+        // field's value is empty (`GeneratedContent::placeholder`, resolved through
+        // `input::part(placeholder)`), and it is never a tree node. A hashed
+        // `placeholder` prop reaches none of that — which is why an authored
+        // `<input placeholder="…">` used to render no hint at all while
+        // `Input::placeholder(…)` rendered one.
+        "placeholder" => PLACEHOLDER,
         // A stable testing identifier, not a style attribute (spec §7.5).
         "test-id" => TEST_ID,
         "automation-id" => AUTOMATION_ID,
@@ -281,6 +301,68 @@ mod tests {
     }
 
     #[test]
+    fn every_control_the_ua_sheet_styles_has_both_spellings() {
+        // The other half of "one handle, two spellings". These five widgets used to
+        // answer to a PascalCase tag only, so `<checkbox>` was a styled `div` with
+        // no behaviour while `Checkbox::new()` was the control — one CSS type over
+        // two different trees. Each pair is now one id.
+        for (element, component, id) in [
+            ("button", "Button", BUTTON),
+            ("input", "Input", INPUT),
+            ("checkbox", "Checkbox", CHECKBOX),
+            ("radio", "Radio", RADIO),
+            ("select", "Select", SELECT),
+            ("table", "Table", TABLE),
+        ] {
+            assert_eq!(builtin_component_id(element), Some(id), "{element}");
+            assert_eq!(
+                component_id_for(element, TagPosition::Element),
+                component_id_for(component, TagPosition::Component),
+                "{element}/{component}"
+            );
+            assert_ne!(
+                component_id_for(element, TagPosition::Element),
+                CONTAINER,
+                "{element}"
+            );
+        }
+    }
+
+    #[test]
+    fn textarea_is_the_input_widget_and_says_so_in_its_local_name() {
+        // HTML's two text-entry tags are one widget here, so `<textarea>` binds to
+        // the *same* id as `<input>` — and the distinction survives in the local
+        // name, which is what `EditableField::is_multiline` reads. No second
+        // component id, and no PascalCase `Textarea` invented to hold one.
+        assert_eq!(builtin_component_id("textarea"), Some(INPUT));
+        assert_eq!(
+            component_id_for("textarea", TagPosition::Element),
+            component_id_for("input", TagPosition::Element)
+        );
+        assert_eq!(
+            local_name_for("textarea", TagPosition::Element),
+            Some("textarea")
+        );
+        assert_eq!(local_name_for("input", TagPosition::Element), Some("input"));
+    }
+
+    #[test]
+    fn the_widgets_the_ua_sheet_does_not_style_keep_one_spelling() {
+        // The rule has a boundary, and it is stated rather than implied: a
+        // lowercase spelling exists where a UA rule reaches it. Nothing here is a
+        // reserved element tag, so `<menu>` and `<dialog>` stay ordinary boxes an
+        // author may name.
+        for tag in ["menu", "dialog", "tabs", "list", "tree", "docking"] {
+            assert_eq!(builtin_component_id(tag), None, "{tag}");
+            assert_eq!(
+                component_id_for(tag, TagPosition::Element),
+                CONTAINER,
+                "{tag}"
+            );
+        }
+    }
+
+    #[test]
     fn image_element_and_component_spellings_agree() {
         assert_eq!(component_id_for("img", TagPosition::Element), IMAGE);
         assert_eq!(component_id_for("Image", TagPosition::Component), IMAGE);
@@ -352,7 +434,7 @@ mod tests {
         // author wrote.
         for tag in ["button", "div", "span", "td", "img", "something-custom"] {
             assert_eq!(
-                local_name_for(tag, TagPosition::Element, [] as [&str; 0]),
+                local_name_for(tag, TagPosition::Element),
                 Some(tag),
                 "{tag}"
             );
@@ -364,35 +446,37 @@ mod tests {
         // A component names a component; the elements its render produces carry
         // their own names. And a type selector matches ASCII-case-insensitively, so
         // a local name `Card` would be indistinguishable from a `<card>` element.
-        assert_eq!(
-            local_name_for("Card", TagPosition::Component, [] as [&str; 0]),
-            None
-        );
-        assert_eq!(
-            local_name_for("Button", TagPosition::Component, [] as [&str; 0]),
-            None
-        );
+        assert_eq!(local_name_for("Card", TagPosition::Component), None);
+        assert_eq!(local_name_for("Button", TagPosition::Component), None);
     }
 
     #[test]
-    fn an_authored_type_attribute_wins_the_local_name_slot() {
-        // TYPE is two channels through one symbol — the CSS local name and HTML's
-        // own `<button type="submit">`. The author owns it: given an authored
-        // binding, the implicit name stands down rather than emitting a second
-        // property under the same symbol.
+    fn the_local_name_symbol_is_not_the_authored_type_symbol() {
+        // The two channels HTML keeps apart, and this engine now does too: the tag
+        // says *what a thing is*, `type` says *which kind*. They shared one symbol,
+        // and the price was that `<button type="submit">` had CSS type `submit` and
+        // so matched no `button { … }` rule at all.
+        assert_ne!(LOCAL_NAME, TYPE);
+        assert_eq!(attr_symbol("type"), TYPE);
+        assert_ne!(attr_symbol("type"), LOCAL_NAME);
+        // No attribute name an author can write binds to LOCAL_NAME — it is the
+        // element's identity, contributed by the lowering paths alone.
+        for name in ["local-name", "localname", "tag", "type"] {
+            assert_ne!(attr_symbol(name), LOCAL_NAME, "{name}");
+        }
+    }
+
+    #[test]
+    fn an_authored_type_attribute_leaves_the_local_name_alone() {
+        // The defect this stage closed: an authored `type` used to make the tag
+        // contribute *no* name. It is a separate symbol now, so the tag always
+        // contributes, whatever else the author wrote.
         assert_eq!(
-            local_name_for("button", TagPosition::Element, ["type"]),
-            None
-        );
-        assert_eq!(
-            local_name_for("button", TagPosition::Element, ["class", "type", "id"]),
-            None
-        );
-        // Only that one attribute: everything else leaves the name in place.
-        assert_eq!(
-            local_name_for("button", TagPosition::Element, ["class", "id", "test-id"]),
+            local_name_for("button", TagPosition::Element),
             Some("button")
         );
+        assert_eq!(attr_symbol_on("button", "type"), TYPE);
+        assert_ne!(attr_symbol_on("button", "type"), LOCAL_NAME);
     }
 
     #[test]
@@ -402,14 +486,7 @@ mod tests {
         // `<slot name="header"/>` has to stay *the same node* a component's own
         // `ViewNode::slot("header")` builds. A property on one spelling and not the
         // other would be two outlets.
-        assert_eq!(
-            local_name_for(OUTLET_TAG, TagPosition::Element, [] as [&str; 0]),
-            None
-        );
-        assert_eq!(
-            local_name_for(OUTLET_TAG, TagPosition::Element, ["name"]),
-            None
-        );
+        assert_eq!(local_name_for(OUTLET_TAG, TagPosition::Element), None);
     }
 
     #[test]
@@ -420,9 +497,26 @@ mod tests {
         assert_eq!(attr_symbol("src"), SRC);
         assert_eq!(attr_symbol("disabled"), DISABLED);
         assert_eq!(attr_symbol("checked"), CHECKED);
+        assert_eq!(attr_symbol("placeholder"), PLACEHOLDER);
         assert_eq!(attr_symbol("test-id"), TEST_ID);
         assert_eq!(attr_symbol("automation-id"), AUTOMATION_ID);
         assert_eq!(attr_symbol("slot"), SLOT);
+    }
+
+    #[test]
+    fn the_placeholder_hint_is_reserved_because_only_the_painter_reads_it() {
+        // The one reserved attribute here that is not a selector input. §4.16 makes
+        // the placeholder a synthetic part the runtime generates from this symbol
+        // and this symbol alone (`StyleAttributes::placeholder` →
+        // `GeneratedContent::placeholder`), so a hashed spelling reaches nothing at
+        // all — which is what an authored `<input placeholder="…">` used to do
+        // while `Input::placeholder(…)` painted a hint. Same attribute, two front
+        // ends, one visible outcome and one invisible one.
+        assert_eq!(attr_symbol("placeholder"), PLACEHOLDER);
+        assert_ne!(attr_symbol("placeholder"), fallback_symbol("placeholder"));
+        // It is also the symbol `obscur-view` reserves for it; the two crates
+        // restate the table and this is the pin on this side.
+        assert_eq!(PLACEHOLDER.raw(), 0x0000_0009);
     }
 
     #[test]
@@ -535,9 +629,11 @@ mod tests {
             CLASS,
             ID,
             TYPE,
+            LOCAL_NAME,
             SRC,
             DISABLED,
             CHECKED,
+            PLACEHOLDER,
             EVENT_CLICK,
             EVENT_INPUT,
             EVENT_CHANGE,

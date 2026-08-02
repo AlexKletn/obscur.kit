@@ -15,7 +15,9 @@ use obscur_kit::view::component::{
     Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
     ComponentRegistration, ComponentVersion, ErasedComponent, InstanceId,
 };
-use obscur_kit::view::view::{CLASS, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_kit::view::view::{
+    CLASS, LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+};
 
 #[doc = include_str!("component_output_is_styled.doc/STYLESHEET.md")]
 const STYLESHEET: &str = "\
@@ -39,7 +41,10 @@ const UA_BUTTON_INK: (f32, f32, f32) = (
 #[doc = include_str!("component_output_is_styled.doc/element.md")]
 fn element(local_name: &str, class: &str) -> ViewNode {
     ViewNode::element(name_binding::CONTAINER)
-        .with_prop(ViewProperty::new(TYPE, ViewValue::Text(local_name.into())))
+        .with_prop(ViewProperty::new(
+            LOCAL_NAME,
+            ViewValue::Text(local_name.into()),
+        ))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 

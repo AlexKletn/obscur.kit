@@ -2,9 +2,7 @@
 
 use std::fmt::Write as _;
 
-use obscur_ui_ir::document::{
-    UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrProperty, UiIrValue,
-};
+use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
 use obscur_ui_ir::name_binding::{self, TagPosition};
 
 use crate::codegen::CodegenRoot;
@@ -333,22 +331,18 @@ fn emit_element(
         );
     }
 
-    // The tag itself, as the reserved TYPE property — the element's local name, so
-    // a `button { … }` / `td { … }` type selector matches what the author wrote
-    // (spec §4.13). Emitted *after* the authored properties, so every authored one
-    // keeps the index it was written at; skipped entirely when the author bound
-    // `type` themselves, which is `local_name_for`'s author-wins rule rather than
-    // this call site's. The runtime bridge emits the same property from the same
-    // call, which is what keeps an interpreted document and a compiled one the same
-    // element.
-    if let Some(local_name) = name_binding::local_name_for(
-        node.tag(),
-        position,
-        node.properties().iter().map(UiIrProperty::name),
-    ) {
-        let symbol = name_binding::TYPE.raw();
+    // The tag itself, as the reserved LOCAL_NAME property — the element's local
+    // name, so a `button { … }` / `td { … }` type selector matches what the author
+    // wrote (spec §4.13). Emitted *after* the authored properties, so every authored
+    // one keeps the index it was written at. An authored `type="…"` is a different
+    // symbol and does not displace it; when the tag contributes no name at all is
+    // `local_name_for`'s rule rather than this call site's. The runtime bridge emits
+    // the same property from the same call, which is what keeps an interpreted
+    // document and a compiled one the same element.
+    if let Some(local_name) = name_binding::local_name_for(node.tag(), position) {
+        let symbol = name_binding::LOCAL_NAME.raw();
         // Through `emit_literal`, so the implicit local name is spelled exactly as
-        // an authored `type="button"` would be — one shape for the one symbol.
+        // an authored text attribute would be — one shape for every text property.
         let value = emit_literal(&UiIrValue::Text(local_name.into()), root);
         let _ = writeln!(
             out,
@@ -500,23 +494,24 @@ mod tests {
     }
 
     #[test]
-    fn an_element_tag_emits_its_local_name_under_the_type_symbol() {
+    fn an_element_tag_emits_its_local_name_under_the_local_name_symbol() {
         // The generated code carries the element's own name, so the `button { … }`
         // rules in the UA sheet (and an author's) match what the author wrote.
-        // TYPE symbol == 0x3; Button::COMPONENT_ID == 0x00D0_0001, because a
+        // LOCAL_NAME symbol == 0xa; Button::COMPONENT_ID == 0x00D0_0001, because a
         // lowercase `button` is the same control as `<Button/>`.
         let out = expr(UiIrNode::element(0, "button"));
         assert!(out.contains("ComponentId::from_raw(0xd00001)"), "{out}");
         assert!(
-            out.contains(r#"InternedSymbol::from_raw(0x3), ::obscur_kit::view::view::ViewValue::Text("button".into())"#),
+            out.contains(r#"InternedSymbol::from_raw(0xa), ::obscur_kit::view::view::ViewValue::Text("button".into())"#),
             "{out}"
         );
     }
 
     #[test]
-    fn an_authored_type_replaces_the_implicit_local_name() {
-        // One property under the shared symbol, carrying the author's value:
-        // `<button type="submit">` is HTML's spelling and the author owns the slot.
+    fn an_authored_type_is_emitted_beside_the_implicit_local_name() {
+        // Two channels, two symbols, two properties: `<button type="submit">` emits
+        // the author's `submit` under TYPE (0x3) *and* its own `button` under
+        // LOCAL_NAME (0xa). The authored one used to replace the name outright.
         let out = expr(
             UiIrNode::element(0, "button").with_property(UiIrProperty::text("type", "submit")),
         );
@@ -525,17 +520,19 @@ mod tests {
             1,
             "{out}"
         );
-        assert!(out.contains(r#"ViewValue::Text("submit".into())"#), "{out}");
-        assert!(
-            !out.contains(r#"ViewValue::Text("button".into())"#),
+        assert_eq!(
+            out.matches("InternedSymbol::from_raw(0xa)").count(),
+            1,
             "{out}"
         );
+        assert!(out.contains(r#"ViewValue::Text("submit".into())"#), "{out}");
+        assert!(out.contains(r#"ViewValue::Text("button".into())"#), "{out}");
     }
 
     #[test]
     fn a_component_tag_emits_no_local_name() {
         let out = expr(UiIrNode::component(0, "Card"));
-        assert!(!out.contains("InternedSymbol::from_raw(0x3)"), "{out}");
+        assert!(!out.contains("InternedSymbol::from_raw(0xa)"), "{out}");
     }
 
     #[test]

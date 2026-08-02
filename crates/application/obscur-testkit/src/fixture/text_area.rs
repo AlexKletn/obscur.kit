@@ -5,7 +5,7 @@ use obscur_style::cascade::CascadeOrigin;
 use obscur_style::matching::{BlockDeclaration, StyleRule, Stylesheet};
 use obscur_style::property::{Length, PropertyId, PropertyValue, layout_keyword};
 use obscur_view::view::{
-    CLASS, EVENT_INPUT, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+    CLASS, EVENT_INPUT, LOCAL_NAME, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
     ViewValue,
 };
 
@@ -31,7 +31,7 @@ impl TextArea {
                 .with_children(ViewFragment::from_nodes(vec![
                     ViewNode::element(ComponentId::from_raw(711))
                         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("area".into())))
-                        .with_prop(ViewProperty::new(TYPE, ViewValue::from("textarea")))
+                        .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("textarea")))
                         .with_event(ViewEventBinding::new(EVENT_INPUT, EditablePanel::CMD_INPUT))
                         .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
                             text.to_string(),

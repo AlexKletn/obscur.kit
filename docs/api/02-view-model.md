@@ -100,20 +100,24 @@ Reserved property names, all in `obscur_kit::view::view`:
 |---|---|
 | `CLASS` | CSS classes, space-separated |
 | `ID` | CSS `#id` |
-| `TYPE` | the CSS *type* selector — `button`, `input`, `textarea`, … |
+| `LOCAL_NAME` | the element's own name — what a CSS *type* selector matches: `button`, `input`, `textarea`, … |
+| `TYPE` | the authored `type="…"` attribute — what `[type=submit]` matches |
 | `SRC` | image or vector source |
 | `DISABLED`, `CHECKED`, `READONLY` | control state, matched by `:disabled` / `:checked` |
 | `VALUE` | a control's value |
 | `PLACEHOLDER` | a field's placeholder |
 | `TEST_ID`, `AUTOMATION_ID` | stable selectors for tests and automation |
 
-`TYPE` is what makes the UA stylesheet apply: a node with type `button` picks up
-the UA button rule, padding and border included. See [04 — Styling](04-styling.md).
+`LOCAL_NAME` is what makes the UA stylesheet apply: a node named `button` picks
+up the UA button rule, padding and border included. See
+[04 — Styling](04-styling.md).
 
-A view built by hand sets `TYPE` explicitly; markup does not have to — every
-authored element tag becomes its own `TYPE` (its CSS local name), so `<td>` is
-typed `td`. An authored `type="…"` wins that slot when both apply. See
-[09 — Authoring formats](09-authoring-formats.md#type-is-two-channels-through-one-symbol).
+A view built by hand sets `LOCAL_NAME` explicitly; markup does not have to —
+every authored element tag becomes its own `LOCAL_NAME`, so `<td>` is typed `td`.
+`TYPE` is a different channel: it carries only what the author wrote as
+`type="…"`, so `<button type="submit">` is a `button` that also answers to
+`[type=submit]`. See
+[09 — Authoring formats](09-authoring-formats.md#the-tag-and-type-are-two-channels-and-two-symbols).
 
 ## Events
 
@@ -180,11 +184,20 @@ Reserved symbols behind both: `VIRTUAL_LIST_ID`, `VIRTUAL_ITEM_COUNT`,
 into it. A stray outlet — one with nothing to project — is refused by the
 reconciler and reported.
 
+`ViewNode::slot("")` — an outlet naming **no** slot — is the *default* one: it
+takes the authored content that names none, text runs included, which is the
+only way a `<button>Save</button>` can reach a mounted control at all. An outlet
+nothing fills renders its own children as **fallback** content, which is how one
+outlet serves both `<button>Save</button>` and `<button label="Save"/>`. The
+shipped `button` is the one component that uses either, and its contract
+declares the slot under the reserved `DEFAULT_SLOT` name.
+
 > **partial** — a user component authored as `<Card/>` in either front end does
 > mount and does receive its projected children. What is missing is checking: an
 > outlet's name is not verified against the component's own declaration, so a
-> `<slot name="hedaer"/>` silently receives nothing. No *shipped* component
-> declares a slot, because no shipped widget is a `Component`.
+> `<slot name="hedaer"/>` silently receives nothing. And the default slot and
+> fallback content exist in the runtime only: `.okui` refuses `<slot/>` and
+> refuses children on an outlet, because neither has an authored spelling yet.
 
 ## Building views in practice
 

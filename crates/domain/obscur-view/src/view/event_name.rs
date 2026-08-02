@@ -31,5 +31,6 @@ mod tests {
         assert_ne!(EVENT_CLICK, super::super::CLASS);
         assert_ne!(EVENT_CLICK, super::super::ID);
         assert_ne!(EVENT_CLICK, super::super::TYPE);
+        assert_ne!(EVENT_CLICK, super::super::LOCAL_NAME);
     }
 }

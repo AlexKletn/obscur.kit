@@ -94,7 +94,7 @@ impl MatchElement for TreeElement<'_> {
         if name.eq_ignore_ascii_case("id") {
             self.id()
         } else if name.eq_ignore_ascii_case("type") {
-            self.local_name()
+            self.node().and_then(|n| n.attributes().control_type())
         } else {
             None
         }
@@ -162,7 +162,8 @@ mod tests {
     use obscur_identity::ComponentId;
     use obscur_tree::reconciliation::Reconciler;
     use obscur_view::view::{
-        CHECKED, CLASS, DISABLED, ID, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+        CHECKED, CLASS, DISABLED, ID, LOCAL_NAME, TYPE, View, ViewFragment, ViewNode, ViewProperty,
+        ViewValue,
     };
 
     fn text_prop(name: obscur_identity::InternedSymbol, value: &str) -> ViewProperty {
@@ -188,7 +189,7 @@ mod tests {
     fn reports_local_name_id_and_class() {
         let view = View::from_fragment(ViewFragment::from_nodes(vec![
             ViewNode::element(ComponentId::from_raw(10))
-                .with_prop(text_prop(TYPE, "container"))
+                .with_prop(text_prop(LOCAL_NAME, "container"))
                 .with_prop(text_prop(ID, "main"))
                 .with_prop(text_prop(CLASS, "counter primary")),
         ]));
@@ -204,10 +205,16 @@ mod tests {
     }
 
     #[test]
-    fn attribute_resolves_id_and_type_only() {
+    fn attribute_resolves_id_and_the_authored_type_only() {
+        // `[type=…]` reads the attribute the author wrote, which is a different
+        // reserved symbol from the element's own name. This assertion used to read
+        // `Some("button")` off a node that had no `type` at all — the local name
+        // answering for an attribute nobody wrote, which is exactly why
+        // `[type=submit]` could not be written to mean the attribute.
         let view = View::from_fragment(ViewFragment::from_nodes(vec![
             ViewNode::element(ComponentId::from_raw(10))
-                .with_prop(text_prop(TYPE, "button"))
+                .with_prop(text_prop(LOCAL_NAME, "button"))
+                .with_prop(text_prop(TYPE, "submit"))
                 .with_prop(text_prop(ID, "ok")),
         ]));
         let tree = reconcile(&view);
@@ -216,8 +223,27 @@ mod tests {
 
         assert_eq!(element.attribute("id"), Some("ok"));
         assert_eq!(element.attribute("ID"), Some("ok"));
-        assert_eq!(element.attribute("type"), Some("button"));
+        assert_eq!(element.attribute("type"), Some("submit"));
+        assert_eq!(element.attribute("TYPE"), Some("submit"));
+        // The tag is still the type selector's subject, and it is not the attribute.
+        assert_eq!(element.local_name(), Some("button"));
         assert_eq!(element.attribute("data-foo"), None);
+    }
+
+    #[test]
+    fn an_element_without_an_authored_type_has_no_type_attribute() {
+        // The other half: the tag alone must not answer `[type=…]`. Every element
+        // in the tree has a local name, so a local name standing in for the
+        // attribute made `[type=div]` match every box in the document.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10)).with_prop(text_prop(LOCAL_NAME, "div")),
+        ]));
+        let tree = reconcile(&view);
+        let child = root_children(&tree)[0];
+        let element = TreeElement::new(&tree, child);
+
+        assert_eq!(element.local_name(), Some("div"));
+        assert_eq!(element.attribute("type"), None);
     }
 
     #[test]
@@ -332,10 +358,10 @@ mod tests {
         // carrying CHECKED — the structural state the widgets now emit.
         let view = View::from_fragment(ViewFragment::from_nodes(vec![
             ViewNode::element(ComponentId::from_raw(20))
-                .with_prop(text_prop(TYPE, "button"))
+                .with_prop(text_prop(LOCAL_NAME, "button"))
                 .with_prop(ViewProperty::new(DISABLED, ViewValue::Bool(true))),
             ViewNode::element(ComponentId::from_raw(21))
-                .with_prop(text_prop(TYPE, "checkbox"))
+                .with_prop(text_prop(LOCAL_NAME, "checkbox"))
                 .with_prop(ViewProperty::new(CHECKED, ViewValue::Bool(true))),
         ]));
         let tree = reconcile(&view);

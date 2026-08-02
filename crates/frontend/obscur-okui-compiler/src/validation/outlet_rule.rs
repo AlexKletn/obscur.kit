@@ -29,13 +29,13 @@ pub fn is_outlet_tag(tag: &str) -> bool {
 }
 
 #[doc = include_str!("outlet_rule.doc/MISSING_NAME_MESSAGE.md")]
-pub const MISSING_NAME_MESSAGE: &str = "`<slot>` requires a `name`: §2.12 declares *named* slots and projection matches an outlet to content by name and by nothing else, so an unnamed outlet is filled by nothing and deleted. Write `<slot name=\"…\"/>`";
+pub const MISSING_NAME_MESSAGE: &str = "`<slot>` requires a `name`: §2.12 declares *named* slots, and an authored outlet is matched to its component's declaration by name. The runtime does have a default slot — the outlet naming none, which takes the content that names none — but nothing spells it in `.okui`: a contract declares it under a reserved name no author can write, and until that is decided an unnamed outlet here would be a declaration nothing validates. Write `<slot name=\"…\"/>`";
 
 #[doc = include_str!("outlet_rule.doc/DYNAMIC_NAME_MESSAGE.md")]
 pub const DYNAMIC_NAME_MESSAGE: &str = "`<slot name={…}>` is refused: a slot is matched against its component's declaration at compile time, so an outlet's name must be a literal — the same rule that refuses `slot={…}` on the child side of the same join. Write `<slot name=\"…\"/>`";
 
 #[doc = include_str!("outlet_rule.doc/OUTLET_CHILDREN_MESSAGE.md")]
-pub const OUTLET_CHILDREN_MESSAGE: &str = "`<slot>` takes no children: an outlet is substituted away by projection and an unfilled one leaves nothing behind, so children here would be dropped without a trace. §2.12 describes no fallback content and none is implemented";
+pub const OUTLET_CHILDREN_MESSAGE: &str = "`<slot>` takes no children *here*: projection does render an unfilled outlet's children as fallback content, but §2.12 describes no such construct and no authored `.okui` component declares one — the one component that uses it, the built-in `button`, builds its outlet in Rust. Until the spelling is decided, children on an authored outlet would be content nothing validates";
 
 #[doc = include_str!("outlet_rule.doc/extra_attribute_message.md")]
 #[must_use]

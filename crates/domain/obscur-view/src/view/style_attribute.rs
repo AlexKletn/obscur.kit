@@ -32,6 +32,9 @@ pub const VALUE: InternedSymbol = InternedSymbol::from_raw(0x0000_0008);
 #[doc = include_str!("style_attribute.doc/PLACEHOLDER.md")]
 pub const PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_0009);
 
+#[doc = include_str!("style_attribute.doc/LOCAL_NAME.md")]
+pub const LOCAL_NAME: InternedSymbol = InternedSymbol::from_raw(0x0000_000A);
+
 #[doc = include_str!("style_attribute.doc/StyleAttributes.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleAttributes {
@@ -54,6 +57,8 @@ pub struct StyleAttributes {
     virtual_list: Option<u32>,
     #[doc = include_str!("style_attribute.doc/placeholder.md")]
     placeholder: Option<Box<str>>,
+    #[doc = include_str!("style_attribute.doc/control_type.md")]
+    control_type: Option<Box<str>>,
 }
 
 #[doc = include_str!("style_attribute.doc/is_truthy.md")]
@@ -120,7 +125,8 @@ impl StyleAttributes {
                     attributes.classes = text.split_ascii_whitespace().map(Into::into).collect();
                 }
                 ID => attributes.id = Some(text.clone()),
-                TYPE => attributes.local_name = Some(text.clone()),
+                LOCAL_NAME => attributes.local_name = Some(text.clone()),
+                TYPE => attributes.control_type = Some(text.clone()),
                 SRC => attributes.image_source = Some(text.clone()),
                 VALUE => attributes.control_value = Some(text.clone()),
                 PLACEHOLDER => attributes.placeholder = Some(text.clone()),
@@ -134,6 +140,12 @@ impl StyleAttributes {
     #[must_use]
     pub fn local_name(&self) -> Option<&str> {
         self.local_name.as_deref()
+    }
+
+    #[doc = include_str!("style_attribute.doc/control_type_2.md")]
+    #[must_use]
+    pub fn control_type(&self) -> Option<&str> {
+        self.control_type.as_deref()
     }
 
     #[doc = include_str!("style_attribute.doc/id.md")]
@@ -206,6 +218,7 @@ impl StyleAttributes {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.local_name.is_none()
+            && self.control_type.is_none()
             && self.id.is_none()
             && self.classes.is_empty()
             && self.image_source.is_none()
@@ -228,6 +241,34 @@ mod tests {
     }
 
     #[test]
+    fn every_reserved_style_attribute_symbol_is_distinct() {
+        // The dense low-range table is hand-numbered, so a duplicated literal is a
+        // silent aliasing bug: two attributes would write one field. `LOCAL_NAME`
+        // was the newest entry and the one this most needed to catch — it was
+        // carved out of `TYPE`, and a value equal to it would have re-created the
+        // exact collision it exists to end.
+        let reserved = [
+            ("CLASS", CLASS),
+            ("ID", ID),
+            ("TYPE", TYPE),
+            ("SRC", SRC),
+            ("DISABLED", DISABLED),
+            ("CHECKED", CHECKED),
+            ("READONLY", READONLY),
+            ("VALUE", VALUE),
+            ("PLACEHOLDER", PLACEHOLDER),
+            ("LOCAL_NAME", LOCAL_NAME),
+            ("VIRTUAL_ROW_EXTENT", VIRTUAL_ROW_EXTENT),
+            ("VIRTUAL_LIST_ID", VIRTUAL_LIST_ID),
+        ];
+        for (i, (left_name, left)) in reserved.iter().enumerate() {
+            for (right_name, right) in &reserved[i + 1..] {
+                assert_ne!(left, right, "{left_name} aliases {right_name}");
+            }
+        }
+    }
+
+    #[test]
     fn empty_when_no_attributes() {
         let attrs = StyleAttributes::extract(&[]);
         assert!(attrs.is_empty());
@@ -239,7 +280,7 @@ mod tests {
     #[test]
     fn extracts_local_name_id_and_classes() {
         let props = [
-            text_prop(TYPE, "container"),
+            text_prop(LOCAL_NAME, "container"),
             text_prop(ID, "main"),
             text_prop(CLASS, "counter  primary   large"),
         ];
@@ -251,6 +292,44 @@ mod tests {
         assert!(attrs.has_class("primary"));
         assert!(!attrs.has_class("missing"));
         assert!(!attrs.is_empty());
+    }
+
+    #[test]
+    fn the_local_name_and_the_authored_type_are_two_independent_channels() {
+        // The defect the LOCAL_NAME symbol exists to close: `<button
+        // type="submit">` used to be an element whose CSS *type* was `submit`,
+        // because one symbol carried the tag and the attribute both. The tag says
+        // what a thing is; `type` says which kind; they no longer overwrite each
+        // other.
+        let attrs =
+            StyleAttributes::extract(&[text_prop(LOCAL_NAME, "button"), text_prop(TYPE, "submit")]);
+        assert_eq!(attrs.local_name(), Some("button"));
+        assert_eq!(attrs.control_type(), Some("submit"));
+
+        // Either one alone leaves the other unset, and either one alone makes the
+        // set non-empty (both are restyle inputs).
+        let named = StyleAttributes::extract(&[text_prop(LOCAL_NAME, "button")]);
+        assert_eq!(named.local_name(), Some("button"));
+        assert_eq!(named.control_type(), None);
+        assert!(!named.is_empty());
+
+        let typed = StyleAttributes::extract(&[text_prop(TYPE, "submit")]);
+        assert_eq!(typed.local_name(), None);
+        assert_eq!(typed.control_type(), Some("submit"));
+        assert!(!typed.is_empty());
+    }
+
+    #[test]
+    fn equality_includes_the_authored_type() {
+        // A `type` change is observed by equality, so reconcile re-applies
+        // attributes and an `[type=…]` rule re-matches.
+        let submit = StyleAttributes::extract(&[text_prop(TYPE, "submit")]);
+        let reset = StyleAttributes::extract(&[text_prop(TYPE, "reset")]);
+        assert_ne!(submit, reset);
+        assert_eq!(
+            submit,
+            StyleAttributes::extract(&[text_prop(TYPE, "submit")])
+        );
     }
 
     #[test]

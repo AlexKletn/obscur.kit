@@ -25,8 +25,9 @@ removes the duplicated ad-hoc hashing they used to carry.
 - **Tags → a local name (CSS *type*)**: an *element* tag is also the node's
   own **local name**, the string a §4.13 type selector matches — `<button>`
   is what `button { … }` styles, exactly as in HTML. [`local_name_for`] is
-  that policy, and it is the reason both lowering paths emit a [`TYPE`]
-  property nobody authored.
+  that policy, and it is the reason both lowering paths emit a [`LOCAL_NAME`]
+  property nobody authored. HTML's authored `type="…"` is a *different*
+  channel under a different symbol ([`TYPE`]), so the two never contend.
 - **Attribute names → [`InternedSymbol`]**: the CSS/reserved attributes
   (`class`, `id`, `type`, `src`, `disabled`, `checked`) map to the reserved
   `obscur-view` symbols the reconciler and matcher read; any other name is
@@ -62,7 +63,7 @@ every authored element reached the tree **anonymous**: `<button>`, `<div>` and
 `<td>` were three nodes with no local name, and `button { … }`, `div { … }`,
 `td { … }` — including the rules the facade's own UA stylesheet is written
 entirely in — matched none of them. Only the hand-written widgets styled
-themselves, by setting the reserved [`TYPE`] property in Rust
+themselves, by setting the reserved [`LOCAL_NAME`] property in Rust
 (`obscur_widgets::Button::view`). Authored markup could be styled by class and
 by id, and by type never.
 

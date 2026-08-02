@@ -52,7 +52,7 @@ matches — and what your own sheet must override if you restyle it.
 | `Input` | `new(command)`, `with_value(command, value)` | `placeholder(…)`, `multiline(bool)`, `disabled(bool)` | `input`, or `textarea` when multiline |
 | `Select` | `new(command)` | `option(label)`, `with_options(iter)`, `disabled(bool)`, `open()`, `selected_label()` | `select` |
 | `List` | `new()` | `item(label)`, `with_items(iter)`, `selected_indices()` | — |
-| `Table` | `new()` | `column(Column)`, `with_columns(iter)`, `row(cells)`, `with_rows(iter)`, `row_count()`, `column_count()` | — |
+| `Table` | `new()` | `column(Column)`, `with_columns(iter)`, `row(cells)`, `with_rows(iter)`, `row_count()`, `column_count()` | `table`, and its parts `tr` / `th` / `td` |
 | `Tabs` | `new()` | `tab(label)`, `with_tabs(iter)` | — |
 | `Tree` | — | built from `TreeNode::new(label, depth, has_children)` | — |
 | `Menu` | `new()` | `item(MenuItem)`, `with_items(iter)`, `open()` | — |
@@ -61,17 +61,118 @@ matches — and what your own sheet must override if you restyle it.
 | `Docking` | `new()` | `with_panels(iter)`; panels are `DockPanel::new(id, title, DockSide)` | — |
 | `Column` | `new(title)` | (a `Table` column) | — |
 
-**Only five widgets carry a CSS type**, and they are exactly the five the UA
+**Only six widgets carry a CSS type**, and they are exactly the six the UA
 stylesheet has rules for. The rest set a private `role` property instead — that
-feeds the accessibility projection, and a CSS type selector cannot match it. To
-style a `List` or a `Table`, use classes.
+is not a class and not a local name, so a CSS type selector cannot match it. To
+style a `List` or a `Menu`, use classes.
 
-That cuts both ways: the UA sheet also carries `table`, `th`, `td`, `a`,
-`fieldset` and `img` rules, and **nothing in the widget or primitive tier sets
-those types**. They match a node an application types by hand with the `TYPE`
-property — and, since `name_binding::local_name_for`, every element tag written in
-markup: an authored `<td>` is typed `td` by its tag alone, so those rules reach
-`.okui` / `okui!` markup without an application naming anything.
+`Table` is the one that changed: its rows and cells are real element nodes, and
+they used to carry that private `role` (the text `row` / `cell`) rather than a
+name. The sheet's `table`, `th`, `td` and `tr:hover` rules were therefore dead
+against every table a program built while matching hand-written `<table>` markup
+perfectly. The parts name themselves now — `table`, `tr`, `th`, `td` — so one
+sheet styles both routes, and the accessibility projection announces a table
+rather than a stack of unnamed groups.
+
+`img` was the same defect one tier down, and is fixed the same way. `<img>` in
+markup and `Image::new(…)` in Rust are **one built-in** —
+`name_binding::builtin_component_id("img")` *is* `Image::COMPONENT_ID` — but the
+tag contributed a local name and the primitive contributed none, so one `img`
+rule reached one of the two trees, and the accessibility projection announced a
+primitive image as an unnamed group. The primitive names itself now.
+
+The sheet's remaining hand-written vocabulary is `a` and `fieldset`: **nothing
+in the widget or primitive tier sets those types**. They match a node an
+application names by hand with the `LOCAL_NAME` property — and, since
+`name_binding::local_name_for`, every element tag written in markup: an authored
+`<a>` is typed `a` by its tag alone, so those rules reach `.okui` / `okui!`
+markup without an application naming anything. Those two are also the whole of
+the escape hatch in `tests/ua_stylesheet_vocabulary.rs`, the guard that now
+rejects a UA rule for anything the toolkit cannot build.
+
+### Five of them mount from markup
+
+`Checkbox`, `Radio`, `Select`, `Input` and `Button` are not only builders: each
+ships a props struct, an `impl Component` and a `ComponentFactory`, and
+`KitBootstrap` registers all five by default. So an authored tag is the real
+control, not a styled box with the right id:
+
+```html
+<checkbox label="Agree" checked/>
+<radio label="One" checked/>
+<select options="Alpha, Beta" selected={1} open/>
+<input value="abc" placeholder="Search"/>
+<textarea value="line one" on:input={edit}/>
+<button on:click=save>Save</button>
+```
+
+Five things about that markup are worth stating rather than inferring.
+
+**A toggle's authored state is `checked`, the reserved attribute** — for the
+radio too, where the *builder* method is `selected(bool)`. `checked` is what the
+cascade reads for `:checked`, so a control cannot paint a filled dot while
+`radio:checked` fails to match it. Presence is the statement: a bare `checked`
+means checked.
+
+**A select's options are a prop, not children.** `Select::with_options` takes
+labels, not views, and the control synthesises each `.select-option` row around
+one — so `options="Alpha, Beta"` is a comma-separated list, `selected` is an
+index and `open` is present-or-absent. The consequence, stated plainly: **an
+option label containing a comma cannot be authored in markup.** It can be built
+in Rust and it survives there, because `Select::view` emits its own list under a
+separator no typed label contains.
+
+**A field's text is `value`, and `<input>` and `<textarea>` are one control.**
+They share `Input::COMPONENT_ID` and one registration; which of them a node is
+rides on its *local name*, which is what decides multi-line editing — so an
+authored textarea's `Enter` inserts a newline and an input's does not, exactly
+as before. The `placeholder` is not the component's output at all: §4.16 makes
+it a synthetic part the runtime paints from the reserved attribute while the
+field is empty, style it with `input::part(placeholder)`. Since this release an
+authored `placeholder="…"` reaches it; before, only `Input::placeholder(…)` did,
+and the authored hint painted in full ink or not at all.
+
+**Four of these controls own their content.** A component's output replaces its
+host's children, so authored content under `<checkbox>`, `<radio>`, `<select>`,
+`<input>` or `<textarea>` could not render. That is a compile error rather than
+a silent loss:
+
+```html
+<textarea>Hello</textarea>   <!-- rejected: use value="Hello" -->
+```
+
+HTML makes a textarea's child text its default value; here that is spelled
+`value="…"`. No policy applies to `<button>` or `<table>`, and their children
+still render: `<table>` mounts nothing at all, and what mounts on `<button>`
+owns no children — see below.
+
+**A button's children are yours.** `<button>` is the one mounted control whose
+content is the author's, so it is the one that declares a §2.12 **slot** — the
+default one. Its component renders that outlet and nothing else, and the runtime
+projects your children into it before the frame is reconciled:
+
+```html
+<button on:click=save>Save</button>          <!-- your text -->
+<button on:click=save><b>Save</b> now</button>  <!-- your markup, all of it -->
+<button on:click=save label="Save"/>         <!-- the label is the fallback -->
+```
+
+The third line is the one that changed: `label="…"` is what the `.okui`
+compiler requires of `<Button label="…"/>`, and until this release it rendered
+an empty button. It is the outlet's *fallback* now — shown only when you supply
+no content, so writing both never loses your markup.
+
+Registering a built-in does not touch the host node. Your `class`, your
+`on:change`, your `disabled` and the `:checked` / `:disabled` the cascade reads
+are all still the authored node's; only what renders underneath is the
+control's. And a widget you built in Rust renders exactly what it always did —
+`Checkbox::new(…).view()` carries the same id, so it mounts too, and the
+component regenerates the same children the builder installed.
+
+`<table>` is the one lowercase control tag still mounting nothing, and that is
+a decision rather than a gap: its rows and cells are `tr`/`td`/`th` elements you
+write or `Table::view()` builds from data, so a component there could only hand
+them straight back. It stays an author-owned base element.
 
 ### The trap worth knowing before you style one
 
@@ -114,7 +215,9 @@ values a stylesheet reads. See [04 — Styling](04-styling.md#themes).
 - **No user-authored components *here*.** The tier this page documents is the
   built-ins. Authoring your own works — `#[derive(Contract)]`, `<Card/>` in either
   front end, `register_component` on the runtime, and §2.12 slot projection — but
-  this repository ships none, so nothing below is one. See
+  this repository ships no *user* component, so nothing below is one. The five
+  built-ins that are components (above) are not an exception to that: they are
+  registered under reserved ids a base-element tag already binds to. See
   [09 — Authoring formats](09-authoring-formats.md#user-components-and-slots) for
   what is and is not checked about the tag.
 - **No context menus.** §6.7 requires custom context menus; `Menu` is a menu

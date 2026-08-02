@@ -37,11 +37,12 @@ symbols. The emitted handles are raw values (`from_raw(0x…)`) resolved from
 the registry at generation time.
 
 An **element** tag is emitted twice over: as the component id above, and as the
-reserved `TYPE` property carrying the tag as the node's *local name*, so a
+reserved `LOCAL_NAME` property carrying the tag as the node's *local name*, so a
 `button { … }` type selector matches an authored `<button>` (spec §4.13). Both
-halves come from the registry — [`name_binding::local_name_for`] owns the
-policy, including the rule that an authored `type="…"` wins the same slot — and
-the runtime bridge emits the identical property from the identical call.
+halves come from the registry — [`name_binding::local_name_for`] owns the policy
+— and the runtime bridge emits the identical property from the identical call.
+An authored `type="…"` emits its own reserved `TYPE` property from the attribute
+loop above and does not displace the name.
 
 A tag naming **no** built-in resolves by the node's kind: a `<div>` is the
 `Container` box, and a `<Card>` is

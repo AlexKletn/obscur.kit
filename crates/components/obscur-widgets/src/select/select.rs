@@ -4,8 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    CLASS, DISABLED as ATTR_DISABLED, EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment,
-    ViewNode, ViewProperty, ViewValue,
+    CLASS, DISABLED as ATTR_DISABLED, EVENT_CLICK, LOCAL_NAME, View, ViewEventBinding,
+    ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 #[doc = include_str!("select.doc/Select.md")]
@@ -39,9 +39,14 @@ impl Select {
     #[doc = include_str!("select.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0401);
     #[doc = include_str!("select.doc/PROP_OPEN.md")]
-    const PROP_OPEN: InternedSymbol = InternedSymbol::from_raw(0x00D1_0402);
+    pub(crate) const PROP_OPEN: InternedSymbol = InternedSymbol::from_raw(0x00D1_0402);
     #[doc = include_str!("select.doc/PROP_SELECTED.md")]
-    const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0403);
+    pub(crate) const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0403);
+    #[doc = include_str!("select.doc/PROP_OPTIONS.md")]
+    pub(crate) const PROP_OPTIONS: InternedSymbol = InternedSymbol::from_raw(0x00D1_0404);
+
+    #[doc = include_str!("select.doc/OPTION_SEPARATOR.md")]
+    pub(crate) const OPTION_SEPARATOR: char = '\u{1f}';
 
     #[doc = include_str!("select.doc/new.md")]
     #[must_use]
@@ -171,15 +176,65 @@ impl Select {
     #[must_use]
     pub fn view(&self) -> View {
         let selected = self.selected.map_or(-1, |i| i64::try_from(i).unwrap_or(-1));
+        let node = ViewNode::element(Self::COMPONENT_ID)
+            // Stable CSS type / local name so a UA (or author) `select { … }` type
+            // selector matches this control (spec §4.13). Additive.
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("select")))
+            .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("menu")))
+            .with_prop(ViewProperty::new(
+                Self::PROP_DISABLED,
+                ViewValue::Bool(self.disabled),
+            ))
+            .with_prop(ViewProperty::new(
+                Self::PROP_OPEN,
+                ViewValue::Bool(self.open),
+            ))
+            .with_prop(ViewProperty::new(
+                Self::PROP_SELECTED,
+                ViewValue::Int(selected),
+            ))
+            .with_event(ViewEventBinding::new(EVENT_CLICK, self.command));
+        // The option labels, so this node and an authored `<select options="…"/>`
+        // carry the SAME facts. That is what makes mounting `SelectComponent` on a
+        // node this method built idempotent: the component decodes these props and
+        // regenerates exactly the children installed below. Emitted only when there
+        // are options, so "no options" and "one empty-labelled option" stay
+        // distinguishable — see `PROP_OPTIONS`.
+        let node = if self.options.is_empty() {
+            node
+        } else {
+            node.with_prop(ViewProperty::new(
+                Self::PROP_OPTIONS,
+                ViewValue::from(self.options.join(&Self::OPTION_SEPARATOR.to_string())),
+            ))
+        };
+        // Reserved `:disabled` structural-state attribute — emitted only when
+        // disabled; survives reconcile and feeds the matcher's `:disabled`.
+        let node = if self.disabled {
+            node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)))
+        } else {
+            node
+        }
+        .with_children(Self::contents(&self.options, self.selected, self.open));
+        View::single(node)
+    }
+
+    #[doc = include_str!("select.doc/contents.md")]
+    #[must_use]
+    pub(crate) fn contents(
+        options: &[Box<str>],
+        selected: Option<usize>,
+        open: bool,
+    ) -> ViewFragment {
         // Header label: the selected option, else the first option (a bare
         // `<select>` shows its first option when nothing is picked), else empty.
-        let header_label: Box<str> = self
-            .selected_label()
-            .or_else(|| self.options.first().map(|s| &**s))
-            .unwrap_or("")
+        let header_label: Box<str> = selected
+            .and_then(|i| options.get(i))
+            .or_else(|| options.first())
+            .map_or("", |label| &**label)
             .into();
         // The disclosure-arrow indicator sub-part.
-        let (arrow_class, arrow_glyph) = if self.open {
+        let (arrow_class, arrow_glyph) = if open {
             ("select-arrow open", "▲")
         } else {
             ("select-arrow", "▼")
@@ -199,13 +254,12 @@ impl Select {
         let mut children: Vec<ViewNode> = vec![header];
         // The open dropdown popup: a `.select-list` of stacked `.select-option`
         // rows, the selected one carrying a `selected` class. Absent when closed.
-        if self.open {
-            let options: Vec<ViewNode> = self
-                .options
+        if open {
+            let rows: Vec<ViewNode> = options
                 .iter()
                 .enumerate()
                 .map(|(i, label)| {
-                    let class = if self.selected == Some(i) {
+                    let class = if selected == Some(i) {
                         "select-option selected"
                     } else {
                         "select-option"
@@ -221,36 +275,10 @@ impl Select {
             children.push(
                 ViewNode::element(Self::LIST_ID)
                     .with_prop(ViewProperty::new(CLASS, ViewValue::from("select-list")))
-                    .with_children(ViewFragment::from_nodes(options)),
+                    .with_children(ViewFragment::from_nodes(rows)),
             );
         }
-        let node = ViewNode::element(Self::COMPONENT_ID)
-            // Stable CSS type / local name so a UA (or author) `select { … }` type
-            // selector matches this control (spec §4.13). Additive.
-            .with_prop(ViewProperty::new(TYPE, ViewValue::from("select")))
-            .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("menu")))
-            .with_prop(ViewProperty::new(
-                Self::PROP_DISABLED,
-                ViewValue::Bool(self.disabled),
-            ))
-            .with_prop(ViewProperty::new(
-                Self::PROP_OPEN,
-                ViewValue::Bool(self.open),
-            ))
-            .with_prop(ViewProperty::new(
-                Self::PROP_SELECTED,
-                ViewValue::Int(selected),
-            ))
-            .with_event(ViewEventBinding::new(EVENT_CLICK, self.command));
-        // Reserved `:disabled` structural-state attribute — emitted only when
-        // disabled; survives reconcile and feeds the matcher's `:disabled`.
-        let node = if self.disabled {
-            node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)))
-        } else {
-            node
-        }
-        .with_children(ViewFragment::from_nodes(children));
-        View::single(node)
+        ViewFragment::from_nodes(children)
     }
 }
 

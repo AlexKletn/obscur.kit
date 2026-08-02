@@ -57,15 +57,28 @@ pub fn widget_contracts() -> Vec<ComponentContract> {
             .allowing_event("change")
             .no_children(),
         // `Radio::new(label, command)` + `.selected(..)`/`.disabled(..)`.
+        //
+        // The authored spelling of the selection is `checked`, not `selected`:
+        // `selected` is the name of the *builder's* method, while `checked` is the
+        // name of the thing on the node — and only `checked` is also what the
+        // cascade reads for `:checked`. This list said `selected` while no authored
+        // `<radio>` rendered anything at all, so the two could not yet disagree;
+        // `RadioProps` mounts one now, and a spelling that painted a filled dot
+        // while `radio:checked` failed to match it would be the disagreement.
         ComponentContract::new("Radio")
             .requiring_prop("label")
-            .allowing_prop("selected")
+            .allowing_prop("checked")
             .allowing_prop("disabled")
             .allowing_event("change")
             .no_children(),
-        // `Select::new(command)` + `.disabled(..)`; one root click covers the
-        // whole control (header and rows alike).
+        // `Select::new(command)` + `.with_options(..)`/`.select(..)`/`.open()`/
+        // `.disabled(..)`; one root click covers the whole control (header and rows
+        // alike). `options` is a comma-separated list of labels, because
+        // `with_options` takes labels rather than views — see `SelectProps`.
         ComponentContract::new("Select")
+            .allowing_prop("options")
+            .allowing_prop("selected")
+            .allowing_prop("open")
             .allowing_prop("disabled")
             .allowing_event("click")
             .no_children(),
@@ -90,9 +103,31 @@ pub fn widget_contracts() -> Vec<ComponentContract> {
     ]
 }
 
+#[doc = include_str!("builtin_contracts.doc/mounted_element_contracts.md")]
+#[must_use]
+pub fn mounted_element_contracts() -> Vec<ComponentContract> {
+    ["input", "textarea", "checkbox", "radio", "select"]
+        .into_iter()
+        .map(|tag| ComponentContract::new(tag).no_children())
+        .collect()
+}
+
+#[doc = include_str!("builtin_contracts.doc/default_contracts.md")]
+#[must_use]
+pub fn default_contracts() -> Vec<ComponentContract> {
+    builtin_contracts()
+        .into_iter()
+        .chain(widget_contracts())
+        .chain(mounted_element_contracts())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ComponentContract, builtin_contracts, widget_contracts};
+    use super::{
+        ComponentContract, builtin_contracts, default_contracts, mounted_element_contracts,
+        widget_contracts,
+    };
 
     /// The contract for `tag`, from the widget set.
     fn widget(tag: &str) -> ComponentContract {
@@ -165,6 +200,39 @@ mod tests {
     }
 
     #[test]
+    fn radio_spells_its_selection_the_way_the_node_does() {
+        // `selected` names the builder's method; `checked` names the thing on the
+        // node, and it is the one the cascade reads for `:checked`. Now that an
+        // authored `<Radio/>` mounts a control that paints from that state, the two
+        // spellings could disagree — so there is only one.
+        let radio = widget("Radio");
+        assert_eq!(radio.required_props(), &["label".into()]);
+        assert!(radio.allowed_props().contains(&"checked".into()));
+        assert!(
+            !radio.allowed_props().contains(&"selected".into()),
+            "a second spelling of the selection would be a second answer to \
+             `radio:checked`"
+        );
+    }
+
+    #[test]
+    fn select_states_its_options_as_a_prop_rather_than_as_children() {
+        // The options are labels, not views (`Select::with_options` takes
+        // `Into<Box<str>>`), and the control synthesises each `.select-option` row
+        // around them. So they are a prop, and the child surface stays closed —
+        // an authored `<option>` would be a vocabulary nothing renders.
+        let select = widget("Select");
+        assert!(select.required_props().is_empty(), "a bare select is legal");
+        for prop in ["options", "selected", "open", "disabled"] {
+            assert!(
+                select.allowed_props().contains(&prop.into()),
+                "Select must admit {prop}"
+            );
+        }
+        assert!(select.children().is_none());
+    }
+
+    #[test]
     fn collection_widgets_stay_open_rather_than_inventing_a_vocabulary() {
         // Menu/Tabs/Tree/Table/Docking take typed Rust content with no string
         // spelling; registering an open PROP surface keeps them honestly unchecked
@@ -195,6 +263,73 @@ mod tests {
                 contract.component(),
                 contract.children()
             );
+        }
+    }
+
+    #[test]
+    fn a_base_element_whose_factory_owns_its_children_forbids_authored_ones() {
+        // `BuiltinComponents` registers a factory whose component owns its
+        // children for `<input>`, `<textarea>`, `<checkbox>`, `<radio>` and
+        // `<select>`, and a mounted component's output REPLACES its host's
+        // children — so an authored child under one of these tags is thrown away
+        // by the frame that renders it. Silently, and because of a registration
+        // made somewhere else. These five entries turn that into a compile error
+        // that names the tag. `<button>` mounts too and is deliberately NOT here:
+        // its component renders the default-slot outlet, so the author's children
+        // are projected back rather than replaced.
+        let contracts = mounted_element_contracts();
+        let names: Vec<&str> = contracts.iter().map(ComponentContract::component).collect();
+        assert_eq!(
+            names,
+            vec!["input", "textarea", "checkbox", "radio", "select"]
+        );
+        for contract in &contracts {
+            assert!(
+                contract.children().is_none(),
+                "{} must forbid children",
+                contract.component()
+            );
+            // Only the child policy. Declaring a prop would CLOSE the prop surface
+            // (see `check_props`), rejecting attributes these tags accept today.
+            assert!(
+                contract.required_props().is_empty() && contract.allowed_props().is_empty(),
+                "{} states a prop surface it was not asked for",
+                contract.component()
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_table_is_the_three_tables_and_nothing_else() {
+        // What a default compile knows about, stated once. The order is the claim
+        // that matters: a registry keyed by tag string lets a later entry win, and
+        // the base-element policies are last so that a future collision resolves
+        // towards the tag whose factory owns its children.
+        let default = default_contracts();
+        assert_eq!(
+            default.len(),
+            builtin_contracts().len()
+                + widget_contracts().len()
+                + mounted_element_contracts().len()
+        );
+        let names: Vec<&str> = default.iter().map(ComponentContract::component).collect();
+        assert_eq!(names.first(), Some(&"Container"));
+        assert_eq!(names.last(), Some(&"select"));
+    }
+
+    #[test]
+    fn the_tags_that_mount_nothing_keep_their_children() {
+        // The boundary, stated from the other side, and for two DIFFERENT reasons:
+        // `<table>` renders its authored children because no factory claims that id
+        // at all, while `<button>` renders them although a factory does — its
+        // component is the §2.12 default-slot outlet, so the children are projected
+        // back rather than replaced. A contract here would forbid markup that works
+        // in both cases, so the rule is "whose factory owns its children", not
+        // "every base element" and not "every unmounted one".
+        let contracts = mounted_element_contracts();
+        let names: Vec<&str> = contracts.iter().map(ComponentContract::component).collect();
+        for tag in ["button", "table", "div", "img"] {
+            assert!(!names.contains(&tag), "{tag} must stay permissive");
         }
     }
 

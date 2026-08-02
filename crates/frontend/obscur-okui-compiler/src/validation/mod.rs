@@ -1,7 +1,9 @@
 #![doc = include_str!("mod.doc/_module.md")]
 
 mod builtin_contracts;
-pub use builtin_contracts::{builtin_contracts, widget_contracts};
+pub use builtin_contracts::{
+    builtin_contracts, default_contracts, mounted_element_contracts, widget_contracts,
+};
 mod capability_validator;
 pub use capability_validator::CapabilityValidator;
 mod child_policy;

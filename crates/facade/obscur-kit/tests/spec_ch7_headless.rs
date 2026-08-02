@@ -14,7 +14,9 @@ use obscur_kit::identity::ComponentId;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::selector::PseudoState;
-use obscur_kit::view::view::{CLASS, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_kit::view::view::{
+    CLASS, LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+};
 use support::{at, drive, el, geom, runtime, txt, view};
 
 const VW: f32 = 1000.0;
@@ -175,7 +177,10 @@ fn scene_paint_and_accessibility_are_produced_without_a_renderer() {
 #[doc = include_str!("spec_ch7_headless.doc/button.md")]
 fn button(id: u64, class: &str) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))
-        .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+        .with_prop(ViewProperty::new(
+            LOCAL_NAME,
+            ViewValue::Text("button".into()),
+        ))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
         .with_children(ViewFragment::from_nodes(vec![ViewNode::text(class)]))
 }

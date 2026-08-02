@@ -38,7 +38,9 @@ Only `Dialog` accepts authored children; every other widget builds its
 children inside its own `view()` from its own model, so the children an author
 writes reach no tree at all. That used to be inexpressible — an empty
 allowed-children list meant *any* child — so `<Button>OK</Button>` compiled
-into a text run nothing mounts. Each of those eleven widgets now declares
+clean, saying the button's content twice in a position this spelling does not
+read (`<Button/>` states it as the `label` these contracts require; the base
+element `<button>…</button>` is the spelling whose content is its children). Each of those eleven widgets now declares
 [`no_children`](ComponentContract::no_children)
 ([`ChildPolicy::None`](crate::validation::ChildPolicy::None)), including the
 five collection widgets: `<Tabs><Tab/></Tabs>` mounted an empty widget in

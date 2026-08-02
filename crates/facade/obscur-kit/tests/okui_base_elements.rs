@@ -11,6 +11,7 @@ use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::{InternedSymbol, RuntimeId};
+use obscur_kit::interaction::command::{KeyEvent, LogicalKey, NamedKey, PhysicalKey};
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 use obscur_kit::okui_compiler::bridge::UiIrViewBridge;
 use obscur_kit::okui_compiler::compile::Compiler;
@@ -20,10 +21,16 @@ use obscur_kit::primitives::Container;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::runtime::orchestration::NodeInspection;
 use obscur_kit::style::matching::Stylesheet;
+use obscur_kit::style::property::PropertyId;
 use obscur_kit::ui_ir::name_binding::{self, TagPosition};
 use obscur_kit::ui_macros::okui;
 use obscur_kit::view::view::View;
 use obscur_kit::widgets::button::Button;
+use obscur_kit::widgets::checkbox::Checkbox;
+use obscur_kit::widgets::input::Input;
+use obscur_kit::widgets::radio::Radio;
+use obscur_kit::widgets::select::Select;
+use obscur_kit::widgets::table::Table;
 
 #[doc = include_str!("okui_base_elements.doc/stylesheet.md")]
 fn stylesheet(css: &str) -> Stylesheet {
@@ -144,23 +151,43 @@ fn the_interpreted_okui_path_names_the_same_element() {
 }
 
 #[test]
-fn an_authored_type_attribute_wins_the_overloaded_slot() {
-    // `TYPE` is one symbol carrying two things — the CSS local name and HTML's own
-    // `<button type="submit">` — and the author owns it. So the node's type is
-    // `submit`, `button { … }` no longer matches it, and `submit { … }` does. That
-    // is the price of the overload, stated rather than hidden: an author who wants
-    // both writes a class.
+fn an_authored_type_attribute_and_the_tag_are_two_channels() {
+    // THE defect this vocabulary work exists to close. `<button type="submit">` is
+    // ordinary, idiomatic markup, and it used to be an element whose CSS *type* was
+    // `submit`: it matched no `button { … }` rule, silently lost the whole of its UA
+    // styling, and `[type=submit]` could not be written to mean the attribute
+    // because the attribute lookup returned the local name. The tag says *what a
+    // thing is*, `type` says *which kind*, and both now reach the cascade.
     let view = okui! {
         <div class="root">
             <button type="submit" class="btn">"OK"</button>
         </div>
     };
+    // Still a `button` to a type selector.
     let nodes = render(&view, &[stylesheet("button { width: 120px }")]);
-    assert_eq!(node(&nodes, "btn").local_name.as_deref(), Some("submit"));
-    assert_ne!(width(&nodes, "btn"), 120.0);
+    assert_eq!(node(&nodes, "btn").local_name.as_deref(), Some("button"));
+    assert_eq!(width(&nodes, "btn"), 120.0);
 
-    let matched = render(&view, &[stylesheet("submit { width: 90px }")]);
-    assert_eq!(width(&matched, "btn"), 90.0);
+    // And the authored attribute is what `[type=submit]` reads.
+    let by_attribute = render(&view, &[stylesheet("[type=submit] { width: 90px }")]);
+    assert_eq!(width(&by_attribute, "btn"), 90.0);
+
+    // Both at once, from one sheet: the type selector and the attribute selector
+    // name the same node, and the more specific attribute rule wins the width.
+    let both = render(
+        &view,
+        &[stylesheet(
+            "button { width: 120px; height: 40px } [type=submit] { width: 90px }",
+        )],
+    );
+    assert_eq!(width(&both, "btn"), 90.0);
+    assert_eq!(node(&both, "btn").bounds.map(|r| r.size.height), Some(40.0));
+
+    // The tag never answers for the attribute: a `<button>` with no authored `type`
+    // matches no `[type=…]` rule at all.
+    let plain = okui! { <div class="root"><button class="btn">"OK"</button></div> };
+    let unmatched = render(&plain, &[stylesheet("[type=button] { width: 77px }")]);
+    assert_ne!(width(&unmatched, "btn"), 77.0);
 }
 
 #[test]
@@ -281,5 +308,179 @@ fn the_ua_stylesheet_reaches_an_authored_button() {
         width(&nodes, "btn") > 40.0,
         "the UA padding/border must be laid out: {:?}",
         node(&nodes, "btn").bounds
+    );
+}
+
+#[test]
+fn every_control_the_ua_sheet_styles_is_the_shipped_widgets_id_in_markup() {
+    // `<button>` was the only lowercase control tag; the rest named no built-in and
+    // fell through to `Container`, so `<checkbox>` was a styled box with no
+    // behaviour standing beside `Checkbox::new()`, the real control — one CSS type
+    // over two different trees. Rendered rather than resolved, because the claim is
+    // about the node that reaches the tree.
+    let view = okui! {
+        <div class="root">
+            <input class="tf"/>
+            <textarea class="ta"/>
+            <checkbox class="cb"/>
+            <radio class="rb"/>
+            <select class="sel"/>
+            <table class="tbl"/>
+        </div>
+    };
+    let nodes = render(&view, &[]);
+    for (class, local_name, component) in [
+        ("tf", "input", Input::COMPONENT_ID),
+        ("ta", "textarea", Input::COMPONENT_ID),
+        ("cb", "checkbox", Checkbox::COMPONENT_ID),
+        ("rb", "radio", Radio::COMPONENT_ID),
+        ("sel", "select", Select::COMPONENT_ID),
+        ("tbl", "table", Table::COMPONENT_ID),
+    ] {
+        let element = node(&nodes, class);
+        assert_eq!(element.local_name.as_deref(), Some(local_name), "{class}");
+        assert_eq!(element.component, Some(component), "{class}");
+        assert_ne!(element.component, Some(Container::COMPONENT_ID), "{class}");
+    }
+}
+
+#[test]
+fn an_authored_textarea_is_the_input_widget_and_still_the_multiline_one() {
+    // The interesting spelling, and it needed no new mechanism. HTML's two
+    // text-entry tags are one widget here, so `<textarea>` binds to
+    // `Input::COMPONENT_ID` exactly as `<input>` does — and the distinction they
+    // carry survives in the LOCAL_NAME, which is what both the cascade and
+    // `EditableField::is_multiline` read. So one id, and still two behaviours:
+    // the UA sheet gives the single-line field `white-space: pre` (no wrapping,
+    // no trailing-space hang) and the multi-line one `pre-wrap`.
+    let view = okui! {
+        <div class="root">
+            <input class="tf"/>
+            <textarea class="ta"/>
+        </div>
+    };
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0));
+    runtime.set_default_stylesheet(obscur_kit::ua_stylesheet());
+    runtime.render_now(&view, &[]);
+    let nodes = runtime.inspect_snapshot().nodes;
+
+    let white_space = |class: &str| {
+        runtime
+            .computed_style(node(&nodes, class).node)
+            .and_then(|style| style.get(PropertyId::WhiteSpace))
+            .map_or_else(
+                || panic!("no white-space on .{class}"),
+                |value| format!("{value:?}"),
+            )
+    };
+    assert_eq!(
+        node(&nodes, "ta").component,
+        node(&nodes, "tf").component,
+        "one control, two tags"
+    );
+    assert_ne!(
+        white_space("ta"),
+        white_space("tf"),
+        "the local name is what keeps `input` and `textarea` two behaviours: {:?} vs {:?}",
+        white_space("ta"),
+        white_space("tf")
+    );
+    // And the UA's intrinsic sizes, which are also written as type selectors: the
+    // 180px/240px content widths of `input`/`textarea` plus the 13px padding and
+    // 1.5px border the two share.
+    assert_eq!(width(&nodes, "tf"), 180.0 + 26.0 + 3.0);
+    assert_eq!(width(&nodes, "ta"), 240.0 + 26.0 + 3.0);
+}
+
+#[doc = include_str!("okui_base_elements.doc/typed_into.md")]
+fn typed_into(class: &str) -> Option<String> {
+    let view = okui! {
+        <div class="root">
+            <input class="tf" on:input={edit}/>
+            <textarea class="ta" on:input={edit}/>
+        </div>
+    };
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 400.0));
+    runtime.set_default_stylesheet(obscur_kit::ua_stylesheet());
+    runtime.on_text_input(InternedSymbol::named("edit"), |_| {});
+    runtime.render_now(&view, &[]);
+
+    // Press inside the field so the runtime seeds an editing session on it.
+    let bounds = node(&runtime.inspect_snapshot().nodes, class)
+        .bounds
+        .expect("the UA sheet gives the field a box");
+    let at = Point::new(bounds.origin.x + 5.0, bounds.origin.y + 5.0);
+    for kind in [PointerEventKind::Down, PointerEventKind::Up] {
+        let _ = runtime.handle_pointer(
+            PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, at).as_trusted(),
+        );
+    }
+    for key in [
+        KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character('a'))),
+        KeyEvent::press(PhysicalKey::Enter, Some(LogicalKey::named(NamedKey::Enter))),
+        KeyEvent::press(PhysicalKey::KeyB, Some(LogicalKey::character('b'))),
+    ] {
+        runtime.handle_key(key);
+    }
+    runtime.editing_text().map(str::to_owned)
+}
+
+#[test]
+fn an_authored_textareas_enter_inserts_a_newline_and_an_inputs_does_not() {
+    // The behavioural half, and the reason `textarea` needed no second component
+    // id: `EditableField::is_multiline` decides multi-line editing by
+    // `local_name() == "textarea"`, and the tag is where the local name comes
+    // from. So markup gets the distinction from the mechanism that was already
+    // there — an `Enter` in the area is an edit, and in the field it is an
+    // activation that inserts nothing.
+    assert_eq!(typed_into("ta").as_deref(), Some("a\nb"));
+    assert_eq!(typed_into("tf").as_deref(), Some("ab"));
+}
+
+#[test]
+fn the_ua_stylesheet_reaches_an_authored_checkbox() {
+    // `<checkbox>` used to be a `div`: it took the `checkbox { … }` rules (a local
+    // name has always come from the tag) but not the control's identity, so markup
+    // and `Checkbox::new()` were two nodes that merely looked alike. Both halves
+    // are asserted here — the id, and the UA look that goes with it.
+    let view = okui! {
+        <div class="root">
+            <checkbox class="cb"/>
+            <div class="plain"/>
+        </div>
+    };
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 200.0));
+    runtime.set_default_stylesheet(obscur_kit::ua_stylesheet());
+    runtime.render_now(&view, &[]);
+    let nodes = runtime.inspect_snapshot().nodes;
+
+    assert_eq!(node(&nodes, "cb").component, Some(Checkbox::COMPONENT_ID));
+    // The `checkbox { … }` rule sets no background (a bare type rule would box the
+    // whole labelled control rather than the indicator); what it does set is the
+    // ink and a flex row, so those are what the assertion reads.
+    let computed = |class: &str, property: PropertyId| {
+        runtime
+            .computed_style(node(&nodes, class).node)
+            .and_then(|style| style.get(property))
+            .map(|value| format!("{value:?}"))
+    };
+    let ink = computed("cb", PropertyId::Color).expect("the UA rule declares a colour");
+    assert!(
+        ink.contains("0.16862746"),
+        "the UA `checkbox` rule must reach an authored checkbox: {ink}"
+    );
+    assert!(
+        computed("cb", PropertyId::Display).is_some(),
+        "…and give it the indicator/label row the rule declares"
+    );
+    assert_eq!(
+        computed("plain", PropertyId::Display),
+        None,
+        "no UA rule names `div`, so the box beside it declares nothing at all"
+    );
+    assert_ne!(
+        computed("plain", PropertyId::Color),
+        Some(ink),
+        "…and keeps the initial ink, where the control's is the sheet's own"
     );
 }

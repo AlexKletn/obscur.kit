@@ -9,3 +9,12 @@ element **itself**: the exported-part selector `Component::part(placeholder)`
 is matched with the field as the host, so `Input::part(placeholder) { color }`
 recolours the hint without the field having to be a component host. Its text is
 the reserved `PLACEHOLDER` attribute the widget emits.
+
+**Which value the emptiness rule reads** depends on which side wrote the node.
+An application declaring a *controlled* value writes the reserved `VALUE`
+attribute — `Input::view` always does — and that value is then the whole answer,
+empty or not. Authored markup deliberately writes no such attribute (it would
+make every authored field uneditable), so for those nodes the value is the text
+the field renders, which is the mounted control's editable run. Reading only the
+reserved attribute would paint the hint on top of an authored
+`<input value="abc" placeholder="Search"/>`.

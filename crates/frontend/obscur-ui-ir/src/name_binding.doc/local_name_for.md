@@ -4,32 +4,26 @@ or [`None`] when it contributes none.
 This is the whole of "a base element, as in HTML": a `<button>` an author
 wrote must be what a `button { … }` type selector matches (spec §4.13, "type,
 class, id, attribute, descendant/child/sibling combinators"), and the matcher
-reads an element's local name from the reserved [`TYPE`] property — nothing
-else. So both lowering paths append a `TYPE` property nobody authored, and
-this function is the single definition of when and to what, because the two
-paths must emit the same bytes.
+reads an element's local name from the reserved [`LOCAL_NAME`] property —
+nothing else. So both lowering paths append a [`LOCAL_NAME`] property nobody
+authored, and this function is the single definition of when and to what,
+because the two paths must emit the same bytes.
 
-# `type` is two channels, and the author owns it
+# An element-position tag always contributes its name
 
-[`TYPE`] is overloaded, and honestly so: it is *both* the element's local name
-(this function's implicit value) *and* the reserved symbol an authored
-`type="…"` attribute binds to — and HTML really does write
-`<button type="submit">`, so the collision is not hypothetical. There is one
-slot and two writers, so the rule is that the **author wins**: given any
-authored attribute that binds to `TYPE`, this returns [`None`] and the node
-carries the authored value alone. `<button type="submit">` is therefore an
-element whose CSS type is `submit`, which is the price of the overload and not
-a thing to paper over: an author who wants both spellings out of one node has
-to say so with a class. (`authored_attributes` is asked for by *name*, not by
-resolved symbol, so the caller cannot forget to route it through
-[`attr_symbol_on`] — this function does that itself, on the same tag.)
+There is nothing to arbitrate. [`LOCAL_NAME`] is the element's identity and
+carries only the tag; HTML's own `type="…"` is a separate reserved symbol
+([`TYPE`]) that only the author writes. So `<button type="submit">` — ordinary,
+idiomatic markup — is a `button` *and* answers to `[type=submit]`, where the
+two once shared one slot and the attribute silently took the whole of the
+element's UA styling with it.
 
 # A component tag gets none
 
 `<Card/>` is not an element; it names a component, whose own render produces
 the elements — and each of *those* carries its own local name (that is exactly
-what `obscur_widgets::Button::view` sets `TYPE` for). Naming the *host* node
-`Card` would invent a CSS type no vocabulary has, and a costly one: a type
+what `obscur_widgets::Button::view` sets [`LOCAL_NAME`] for). Naming the *host*
+node `Card` would invent a CSS type no vocabulary has, and a costly one: a type
 selector is matched ASCII-case-**insensitively**
 (`SelectorMatcher::matches_simple`), so a `<Card/>` and a hypothetical `<card>`
 element would be indistinguishable to the cascade. A component's node

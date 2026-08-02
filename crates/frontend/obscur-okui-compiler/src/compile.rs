@@ -15,7 +15,7 @@ use crate::typing::TypeError;
 use crate::validation::{
     CapabilityValidator, CollectionValidator, CommandSurface, CommandValidator, ComponentContract,
     ContractValidator, ExpressionValidator, OutletValidator, ValidationDiagnostic,
-    builtin_contracts, widget_contracts,
+    default_contracts,
 };
 
 #[doc = include_str!("compile.doc/ContractRegistry.md")]
@@ -35,7 +35,7 @@ impl ContractRegistry {
     #[must_use]
     pub fn builtins() -> Self {
         let mut registry = Self::new();
-        for contract in builtin_contracts().into_iter().chain(widget_contracts()) {
+        for contract in default_contracts() {
             registry.register(contract);
         }
         registry
@@ -417,6 +417,46 @@ mod tests {
             "diagnostics: {:?}",
             result.diagnostics()
         );
+    }
+
+    #[test]
+    fn a_mounted_base_element_reports_authored_children_rather_than_dropping_them() {
+        // The default registry, no `with_registry`. `<textarea>Hello</textarea>` is
+        // the case that forced this: HTML makes a textarea's child text its default
+        // value, this toolkit spells that `value="…"`, and `BuiltinComponents` now
+        // mounts a component whose output replaces the host's children — so that
+        // markup would have rendered an EMPTY field. It reports instead.
+        let content = Compiler::new("app.okui").compile(&document("<textarea>Hello</textarea>"));
+        assert!(content.has_errors(), "an authored value must not vanish");
+        // An element child is the same fault: `<select><option/></select>` reaches
+        // no tree either, because `SelectProps` reads a comma-separated `options`.
+        let child = Compiler::new("app.okui").compile(&document("<select><option/></select>"));
+        assert!(child.has_errors(), "diagnostics: {:?}", child.diagnostics());
+
+        // The migration compiles, and so does every prop these tags already took —
+        // only the CHILD surface was closed, so nothing else had to change.
+        let ok = Compiler::new("app.okui").compile(&document(
+            "<div><textarea value=\"Hello\" class=\"ta\" placeholder=\"Notes\" \
+             on:input=edit/><input readonly=\"true\"/></div>",
+        ));
+        assert!(!ok.has_errors(), "diagnostics: {:?}", ok.diagnostics());
+    }
+
+    #[test]
+    fn a_base_element_that_mounts_nothing_still_takes_its_children() {
+        // The other half, and the campaign's line: `<button>` and `<table>` keep
+        // their children — `<table>` because nothing mounts on it, `<button>`
+        // because what mounts on it renders the §2.12 default-slot outlet and so
+        // owns no children of its own. A contract that forbade them would break
+        // markup that works today.
+        for src in ["<button>Save</button>", "<table><tr/></table>"] {
+            let result = Compiler::new("app.okui").compile(&document(src));
+            assert!(
+                !result.has_errors(),
+                "{src} must still compile: {:?}",
+                result.diagnostics()
+            );
+        }
     }
 
     #[test]

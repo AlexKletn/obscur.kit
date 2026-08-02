@@ -1041,9 +1041,10 @@ mod tests {
         );
 
         // The other side of the line: a lowercase `<button>` is a base element
-        // whose authored children are the only thing that renders (nothing mounts
-        // the widget's view for it), so the rule must not touch it. Contracts are
-        // keyed by the authored tag, which is what keeps the two apart.
+        // whose authored children are the only thing that renders (what mounts on
+        // it renders the default-slot outlet, which hands them back), so the rule
+        // must not touch it. Contracts are keyed by the authored tag, which is
+        // what keeps the two apart.
         assert!(
             DslMacro::to_document(quote! { <button class="btn"><span>"press"</span></button> })
                 .is_ok(),

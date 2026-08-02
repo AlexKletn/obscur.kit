@@ -50,6 +50,11 @@ pub(super) fn run(
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), window.size());
     let boot = KitBootstrap::new();
     boot.install_default_stylesheet(&mut runtime);
+    // The controls the UA sheet styles, mounted rather than merely named: without
+    // this an authored `<checkbox>` on a panel is an empty box with the right id.
+    // The only failure is a duplicate id, which cannot happen on a runtime this
+    // function has just created.
+    let _ = boot.install_builtin_components(&mut runtime);
     boot.install_image_resources(&mut runtime, ".");
     boot.install_vector_resources(&mut runtime);
     let _spawner = boot.install_blocking_executor(&mut runtime);

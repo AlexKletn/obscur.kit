@@ -194,6 +194,11 @@ fn run_inner(
     // pipeline, filesystem images, and the threaded blocking executor (correct for
     // a standalone window — it is not a headless host).
     boot.install_default_stylesheet(&mut runtime);
+    // …and the controls that sheet styles, mounted rather than merely named: the id
+    // an authored `<checkbox>` carries is only a handle until a factory sits under
+    // it. The only failure is a duplicate id, which cannot happen on a runtime this
+    // function has just created.
+    let _ = boot.install_builtin_components(&mut runtime);
     let mut css = CssPipeline::new();
     // The authored set goes in through the same handle a later replacement uses, so
     // the identity and revision each source is stamped with (§4.12's cache key) is

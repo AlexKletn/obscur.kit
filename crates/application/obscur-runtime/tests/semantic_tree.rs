@@ -11,7 +11,7 @@ use obscur_accessibility::tree::{SemanticSnapshot, SemanticUpdate};
 use obscur_identity::ComponentId;
 use obscur_runtime::UiRuntime;
 use obscur_testkit::fixture::{ButtonElement, CounterPanel, TestFixture};
-use obscur_view::view::{TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 /// A bridge that keeps what it was handed. Counting pushes would let a test
 /// pass while the runtime published an empty or stale tree, so this retains
@@ -59,7 +59,10 @@ fn semantic_snapshot_reflects_the_live_rendered_tree() {
     // A `button` element (CSS type) carrying a "Save" text child.
     let view = View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(20))
-            .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+            .with_prop(ViewProperty::new(
+                LOCAL_NAME,
+                ViewValue::Text("button".into()),
+            ))
             .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")])),
     ]));
 

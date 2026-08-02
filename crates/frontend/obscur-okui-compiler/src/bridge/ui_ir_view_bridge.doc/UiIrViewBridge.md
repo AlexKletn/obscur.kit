@@ -20,10 +20,11 @@ runtime desired [`View`], connecting the frontend IR to the reconciler
   [`ViewEventBinding`]s (`click`/`input`/`change` bind to the reserved
   `EVENT_*` symbols the runtime dispatcher resolves) and the node's optional
   [`key`](UiIrNode::key) becomes a [`ViewKey`]. An **element** tag additionally
-  becomes the node's *local name* — the reserved `TYPE` property a §4.13 type
-  selector matches, so `button { … }` styles an authored `<button>` — under
-  [`name_binding::local_name_for`], which also decides that an authored
-  `type="…"` wins that slot and that a component tag contributes no name.
+  becomes the node's *local name* — the reserved `LOCAL_NAME` property a §4.13
+  type selector matches, so `button { … }` styles an authored `<button>` — under
+  [`name_binding::local_name_for`], which also decides that a component tag
+  contributes no name. An authored `type="…"` is a separate symbol and travels
+  beside it, not instead of it.
 - **Text** → a [`ViewNode::Text`] carrying the literal content (and key, if
   any).
 - **Fragment** → its children spliced into the surrounding fragment (a

@@ -795,28 +795,36 @@ mod tests {
             struct MyProps {
                 disabled: bool,
                 placeholder: String,
+                value: String,
             }
         });
 
-        // `disabled` is reserved: a low fixed constant, not a hash at all.
-        let disabled = name_symbol("disabled");
-        assert_eq!(disabled, 0x0000_0005, "reserved DISABLED symbol");
-        assert!(
-            generated.contains(&format!("from_raw ({disabled})")),
-            "{generated}"
-        );
-        assert!(
-            !generated.contains(&format!("from_raw ({})", fnv32("disabled"))),
-            "the bare hash must not appear: {generated}"
-        );
+        // Two reserved names, each a low fixed constant rather than a hash at
+        // all. `placeholder` is here because it became reserved the day an
+        // authored `<input placeholder="…">` had to reach the §4.16 synthetic
+        // part the runtime paints from that symbol — which is exactly the class
+        // of change this test exists to catch, since the derive would otherwise
+        // keep emitting a hash the painter never reads.
+        for (name, reserved) in [("disabled", 0x0000_0005), ("placeholder", 0x0000_0009)] {
+            let symbol = name_symbol(name);
+            assert_eq!(symbol, reserved, "reserved {name} symbol");
+            assert!(
+                generated.contains(&format!("from_raw ({symbol})")),
+                "{generated}"
+            );
+            assert!(
+                !generated.contains(&format!("from_raw ({})", fnv32(name))),
+                "the bare hash must not appear for {name}: {generated}"
+            );
+        }
 
-        // `placeholder` is not reserved: fallback = hash | 0x8000_0000, and its
-        // hash does NOT already carry the top bit, so the two really differ.
-        let placeholder = name_symbol("placeholder");
-        assert_eq!(placeholder, fnv32("placeholder") | 0x8000_0000);
-        assert_ne!(placeholder, fnv32("placeholder"));
+        // `value` is not reserved: fallback = hash | 0x8000_0000, and its hash
+        // does NOT already carry the top bit, so the two really differ.
+        let value = name_symbol("value");
+        assert_eq!(value, fnv32("value") | 0x8000_0000);
+        assert_ne!(value, fnv32("value"));
         assert!(
-            generated.contains(&format!("from_raw ({placeholder})")),
+            generated.contains(&format!("from_raw ({value})")),
             "{generated}"
         );
     }

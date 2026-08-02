@@ -6,7 +6,7 @@ use obscur_kit::geometry::Size;
 use obscur_kit::identity::{ComponentId, RuntimeId};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::view::view::{
-    CHECKED, CLASS, DISABLED, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    CHECKED, CLASS, DISABLED, LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 use std::cell::RefCell;
@@ -19,7 +19,10 @@ fn runtime() -> UiRuntime {
 #[doc = include_str!("accessibility_output_path.doc/element.md")]
 fn element(component: u64, local_name: &str, label: &str, state: &[ViewProperty]) -> ViewNode {
     let mut node = ViewNode::element(ComponentId::from_raw(component))
-        .with_prop(ViewProperty::new(TYPE, ViewValue::Text(local_name.into())))
+        .with_prop(ViewProperty::new(
+            LOCAL_NAME,
+            ViewValue::Text(local_name.into()),
+        ))
         .with_children(ViewFragment::from_nodes(vec![ViewNode::text(label)]));
     for prop in state {
         node = node.with_prop(prop.clone());
@@ -33,7 +36,10 @@ fn panel_view() -> View {
     let checked = ViewProperty::new(CHECKED, ViewValue::Bool(true));
     View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(1))
-            .with_prop(ViewProperty::new(TYPE, ViewValue::Text("region".into())))
+            .with_prop(ViewProperty::new(
+                LOCAL_NAME,
+                ViewValue::Text("region".into()),
+            ))
             .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
             .with_children(ViewFragment::from_nodes(vec![
                 element(2, "button", "Save", std::slice::from_ref(&disabled)),

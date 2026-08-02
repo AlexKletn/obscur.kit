@@ -4,9 +4,11 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    CHECKED as ATTR_CHECKED, CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, TYPE, View,
+    CHECKED as ATTR_CHECKED, CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, LOCAL_NAME, View,
     ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
+
+use super::CheckboxProps;
 
 #[doc = include_str!("checkbox.doc/Checkbox.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +33,7 @@ impl Checkbox {
     #[doc = include_str!("checkbox.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0301);
     #[doc = include_str!("checkbox.doc/PROP_CHECKED.md")]
-    const PROP_CHECKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0302);
+    pub(crate) const PROP_CHECKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0302);
 
     #[doc = include_str!("checkbox.doc/new.md")]
     #[must_use]
@@ -143,7 +145,7 @@ impl Checkbox {
         let mut node = ViewNode::element(Self::COMPONENT_ID)
             // Stable CSS type / local name so a UA (or author) `checkbox { … }`
             // type selector matches this control (spec §4.13). Additive.
-            .with_prop(ViewProperty::new(TYPE, ViewValue::from("checkbox")))
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("checkbox")))
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
                 ViewValue::from("checkbox"),
@@ -155,6 +157,15 @@ impl Checkbox {
             .with_prop(ViewProperty::new(
                 Self::PROP_CHECKED,
                 ViewValue::Int(checked),
+            ))
+            // The authored `label` attribute, emitted by the Rust builder too, so
+            // this node and an authored `<checkbox label="…"/>` carry the SAME
+            // props. That is what makes mounting `CheckboxComponent` on a node
+            // this method built idempotent: the component decodes these props and
+            // regenerates exactly the children installed below.
+            .with_prop(ViewProperty::new(
+                CheckboxProps::LABEL,
+                ViewValue::from(&*self.label),
             ))
             .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
         // Reserved structural-state attributes — emitted only when set, so a
@@ -168,29 +179,34 @@ impl Checkbox {
         if self.disabled {
             node = node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)));
         }
+        let node = node.with_children(Self::contents(self.checked, &self.label));
+        View::single(node)
+    }
+
+    #[doc = include_str!("checkbox.doc/contents.md")]
+    #[must_use]
+    pub(crate) fn contents(checked: Option<bool>, label: &str) -> ViewFragment {
         // The boxed indicator sub-part: a `.checkbox-box` element carrying a
         // state class, with the tick / bar as its child.
         let mut box_class = String::from("checkbox-box");
-        let box_child: Vec<ViewNode> = if self.is_checked() {
-            box_class.push_str(" checked");
-            vec![Text::new("✓").into_view_node()]
-        } else if self.is_indeterminate() {
-            box_class.push_str(" indeterminate");
-            vec![
-                ViewNode::element(Self::BAR_ID)
-                    .with_prop(ViewProperty::new(CLASS, ViewValue::from("checkbox-bar"))),
-            ]
-        } else {
-            Vec::new()
+        let box_child: Vec<ViewNode> = match checked {
+            Some(true) => {
+                box_class.push_str(" checked");
+                vec![Text::new("✓").into_view_node()]
+            }
+            None => {
+                box_class.push_str(" indeterminate");
+                vec![
+                    ViewNode::element(Self::BAR_ID)
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::from("checkbox-bar"))),
+                ]
+            }
+            Some(false) => Vec::new(),
         };
         let indicator = ViewNode::element(Self::BOX_ID)
             .with_prop(ViewProperty::new(CLASS, ViewValue::from(box_class)))
             .with_children(ViewFragment::from_nodes(box_child));
-        let node = node.with_children(ViewFragment::from_nodes(vec![
-            indicator,
-            Text::new(self.label.clone()).into_view_node(),
-        ]));
-        View::single(node)
+        ViewFragment::from_nodes(vec![indicator, Text::new(label).into_view_node()])
     }
 }
 

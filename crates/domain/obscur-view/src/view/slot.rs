@@ -10,6 +10,12 @@ pub const SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0301);
 #[doc = include_str!("slot.doc/SLOT_OUTLET.md")]
 pub const SLOT_OUTLET: ComponentId = ComponentId::from_raw(0x00B0_0001);
 
+#[doc = include_str!("slot.doc/DEFAULT_SLOT.md")]
+pub const DEFAULT_SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0302);
+
+#[doc = include_str!("slot.doc/FIRST_MOUNTABLE_COMPONENT.md")]
+const FIRST_MOUNTABLE_COMPONENT: u64 = 0x00D0_0000;
+
 #[doc = include_str!("slot.doc/slot_assignment.md")]
 #[must_use]
 pub fn slot_assignment(props: &[ViewProperty]) -> Option<&str> {
@@ -31,13 +37,19 @@ pub fn assigns_slots(nodes: &[ViewNode]) -> bool {
     })
 }
 
+#[doc = include_str!("slot.doc/may_project_content.md")]
+#[must_use]
+pub fn may_project_content(component: ComponentId) -> bool {
+    component.raw() >= FIRST_MOUNTABLE_COMPONENT
+}
+
 #[doc = include_str!("slot.doc/outlet_name.md")]
-fn outlet_name(node: &ViewNode) -> Option<&str> {
+fn outlet_name(node: &ViewNode) -> &str {
     match node {
         ViewNode::Element {
             component, props, ..
-        } if *component == SLOT_OUTLET => slot_assignment(props),
-        _ => None,
+        } if *component == SLOT_OUTLET => slot_assignment(props).unwrap_or(""),
+        _ => "",
     }
 }
 
@@ -70,14 +82,23 @@ fn project_fragment(fragment: ViewFragment, content: &ViewFragment) -> ViewFragm
     let mut projected: Vec<ViewNode> = Vec::with_capacity(fragment.len());
     for node in fragment.into_nodes() {
         if is_outlet(&node) {
-            // An unnamed outlet names no slot, so nothing is assigned to it.
-            if let Some(name) = outlet_name(&node) {
-                projected.extend(
-                    content
-                        .iter()
-                        .filter(|candidate| assigned_to(candidate, name))
-                        .cloned(),
-                );
+            let name = outlet_name(&node);
+            let before = projected.len();
+            projected.extend(
+                content
+                    .iter()
+                    .filter(|candidate| assigned_to(candidate, name))
+                    .cloned(),
+            );
+            // Fallback content: an outlet nothing filled renders its own
+            // children instead. That is what lets one outlet state both halves
+            // of "the author's content, or this if there is none" —
+            // `<button label="Save"/>` and `<button>Save</button>` are the same
+            // component rendering the same single position.
+            if projected.len() == before
+                && let ViewNode::Element { children, .. } = node
+            {
+                projected.extend(project_fragment(children, content).into_nodes());
             }
         } else {
             projected.push(project_node(node, content));
@@ -109,14 +130,24 @@ fn project_node(node: ViewNode, content: &ViewFragment) -> ViewNode {
 #[doc = include_str!("slot.doc/assigned_to.md")]
 fn assigned_to(node: &ViewNode, name: &str) -> bool {
     match node {
-        ViewNode::Element { props, .. } => slot_assignment(props) == Some(name),
-        ViewNode::Text { .. } => false,
+        ViewNode::Element { props, .. } => match slot_assignment(props) {
+            Some(assigned) => assigned == name,
+            // Content that names no slot belongs to the default one, and to no
+            // named one — the rule that lets `<button>Save</button>` keep its
+            // author's text without the author naming a slot.
+            None => name.is_empty(),
+        },
+        // A text run carries no properties, so it can name no slot: it is
+        // content of the default slot or of nothing.
+        ViewNode::Text { .. } => name.is_empty(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SLOT, SLOT_OUTLET, assigns_slots, project_slots, slot_assignment};
+    use super::{
+        SLOT, SLOT_OUTLET, assigns_slots, may_project_content, project_slots, slot_assignment,
+    };
     use crate::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
     use obscur_identity::ComponentId;
 
@@ -204,8 +235,10 @@ mod tests {
 
     #[test]
     fn an_unassigned_child_reaches_no_outlet() {
-        // §2.12 declares *named* slots. A child naming none is not "the default
-        // one" — there is no default one.
+        // A child naming no slot is content of the DEFAULT slot, and of no named
+        // one: neither region here declares the default outlet, so the loose
+        // child reaches neither. Naming a slot is how an author opts out of the
+        // default; declaring the unnamed outlet is how a component opts in.
         let content = ViewFragment::from_nodes(vec![
             ViewNode::element(BOX)
                 .with_children(ViewFragment::from_nodes(vec![ViewNode::text("loose")])),
@@ -213,6 +246,69 @@ mod tests {
         let projected = project_slots(two_regions(), &content);
         assert!(marks_under(&projected, 0).is_empty());
         assert!(marks_under(&projected, 1).is_empty());
+    }
+
+    #[test]
+    fn the_default_outlet_takes_the_content_that_names_no_slot() {
+        // The whole reason the default slot exists: a text run carries no
+        // properties, so `<button>Save</button>`'s only child can never name a
+        // slot — and a control that could not project it would eat the author's
+        // markup.
+        let output = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(BOX)
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::slot("header")])),
+            ViewNode::element(BOX)
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::slot("")])),
+        ]));
+        let content = ViewFragment::from_nodes(vec![
+            assigned("header", "H"),
+            ViewNode::text("Save"),
+            ViewNode::element(BOX)
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("loose")])),
+        ]);
+        let projected = project_slots(output, &content);
+
+        assert_eq!(marks_under(&projected, 0), ["H"]);
+        assert_eq!(
+            marks_under(&projected, 1),
+            ["Save", "loose"],
+            "the text run and the unassigned element, in authored order — and \
+             not the child that asked for `header`"
+        );
+    }
+
+    #[test]
+    fn an_outlet_nothing_fills_renders_its_fallback() {
+        // The other half of one position: `<button label="Save"/>` names no
+        // content, so the outlet's own children are what renders. An outlet the
+        // author DID fill drops its fallback rather than showing both.
+        let output = || {
+            View::from_fragment(ViewFragment::from_nodes(vec![
+                ViewNode::element(BOX).with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::slot("")
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text("fallback")])),
+                ])),
+            ]))
+        };
+        assert_eq!(
+            marks_under(&project_slots(output(), &ViewFragment::new()), 0),
+            ["fallback"]
+        );
+        let content = ViewFragment::from_nodes(vec![ViewNode::text("Save")]);
+        assert_eq!(marks_under(&project_slots(output(), &content), 0), ["Save"]);
+    }
+
+    #[test]
+    fn only_a_mountable_id_retains_its_content() {
+        // The reconciler's second gate. A primitive and the outlet itself can
+        // host no component, so their children are never anyone's slot content;
+        // a widget and a user component can, and pay one clone for it.
+        assert!(!may_project_content(BOX));
+        assert!(!may_project_content(SLOT_OUTLET));
+        assert!(may_project_content(ComponentId::from_raw(0x00D0_0001)));
+        assert!(may_project_content(ComponentId::from_raw(
+            0x8000_0000_0000_0001
+        )));
     }
 
     #[test]

@@ -56,7 +56,7 @@ fn disabled_control_takes_no_focus_and_fires_no_command() {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use obscur_view::view::{DISABLED, EVENT_CLICK, TYPE, ViewEventBinding};
+    use obscur_view::view::{DISABLED, EVENT_CLICK, LOCAL_NAME, ViewEventBinding};
 
     // A single 100x50 `button` carrying the reserved DISABLED attribute and an
     // `on-click` binding. A native disabled control is inert.
@@ -64,7 +64,7 @@ fn disabled_control_takes_no_focus_and_fires_no_command() {
     let view = View::from_fragment(ViewFragment::from_nodes(vec![
         ViewNode::element(ComponentId::from_raw(200))
             .with_prop(ViewProperty::new(CLASS, ViewValue::Text("a".into())))
-            .with_prop(ViewProperty::new(TYPE, ViewValue::from("button")))
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("button")))
             .with_prop(ViewProperty::new(DISABLED, ViewValue::Bool(true)))
             .with_event(ViewEventBinding::new(EVENT_CLICK, cmd)),
     ]));

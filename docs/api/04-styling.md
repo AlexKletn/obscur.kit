@@ -146,7 +146,22 @@ compiled sheet; `KitBootstrap::install_default_stylesheet(rt)` installs it, and
 It gives the base controls a grayscale "wireframe" look — ink `#2b2a27` on paper
 `#faf9f6`, `1.5px` borders, `2px` radii — with the full interaction-state set. It
 has rules for `button`, `input`, `textarea`, `checkbox`, `radio`, `select`, `a`,
-`fieldset`, `table`, `th`, `td` and `img`.
+`fieldset`, `table`, `th`, `td`, `tr` and `img`, for the sub-part classes the
+widgets emit (`.checkbox-box`, `.radio-dot`, `.select-header`, …), and for the
+`::part(placeholder)` hint.
+
+The **source** lives in `obscur_kit::theme_system::stylesheet::ua_css` — the
+crate whose charter is "CSS; tokens; fonts/icons/assets; presets; component
+style parts" (`crate-arch §2.6`). Compiling it stays in the facade, because the
+parser is a `frontend/` crate and a `components/` crate may not depend on one.
+`obscur_kit::ua_css()` re-exports the text, so nothing a host writes changes.
+
+**Every selector in it names something the toolkit can build**, and that is a
+test rather than a promise: `tests/ua_stylesheet_vocabulary.rs` builds every
+widget in every state, renders each, and rejects any rule for a type, class or
+part that did not come out. A stylesheet is the easiest place in a toolkit to
+hide a rule that matches nothing — nothing fails, nothing warns, and the only
+symptom is a control that does not look the way the sheet says it does.
 
 **It carries real geometry, not just colour.** `button { padding: 11px 20px;
 border: 1.5px solid … }` applies to every `Button` you place, and your class

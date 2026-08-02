@@ -136,7 +136,7 @@ fn stylesheet() -> &'static str {
 .gallery { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; \
            grid-template-rows: 143px 143px 143px; gap: 12px; \
            width: 960px; height: 454px; }\n\
-card { border-radius: 10px; padding: 12px; background-color: #1c2130; }\n\
+[type=card] { border-radius: 10px; padding: 12px; background-color: #1c2130; }\n\
 .card-label { color: #e6ebf5; font-size: 14px; font-weight: 600; height: 18px; }\n\
 .card-note { color: #aab4c8; font-size: 12px; height: 15px; }\n\
 \

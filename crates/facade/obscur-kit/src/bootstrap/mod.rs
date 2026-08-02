@@ -1,4 +1,6 @@
 #![doc = include_str!("mod.doc/_module.md")]
+mod builtin_components;
+pub use builtin_components::BuiltinComponents;
 mod css_pipeline;
 pub use css_pipeline::CssPipeline;
 #[cfg(feature = "font-fontconfig")]

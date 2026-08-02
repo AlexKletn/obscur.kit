@@ -21,7 +21,7 @@ use obscur_kit::text::font::{FontAttributes, FontFamily, FontId, GenericFamily};
 use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{
-    CLASS, EVENT_INPUT, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+    CLASS, EVENT_INPUT, LOCAL_NAME, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
     ViewValue,
 };
 
@@ -175,7 +175,7 @@ fn field_view(text: &str) -> View {
             .with_children(ViewFragment::from_nodes(vec![
                 ViewNode::element(ComponentId::from_raw(2))
                     .with_prop(ViewProperty::new(CLASS, ViewValue::Text("field".into())))
-                    .with_prop(ViewProperty::new(TYPE, ViewValue::from("textarea")))
+                    .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("textarea")))
                     .with_event(ViewEventBinding::new(EVENT_INPUT, CMD))
                     .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
                         text.to_string(),

@@ -9,9 +9,10 @@ It used to be one field — `allowed_children: Vec<Box<str>>` — whose
 component wanted: `Button`, `Input`, `Checkbox`, `Radio`, `Select` and the
 collection widgets synthesise their content inside their own `view()` from
 their own model, and `Image`/`Canvas`/`ForeignSurface` are leaves. So
-`<Button>OK</Button>` authored a text run that nothing mounts and nothing
-renders, and it compiled clean — because the only way to spell "no children"
-was the very same empty list that already meant "any".
+`<Button>OK</Button>` — the *props* spelling of a control, carrying its content
+a second time in a position that spelling does not read — compiled clean,
+because the only way to say "no children" was the very same empty list that
+already meant "any".
 
 Overloading emptiness a second time (an empty list meaning *none* in some
 contexts) would have made the field's meaning depend on who was reading it.

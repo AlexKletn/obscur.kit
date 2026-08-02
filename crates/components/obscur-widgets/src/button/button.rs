@@ -4,8 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    DISABLED as ATTR_DISABLED, EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment, ViewNode,
-    ViewProperty, ViewValue,
+    DISABLED as ATTR_DISABLED, EVENT_CLICK, LOCAL_NAME, View, ViewEventBinding, ViewFragment,
+    ViewNode, ViewProperty, ViewValue,
 };
 
 #[doc = include_str!("button.doc/Button.md")]
@@ -102,7 +102,7 @@ impl Button {
             // Stable CSS type / local name so a UA (or author) `button { … }` type
             // selector matches this control (spec §4.13). Additive — it sits
             // alongside the semantic-role/state props, never replacing them.
-            .with_prop(ViewProperty::new(TYPE, ViewValue::from("button")))
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("button")))
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
                 ViewValue::from("button"),
@@ -123,10 +123,17 @@ impl Button {
         if self.disabled {
             node = node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)));
         }
-        let node = node.with_children(ViewFragment::from_nodes(vec![
-            Text::new(self.label.clone()).into_view_node(),
-        ]));
+        let node = node.with_children(Self::contents(&self.label));
         View::single(node)
+    }
+
+    #[doc = include_str!("button.doc/contents.md")]
+    #[must_use]
+    pub(crate) fn contents(label: &str) -> ViewFragment {
+        if label.is_empty() {
+            return ViewFragment::new();
+        }
+        ViewFragment::from_nodes(vec![Text::new(label).into_view_node()])
     }
 
     #[doc = include_str!("button.doc/into_view_node.md")]

@@ -58,7 +58,7 @@ pub(crate) fn resolve_generated_content(
         let content = GeneratedContent {
             before: resolve_pseudo(sheets, &element, "before", environment),
             after: resolve_pseudo(sheets, &element, "after", environment),
-            placeholder: resolve_placeholder(sheets, &element, node, environment),
+            placeholder: resolve_placeholder(tree, sheets, &element, node, environment),
         };
         if !content.is_empty() {
             out.insert(id, content);
@@ -91,21 +91,31 @@ fn resolve_pseudo(
 
 #[doc = include_str!("generated_content.doc/resolve_placeholder.md")]
 fn resolve_placeholder(
+    tree: &RetainedTree,
     sheets: &[Stylesheet],
     element: &TreeElement<'_>,
     node: &RetainedNode,
     environment: &MediaEnvironment,
 ) -> Option<GeneratedRun> {
     let attributes = node.attributes();
+    let placeholder = attributes.placeholder().filter(|hint| !hint.is_empty())?;
     // `:placeholder-shown` — the hint is shown only while the field's value is
-    // empty. A control with no declared value (a bare editable) is treated as empty.
-    if attributes
-        .control_value()
-        .is_some_and(|value| !value.is_empty())
-    {
+    // empty. Which attribute states that value depends on which side wrote the
+    // node. An application that declares a CONTROLLED value writes the reserved
+    // `VALUE` attribute (`Input::view` always does), and then that value is the
+    // answer — including when it is empty. Authored markup writes no such
+    // attribute on purpose: `<input value="abc"/>` is HTML's *default* value,
+    // which the user then owns, so it lowers to an ordinary attribute and reaches
+    // the tree only as the text the mounted control renders. For that node the
+    // rendered text IS the value, and reading it is what keeps the hint from
+    // being painted on top of the field's own "abc".
+    let is_empty = match attributes.control_value() {
+        Some(declared) => declared.is_empty(),
+        None => renders_no_text(tree, node),
+    };
+    if !is_empty {
         return None;
     }
-    let placeholder = attributes.placeholder().filter(|hint| !hint.is_empty())?;
     let resolved = cascade_where(sheets, environment, |selector| {
         part_specificity_for(selector, PLACEHOLDER_PART, element)
     });
@@ -114,6 +124,15 @@ fn resolve_placeholder(
         color: resolved
             .get(PropertyId::Color)
             .and_then(PropertyValue::as_color),
+    })
+}
+
+#[doc = include_str!("generated_content.doc/renders_no_text.md")]
+fn renders_no_text(tree: &RetainedTree, node: &RetainedNode) -> bool {
+    node.child_nodes().iter().all(|&child| {
+        tree.get(child).is_none_or(|child| {
+            child.kind().text().is_none_or(str::is_empty) && renders_no_text(tree, child)
+        })
     })
 }
 

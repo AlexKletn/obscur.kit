@@ -4,9 +4,11 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    CHECKED as ATTR_CHECKED, CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, TYPE, View,
+    CHECKED as ATTR_CHECKED, CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, LOCAL_NAME, View,
     ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
+
+use super::RadioProps;
 
 #[doc = include_str!("radio.doc/Radio.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +33,7 @@ impl Radio {
     #[doc = include_str!("radio.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C01);
     #[doc = include_str!("radio.doc/PROP_SELECTED.md")]
-    const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C02);
+    pub(crate) const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C02);
 
     #[doc = include_str!("radio.doc/new.md")]
     #[must_use]
@@ -118,7 +120,7 @@ impl Radio {
         let mut node = ViewNode::element(Self::COMPONENT_ID)
             // Stable CSS type / local name so a UA (or author) `radio { … }`
             // type selector matches this control (spec §4.13). Additive.
-            .with_prop(ViewProperty::new(TYPE, ViewValue::from("radio")))
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("radio")))
             .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("radio")))
             .with_prop(ViewProperty::new(
                 Self::PROP_DISABLED,
@@ -127,6 +129,15 @@ impl Radio {
             .with_prop(ViewProperty::new(
                 Self::PROP_SELECTED,
                 ViewValue::Bool(self.selected),
+            ))
+            // The authored `label` attribute, emitted by the Rust builder too, so
+            // this node and an authored `<radio label="…"/>` carry the SAME props.
+            // That is what makes mounting `RadioComponent` on a node this method
+            // built idempotent: the component decodes these props and regenerates
+            // exactly the children installed below.
+            .with_prop(ViewProperty::new(
+                RadioProps::LABEL,
+                ViewValue::from(&*self.label),
             ))
             .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
         // Reserved structural-state attributes — emitted only when set, feeding
@@ -138,9 +149,16 @@ impl Radio {
         if self.disabled {
             node = node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)));
         }
+        let node = node.with_children(Self::contents(self.selected, &self.label));
+        View::single(node)
+    }
+
+    #[doc = include_str!("radio.doc/contents.md")]
+    #[must_use]
+    pub(crate) fn contents(selected: bool, label: &str) -> ViewFragment {
         // The circular indicator sub-part: a `.radio-dot`, with the filled
         // `.radio-fill` centre present only when selected.
-        let dot_child: Vec<ViewNode> = if self.selected {
+        let dot_child: Vec<ViewNode> = if selected {
             vec![
                 ViewNode::element(Self::FILL_ID)
                     .with_prop(ViewProperty::new(CLASS, ViewValue::from("radio-fill"))),
@@ -151,11 +169,7 @@ impl Radio {
         let indicator = ViewNode::element(Self::DOT_ID)
             .with_prop(ViewProperty::new(CLASS, ViewValue::from("radio-dot")))
             .with_children(ViewFragment::from_nodes(dot_child));
-        let node = node.with_children(ViewFragment::from_nodes(vec![
-            indicator,
-            Text::new(self.label.clone()).into_view_node(),
-        ]));
-        View::single(node)
+        ViewFragment::from_nodes(vec![indicator, Text::new(label).into_view_node()])
     }
 }
 

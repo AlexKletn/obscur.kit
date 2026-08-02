@@ -23,6 +23,11 @@ fn reserved_attribute_symbols_match_obscur_view() {
     assert_eq!(name_binding::CLASS, view::CLASS);
     assert_eq!(name_binding::ID, view::ID);
     assert_eq!(name_binding::TYPE, view::TYPE);
+    // The element's own name, carved out of TYPE so an authored `type="…"` and the
+    // tag stop overwriting each other. Drift here un-styles the whole element
+    // vocabulary on one front end and not the other.
+    assert_eq!(name_binding::LOCAL_NAME, view::LOCAL_NAME);
+    assert_ne!(name_binding::LOCAL_NAME, name_binding::TYPE);
     assert_eq!(name_binding::SRC, view::SRC);
     assert_eq!(name_binding::DISABLED, view::DISABLED);
     assert_eq!(name_binding::CHECKED, view::CHECKED);
@@ -132,10 +137,50 @@ fn resolved_tags_bind_to_the_real_component_ids() {
 }
 
 #[test]
+fn every_control_the_ua_sheet_styles_resolves_to_the_shipped_widget() {
+    // Cross-crate, so these are the real widget constants rather than the
+    // frontend's mirror of them. Each of these controls used to answer to a
+    // PascalCase tag only, so `<checkbox>`, `<input>`, `<select>` and `<table>`
+    // fell through to `Container` — a styled box with no behaviour standing beside
+    // the real control the Rust API builds, under one `checkbox { … }` rule that
+    // reached both and meant two different things.
+    for (element, id) in [
+        ("button", Button::COMPONENT_ID),
+        ("input", Input::COMPONENT_ID),
+        ("checkbox", Checkbox::COMPONENT_ID),
+        ("radio", Radio::COMPONENT_ID),
+        ("select", Select::COMPONENT_ID),
+        ("table", Table::COMPONENT_ID),
+    ] {
+        assert_eq!(
+            name_binding::component_id_for(element, TagPosition::Element),
+            id,
+            "{element}"
+        );
+        assert_ne!(
+            name_binding::component_id_for(element, TagPosition::Element),
+            Container::COMPONENT_ID,
+            "{element}"
+        );
+    }
+    // HTML's two text-entry tags are one widget here — no `Textarea` type exists
+    // to be a second one — and the multi-line/single-line distinction rides on the
+    // local name instead, which is what `EditableField::is_multiline` reads.
+    assert_eq!(
+        name_binding::component_id_for("textarea", TagPosition::Element),
+        Input::COMPONENT_ID
+    );
+    assert_eq!(
+        name_binding::local_name_for("textarea", TagPosition::Element),
+        Some("textarea")
+    );
+}
+
+#[test]
 fn an_authored_element_and_the_rust_widget_share_one_css_type() {
     // The local name `name_binding::local_name_for` gives an authored `<button>`
     // must be the SAME string `obscur_widgets::Button::view` sets under the
-    // reserved TYPE symbol — that is the whole reason `button { … }` can be written
+    // reserved LOCAL_NAME symbol — that is the whole reason `button { … }` can be written
     // once and style both. Drift here splits the UA stylesheet in two: the rule
     // would reach the Rust widget and not the markup, or the reverse, and nothing
     // else in either crate would notice.
@@ -153,11 +198,48 @@ fn an_authored_element_and_the_rust_widget_share_one_css_type() {
         .map(str::to_owned);
     assert_eq!(widget_type.as_deref(), Some("button"));
     assert_eq!(
-        name_binding::local_name_for("button", TagPosition::Element, [] as [&str; 0]),
+        name_binding::local_name_for("button", TagPosition::Element),
         widget_type.as_deref()
     );
     // And the symbol the frontend emits it under is the one the matcher reads.
-    assert_eq!(name_binding::TYPE, view::TYPE);
+    assert_eq!(name_binding::LOCAL_NAME, view::LOCAL_NAME);
+}
+
+#[doc = include_str!("okui_name_binding_drift.doc/widget_local_name.md")]
+fn widget_local_name(rendered: view::View) -> Option<String> {
+    let node = rendered.into_fragment().nodes().to_vec().remove(0);
+    let view::ViewNode::Element { props, .. } = &node else {
+        panic!("a widget's view root is an element");
+    };
+    view::StyleAttributes::extract(props)
+        .local_name()
+        .map(str::to_owned)
+}
+
+#[test]
+fn every_control_and_its_tag_agree_on_one_css_type() {
+    // The same claim as above, for the rest of the vocabulary the UA sheet is
+    // written in. The tag and the widget must produce the SAME string, or the one
+    // `input, textarea { … }` / `checkbox { … }` / `select { … }` rule styles one
+    // of the two trees and silently misses the other.
+    let save = obscur_kit::identity::InternedSymbol::named("save");
+    for (tag, rendered) in [
+        ("button", Button::new("OK", save).view()),
+        ("input", Input::new(save).view()),
+        ("textarea", Input::new(save).multiline(true).view()),
+        ("checkbox", Checkbox::new("Agree", save).view()),
+        ("radio", Radio::new("One", save).view()),
+        ("select", Select::new(save).view()),
+        ("table", Table::new().view()),
+    ] {
+        let widget_type = widget_local_name(rendered);
+        assert_eq!(widget_type.as_deref(), Some(tag), "{tag}");
+        assert_eq!(
+            name_binding::local_name_for(tag, TagPosition::Element),
+            widget_type.as_deref(),
+            "{tag}"
+        );
+    }
 }
 
 // ---- widget contract drift (§2.13) ---------------------------------------

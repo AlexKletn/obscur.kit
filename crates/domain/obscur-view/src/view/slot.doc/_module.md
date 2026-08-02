@@ -23,14 +23,32 @@ load-bearing if something acts on it. Two halves have to meet:
 [`ViewNode::slot`](super::ViewNode::slot) is that position, and
 [`project_slots`] is the join.
 
-# Named slots only
+# Named slots, and the default one
 
-§2.12 says *named* slots, and says nothing about an unnamed default one.
-An outlet therefore always names a slot, and content is matched to it by
-name and by nothing else. A child carrying no `slot="…"` reaches no outlet,
-and an outlet no child names projects to nothing rather than to a leftover
-box. Declaration order is not a destination — inventing one is what
-`5e8e7fe` refused for `<Loading>`.
+§2.12 says *named* slots, and content that names a slot reaches that slot and
+no other. What it does not say is where content that names **nothing** goes,
+and that question has an answer that cannot be avoided: `<button>Save</button>`
+is a control's authored content, its only child is a text run, and a text run
+carries no properties — so it can never name a slot, however the author writes
+it. Either such content has a destination or a mounted control silently eats
+the author's markup.
+
+So there is one, and exactly one, unnamed destination: the **default slot**,
+declared by an outlet that names no slot, filled by the content that names
+none. Both halves are explicit — the component says "the author's content
+goes here" by rendering the outlet, and the author says "not the default" by
+writing a `slot="…"`. What stays refused is a destination *inferred* from
+something that never said it was one: declaration order is still not a
+destination, which is what `5e8e7fe` refused for `<Loading>`, and content
+naming a slot the output declares no outlet for still reaches nothing rather
+than falling back to the default.
+
+An outlet nothing is assigned to renders its **fallback** — its own children —
+and one with no fallback renders nothing at all rather than a leftover box.
+That is what makes the default slot enough on its own for a control whose
+content has a prop spelling too: `<button label="Save"/>` and
+`<button>Save</button>` are one component rendering one position, and the
+author's content wins where there is any.
 
 # The authored spelling
 

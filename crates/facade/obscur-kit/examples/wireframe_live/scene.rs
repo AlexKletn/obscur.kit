@@ -6,8 +6,8 @@
 use obscur_kit::identity::{ComponentId, InternedSymbol};
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{
-    CLASS, EVENT_CLICK, ID, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
-    ViewValue,
+    CLASS, EVENT_CLICK, ID, LOCAL_NAME, View, ViewEventBinding, ViewFragment, ViewNode,
+    ViewProperty, ViewValue,
 };
 use obscur_kit::widgets::button::Button;
 use obscur_kit::widgets::checkbox::Checkbox;
@@ -452,7 +452,7 @@ fn control_sized(id: &str, class: &str, view: View) -> ViewNode {
 #[doc = include_str!("scene.doc/anchor.md")]
 fn anchor(id: &str, label: &str) -> ViewNode {
     ViewNode::element(ANCHOR_ID)
-        .with_prop(ViewProperty::new(TYPE, ViewValue::from("a")))
+        .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("a")))
         .with_prop(ViewProperty::new(ID, ViewValue::Text(id.into())))
         .with_event(ViewEventBinding::new(EVENT_CLICK, CMD_LINK))
         .with_children(ViewFragment::from_nodes(vec![text_inline(label)]))

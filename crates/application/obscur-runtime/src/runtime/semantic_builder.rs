@@ -191,12 +191,17 @@ impl SemanticTreeBuilder {
             "image" | "img" => SemanticRole::Image,
             "checkbox" => SemanticRole::Checkbox,
             "radio" | "radiobutton" => SemanticRole::RadioButton,
-            "input" | "textinput" | "textfield" => SemanticRole::TextInput,
+            // HTML's two text-entry tags are one control here, and one role: a
+            // `<textarea>` is a multi-line text input, not an unnamed group.
+            "input" | "textarea" | "textinput" | "textfield" => SemanticRole::TextInput,
             "list" | "ul" | "ol" => SemanticRole::List,
             "listitem" | "li" => SemanticRole::ListItem,
             "table" => SemanticRole::Table,
             "row" | "tr" => SemanticRole::Row,
-            "cell" | "td" => SemanticRole::Cell,
+            // No `ColumnHeader` role exists to map `th` onto, so it takes the
+            // nearest true one: a header cell is a cell. Naming it `Group` — the
+            // fallback — would say it is not part of the table at all.
+            "cell" | "td" | "th" => SemanticRole::Cell,
             "dialog" => SemanticRole::Dialog,
             "menu" => SemanticRole::Menu,
             "menuitem" => SemanticRole::MenuItem,
@@ -234,8 +239,8 @@ mod tests {
     use super::*;
     use obscur_identity::{ComponentId, InternedSymbol};
     use obscur_view::view::{
-        CHECKED, CLASS, DISABLED, READONLY, StyleAttributes, TYPE, ViewEventBinding, ViewProperty,
-        ViewValue,
+        CHECKED, CLASS, DISABLED, LOCAL_NAME, READONLY, StyleAttributes, ViewEventBinding,
+        ViewProperty, ViewValue,
     };
 
     /// Allocates an element whose local name (CSS type) is `local_name`.
@@ -255,7 +260,10 @@ mod tests {
         let id = tree.alloc(NodeKind::Element {
             component: ComponentId::from_raw(component),
         });
-        let mut props = vec![ViewProperty::new(TYPE, ViewValue::Text(local_name.into()))];
+        let mut props = vec![ViewProperty::new(
+            LOCAL_NAME,
+            ViewValue::Text(local_name.into()),
+        )];
         props.extend(
             state
                 .iter()
@@ -581,5 +589,44 @@ mod tests {
         let snapshot = SemanticTreeBuilder::snapshot(&tree, None);
         assert_eq!(snapshot.len(), 5);
         assert_eq!(snapshot.root(), Some(root));
+    }
+
+    #[test]
+    fn the_whole_table_vocabulary_is_announced_as_a_table() {
+        // The `Table` widget's parts name themselves `table`/`tr`/`th`/`td` now, so
+        // this table is what a screen reader is told. `th` is the entry that had to
+        // be added: there is no `ColumnHeader` role to map it onto, so it takes the
+        // nearest true one rather than falling through to `Group`, which would say
+        // a header cell is not part of the table at all.
+        assert_eq!(
+            SemanticTreeBuilder::role_for_local_name("table"),
+            SemanticRole::Table
+        );
+        assert_eq!(
+            SemanticTreeBuilder::role_for_local_name("tr"),
+            SemanticRole::Row
+        );
+        for cell in ["td", "th"] {
+            assert_eq!(
+                SemanticTreeBuilder::role_for_local_name(cell),
+                SemanticRole::Cell,
+                "{cell}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_textarea_is_announced_as_a_text_input() {
+        // HTML's two text-entry tags are one control here and one role. A
+        // multi-line field used to be an unnamed `Group`, because only `input` was
+        // in the table — which was invisible while `<textarea>` was a spelling only
+        // the `Input` widget could produce, and is not now that markup can write it.
+        for tag in ["input", "textarea"] {
+            assert_eq!(
+                SemanticTreeBuilder::role_for_local_name(tag),
+                SemanticRole::TextInput,
+                "{tag}"
+            );
+        }
     }
 }

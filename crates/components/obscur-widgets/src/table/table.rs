@@ -3,7 +3,7 @@
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
-use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 #[doc = include_str!("table.doc/Column.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,8 +79,6 @@ impl Table {
     #[doc = include_str!("table.doc/TABLE_CELL_ID.md")]
     const TABLE_CELL_ID: ComponentId = ComponentId::from_raw(0x00D0_002A);
 
-    #[doc = include_str!("table.doc/PROP_ROLE.md")]
-    const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0A00);
     #[doc = include_str!("table.doc/PROP_SORT_COL.md")]
     const PROP_SORT_COL: InternedSymbol = InternedSymbol::from_raw(0x00D1_0A01);
     #[doc = include_str!("table.doc/PROP_SORTABLE.md")]
@@ -203,12 +201,20 @@ impl Table {
             .sorted_column()
             .map_or(-1, |i| i64::try_from(i).unwrap_or(-1));
 
+        // The table's parts name themselves in HTML's own vocabulary, under the
+        // reserved LOCAL_NAME symbol the matcher reads as an element's *type*
+        // (spec §4.13). They used to carry a private `role` property instead — not
+        // a class, not a local name, invisible to CSS — so the UA sheet's `table`,
+        // `th`, `td` and `tr:hover` rules were dead against this widget while
+        // matching the same markup written by hand. A header cell is `th` and a
+        // data cell `td`, the distinction the shared `TABLE_CELL_ID` cannot carry
+        // and the one the sheet styles differently.
         let header_cells: Vec<ViewNode> = self
             .columns
             .iter()
             .map(|column| {
                 ViewNode::element(Self::TABLE_CELL_ID)
-                    .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("cell")))
+                    .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("th")))
                     .with_prop(ViewProperty::new(
                         Self::PROP_SORTABLE,
                         ViewValue::Bool(column.sortable),
@@ -219,7 +225,7 @@ impl Table {
             })
             .collect();
         let header = ViewNode::element(Self::TABLE_ROW_ID)
-            .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("row")))
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("tr")))
             .with_children(ViewFragment::from_nodes(header_cells));
 
         let mut rows: Vec<ViewNode> = Vec::with_capacity(self.rows.len() + 1);
@@ -229,7 +235,7 @@ impl Table {
                 .iter()
                 .map(|cell| {
                     ViewNode::element(Self::TABLE_CELL_ID)
-                        .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("cell")))
+                        .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("td")))
                         .with_children(ViewFragment::from_nodes(vec![
                             Text::new(cell.clone()).into_view_node(),
                         ]))
@@ -237,13 +243,13 @@ impl Table {
                 .collect();
             rows.push(
                 ViewNode::element(Self::TABLE_ROW_ID)
-                    .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("row")))
+                    .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("tr")))
                     .with_children(ViewFragment::from_nodes(cells)),
             );
         }
 
         let node = ViewNode::element(Self::COMPONENT_ID)
-            .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("table")))
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("table")))
             .with_prop(ViewProperty::new(
                 Self::PROP_SORT_COL,
                 ViewValue::Int(sort_col),
@@ -317,6 +323,61 @@ mod tests {
     #[test]
     fn semantic_role_is_table() {
         assert_eq!(sample().semantic_role(), SemanticRole::Table);
+    }
+
+    fn local_name_of(node: &ViewNode) -> Option<String> {
+        let ViewNode::Element { props, .. } = node else {
+            return None;
+        };
+        props
+            .iter()
+            .find(|p| p.name() == LOCAL_NAME)
+            .and_then(|p| match p.value() {
+                ViewValue::Text(text) => Some(text.to_string()),
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn every_part_names_itself_in_the_html_table_vocabulary() {
+        // What the UA sheet's `table`, `th`, `td` and `tr:hover` rules match. The
+        // parts used to carry a private `role` property — invisible to CSS — so
+        // those four rules were dead against this widget, and a hand-written
+        // `<table>` and a `Table::new()` were two different trees under one sheet.
+        let view = sample().view();
+        let root = &view.root().nodes()[0];
+        assert_eq!(local_name_of(root).as_deref(), Some("table"));
+
+        let ViewNode::Element { children: rows, .. } = root else {
+            panic!("expected element root");
+        };
+        for row in rows.nodes() {
+            assert_eq!(local_name_of(row).as_deref(), Some("tr"));
+        }
+
+        // The header row's cells are `th`, every data row's are `td` — the one
+        // distinction the shared `TABLE_CELL_ID` cannot carry, and the one the
+        // sheet styles differently.
+        let cells_of = |row: &ViewNode| {
+            let ViewNode::Element { children, .. } = row else {
+                panic!("expected element row");
+            };
+            children
+                .nodes()
+                .iter()
+                .map(local_name_of)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            cells_of(&rows.nodes()[0]),
+            vec![Some("th".to_owned()), Some("th".to_owned())]
+        );
+        for data_row in &rows.nodes()[1..] {
+            assert_eq!(
+                cells_of(data_row),
+                vec![Some("td".to_owned()), Some("td".to_owned())]
+            );
+        }
     }
 
     #[test]

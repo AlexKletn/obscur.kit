@@ -1,8 +1,6 @@
 #![doc = include_str!("ui_ir_view_bridge.doc/_module.md")]
 
-use obscur_ui_ir::document::{
-    UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrProperty, UiIrValue,
-};
+use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
 use obscur_ui_ir::name_binding::{self, TagPosition};
 use obscur_view::view::{
     View, ViewEventBinding, ViewFragment, ViewKey, ViewNode, ViewProperty, ViewValue,
@@ -63,19 +61,16 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
             lower_value(property.value()),
         ));
     }
-    // The tag itself, as the reserved TYPE property — the element's local name, so
-    // an authored `<button>` is what a `button { … }` type selector matches (spec
-    // §4.13). Appended after the authored properties so each of those keeps its
-    // authored position, and skipped when the author bound `type` themselves; both
-    // rules live in `local_name_for`, which the code generator calls with the same
+    // The tag itself, as the reserved LOCAL_NAME property — the element's local
+    // name, so an authored `<button>` is what a `button { … }` type selector
+    // matches (spec §4.13). Appended after the authored properties so each of those
+    // keeps its authored position. It never collides with an authored `type="…"`
+    // (that binds to TYPE, above), so the tag always contributes; when it does not
+    // is `local_name_for`'s rule, and the code generator calls it with the same
     // arguments to emit the same property.
-    if let Some(local_name) = name_binding::local_name_for(
-        node.tag(),
-        position,
-        node.properties().iter().map(UiIrProperty::name),
-    ) {
+    if let Some(local_name) = name_binding::local_name_for(node.tag(), position) {
         view = view.with_prop(ViewProperty::new(
-            name_binding::TYPE,
+            name_binding::LOCAL_NAME,
             ViewValue::Text(local_name.into()),
         ));
     }
@@ -151,7 +146,7 @@ mod tests {
     use super::*;
     use obscur_identity::ComponentId;
     use obscur_ui_ir::document::{UiIrEvent, UiIrProperty};
-    use obscur_view::view::{CLASS, EVENT_CLICK, ID, SRC, TYPE};
+    use obscur_view::view::{CLASS, EVENT_CLICK, ID, LOCAL_NAME, SRC, TYPE};
 
     #[test]
     fn element_text_event_and_key_map_to_view_nodes() {
@@ -303,7 +298,7 @@ mod tests {
         // Not a button feature: the whole element vocabulary was anonymous.
         for tag in ["div", "span", "td", "img"] {
             assert_eq!(
-                root_prop(UiIrNode::element(1, tag), TYPE),
+                root_prop(UiIrNode::element(1, tag), LOCAL_NAME),
                 Some(ViewValue::Text(tag.into())),
                 "{tag}"
             );
@@ -311,9 +306,11 @@ mod tests {
     }
 
     #[test]
-    fn an_authored_type_wins_over_the_implicit_local_name() {
-        // `<button type="submit">` is HTML's own spelling, and TYPE is the one symbol
-        // both channels share: the author's value is the only one on the node.
+    fn an_authored_type_travels_beside_the_implicit_local_name() {
+        // `<button type="submit">` is HTML's own spelling, and the two channels are
+        // now two symbols: the node carries the author's `submit` under TYPE *and*
+        // its own `button` under LOCAL_NAME. It used to carry only the first, and so
+        // matched no `button { … }` rule at all.
         let node =
             UiIrNode::element(1, "button").with_property(UiIrProperty::text("type", "submit"));
         let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(node));
@@ -326,14 +323,20 @@ mod tests {
             .map(ViewProperty::value)
             .collect();
         assert_eq!(types, vec![&ViewValue::Text("submit".into())]);
+        let attributes = obscur_view::view::StyleAttributes::extract(props);
+        assert_eq!(attributes.local_name(), Some("button"));
+        assert_eq!(attributes.control_type(), Some("submit"));
     }
 
     #[test]
     fn a_component_tag_gets_no_local_name() {
         // A `<Card/>` node is a seam, not a box an author styles by type; the
         // elements its render produces carry their own names.
-        assert_eq!(root_prop(UiIrNode::component(1, "Card"), TYPE), None);
-        assert_eq!(root_prop(UiIrNode::component(1, "Button"), TYPE), None);
+        assert_eq!(root_prop(UiIrNode::component(1, "Card"), LOCAL_NAME), None);
+        assert_eq!(
+            root_prop(UiIrNode::component(1, "Button"), LOCAL_NAME),
+            None
+        );
     }
 
     #[test]

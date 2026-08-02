@@ -11,6 +11,10 @@ pub struct KitBootstrap {
     renderer_id: u64,
     #[cfg(feature = "cache-fs")]
     cache_root: Option<PathBuf>,
+    // Spelled as the OPT-OUT rather than as `builtin_components: bool`, so the
+    // `Default` this type derives is the defaults-on answer without a hand-written
+    // `impl Default` that a later field could quietly diverge from.
+    without_builtin_components: bool,
 }
 
 impl KitBootstrap {
@@ -58,6 +62,30 @@ impl KitBootstrap {
     #[doc = include_str!("kit_bootstrap.doc/install_default_stylesheet.md")]
     pub fn install_default_stylesheet(&self, runtime: &mut crate::runtime::UiRuntime) {
         runtime.set_default_stylesheet(self.ua_stylesheet());
+    }
+
+    #[doc = include_str!("kit_bootstrap.doc/without_builtin_components.md")]
+    #[must_use]
+    pub const fn without_builtin_components(mut self) -> Self {
+        self.without_builtin_components = true;
+        self
+    }
+
+    #[doc = include_str!("kit_bootstrap.doc/registers_builtin_components.md")]
+    #[must_use]
+    pub const fn registers_builtin_components(&self) -> bool {
+        !self.without_builtin_components
+    }
+
+    #[doc = include_str!("kit_bootstrap.doc/install_builtin_components.md")]
+    pub fn install_builtin_components(
+        &self,
+        runtime: &mut crate::runtime::UiRuntime,
+    ) -> Result<(), crate::view::component::RegistryError> {
+        if self.without_builtin_components {
+            return Ok(());
+        }
+        super::BuiltinComponents::install(runtime)
     }
 
     #[doc = include_str!("kit_bootstrap.doc/default_renderer.md")]

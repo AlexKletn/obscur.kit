@@ -6,7 +6,9 @@ use obscur_style::property::{PropertyId, PropertyValue, StyleColor};
 use obscur_style::selector::{
     ComplexSelector, CompoundSelector, PseudoClassSelector, SelectorList, SimpleSelector,
 };
-use obscur_view::view::{DISABLED, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{
+    DISABLED, LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+};
 
 #[doc = include_str!("button_element.doc/ButtonElement.md")]
 #[derive(Debug)]
@@ -51,7 +53,10 @@ impl ButtonElement {
     #[doc = include_str!("button_element.doc/element.md")]
     fn element() -> ViewNode {
         ViewNode::element(ComponentId::from_raw(20))
-            .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+            .with_prop(ViewProperty::new(
+                LOCAL_NAME,
+                ViewValue::Text("button".into()),
+            ))
             .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")]))
     }
 

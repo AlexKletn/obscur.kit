@@ -4,9 +4,9 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
 use obscur_view::view::{
-    DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, PLACEHOLDER as ATTR_PLACEHOLDER,
-    READONLY as ATTR_READONLY, TYPE, VALUE as ATTR_VALUE, View, ViewEventBinding, ViewFragment,
-    ViewNode, ViewProperty, ViewValue,
+    DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, LOCAL_NAME,
+    PLACEHOLDER as ATTR_PLACEHOLDER, READONLY as ATTR_READONLY, VALUE as ATTR_VALUE, View,
+    ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 #[doc = include_str!("input.doc/Input.md")]
@@ -31,7 +31,7 @@ impl Input {
     #[doc = include_str!("input.doc/PROP_DISABLED.md")]
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0201);
     #[doc = include_str!("input.doc/PROP_VALUE.md")]
-    const PROP_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0202);
+    pub(crate) const PROP_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0202);
     #[doc = include_str!("input.doc/PROP_PLACEHOLDER.md")]
     const PROP_PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x00D1_0203);
     #[doc = include_str!("input.doc/PROP_READONLY.md")]
@@ -170,7 +170,7 @@ impl Input {
         // `input` for a single-line field (byte-identical to before). Additive.
         let type_name = if self.multiline { "textarea" } else { "input" };
         let node = ViewNode::element(Self::COMPONENT_ID)
-            .with_prop(ViewProperty::new(TYPE, ViewValue::from(type_name)))
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from(type_name)))
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
                 ViewValue::from("textbox"),
@@ -224,14 +224,20 @@ impl Input {
         } else {
             node
         };
+        let node = node.with_children(Self::contents(value));
+        View::single(node)
+    }
+
+    #[doc = include_str!("input.doc/contents.md")]
+    #[must_use]
+    pub(crate) fn contents(value: &str) -> ViewFragment {
         // The field's editable text is always a single `Text` child carrying the
         // current value (empty when the field is empty). It is the caret/selection
         // and IME-preedit paint target and what the editing session auto-seeds from;
         // being a `Text` node it is content, not a component-tree child. The
         // placeholder is NOT a child — it is a §4.16 synthetic part the runtime
         // paints from the reserved `PLACEHOLDER` attribute while the value is empty.
-        let node = node.with_children(ViewFragment::from_nodes(vec![ViewNode::text(value)]));
-        View::single(node)
+        ViewFragment::from_nodes(vec![ViewNode::text(value)])
     }
 }
 
@@ -447,15 +453,20 @@ mod tests {
     }
 
     #[test]
-    fn single_line_input_emits_type_input() {
-        // A plain (single-line) input carries the reserved CSS type `input` and is
-        // not multiline — byte-identical to before the multiline mode existed.
+    fn single_line_input_emits_the_input_local_name() {
+        // A plain (single-line) input carries the reserved CSS local name `input`
+        // and is not multiline. The name is what the cascade's type selector and
+        // `EditableField::is_multiline` both read; the authored `type` attribute is
+        // a separate channel this control never writes.
         let i = Input::new(cmd());
         assert!(!i.is_multiline());
         let view = i.view();
         match &view.root().nodes()[0] {
             ViewNode::Element { props, .. } => {
-                let ty = props.iter().find(|p| p.name() == TYPE).expect("type prop");
+                let ty = props
+                    .iter()
+                    .find(|p| p.name() == LOCAL_NAME)
+                    .expect("local-name prop");
                 assert_eq!(*ty.value(), ViewValue::from("input"));
             }
             ViewNode::Text { .. } => panic!("expected element root"),
@@ -463,15 +474,20 @@ mod tests {
     }
 
     #[test]
-    fn multiline_input_emits_type_textarea() {
-        // A `.multiline(true)` field carries the reserved CSS type `textarea`, so
-        // the UA `textarea { … }` rules bind and the runtime treats it as MULTILINE.
+    fn multiline_input_emits_the_textarea_local_name() {
+        // A `.multiline(true)` field carries the reserved CSS local name `textarea`,
+        // so the UA `textarea { … }` rules bind and the runtime treats it as
+        // MULTILINE. This is the only place the two tags differ, and it rides on
+        // the host node — which a mounted `InputComponent` never rewrites.
         let i = Input::with_value(cmd(), "line one").multiline(true);
         assert!(i.is_multiline());
         let view = i.view();
         match &view.root().nodes()[0] {
             ViewNode::Element { props, .. } => {
-                let ty = props.iter().find(|p| p.name() == TYPE).expect("type prop");
+                let ty = props
+                    .iter()
+                    .find(|p| p.name() == LOCAL_NAME)
+                    .expect("local-name prop");
                 assert_eq!(*ty.value(), ViewValue::from("textarea"));
             }
             ViewNode::Text { .. } => panic!("expected element root"),

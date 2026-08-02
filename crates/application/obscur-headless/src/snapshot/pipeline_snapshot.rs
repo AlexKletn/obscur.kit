@@ -321,14 +321,18 @@ mod tests {
     fn accessibility_stage_reflects_the_rendered_tree() {
         use obscur_accessibility::semantic::SemanticRole;
         use obscur_identity::{ComponentId, RuntimeId};
-        use obscur_view::view::{TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+        use obscur_view::view::{
+            LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+        };
 
         use crate::host::HeadlessHost;
 
         // A single `button` element.
         let view = View::from_fragment(ViewFragment::from_nodes(vec![
-            ViewNode::element(ComponentId::from_raw(10))
-                .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into()))),
+            ViewNode::element(ComponentId::from_raw(10)).with_prop(ViewProperty::new(
+                LOCAL_NAME,
+                ViewValue::Text("button".into()),
+            )),
         ]));
         let mut host = HeadlessHost::new(RuntimeId::from_raw(1));
         host.render_styled(&view, &[]);

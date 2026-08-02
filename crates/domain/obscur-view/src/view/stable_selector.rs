@@ -11,7 +11,7 @@ pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
 #[cfg(test)]
 mod tests {
     use super::{AUTOMATION_ID, TEST_ID};
-    use crate::view::{CHECKED, CLASS, DISABLED, EVENT_CLICK, ID, READONLY, SRC, TYPE};
+    use crate::view::{CHECKED, CLASS, DISABLED, EVENT_CLICK, ID, LOCAL_NAME, READONLY, SRC, TYPE};
 
     #[test]
     fn the_stable_selectors_collide_with_no_other_reserved_symbol() {
@@ -19,6 +19,7 @@ mod tests {
             CLASS,
             ID,
             TYPE,
+            LOCAL_NAME,
             SRC,
             DISABLED,
             CHECKED,
