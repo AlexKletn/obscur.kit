@@ -90,13 +90,13 @@ impl ScrollOffsets {
             .map(|c| (c.node, self.clamped(*c)))
             .collect();
         let mut folded = fold.boxes.clone();
-        let cap = fold.tree.len();
+        let ancestor_walk_limit = fold.tree.len();
         for (&node, layout_box) in &mut folded {
             let mut dy = 0.0;
             let mut current = node;
             // Fold every scroll-container ancestor, exclusive of the node itself: a
             // scroll container reports its own unscrolled position.
-            for _ in 0..cap {
+            for _ in 0..ancestor_walk_limit {
                 let Some(parent) = fold
                     .tree
                     .get(current)

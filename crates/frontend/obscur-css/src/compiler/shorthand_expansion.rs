@@ -162,7 +162,6 @@ pub(super) fn expand_pair_shorthand(
             UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
         )]
     };
-    // The two sides' single-component value slices (align first, then justify).
     let (align_values, justify_values): (&[ParsedValue], &[ParsedValue]) = match &*decl.value {
         [a] => (std::slice::from_ref(a), std::slice::from_ref(a)),
         [a, b] => (std::slice::from_ref(a), std::slice::from_ref(b)),
@@ -422,7 +421,6 @@ pub(super) fn expand_grid_area_shorthand(
             None => return unsupported(),
         }
     }
-    // Fill omitted edges: `[row-start, column-start, row-end, column-end]`.
     // `GridLineValue` is no longer `Copy` (its `Named` variant owns a name), so
     // clone the reused edges.
     let [row_start, column_start, row_end, column_end] = match edges.as_slice() {
@@ -582,7 +580,6 @@ mod tests {
                 PropertyValue::Length(Length::px(6.0))
             )]
         );
-        // The name resolves as a known longhand.
         assert_eq!(
             property_id_from_name("border-bottom-right-radius"),
             Some(PropertyId::BorderBottomRightRadius)
@@ -1066,8 +1063,6 @@ mod tests {
         assert_eq!(decls.len(), 1);
         assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
     }
-
-    // ---- grid-template-areas ----
 
     /// `(grow, shrink, basis)` for a `flex` shorthand, as the three longhands.
     fn flex_triple(text: &str) -> Vec<(PropertyId, PropertyValue)> {

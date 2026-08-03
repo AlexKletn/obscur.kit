@@ -69,7 +69,6 @@ impl LayoutAlgorithm for DockingLayout {
         let content_width = (constraints.max.width - pad_x).max(0.0);
         let content_height = (constraints.max.height - pad_y).max(0.0);
 
-        // The space still available to dock into, shrinking as bands are claimed.
         let mut remaining = Rect::new(
             Point::new(padding.left, padding.top),
             Size::new(content_width, content_height),

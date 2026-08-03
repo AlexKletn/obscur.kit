@@ -200,7 +200,6 @@ fn im_01_object_fit_none_centres_at_natural_size_and_clips() {
         "the mandatory clip is the content box — zero pixels paint outside it"
     );
 
-    // The sibling at (110,0) is unobscured.
     let px = support::rasterize(&runtime, VW, VW);
     let (r, g, b, _) = px.at(130, 20);
     assert_eq!(

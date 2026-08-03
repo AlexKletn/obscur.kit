@@ -138,9 +138,6 @@ impl PipelineSnapshot {
         scene.set_root(display_list);
         let scene_snapshot = scene.snapshot();
 
-        // The paint stage is the flat paint-command stream a rasterizer
-        // consumes, distinct from the scene stage (which also carries the scene
-        // generation and statistics).
         let paint = scene_snapshot.display_list().clone();
 
         // The accessibility stage projects the retained tree into a semantic
@@ -148,7 +145,6 @@ impl PipelineSnapshot {
         // marked focused.
         let accessibility = SemanticTreeBuilder::snapshot(tree, None);
 
-        // The render-graph stage is the backend-neutral pass description.
         let render_graph = RenderGraphSummary::from_scene(&scene_snapshot, viewport);
 
         Self::new(

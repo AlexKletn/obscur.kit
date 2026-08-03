@@ -1753,7 +1753,6 @@ mod tests {
         let sheet = counter_stylesheet();
         let sheets = std::slice::from_ref(&sheet);
 
-        // Build a real scene first.
         let base = runtime.render_now(&view, sheets);
         let base_commands: Vec<_> = base.snapshot().display_list().commands().to_vec();
         assert!(!base_commands.is_empty());

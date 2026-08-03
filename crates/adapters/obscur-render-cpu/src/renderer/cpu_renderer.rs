@@ -182,13 +182,11 @@ impl Renderer for CpuRenderer {
         // (real group compositing, not per-element alpha). Trivial layers stay a
         // cheap passthrough (no offscreen), keeping the plain path byte-identical.
         let mut targets: Vec<tiny_skia::Pixmap> = vec![root_pixmap];
-        // One entry per open `PushLayer`: the layer's opacity when it pushed an
-        // offscreen target to composite on `PopLayer`, or `None` for a trivial
-        // (passthrough) layer that pushed nothing. Keeps pushes and pops balanced
-        // regardless of whether a layer needed an offscreen pass.
-        // Each open group layer that pushed an offscreen records how to composite it
-        // back: its opacity and its (separable) blend mode. `None` marks a
-        // passthrough layer that pushed no offscreen.
+        // One entry per open `PushLayer`. A layer that pushed an offscreen records
+        // how to composite it back: its opacity and its (separable) blend mode.
+        // `None` marks a trivial (passthrough) layer that pushed nothing. Keeps
+        // pushes and pops balanced regardless of whether a layer needed an
+        // offscreen pass.
         let mut layer_stack: Vec<Option<(f32, tiny_skia::BlendMode)>> = Vec::new();
 
         // The clip stack: each entry is the effective clip mask in force after a
@@ -305,7 +303,6 @@ impl Renderer for CpuRenderer {
                     clip_stack.push(entry);
                 }
                 PaintCommand::PopClip => {
-                    // Guard against an unbalanced list: a stray pop is ignored.
                     let _ = clip_stack.pop();
                 }
                 // A CSS `opacity` / `mix-blend-mode` group layer. A layer with

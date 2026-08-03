@@ -242,7 +242,6 @@ impl SceneConverter {
             index += 1;
         }
 
-        // Close any layers a dangling-push (unbalanced) list left open.
         for _ in 0..depth {
             scene.pop_layer();
         }

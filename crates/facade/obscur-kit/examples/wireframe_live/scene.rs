@@ -69,10 +69,6 @@ pub const SELECT_PROMPT: &str = "Choose…";
 #[doc = include_str!("scene.doc/ANCHOR_ID.md")]
 const ANCHOR_ID: ComponentId = ComponentId::from_raw(0x7100_00A0);
 
-// ---------------------------------------------------------------------------
-// The shared interaction state.
-// ---------------------------------------------------------------------------
-
 #[doc = include_str!("scene.doc/WireState.md")]
 #[derive(Debug, Clone)]
 pub struct WireState {
@@ -185,10 +181,6 @@ pub fn stylesheet() -> &'static str {
 .wf-foot-line { height: 16px; color: #9b998f; font-size: 11px; font-weight: 500; }\n\
 "
 }
-
-// ---------------------------------------------------------------------------
-// The view builder.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("scene.doc/view.md")]
 #[must_use]
@@ -409,10 +401,6 @@ fn radio_body(state: &WireState) -> ViewNode {
 fn link_body() -> ViewNode {
     body(vec![slot("DEFAULT · LIVE", anchor("link", "Text link"))])
 }
-
-// ---------------------------------------------------------------------------
-// Small view helpers.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("scene.doc/section.md")]
 fn section(num: &str, title: &str, tag: &str, body_node: ViewNode) -> ViewNode {

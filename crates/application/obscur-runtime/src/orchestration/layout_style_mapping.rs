@@ -530,7 +530,6 @@ mod tests {
             PropertyId::Display,
             ComputedValue::keyword(layout_keyword::DISPLAY_FLEX),
         );
-        // Box model.
         computed.set(
             PropertyId::MarginTop,
             ComputedValue::length(Length::px(1.0)),
@@ -563,7 +562,6 @@ mod tests {
             PropertyId::PaddingLeft,
             ComputedValue::length(Length::px(8.0)),
         );
-        // Sizing constraints.
         computed.set(
             PropertyId::MinWidth,
             ComputedValue::length(Length::px(10.0)),
@@ -580,7 +578,6 @@ mod tests {
             PropertyId::MaxHeight,
             ComputedValue::length(Length::px(13.0)),
         );
-        // Flex container + item.
         computed.set(PropertyId::Gap, ComputedValue::length(Length::px(9.0)));
         computed.set(
             PropertyId::FlexDirection,

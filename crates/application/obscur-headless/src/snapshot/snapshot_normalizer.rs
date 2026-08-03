@@ -134,7 +134,6 @@ mod tests {
         let mut inputs = StyleInputs::new();
         inputs.set_cascaded(child, styled_box_decls());
 
-        // Re-render under the new inputs, then capture.
         host.render_styled(&sample_view(), &[]);
         let snapshot = PipelineSnapshot::capture(host.tree(), &inputs, host.config().viewport());
 
@@ -147,7 +146,6 @@ mod tests {
         assert_eq!(normalized.fill_count(), snapshot.fill_count());
         assert!(normalized.scene_balanced());
 
-        // The rows are sorted by NodeId.
         let ids: Vec<u64> = normalized.nodes().iter().map(|n| n.node().raw()).collect();
         let mut sorted = ids.clone();
         sorted.sort_unstable();

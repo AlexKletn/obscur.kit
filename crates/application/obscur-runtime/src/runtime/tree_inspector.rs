@@ -14,6 +14,12 @@ use crate::orchestration::{
     overlay_commands, scroll_containers, scrollbar_rects,
 };
 
+#[doc = include_str!("tree_inspector.doc/PLACEHOLDER_PART_ID_SPACE.md")]
+const PLACEHOLDER_PART_ID_SPACE: u64 = 1 << 61;
+
+#[doc = include_str!("tree_inspector.doc/SCROLLBAR_PART_ID_SPACE.md")]
+const SCROLLBAR_PART_ID_SPACE: u64 = 1 << 62;
+
 #[doc = include_str!("tree_inspector.doc/TreeInspector.md")]
 pub(crate) struct TreeInspector {
     #[doc = include_str!("tree_inspector.doc/mode.md")]
@@ -135,10 +141,7 @@ impl TreeInspector {
                 .iter()
                 .find(|n| n.node == field)
                 .map_or(0, |n| n.depth + 1);
-            // A stable, collision-free synthetic id derived from the field: the high
-            // bits are set (real ids never reach `1 << 61`) and the low bits carry
-            // the field id, distinct from the scrollbar-part id space (`1 << 62`).
-            let raw = (1_u64 << 61) | field.raw();
+            let raw = PLACEHOLDER_PART_ID_SPACE | field.raw();
             out.push(NodeInspection {
                 node: NodeId::from_raw(raw),
                 parent: Some(field),
@@ -178,10 +181,7 @@ impl TreeInspector {
                 .into_iter()
                 .enumerate()
             {
-                // A stable, collision-free synthetic id derived from the container:
-                // the high bits are set (real ids never reach `1 << 62`) and the low
-                // bits carry the container id plus the part index.
-                let raw = (1_u64 << 62) | (container.node.raw() << 1) | (index as u64);
+                let raw = SCROLLBAR_PART_ID_SPACE | (container.node.raw() << 1) | (index as u64);
                 out.push(NodeInspection {
                     node: NodeId::from_raw(raw),
                     parent: Some(container.node),

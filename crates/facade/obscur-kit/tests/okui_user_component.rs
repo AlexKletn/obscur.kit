@@ -18,8 +18,6 @@ use obscur_kit::view::component::{
 use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 
-// --- The author's component: a props struct, a component, a factory. ---
-
 #[doc = include_str!("okui_user_component.doc/CardProps.md")]
 #[derive(Contract)]
 #[contract(name = "Card")]

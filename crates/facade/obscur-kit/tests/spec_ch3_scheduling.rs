@@ -59,6 +59,8 @@ fn commit(ops: Vec<UiOperation>, version: u64) -> TransactionCommit {
 #[doc = include_str!("spec_ch3_scheduling.doc/an_idle_runtime_presents_no_frames_while_the_clock_advances.md")]
 #[test]
 fn an_idle_runtime_presents_no_frames_while_the_clock_advances() {
+    const VSYNC_TICKS_IN_TEN_SECONDS: usize = 625;
+
     let sheet = support::compile(CSS);
     let sheets = std::slice::from_ref(&sheet);
     let v = static_view();
@@ -70,8 +72,7 @@ fn an_idle_runtime_presents_no_frames_while_the_clock_advances() {
     let _ = drain_frames(&mut rt, &v, sheets);
 
     let mut presented = 0usize;
-    for _ in 0..625 {
-        // 625 * 16 ms = 10 000 ms.
+    for _ in 0..VSYNC_TICKS_IN_TEN_SECONDS {
         rt.advance_motion(VSYNC);
         presented += drain_frames(&mut rt, &v, sheets);
     }

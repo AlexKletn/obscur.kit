@@ -2,6 +2,12 @@
 
 use std::io::{self, BufRead};
 
+fn pop_line_terminator(line: &mut Vec<u8>) {
+    while matches!(line.last(), Some(b'\n' | b'\r')) {
+        line.pop();
+    }
+}
+
 #[doc = include_str!("reader.doc/read_message.md")]
 pub fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     let mut content_length: Option<usize> = None;
@@ -20,10 +26,7 @@ pub fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
             }
             return Ok(None);
         }
-        // Strip the trailing CR/LF.
-        while matches!(line.last(), Some(b'\n' | b'\r')) {
-            line.pop();
-        }
+        pop_line_terminator(&mut line);
         if line.is_empty() {
             break; // blank line: end of headers
         }

@@ -11,7 +11,6 @@ use super::UiRuntime;
 impl UiRuntime {
     #[doc = include_str!("keyboard.doc/handle_key.md")]
     pub fn handle_key(&mut self, event: KeyEvent) -> KeyDispatch {
-        // 1. Fold a physical modifier transition into the held modifier set.
         if let Some(modifier) = event.physical().modifier() {
             self.modifiers = if event.pressed() {
                 self.modifiers.with(modifier)
@@ -20,14 +19,10 @@ impl UiRuntime {
             };
         }
 
-        // 2. Route to the focused node; with no focus the key goes nowhere.
         let Some(target) = self.focused else {
             return KeyDispatch::unhandled();
         };
 
-        // 3. On a press, resolve a bound command from the produced logical key +
-        //    held modifiers and DISPATCH it, so a keyboard shortcut runs the same
-        //    handler a pointer click would (a release never triggers a shortcut).
         // Whether the key was consumed as a text EDIT. When it was, the editing
         // path already scheduled the appropriate frame via `after_edit` (a
         // compose-only `TextEdit` for a same-size edit, or a full `Input`), so the
@@ -35,12 +30,12 @@ impl UiRuntime {
         // full `Input` frame would defeat the per-keystroke compose-only fast path.
         let mut consumed_edit = false;
         let command = if event.pressed() {
-            // 3a. Editing takes precedence for a focused editable: a key that the
-            //     runtime-owned editing session consumes (a printable char,
-            //     Backspace/Delete, an arrow/Home/End motion, or a
-            //     select-all/undo/redo chord) is an EDIT, not a shortcut. When
-            //     consumed, it is neither resolved as a shortcut nor treated as
-            //     activation — a bare 'a' in a field edits the field.
+            // Editing takes precedence for a focused editable: a key that the
+            // runtime-owned editing session consumes (a printable char,
+            // Backspace/Delete, an arrow/Home/End motion, or a select-all/undo/redo
+            // chord) is an EDIT, not a shortcut. When consumed, it is neither
+            // resolved as a shortcut nor treated as activation — a bare 'a' in a
+            // field edits the field.
             if self.try_text_edit(target, &event) {
                 consumed_edit = true;
                 None
@@ -65,10 +60,6 @@ impl UiRuntime {
                         UiEvent::from_key(event).as_trusted(),
                     );
                 }
-                // 3b. Enter/Space activates the focused control regardless of any
-                //     bound shortcut: a button fires its click command, a checkbox
-                //     its change command. Both the shortcut above and this
-                //     activation can fire on the same keypress.
                 if is_activation_key(event.logical()) {
                     self.activate(target, UiEvent::from_key(event).as_trusted());
                 }
@@ -78,10 +69,6 @@ impl UiRuntime {
             None
         };
 
-        // 4. The key reached a focused node: schedule a restyle for the next
-        //    frame, mirroring the pointer path's request on a change — UNLESS the
-        //    key was consumed as a text edit, which already scheduled its own
-        //    (possibly compose-only) frame via `after_edit`.
         if !consumed_edit {
             self.request_frame(FrameReason::Input);
         }

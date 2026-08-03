@@ -41,7 +41,6 @@ pub(super) fn border_fills(
     let inner_tr = Point::new(x + w - right, y + top);
     let inner_br = Point::new(x + w - right, y + h - bottom);
     let inner_bl = Point::new(x + left, y + h - bottom);
-    // A closed quad path from four corners, in order.
     let quad = |a: Point, b: Point, c: Point, d: Point| -> Path {
         let mut path = Path::new();
         path.move_to(a).line_to(b).line_to(c).line_to(d).close();
@@ -93,16 +92,10 @@ pub(super) fn uniform_border(computed: &ComputedStyles, node: NodeId) -> Option<
     let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
     let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
     let left = border_width_of(computed, node, PropertyId::BorderLeftWidth);
-    // All four widths equal and positive.
     if !(top > 0.0 && top == right && top == bottom && top == left) {
         return None;
     }
-    // Every side `solid`.
-    if !(border_is_solid(computed, node, PropertyId::BorderTopStyle)
-        && border_is_solid(computed, node, PropertyId::BorderRightStyle)
-        && border_is_solid(computed, node, PropertyId::BorderBottomStyle)
-        && border_is_solid(computed, node, PropertyId::BorderLeftStyle))
-    {
+    if !all_sides_solid(computed, node) {
         return None;
     }
     // All four colors equal (resolving `currentColor` the same way for each side).
@@ -177,6 +170,13 @@ pub(super) fn corner_radii_of(
 #[doc = include_str!("border_paint.doc/border_is_solid.md")]
 fn border_is_solid(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> bool {
     border_style_is(computed, node, id, layout_keyword::BORDER_STYLE_SOLID)
+}
+
+fn all_sides_solid(computed: &ComputedStyles, node: NodeId) -> bool {
+    border_is_solid(computed, node, PropertyId::BorderTopStyle)
+        && border_is_solid(computed, node, PropertyId::BorderRightStyle)
+        && border_is_solid(computed, node, PropertyId::BorderBottomStyle)
+        && border_is_solid(computed, node, PropertyId::BorderLeftStyle)
 }
 
 #[doc = include_str!("border_paint.doc/border_is_dashed.md")]

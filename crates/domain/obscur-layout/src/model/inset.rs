@@ -120,16 +120,13 @@ fn sticky_axis(
     port_end: f32,
 ) -> f32 {
     if let Some(start) = start_inset {
-        // Stick to the scrollport start edge (never above static, never past CB).
         let sticky_lower = port_start + start;
         let sticky_upper = cb_end - node_extent;
         sticky_lower.max(static_pos).min(sticky_upper)
     } else if let Some(end) = end_inset {
-        // Stick to the scrollport end edge (never below static, never past CB top).
         let sticky_from_end = port_end - end - node_extent;
         sticky_from_end.min(static_pos).max(cb_start)
     } else {
-        // No inset on this axis: it is not sticky.
         static_pos
     }
 }
@@ -144,16 +141,12 @@ fn resolve_axis(
     natural: f32,
 ) -> (f32, f32) {
     match (start, end) {
-        // Pinned to both edges: insets determine the size, explicit/natural ignored.
         (Some(start), Some(end)) => (cb_origin + start, (cb_extent - start - end).max(0.0)),
-        // Anchored to the start edge; size from explicit-or-natural.
         (Some(start), None) => (cb_origin + start, explicit.unwrap_or(natural)),
-        // Anchored to the end edge; position derived from the size.
         (None, Some(end)) => {
             let size = explicit.unwrap_or(natural);
             (cb_origin + cb_extent - end - size, size)
         }
-        // Neither inset: static-position fallback to the containing-block origin.
         (None, None) => (cb_origin, explicit.unwrap_or(natural)),
     }
 }

@@ -347,7 +347,6 @@ mod tests {
         let mut tree = SemanticTree::new();
         tree.insert(node(1, SemanticRole::Group), None);
         tree.insert(node(3, SemanticRole::ListItem), None);
-        // Node 2 owns node 3.
         tree.insert(
             node(2, SemanticRole::List)
                 .with_relation(SemanticRelation::Owns(DomainNodeId::from_raw(3))),

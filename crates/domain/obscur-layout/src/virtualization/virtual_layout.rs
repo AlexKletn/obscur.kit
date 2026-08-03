@@ -53,7 +53,6 @@ impl VirtualLayout {
         if last > first && self.estimator.offset_of(last, item_count) >= bottom {
             last -= 1;
         }
-        // The visible band is the half-open range `[first, last + 1)`.
         let visible_end = last.saturating_add(1);
         let (start, end) = self.overscan.expand(first, visible_end, item_count);
         MaterializedRange::new(start, end)

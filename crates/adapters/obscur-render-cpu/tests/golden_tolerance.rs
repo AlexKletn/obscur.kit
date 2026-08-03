@@ -97,9 +97,7 @@ fn the_scene_really_is_anti_aliased_and_the_band_is_a_small_minority() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // What the tolerance must ACCEPT — one test per knob, and they are disjoint.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn worst_case_anti_aliasing_variation_is_accepted() {
@@ -153,9 +151,7 @@ fn a_backend_precision_shift_inside_the_noise_floor_is_accepted() {
     assert_eq!(diff.differing_pixels(), 0);
 }
 
-// ---------------------------------------------------------------------------
 // What the tolerance must REJECT — a loose tolerance is worse than a hash.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("golden_tolerance.doc/off_red.md")]
 fn off_red(delta: u8) -> Color {
@@ -246,10 +242,6 @@ fn a_wholly_blank_render_is_rejected() {
         Err(GoldenMismatch::TooManyDifferingPixels { .. })
     ));
 }
-
-// ---------------------------------------------------------------------------
-// Disclosed limits.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn the_cap_does_not_catch_a_sub_pixel_radius_drift() {

@@ -622,10 +622,8 @@ mod tests {
         // honest (see `SocketTransport::serve_with_events`).
         ep.mark_event_push_serviced();
 
-        // Handshake.
         assert!(ep.handshake(&handshake("dev")).is_accepted());
 
-        // Subscribe.
         let sub = ep
             .dispatch(&CommandMessage::new(
                 CommandId::new(10),
@@ -638,12 +636,10 @@ mod tests {
         };
         assert!(subscription.granted);
 
-        // Fan-out reaches the subscriber.
         let events = ep.fan_out(Topic::Frames, &EventKind::FrameCommitted { id: 1 });
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].subscription, subscription.id);
 
-        // Inspect.
         let snapshot = ep
             .dispatch(&CommandMessage::new(
                 CommandId::new(11),
@@ -652,7 +648,6 @@ mod tests {
             .expect("inspect authorised");
         assert!(matches!(snapshot, CommandOutcome::Snapshot(_)));
 
-        // Dangerous inject is audited.
         let inject = ep
             .dispatch(&CommandMessage::new(
                 CommandId::new(12),

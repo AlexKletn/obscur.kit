@@ -13,15 +13,10 @@ fn is_proc_macro_crate_root(file: &Path) -> bool {
     if file.file_name() != Some(OsStr::new("lib.rs")) {
         return false;
     }
-    // `<crate>/src/lib.rs` → `<crate>/Cargo.toml`.
-    let Some(manifest) = file
-        .parent()
-        .and_then(Path::parent)
-        .map(|dir| dir.join("Cargo.toml"))
-    else {
+    let Some(crate_root) = file.parent().and_then(Path::parent) else {
         return false;
     };
-    fs::read_to_string(manifest)
+    fs::read_to_string(crate_root.join("Cargo.toml"))
         .is_ok_and(|text| text.lines().any(|line| line.trim() == "proc-macro = true"))
 }
 

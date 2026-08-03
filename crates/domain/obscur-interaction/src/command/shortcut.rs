@@ -183,11 +183,8 @@ mod tests {
         let sc = Shortcut::new(LogicalKey::character('s')).with_modifiers(ctrl);
 
         assert!(sc.matches(LogicalKey::character('s'), ctrl));
-        // Wrong key.
         assert!(!sc.matches(LogicalKey::character('x'), ctrl));
-        // Missing modifier.
         assert!(!sc.matches(LogicalKey::character('s'), Modifiers::new()));
-        // Extra modifier.
         let ctrl_shift = ctrl.with(Modifier::Shift);
         assert!(!sc.matches(LogicalKey::character('s'), ctrl_shift));
     }

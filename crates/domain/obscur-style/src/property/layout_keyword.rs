@@ -2,8 +2,6 @@
 
 use obscur_identity::InternedSymbol;
 
-// ---- `display` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/DISPLAY_BLOCK.md")]
 pub const DISPLAY_BLOCK: InternedSymbol = InternedSymbol::from_raw(0x0000_1001);
 #[doc = include_str!("layout_keyword.doc/DISPLAY_FLEX.md")]
@@ -15,8 +13,6 @@ pub const DISPLAY_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1004);
 #[doc = include_str!("layout_keyword.doc/DISPLAY_CONTENTS.md")]
 pub const DISPLAY_CONTENTS: InternedSymbol = InternedSymbol::from_raw(0x0000_1005);
 
-// ---- `flex-direction` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/FLEX_ROW.md")]
 pub const FLEX_ROW: InternedSymbol = InternedSymbol::from_raw(0x0000_1101);
 #[doc = include_str!("layout_keyword.doc/FLEX_ROW_REVERSE.md")]
@@ -26,16 +22,12 @@ pub const FLEX_COLUMN: InternedSymbol = InternedSymbol::from_raw(0x0000_1103);
 #[doc = include_str!("layout_keyword.doc/FLEX_COLUMN_REVERSE.md")]
 pub const FLEX_COLUMN_REVERSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1104);
 
-// ---- `flex-wrap` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/FLEX_WRAP_NOWRAP.md")]
 pub const FLEX_WRAP_NOWRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_1F01);
 #[doc = include_str!("layout_keyword.doc/FLEX_WRAP_WRAP.md")]
 pub const FLEX_WRAP_WRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_1F02);
 #[doc = include_str!("layout_keyword.doc/FLEX_WRAP_WRAP_REVERSE.md")]
 pub const FLEX_WRAP_WRAP_REVERSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1F03);
-
-// ---- `justify-content` keyword values ----
 
 #[doc = include_str!("layout_keyword.doc/JUSTIFY_START.md")]
 pub const JUSTIFY_START: InternedSymbol = InternedSymbol::from_raw(0x0000_1201);
@@ -52,8 +44,6 @@ pub const JUSTIFY_SPACE_EVENLY: InternedSymbol = InternedSymbol::from_raw(0x0000
 #[doc = include_str!("layout_keyword.doc/JUSTIFY_STRETCH.md")]
 pub const JUSTIFY_STRETCH: InternedSymbol = InternedSymbol::from_raw(0x0000_1207);
 
-// ---- `align-items` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/ALIGN_START.md")]
 pub const ALIGN_START: InternedSymbol = InternedSymbol::from_raw(0x0000_1301);
 #[doc = include_str!("layout_keyword.doc/ALIGN_CENTER.md")]
@@ -65,14 +55,10 @@ pub const ALIGN_STRETCH: InternedSymbol = InternedSymbol::from_raw(0x0000_1304);
 #[doc = include_str!("layout_keyword.doc/ALIGN_AUTO.md")]
 pub const ALIGN_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1305);
 
-// ---- `direction` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/DIRECTION_LTR.md")]
 pub const DIRECTION_LTR: InternedSymbol = InternedSymbol::from_raw(0x0000_1401);
 #[doc = include_str!("layout_keyword.doc/DIRECTION_RTL.md")]
 pub const DIRECTION_RTL: InternedSymbol = InternedSymbol::from_raw(0x0000_1402);
-
-// ---- `writing-mode` keyword values ----
 
 #[doc = include_str!("layout_keyword.doc/WRITING_MODE_HORIZONTAL_TB.md")]
 pub const WRITING_MODE_HORIZONTAL_TB: InternedSymbol = InternedSymbol::from_raw(0x0000_2601);
@@ -81,16 +67,12 @@ pub const WRITING_MODE_VERTICAL_RL: InternedSymbol = InternedSymbol::from_raw(0x
 #[doc = include_str!("layout_keyword.doc/WRITING_MODE_VERTICAL_LR.md")]
 pub const WRITING_MODE_VERTICAL_LR: InternedSymbol = InternedSymbol::from_raw(0x0000_2603);
 
-// ---- `font-style` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/FONT_STYLE_NORMAL.md")]
 pub const FONT_STYLE_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_1501);
 #[doc = include_str!("layout_keyword.doc/FONT_STYLE_ITALIC.md")]
 pub const FONT_STYLE_ITALIC: InternedSymbol = InternedSymbol::from_raw(0x0000_1502);
 #[doc = include_str!("layout_keyword.doc/FONT_STYLE_OBLIQUE.md")]
 pub const FONT_STYLE_OBLIQUE: InternedSymbol = InternedSymbol::from_raw(0x0000_1503);
-
-// ---- `text-align` keyword values ----
 
 #[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_LEFT.md")]
 pub const TEXT_ALIGN_LEFT: InternedSymbol = InternedSymbol::from_raw(0x0000_1601);
@@ -104,8 +86,6 @@ pub const TEXT_ALIGN_JUSTIFY: InternedSymbol = InternedSymbol::from_raw(0x0000_1
 pub const TEXT_ALIGN_START: InternedSymbol = InternedSymbol::from_raw(0x0000_1605);
 #[doc = include_str!("layout_keyword.doc/TEXT_ALIGN_END.md")]
 pub const TEXT_ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1606);
-
-// ---- `text-overflow` keyword values ----
 
 #[doc = include_str!("layout_keyword.doc/TEXT_OVERFLOW_CLIP.md")]
 pub const TEXT_OVERFLOW_CLIP: InternedSymbol = InternedSymbol::from_raw(0x0000_1701);
@@ -174,8 +154,6 @@ pub const SIZING_MAX_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2
 #[doc = include_str!("layout_keyword.doc/SIZING_FIT_CONTENT.md")]
 pub const SIZING_FIT_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2403);
 
-// ---- relative `font-weight` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/FONT_WEIGHT_BOLDER.md")]
 pub const FONT_WEIGHT_BOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_1801);
 #[doc = include_str!("layout_keyword.doc/FONT_WEIGHT_LIGHTER.md")]
@@ -197,8 +175,6 @@ pub const GRID_AUTO_FLOW_ROW_DENSE: InternedSymbol = InternedSymbol::from_raw(0x
 #[doc = include_str!("layout_keyword.doc/GRID_AUTO_FLOW_COLUMN_DENSE.md")]
 pub const GRID_AUTO_FLOW_COLUMN_DENSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1904);
 
-// ---- `position` keyword values ----
-
 #[doc = include_str!("layout_keyword.doc/POSITION_STATIC.md")]
 pub const POSITION_STATIC: InternedSymbol = InternedSymbol::from_raw(0x0000_1A01);
 #[doc = include_str!("layout_keyword.doc/POSITION_RELATIVE.md")]
@@ -209,8 +185,6 @@ pub const POSITION_ABSOLUTE: InternedSymbol = InternedSymbol::from_raw(0x0000_1A
 pub const POSITION_FIXED: InternedSymbol = InternedSymbol::from_raw(0x0000_1A04);
 #[doc = include_str!("layout_keyword.doc/POSITION_STICKY.md")]
 pub const POSITION_STICKY: InternedSymbol = InternedSymbol::from_raw(0x0000_1A05);
-
-// ---- `z-index` keyword values ----
 
 #[doc = include_str!("layout_keyword.doc/Z_INDEX_AUTO.md")]
 pub const Z_INDEX_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1B01);
@@ -228,8 +202,6 @@ pub const BORDER_STYLE_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1C
 pub const BORDER_STYLE_SOLID: InternedSymbol = InternedSymbol::from_raw(0x0000_1C02);
 #[doc = include_str!("layout_keyword.doc/BORDER_STYLE_DASHED.md")]
 pub const BORDER_STYLE_DASHED: InternedSymbol = InternedSymbol::from_raw(0x0000_1C03);
-
-// ---- `box-sizing` keyword values ----
 
 #[doc = include_str!("layout_keyword.doc/BOX_SIZING_CONTENT_BOX.md")]
 pub const BOX_SIZING_CONTENT_BOX: InternedSymbol = InternedSymbol::from_raw(0x0000_1D01);
@@ -757,7 +729,6 @@ mod tests {
         assert_eq!(position_from_name("sticky"), Some(POSITION_STICKY));
         assert_eq!(position_from_name("Sticky"), Some(POSITION_STICKY));
         assert_eq!(position_from_name("subgrid"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(POSITION_RELATIVE), Some("relative"));
         assert_eq!(name_of(POSITION_STATIC), Some("static"));
         assert_eq!(name_of(POSITION_STICKY), Some("sticky"));
@@ -770,7 +741,6 @@ mod tests {
         // The `<integer>` form is not a keyword, and no other keyword is valid.
         assert_eq!(z_index_from_name("0"), None);
         assert_eq!(z_index_from_name("static"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(Z_INDEX_AUTO), Some("auto"));
     }
 
@@ -798,7 +768,6 @@ mod tests {
             Some(FLEX_WRAP_WRAP_REVERSE)
         );
         assert_eq!(flex_wrap_from_name("clip"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(FLEX_WRAP_NOWRAP), Some("nowrap"));
         assert_eq!(name_of(FLEX_WRAP_WRAP), Some("wrap"));
         assert_eq!(name_of(FLEX_WRAP_WRAP_REVERSE), Some("wrap-reverse"));
@@ -844,7 +813,6 @@ mod tests {
         // removed 2026-07-20: `align-content: stretch` is now recognised and routes
         // to line-cross growth, per spec_ch4_flex::align_content_stretch_grows_lines.
         // It contradicted that oracle; the rest of this grammar check stands.)
-        // Round-trips through `name_of`.
         assert_eq!(name_of(JUSTIFY_SPACE_EVENLY), Some("space-evenly"));
     }
 
@@ -872,7 +840,6 @@ mod tests {
         assert_eq!(align_self_from_name("auto"), Some(ALIGN_AUTO));
         assert_eq!(align_self_from_name("AUTO"), Some(ALIGN_AUTO));
         assert_eq!(align_self_from_name("baseline"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(ALIGN_AUTO), Some("auto"));
     }
 
@@ -922,7 +889,6 @@ mod tests {
             Some(TEXT_OVERFLOW_ELLIPSIS)
         );
         assert_eq!(text_overflow_from_name("fade"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(TEXT_OVERFLOW_CLIP), Some("clip"));
         assert_eq!(name_of(TEXT_OVERFLOW_ELLIPSIS), Some("ellipsis"));
     }
@@ -943,7 +909,6 @@ mod tests {
             Some(TEXT_TRANSFORM_CAPITALIZE)
         );
         assert_eq!(text_transform_from_name("full-width"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(TEXT_TRANSFORM_UPPERCASE), Some("uppercase"));
         assert_eq!(name_of(TEXT_TRANSFORM_CAPITALIZE), Some("capitalize"));
     }
@@ -956,7 +921,6 @@ mod tests {
         assert_eq!(overflow_from_name("scroll"), Some(OVERFLOW_SCROLL));
         assert_eq!(overflow_from_name("AUTO"), Some(OVERFLOW_AUTO));
         assert_eq!(overflow_from_name("overlay"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(OVERFLOW_VISIBLE), Some("visible"));
         assert_eq!(name_of(OVERFLOW_HIDDEN), Some("hidden"));
         assert_eq!(name_of(OVERFLOW_SCROLL), Some("scroll"));
@@ -981,7 +945,6 @@ mod tests {
         // Absolute keywords and unknowns map to nothing (they lower to numbers).
         assert_eq!(font_weight_relative_from_name("bold"), None);
         assert_eq!(font_weight_relative_from_name("normal"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(FONT_WEIGHT_BOLDER), Some("bolder"));
         assert_eq!(name_of(FONT_WEIGHT_LIGHTER), Some("lighter"));
     }
@@ -1035,7 +998,6 @@ mod tests {
         // Unknown / malformed.
         assert_eq!(grid_auto_flow_from_name("dense dense"), None);
         assert_eq!(grid_auto_flow_from_name("diagonal"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(GRID_AUTO_FLOW_COLUMN_DENSE), Some("column dense"));
         assert_eq!(name_of(GRID_AUTO_FLOW_ROW), Some("row"));
     }
@@ -1056,7 +1018,6 @@ mod tests {
             Some(BOX_SIZING_BORDER_BOX)
         );
         assert_eq!(box_sizing_from_name("padding-box"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(BOX_SIZING_CONTENT_BOX), Some("content-box"));
         assert_eq!(name_of(BOX_SIZING_BORDER_BOX), Some("border-box"));
     }
@@ -1072,7 +1033,6 @@ mod tests {
         // The remaining continuous styles fold to `solid`.
         assert_eq!(border_style_from_name("double"), Some(BORDER_STYLE_SOLID));
         assert_eq!(border_style_from_name("wavy"), None);
-        // Round-trips through `name_of`.
         assert_eq!(name_of(BORDER_STYLE_NONE), Some("none"));
         assert_eq!(name_of(BORDER_STYLE_SOLID), Some("solid"));
         assert_eq!(name_of(BORDER_STYLE_DASHED), Some("dashed"));

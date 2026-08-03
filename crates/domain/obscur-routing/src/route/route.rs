@@ -25,13 +25,11 @@ impl Route {
     #[doc = include_str!("route.doc/parse.md")]
     #[must_use]
     pub fn parse(input: &str) -> Self {
-        // Split off the fragment first (everything after the first '#').
         let (before_fragment, fragment) = match input.split_once('#') {
             Some((head, frag)) => (head, Some(Box::<str>::from(frag))),
             None => (input, None),
         };
 
-        // Then split off the query (everything after the first '?').
         let (path_part, query_part) = match before_fragment.split_once('?') {
             Some((head, query)) => (head, Some(query)),
             None => (before_fragment, None),

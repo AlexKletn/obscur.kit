@@ -157,7 +157,6 @@ mod tests {
         assert_lossless(src, &tokens);
         assert_eq!(tokens.last().unwrap().kind(), TokenKind::Eof);
 
-        // Spot-check the expected token sequence.
         let non_ws: Vec<(TokenKind, &str)> = tokens
             .iter()
             .filter(|t| t.kind() != TokenKind::Whitespace && t.kind() != TokenKind::Eof)

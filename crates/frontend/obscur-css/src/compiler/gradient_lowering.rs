@@ -155,11 +155,10 @@ fn resolve_repeating_positions(colored: &[(StyleColor, Option<RepeatPos>)]) -> O
     }
     // The last stop must be positioned — it defines the period.
     mags[n - 1]?;
-    // Clamp authored magnitudes non-decreasing.
-    let mut running = 0.0_f32;
+    let mut highest_magnitude_so_far = 0.0_f32;
     for m in mags.iter_mut().flatten() {
-        *m = m.max(running);
-        running = *m;
+        *m = m.max(highest_magnitude_so_far);
+        highest_magnitude_so_far = *m;
     }
     // Fill runs of unpositioned stops by even interpolation between the known
     // magnitudes bounding the run (both endpoints are known).
@@ -485,20 +484,18 @@ fn resolve_stop_positions(stops: &mut [GradientStop]) {
     if n == 0 {
         return;
     }
-    // Anchor the endpoints.
     if stops[0].position.is_none() {
         stops[0].position = Some(0.0);
     }
     if stops[n - 1].position.is_none() {
         stops[n - 1].position = Some(1.0);
     }
-    // Clamp authored positions to be non-decreasing.
-    let mut running = 0.0_f32;
+    let mut highest_position_so_far = 0.0_f32;
     for stop in stops.iter_mut() {
         if let Some(p) = stop.position {
-            let clamped = p.max(running);
+            let clamped = p.max(highest_position_so_far);
             stop.position = Some(clamped);
-            running = clamped;
+            highest_position_so_far = clamped;
         }
     }
     // Fill runs of unpositioned stops by even interpolation between the known

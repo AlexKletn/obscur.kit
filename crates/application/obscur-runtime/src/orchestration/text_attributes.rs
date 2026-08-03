@@ -1,6 +1,8 @@
 #![doc = include_str!("text_attributes.doc/_module.md")]
 
 use std::borrow::Cow;
+use std::iter::Peekable;
+use std::str::Chars;
 
 use obscur_style::computed::ComputedStyle;
 use obscur_style::property::{Length, PropertyId, PropertyValue, layout_keyword};
@@ -299,15 +301,8 @@ pub(crate) fn collapse_white_space(content: &str, white_space: WhiteSpace) -> Co
         }
         return Cow::Borrowed(content);
     }
-    // Collapsing modes (`normal` / `nowrap` / `pre-line`). Fast path: nothing to
-    // change (no segment break, no tab, and no collapsible space run or edge).
-    if !content.contains('\r')
-        && !content.contains('\n')
-        && !content.contains('\t')
-        && !content.starts_with(' ')
-        && !content.ends_with(' ')
-        && !content.contains("  ")
-    {
+    // Collapsing modes: `normal` / `nowrap` / `pre-line`.
+    if nothing_to_collapse(content) {
         return Cow::Borrowed(content);
     }
     let preserve_breaks = white_space.preserves_segment_breaks();
@@ -319,15 +314,7 @@ pub(crate) fn collapse_white_space(content: &str, white_space: WhiteSpace) -> Co
     let mut at_line_start = true;
     let mut chars = content.chars().peekable();
     while let Some(ch) = chars.next() {
-        // Normalise a CRLF / CR segment break to a single `\n`.
-        let ch = if ch == '\r' {
-            if chars.peek() == Some(&'\n') {
-                chars.next();
-            }
-            '\n'
-        } else {
-            ch
-        };
+        let ch = normalized_segment_break(ch, &mut chars);
         if ch == '\n' {
             if preserve_breaks {
                 // A preserved forced break: trim the collapsible whitespace around
@@ -355,6 +342,25 @@ pub(crate) fn collapse_white_space(content: &str, white_space: WhiteSpace) -> Co
     // A trailing pending space is the block's trailing whitespace: trimmed (never
     // emitted).
     Cow::Owned(out)
+}
+
+fn nothing_to_collapse(content: &str) -> bool {
+    !content.contains('\r')
+        && !content.contains('\n')
+        && !content.contains('\t')
+        && !content.starts_with(' ')
+        && !content.ends_with(' ')
+        && !content.contains("  ")
+}
+
+fn normalized_segment_break(ch: char, rest: &mut Peekable<Chars<'_>>) -> char {
+    if ch != '\r' {
+        return ch;
+    }
+    if rest.peek() == Some(&'\n') {
+        rest.next();
+    }
+    '\n'
 }
 
 #[doc = include_str!("text_attributes.doc/process_text.md")]

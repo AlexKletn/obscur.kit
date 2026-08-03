@@ -96,7 +96,6 @@ impl DiagnosticSubscription {
             return true;
         }
 
-        // Buffer is at capacity: apply the overflow strategy.
         match self.policy.overflow {
             OverflowStrategy::DropOldest => {
                 self.buffer.pop_front();
@@ -110,7 +109,6 @@ impl DiagnosticSubscription {
                     .iter_mut()
                     .find(|d| d.code == diagnostic.code && d.subsystem == diagnostic.subsystem)
                 {
-                    // Merge: retain the newest occurrence in place.
                     *slot = diagnostic.clone();
                     true
                 } else {

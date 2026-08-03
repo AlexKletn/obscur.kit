@@ -154,8 +154,6 @@ impl TextBuffer {
         true
     }
 
-    // -- private helpers ----------------------------------------------------
-
     #[doc = include_str!("text_buffer.doc/snap_to_boundary.md")]
     fn snap_to_boundary(&self, offset: usize) -> usize {
         let mut offset = offset.min(self.text.len());
@@ -167,10 +165,13 @@ impl TextBuffer {
 
     #[doc = include_str!("text_buffer.doc/replace_range.md")]
     fn replace_range(&mut self, range: TextRange, new_text: &str, kind: UndoKind) {
-        // Snap both bounds to character boundaries and re-normalize.
-        let a = self.snap_to_boundary(range.start);
-        let b = self.snap_to_boundary(range.end);
-        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        let snapped_start = self.snap_to_boundary(range.start);
+        let snapped_end = self.snap_to_boundary(range.end);
+        let (start, end) = if snapped_start <= snapped_end {
+            (snapped_start, snapped_end)
+        } else {
+            (snapped_end, snapped_start)
+        };
         let range = TextRange::new(start, end);
 
         let removed = self.text[start..end].to_owned();
@@ -326,45 +327,47 @@ impl TextBuffer {
 
     #[doc = include_str!("text_buffer.doc/next_word.md")]
     fn next_word(&self, offset: usize) -> usize {
-        let mut consumed = 0;
-        // Phase 1: leading whitespace.
-        for c in self.text[offset..].chars() {
-            if c.is_whitespace() {
-                consumed += c.len_utf8();
-            } else {
-                break;
-            }
-        }
-        // Phase 2: the following run of non-whitespace.
-        for c in self.text[offset + consumed..].chars() {
-            if c.is_whitespace() {
-                break;
-            }
-            consumed += c.len_utf8();
-        }
-        offset + consumed
+        let tail = &self.text[offset..];
+        let whitespace = leading_whitespace_len(tail);
+        offset + whitespace + leading_word_len(&tail[whitespace..])
     }
 
     #[doc = include_str!("text_buffer.doc/prev_word.md")]
     fn prev_word(&self, offset: usize) -> usize {
-        let mut pos = offset;
-        // Phase 1: trailing whitespace.
-        for c in self.text[..pos].chars().rev() {
-            if c.is_whitespace() {
-                pos -= c.len_utf8();
-            } else {
-                break;
-            }
-        }
-        // Phase 2: the preceding run of non-whitespace.
-        for c in self.text[..pos].chars().rev() {
-            if c.is_whitespace() {
-                break;
-            }
-            pos -= c.len_utf8();
-        }
-        pos
+        let whitespace = trailing_whitespace_len(&self.text[..offset]);
+        let word_end = offset - whitespace;
+        word_end - trailing_word_len(&self.text[..word_end])
     }
+}
+
+fn leading_whitespace_len(text: &str) -> usize {
+    text.chars()
+        .take_while(|c| c.is_whitespace())
+        .map(char::len_utf8)
+        .sum()
+}
+
+fn leading_word_len(text: &str) -> usize {
+    text.chars()
+        .take_while(|c| !c.is_whitespace())
+        .map(char::len_utf8)
+        .sum()
+}
+
+fn trailing_whitespace_len(text: &str) -> usize {
+    text.chars()
+        .rev()
+        .take_while(|c| c.is_whitespace())
+        .map(char::len_utf8)
+        .sum()
+}
+
+fn trailing_word_len(text: &str) -> usize {
+    text.chars()
+        .rev()
+        .take_while(|c| !c.is_whitespace())
+        .map(char::len_utf8)
+        .sum()
 }
 
 impl Default for TextBuffer {

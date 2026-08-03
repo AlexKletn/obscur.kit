@@ -276,9 +276,6 @@ pub(super) fn arrange(
             .max(0.0),
     );
 
-    // Recurse into in-flow children, translating each parent-relative box to
-    // absolute. Zipping bounds both sides, so a mismatched length never indexes
-    // out of range.
     // The scroll container's visible rect in document coordinates: the viewport
     // translated by the current scroll offset. Its top-left is the doc-coord point
     // now at the top-left of the viewport, so a `position: sticky` child clamps its
@@ -290,6 +287,7 @@ pub(super) fn arrange(
         ),
         viewport.size,
     );
+    // Zipping bounds both sides, so a mismatched length never indexes out of range.
     for (index, (child, child_rel)) in children.iter().zip(out.child_boxes().iter()).enumerate() {
         let rel = child_rel.origin();
         let child_style = style_of(styles, child.node());
@@ -300,8 +298,6 @@ pub(super) fn arrange(
         // from its track, so its subtree has to inherit the track — not the grid
         // container's content box, a containing block the item never had.
         let child_basis = out.child_percent_basis(index).resolve(percent_basis);
-        // The static (normal-flow) absolute origin the algorithm computed for this
-        // child, before any positioning offset.
         let static_origin = Point::new(origin.x + rel.x, origin.y + rel.y);
         // A `position: sticky` child stays IN flow (its flow box, and therefore its
         // siblings, are untouched — siblings use the unchanged flow boxes), but its
@@ -346,8 +342,6 @@ pub(super) fn arrange(
         );
     }
 
-    // Position each out-of-flow child within its containing block, then recurse
-    // into its subtree as an independent positioned root.
     for child in &out_of_flow {
         arrange_out_of_flow(
             tree,

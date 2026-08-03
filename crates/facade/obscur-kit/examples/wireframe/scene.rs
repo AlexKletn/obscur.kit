@@ -6,10 +6,6 @@
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 
-// ---------------------------------------------------------------------------
-// View
-// ---------------------------------------------------------------------------
-
 #[doc = include_str!("scene.doc/view.md")]
 #[must_use]
 pub fn view() -> View {
@@ -66,10 +62,6 @@ fn footer() -> ViewNode {
     )
 }
 
-// ---------------------------------------------------------------------------
-// 01 · Button
-// ---------------------------------------------------------------------------
-
 fn group_button() -> ViewNode {
     let btns = row(vec![
         col("DEFAULT", el("wf-btn", vec![text("wf-btn-t", "Button")])),
@@ -95,10 +87,6 @@ fn group_button() -> ViewNode {
     card("01", "Button", "<button>", vec![btns])
 }
 
-// ---------------------------------------------------------------------------
-// 02 · Button — Primary
-// ---------------------------------------------------------------------------
-
 fn group_button_primary() -> ViewNode {
     let btns = row(vec![
         col(
@@ -120,10 +108,6 @@ fn group_button_primary() -> ViewNode {
     ]);
     card("02", "Button — Primary", "<button type=submit>", vec![btns])
 }
-
-// ---------------------------------------------------------------------------
-// 03 · Text Field
-// ---------------------------------------------------------------------------
 
 fn field_text(class: &str, value: &str, placeholder: bool, caret: bool) -> ViewNode {
     let mut inner = vec![text(
@@ -178,10 +162,6 @@ fn group_text_field() -> ViewNode {
     )
 }
 
-// ---------------------------------------------------------------------------
-// 04 · Textarea
-// ---------------------------------------------------------------------------
-
 fn group_textarea() -> ViewNode {
     let default_ta = el(
         "wf-textarea",
@@ -220,10 +200,6 @@ fn group_textarea() -> ViewNode {
     ]);
     card("04", "Textarea", "<textarea>", vec![r])
 }
-
-// ---------------------------------------------------------------------------
-// 05 · Select
-// ---------------------------------------------------------------------------
 
 fn select_closed(class: &str, label: &str, up: bool, placeholder: bool) -> ViewNode {
     el(
@@ -276,10 +252,6 @@ fn group_select() -> ViewNode {
     card("05", "Select", "<select>", vec![r])
 }
 
-// ---------------------------------------------------------------------------
-// 06 · Checkbox
-// ---------------------------------------------------------------------------
-
 fn checkbox(class: &str, inner: Vec<ViewNode>) -> ViewNode {
     el(&format!("wf-check {class}"), inner)
 }
@@ -322,10 +294,6 @@ fn group_checkbox() -> ViewNode {
     )
 }
 
-// ---------------------------------------------------------------------------
-// 07 · Radio
-// ---------------------------------------------------------------------------
-
 fn radio(class: &str, dot: bool) -> ViewNode {
     // SUBSTITUTE (border-radius:50%): explicit half-px radii for the circle + dot.
     let inner = if dot {
@@ -347,10 +315,6 @@ fn group_radio() -> ViewNode {
     ]);
     card("07", "Radio", "<input type=radio>", vec![r])
 }
-
-// ---------------------------------------------------------------------------
-// 08 · Range Slider
-// ---------------------------------------------------------------------------
 
 fn range(class: &str, thumb: &str) -> ViewNode {
     // Track (rail) + fill + absolutely-positioned thumb via left:calc(45% - 8px).
@@ -374,10 +338,6 @@ fn group_range() -> ViewNode {
     card("08", "Range Slider", "<input type=range>", vec![r])
 }
 
-// ---------------------------------------------------------------------------
-// 09 · Progress & Meter
-// ---------------------------------------------------------------------------
-
 fn group_progress() -> ViewNode {
     let determinate = el("wf-progress", vec![el("wf-progress-fill p60", vec![])]);
     // REAL (repeating-linear-gradient hatch): a 45° diagonal hatch fill across the
@@ -394,10 +354,6 @@ fn group_progress() -> ViewNode {
     ]);
     card("09", "Progress & Meter", "<progress> <meter>", vec![r])
 }
-
-// ---------------------------------------------------------------------------
-// 10 · Number & Search
-// ---------------------------------------------------------------------------
 
 fn group_number_search() -> ViewNode {
     let number = el(
@@ -445,10 +401,6 @@ fn group_number_search() -> ViewNode {
     )
 }
 
-// ---------------------------------------------------------------------------
-// 11 · File & Color
-// ---------------------------------------------------------------------------
-
 fn file_input(class: &str, filename: &str, muted: bool) -> ViewNode {
     el(
         &format!("wf-file {class}"),
@@ -475,10 +427,6 @@ fn group_file_color() -> ViewNode {
     card("11", "File & Color", "<input type=file|color>", vec![r])
 }
 
-// ---------------------------------------------------------------------------
-// 12 · Text Link
-// ---------------------------------------------------------------------------
-
 fn link(class: &str, label: &str) -> ViewNode {
     // Underline = border-bottom:1.5px solid on the text node.
     el(&format!("wf-link {class}"), vec![text("wf-link-t", label)])
@@ -494,10 +442,6 @@ fn group_link() -> ViewNode {
     ]);
     card("12", "Text Link", "<a>", vec![r])
 }
-
-// ---------------------------------------------------------------------------
-// 13 · Fieldset
-// ---------------------------------------------------------------------------
 
 fn fieldset_radio_row(class: &str, dot: bool, label: &str) -> ViewNode {
     el(
@@ -524,10 +468,6 @@ fn group_fieldset() -> ViewNode {
     );
     card("13", "Fieldset", "<fieldset> <legend>", vec![fs])
 }
-
-// ---------------------------------------------------------------------------
-// 14 · Disclosure
-// ---------------------------------------------------------------------------
 
 fn group_disclosure() -> ViewNode {
     let collapsed = el(
@@ -565,10 +505,6 @@ fn group_disclosure() -> ViewNode {
     card("14", "Disclosure", "<details> <summary>", vec![r])
 }
 
-// ---------------------------------------------------------------------------
-// 15 · Scrollbar & Table
-// ---------------------------------------------------------------------------
-
 fn group_scrollbar_table() -> ViewNode {
     let scrollbar = el("wf-scrollbar", vec![el("wf-scroll-thumb", vec![])]);
     let table = el(
@@ -601,10 +537,6 @@ fn trow(class: &str, name: &str, role: &str, status: &str) -> ViewNode {
         ],
     )
 }
-
-// ---------------------------------------------------------------------------
-// Structural helpers
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("scene.doc/card.md")]
 fn card(num: &str, title: &str, tag: &str, mut body: Vec<ViewNode>) -> ViewNode {

@@ -49,28 +49,17 @@ impl ReconcileEnactor {
         tree: &mut RetainedTree,
         desired: &View,
     ) -> Result<(TransactionCommit, ReconciliationPlan), TransactionError> {
-        // 1. Stage the normalized intent: a whole-tree root reconcile.
         let mut staged = UiTransaction::new();
         staged.push(UiOperation::ReplaceRoot);
 
-        // 2. Validate before application. On rejection nothing is mutated.
+        // Validate before application. On rejection nothing is mutated.
         self.validator.validate(&staged)?;
 
-        // 3. Apply: reconciliation is the underlying mechanism that performs the
-        //    actual retained-tree mutation, exactly as before.
+        // Reconciliation is the underlying mechanism that performs the actual
+        // retained-tree mutation, exactly as before.
         let plan = reconciler.reconcile_root(tree, desired);
 
-        // 4. Commit atomically. Only a reconcile that changed the tree advances
-        //    the version and carries operations; an idempotent pass commits
-        //    empty and leaves the stamp untouched.
-        if plan.is_empty() {
-            return Ok((TransactionCommit::new(Vec::new(), self.version), plan));
-        }
-        self.version = self.version.bump();
-        Ok((
-            TransactionCommit::new(staged.into_operations(), self.version),
-            plan,
-        ))
+        Ok(self.commit_if_changed(staged, plan))
     }
 
     #[doc = include_str!("reconcile_enactor.doc/commit_subtree.md")]
@@ -81,25 +70,31 @@ impl ReconcileEnactor {
         node: NodeId,
         desired: &ViewFragment,
     ) -> Result<(TransactionCommit, ReconciliationPlan), TransactionError> {
-        // 1. Stage the normalized intent: re-render this component's subtree.
         let mut staged = UiTransaction::new();
         staged.push(UiOperation::Rerender { node });
 
-        // 2. Validate before application. On rejection nothing is mutated.
+        // Validate before application. On rejection nothing is mutated.
         self.validator.validate(&staged)?;
 
-        // 3. Apply: the subtree-scoped reconcile is the underlying mechanism.
         let plan = reconciler.reconcile(tree, node, desired);
 
-        // 4. Commit atomically, on the same terms as a root commit.
+        Ok(self.commit_if_changed(staged, plan))
+    }
+
+    #[doc = include_str!("reconcile_enactor.doc/commit_if_changed.md")]
+    fn commit_if_changed(
+        &mut self,
+        staged: UiTransaction,
+        plan: ReconciliationPlan,
+    ) -> (TransactionCommit, ReconciliationPlan) {
         if plan.is_empty() {
-            return Ok((TransactionCommit::new(Vec::new(), self.version), plan));
+            return (TransactionCommit::new(Vec::new(), self.version), plan);
         }
         self.version = self.version.bump();
-        Ok((
+        (
             TransactionCommit::new(staged.into_operations(), self.version),
             plan,
-        ))
+        )
     }
 }
 

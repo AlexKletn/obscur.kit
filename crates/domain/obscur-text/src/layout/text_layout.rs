@@ -56,24 +56,19 @@ impl TextLayout {
         let font_size = run.font_size();
         let source = run.source();
 
-        // Split the run's glyphs into per-line glyph groups.
-        let lines_glyphs = if run.is_empty() {
-            // An empty run still yields a single (empty) line.
+        let packed_lines = if run.is_empty() {
             vec![Vec::new()]
         } else if max_width <= 0.0 {
-            // Unconstrained width: the whole run is one line.
             vec![run.glyphs().to_vec()]
         } else {
             Self::pack_lines(run, text, max_width)
         };
 
-        // Build a `TextLine` per group, assigning cumulative tops, byte ranges,
-        // and alignment offsets.
         let mut top = 0.0_f32;
-        let mut lines = Vec::with_capacity(lines_glyphs.len());
-        for (index, glyphs) in lines_glyphs.iter().enumerate() {
+        let mut lines = Vec::with_capacity(packed_lines.len());
+        for (index, glyphs) in packed_lines.iter().enumerate() {
             let start = glyphs.first().map_or(source.start, ShapedGlyph::cluster);
-            let end = lines_glyphs
+            let end = packed_lines
                 .get(index + 1)
                 .and_then(|next| next.first())
                 .map_or(source.end, ShapedGlyph::cluster);

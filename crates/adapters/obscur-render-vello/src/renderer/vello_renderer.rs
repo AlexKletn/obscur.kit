@@ -294,7 +294,6 @@ impl VelloRenderer {
         let gpu_device = device.device().clone();
         let gpu_queue = device.queue().clone();
 
-        // Acquire the swapchain image to present into.
         let surface_texture = surface
             .current_texture()
             .map_err(VelloRenderError::into_renderer_error)?;
@@ -313,7 +312,6 @@ impl VelloRenderer {
             .blitter
             .get_or_insert_with(|| (format, wgpu::util::TextureBlitter::new(&gpu_device, format)));
 
-        // Copy offscreen -> swapchain and present.
         let surface_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

@@ -44,8 +44,6 @@ impl<'t> Walker<'t> {
         }
     }
 
-    // ---- cursor primitives -------------------------------------------------
-
     #[doc = include_str!("parser.doc/nth_kind.md")]
     fn nth_kind(&self, n: usize) -> TokenKind {
         self.tokens
@@ -72,8 +70,6 @@ impl<'t> Walker<'t> {
     fn at_end(&self) -> bool {
         self.peek().is_eof()
     }
-
-    // ---- event helpers -----------------------------------------------------
 
     fn start(&mut self, kind: SyntaxKind) {
         self.events.push(ParseEvent::StartNode(kind));
@@ -105,8 +101,6 @@ impl<'t> Walker<'t> {
             self.bump();
         }
     }
-
-    // ---- grammar -----------------------------------------------------------
 
     #[doc = include_str!("parser.doc/parse_document.md")]
     fn parse_document(&mut self) {

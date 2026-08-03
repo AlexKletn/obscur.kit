@@ -25,13 +25,9 @@ impl MotionCoordinator {
             return Some(last.value());
         }
 
-        // Locate the last keyframe whose offset is <= t; its successor brackets t.
-        let mut i = 0;
-        while i + 1 < frames.len() && frames[i + 1].offset() <= t {
-            i += 1;
-        }
-        let lower: &Keyframe = &frames[i];
-        let upper: &Keyframe = &frames[i + 1];
+        let lower_index = last_keyframe_at_or_before(frames, t);
+        let lower: &Keyframe = &frames[lower_index];
+        let upper: &Keyframe = &frames[lower_index + 1];
         let span = upper.offset() - lower.offset();
         let local = if span == 0.0 {
             0.0
@@ -46,6 +42,14 @@ impl MotionCoordinator {
                 .unwrap_or_else(|| upper.value()),
         )
     }
+}
+
+fn last_keyframe_at_or_before(frames: &[Keyframe], t: f32) -> usize {
+    let mut index = 0;
+    while index + 1 < frames.len() && frames[index + 1].offset() <= t {
+        index += 1;
+    }
+    index
 }
 
 #[cfg(test)]

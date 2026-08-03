@@ -625,8 +625,6 @@ mod tests {
         );
     }
 
-    // ---- selector-list pseudo-classes --------------------------------------
-
     /// selectors-4 §15: ":is(em, #foo) has a specificity of (1,0,0)"; and
     /// ":not(em, strong#foo)" is (1,0,1).
     #[test]

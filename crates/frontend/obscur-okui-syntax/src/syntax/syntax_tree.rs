@@ -39,7 +39,6 @@ mod tests {
         let src = "<Button label=\"Save\">{count}</Button>";
         let tokens = Lexer::new().tokenize(src);
 
-        // Wrap every non-Eof token as a flat Document node.
         let mut root = SyntaxNode::new(SyntaxKind::Document);
         for token in tokens.iter().filter(|t| t.kind() != TokenKind::Eof) {
             root.push_token(SyntaxToken::from_lexer(token));

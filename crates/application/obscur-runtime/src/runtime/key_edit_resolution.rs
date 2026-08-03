@@ -210,8 +210,7 @@ impl<'a> KeyEditResolver<'a> {
             let boundary = GraphemeCursor::new(focus, text.len(), true)
                 .prev_boundary(text, 0)
                 .ok()??;
-            // A single-scalar cluster: defer to the buffer's default delete.
-            (text[boundary..focus].chars().nth(1).is_some()).then_some((boundary, focus))
+            spans_multiple_scalars(&text[boundary..focus]).then_some((boundary, focus))
         } else {
             if focus >= text.len() {
                 return None;
@@ -219,7 +218,7 @@ impl<'a> KeyEditResolver<'a> {
             let boundary = GraphemeCursor::new(focus, text.len(), true)
                 .next_boundary(text, 0)
                 .ok()??;
-            (text[focus..boundary].chars().nth(1).is_some()).then_some((focus, boundary))
+            spans_multiple_scalars(&text[focus..boundary]).then_some((focus, boundary))
         }
     }
 
@@ -270,6 +269,11 @@ impl<'a> KeyEditResolver<'a> {
             to_end,
         ))
     }
+}
+
+#[doc = include_str!("key_edit_resolution.doc/spans_multiple_scalars.md")]
+fn spans_multiple_scalars(cluster: &str) -> bool {
+    cluster.chars().nth(1).is_some()
 }
 
 #[cfg(test)]

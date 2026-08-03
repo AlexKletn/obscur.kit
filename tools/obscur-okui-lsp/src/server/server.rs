@@ -13,6 +13,8 @@ use crate::transport::{read_message, write_message};
 #[doc = include_str!("server.doc/METHOD_NOT_FOUND.md")]
 const METHOD_NOT_FOUND: i64 = -32601;
 
+const TEXT_DOCUMENT_SYNC_FULL: i64 = 1;
+
 #[doc = include_str!("server.doc/to_u32.md")]
 fn to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
@@ -252,8 +254,7 @@ fn server_capabilities() -> JsonValue {
         (
             "capabilities",
             JsonValue::object([
-                // 1 = full-text document sync.
-                ("textDocumentSync", JsonValue::int(1)),
+                ("textDocumentSync", JsonValue::int(TEXT_DOCUMENT_SYNC_FULL)),
                 ("documentSymbolProvider", JsonValue::Bool(true)),
                 ("hoverProvider", JsonValue::Bool(true)),
             ]),

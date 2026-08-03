@@ -51,24 +51,26 @@ impl RetainedTree {
     #[doc = include_str!("retained_tree.doc/alloc.md")]
     pub fn alloc(&mut self, kind: NodeKind) -> NodeId {
         let id = if let Some(index) = self.free.pop() {
-            // Reuse a vacated slot, advancing its generation on reuse.
-            let idx = index as usize;
-            if let Some(slot) = self.slots.get_mut(idx) {
-                slot.generation = slot.generation.next();
-                let id = pack_node_id(index, slot.generation.raw());
-                slot.node = Some(RetainedNode::new(id, kind));
-                id
-            } else {
-                // Free-list referenced a non-existent slot (should never happen);
-                // fall back to appending a fresh slot rather than panicking.
-                self.push_fresh_slot(kind)
-            }
+            self.reuse_vacated_slot(index, kind)
         } else {
             self.push_fresh_slot(kind)
         };
         self.live += 1;
         self.version = self.version.bump();
         id
+    }
+
+    fn reuse_vacated_slot(&mut self, index: u32, kind: NodeKind) -> NodeId {
+        if let Some(slot) = self.slots.get_mut(index as usize) {
+            slot.generation = slot.generation.next();
+            let id = pack_node_id(index, slot.generation.raw());
+            slot.node = Some(RetainedNode::new(id, kind));
+            id
+        } else {
+            // Free-list referenced a non-existent slot (should never happen);
+            // fall back to appending a fresh slot rather than panicking.
+            self.push_fresh_slot(kind)
+        }
     }
 
     #[doc = include_str!("retained_tree.doc/push_fresh_slot.md")]

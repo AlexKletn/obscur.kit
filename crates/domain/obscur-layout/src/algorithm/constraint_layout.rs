@@ -47,7 +47,6 @@ impl LayoutAlgorithm for ConstraintLayout {
             );
         }
 
-        // Definite own size wins; otherwise the largest child plus padding.
         let width = style
             .width
             .resolve(constraints.max.width)

@@ -248,18 +248,16 @@ impl LayoutAlgorithm for FlowLayout {
         );
 
         let mut child_boxes = Vec::with_capacity(children.len());
-        // `y` is the collapsed bottom edge of the last placed *real* (non
-        // collapse-through) child, in content-box coordinates; `pending` is the
-        // open collapsing set of adjoining margins at the current boundary
-        // (CSS 2.1 §8.3.1); `gap_acc` is the non-collapsing `row-gap` accrued
-        // across that boundary (additive per Box Alignment, never collapses).
-        let mut y = 0.0_f32;
-        let mut pending = CollapsingMargins::EMPTY;
-        let mut gap_acc = 0.0_f32;
+        // The bottom edge is in content-box coordinates and the margins adjoining
+        // the current boundary collapse (CSS 2.1 §8.3.1), while the `row-gap`
+        // accrued across it is additive per Box Alignment and never collapses.
+        let mut last_real_child_bottom = 0.0_f32;
+        let mut open_margins = CollapsingMargins::EMPTY;
+        let mut accrued_gap = 0.0_f32;
         for (index, child) in children.iter().enumerate() {
             let child_style = child.style();
             if index > 0 {
-                gap_acc += style.gap;
+                accrued_gap += style.gap;
             }
             // This child's top margin joins the currently-open collapsing set. A
             // block-axis `auto` margin is zero in normal flow (CSS 2.1 §10.6.3):
@@ -270,13 +268,13 @@ impl LayoutAlgorithm for FlowLayout {
             // including this block-axis one: CSS 2.1 §8.3 resolves all four against
             // the containing block's *width*. `margin-top: 10%` of a 300px-wide
             // parent is 30px regardless of how tall anything is.
-            pending = pending.adjoin(child_style.margin.top.resolve(content_width));
+            open_margins = open_margins.adjoin(child_style.margin.top.resolve(content_width));
 
-            // Separation before this child: the additive gap plus the collapsed
-            // margin. For the first child this is just its (contained) top
-            // margin, since `gap_acc` is 0.
-            let separation = gap_acc + pending.solve();
-            let remaining_height = (avail_content_height - (y + separation)).max(0.0);
+            // For the first child the separation is just its (contained) top
+            // margin, since `accrued_gap` is 0.
+            let separation = accrued_gap + open_margins.solve();
+            let remaining_height =
+                (avail_content_height - (last_real_child_bottom + separation)).max(0.0);
             // Horizontal margins take from the child's available inline space
             // (CSS 2.1 §10.3.3: margin-left + border + padding + width + padding
             // + border + margin-right = the containing block's width), so a
@@ -344,7 +342,8 @@ impl LayoutAlgorithm for FlowLayout {
             // An empty, zero-height child with no top/bottom border or padding
             // has adjoining top & bottom margins: it collapses *through*. The
             // open set spans across it — its bottom margin folds in and neither
-            // `y` nor the set is closed — so a run of empties yields one margin.
+            // the bottom edge nor the set is closed — so a run of empties yields
+            // one margin.
             let collapses_through = child_size.height == 0.0
                 && child_style.border.top == 0.0
                 && child_style.border.bottom == 0.0
@@ -352,10 +351,11 @@ impl LayoutAlgorithm for FlowLayout {
                 && child_style.padding.bottom == 0.0;
 
             if collapses_through {
-                pending = pending.adjoin(child_style.margin.bottom.resolve(content_width));
+                open_margins =
+                    open_margins.adjoin(child_style.margin.bottom.resolve(content_width));
                 // Place the zero-height box at the (current) collapsed boundary;
-                // it does not advance `y` and does not close the set.
-                let top = bp_top + y + gap_acc + pending.solve();
+                // it does not advance the bottom edge and does not close the set.
+                let top = bp_top + last_real_child_bottom + accrued_gap + open_margins.solve();
                 child_boxes.push(LayoutBox::new(Rect::new(Point::new(left, top), child_size)));
                 continue;
             }
@@ -363,23 +363,23 @@ impl LayoutAlgorithm for FlowLayout {
             // A real child closes the collapsing set: it sits below the
             // collapsed separation, then a fresh set opens with its bottom
             // margin and the gap accumulator resets.
-            let top = y + separation;
+            let top = last_real_child_bottom + separation;
             child_boxes.push(LayoutBox::new(Rect::new(
                 Point::new(left, bp_top + top),
                 child_size,
             )));
-            y = top + child_size.height;
-            pending =
+            last_real_child_bottom = top + child_size.height;
+            open_margins =
                 CollapsingMargins::EMPTY.adjoin(child_style.margin.bottom.resolve(content_width));
-            gap_acc = 0.0;
+            accrued_gap = 0.0;
         }
 
         // Auto content height: the last real child's collapsed bottom edge plus
         // the trailing collapsing set (the last child's bottom margin — and any
         // trailing collapse-through empties — are *contained* within this box,
         // not protruded; see the module docs). With zero child margins this is
-        // exactly `y`, byte-identical to a gap-only stack.
-        let children_content_height = y + pending.solve();
+        // exactly the bottom edge, byte-identical to a gap-only stack.
+        let children_content_height = last_real_child_bottom + open_margins.solve();
 
         // Content height: the definite height resolved above (already mapped through
         // `box-sizing`, which under `border-box` subtracts the vertical border +
@@ -526,16 +526,16 @@ fn layout_vertical(
     let block_end_padding = if rl { padding.left } else { padding.right };
 
     let mut placed: Vec<VerticalPlacement> = Vec::with_capacity(children.len());
-    // `b` is the block-end of the last placed real child (distance from the
-    // block-start content edge); `pending` is the open block-axis collapsing set;
-    // `gap_acc` is the additive `gap` accrued across the current boundary.
-    let mut b = 0.0_f32;
-    let mut pending = CollapsingMargins::EMPTY;
-    let mut gap_acc = 0.0_f32;
+    // The block-end is a distance from the block-start content edge; the open
+    // set is the block-axis analogue of the horizontal path's, and the `gap`
+    // accrued across the current boundary is additive and never collapses.
+    let mut last_real_child_block_end = 0.0_f32;
+    let mut open_margins = CollapsingMargins::EMPTY;
+    let mut accrued_gap = 0.0_f32;
     for (index, child) in children.iter().enumerate() {
         let cs = child.style();
         if index > 0 {
-            gap_acc += style.gap;
+            accrued_gap += style.gap;
         }
         // Block-start (leading) and block-end (trailing) margins, from the physical
         // edges the mode maps them to. Percentage margins resolve against the
@@ -545,10 +545,10 @@ fn layout_vertical(
         } else {
             (cs.margin.left, cs.margin.right)
         };
-        pending = pending.adjoin(lead_margin.resolve(content_inline));
+        open_margins = open_margins.adjoin(lead_margin.resolve(content_inline));
 
-        let separation = gap_acc + pending.solve();
-        let remaining_block = (block_avail - (b + separation)).max(0.0);
+        let separation = accrued_gap + open_margins.solve();
+        let remaining_block = (block_avail - (last_real_child_block_end + separation)).max(0.0);
 
         // Inline (vertical) margins take from the child's offered inline space;
         // inline-start is the top, inline-end the bottom.
@@ -594,8 +594,8 @@ fn layout_vertical(
             && block_end_padding == 0.0;
 
         if collapses_through {
-            pending = pending.adjoin(trail_margin.resolve(content_inline));
-            let block_start_offset = b + gap_acc + pending.solve();
+            open_margins = open_margins.adjoin(trail_margin.resolve(content_inline));
+            let block_start_offset = last_real_child_block_end + accrued_gap + open_margins.solve();
             placed.push(VerticalPlacement {
                 block_start_offset,
                 inline_offset,
@@ -604,17 +604,17 @@ fn layout_vertical(
             continue;
         }
 
-        let block_start_offset = b + separation;
+        let block_start_offset = last_real_child_block_end + separation;
         placed.push(VerticalPlacement {
             block_start_offset,
             inline_offset,
             size,
         });
-        b = block_start_offset + block_size;
-        pending = CollapsingMargins::EMPTY.adjoin(trail_margin.resolve(content_inline));
-        gap_acc = 0.0;
+        last_real_child_block_end = block_start_offset + block_size;
+        open_margins = CollapsingMargins::EMPTY.adjoin(trail_margin.resolve(content_inline));
+        accrued_gap = 0.0;
     }
-    let children_block = b + pending.solve();
+    let children_block = last_real_child_block_end + open_margins.solve();
 
     // The used block extent: the definite one resolved (and clamped) above, else
     // the children's shrink-wrap — which is clamped here for the first time. A

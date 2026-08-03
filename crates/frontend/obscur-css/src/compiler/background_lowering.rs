@@ -42,11 +42,9 @@ pub(super) fn expand_background(
             selector,
         ))]
     };
-    // `background: linear-gradient(...)` → background-image.
     if let Some(value) = lower_background_image(&decl.value) {
         return standard(PropertyId::BackgroundImage, value);
     }
-    // `background: <color>` → background-color.
     if let [one] = decl.value.as_slice()
         && let Some(color) = parse_stop_color(one)
     {
@@ -59,7 +57,6 @@ pub(super) fn expand_background(
 
 #[doc = include_str!("background_lowering.doc/lower_background_size.md")]
 pub(super) fn lower_background_size(values: &[ParsedValue]) -> Option<PropertyValue> {
-    // Single keyword: `cover` / `contain` / `auto`.
     if let [ParsedValue::Keyword(keyword)] = values {
         if keyword.eq_ignore_ascii_case("cover") {
             return Some(PropertyValue::BackgroundSize(BackgroundSize::Cover));
@@ -73,18 +70,18 @@ pub(super) fn lower_background_size(values: &[ParsedValue]) -> Option<PropertyVa
     }
     // One or two `<length-percentage> | auto` components.
     let components: Vec<&ParsedValue> = values.iter().collect();
-    let (w, h) = match components.as_slice() {
+    let (width, height) = match components.as_slice() {
         [a] => (background_size_component(a)?, Length::Auto),
         [a, b] => (background_size_component(a)?, background_size_component(b)?),
         _ => return None,
     };
     // Both axes `auto` is exactly the intrinsic-size initial.
-    if w.is_auto() && h.is_auto() {
+    if width.is_auto() && height.is_auto() {
         return Some(PropertyValue::BackgroundSize(BackgroundSize::Auto));
     }
     Some(PropertyValue::BackgroundSize(BackgroundSize::Explicit {
-        width: w,
-        height: h,
+        width,
+        height,
     }))
 }
 

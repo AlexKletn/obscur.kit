@@ -122,10 +122,9 @@ impl VirtualLists {
             if extent <= 0.0 {
                 continue;
             }
-            // Screen y relative to the container top, plus the scroll the content is
-            // shifted by, is the offset into the full list; divide by the row extent.
-            let offset = (screen.y - layout_box.bounds.origin.y) + scroll.stored(container);
-            if offset < 0.0 {
+            let content_space_offset =
+                (screen.y - layout_box.bounds.origin.y) + scroll.stored(container);
+            if content_space_offset < 0.0 {
                 continue;
             }
             #[expect(
@@ -133,7 +132,7 @@ impl VirtualLists {
                 clippy::cast_sign_loss,
                 reason = "offset is non-negative and bounded by the container's clamped scrollport"
             )]
-            let index = (offset / extent) as usize;
+            let index = (content_space_offset / extent) as usize;
             return Some((id, index));
         }
         None

@@ -621,6 +621,4 @@ pub(crate) mod tests {
         assert_eq!(decls.len(), 1);
         assert_eq!(standard_of(&decls[0]).property(), PropertyId::Width);
     }
-
-    // ---- grid-template-columns / grid-template-rows ----
 }

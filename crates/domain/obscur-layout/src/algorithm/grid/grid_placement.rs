@@ -94,19 +94,15 @@ fn resolve_axis(start: GridLine, end: GridLine, num_tracks: usize) -> (Option<us
     let tracks_i32 = i32::try_from(num_tracks).unwrap_or(i32::MAX);
     let has_negative =
         matches!(start, GridLine::Line(a) if a < 0) || matches!(end, GridLine::Line(b) if b < 0);
-    // Normalise a negative (from-end) line to a positive 1-based line: `-1` is the
-    // last line (`num_tracks + 1`), i.e. `num_tracks + 2 + a` for a negative `a`;
-    // clamped to a valid `≥ 1` line. Positive/`Auto`/`Span` edges pass through.
-    let norm = |line: GridLine| -> GridLine {
+    let from_end_line_to_positive_line = |line: GridLine| -> GridLine {
         match line {
             GridLine::Line(a) if a < 0 => GridLine::Line((tracks_i32 + 2 + a).max(1)),
             other => other,
         }
     };
-    let start = norm(start);
-    let end = norm(end);
-    // A clamped-positive line index (`≥ 1`) as a 0-based track index.
-    let track = |line: i32| usize::try_from(line.max(1)).unwrap_or(1) - 1;
+    let start = from_end_line_to_positive_line(start);
+    let end = from_end_line_to_positive_line(end);
+    let zero_based_track_of_line = |line: i32| usize::try_from(line.max(1)).unwrap_or(1) - 1;
     let (anchor, span) = match (start, end) {
         // Definite start line — end decides the span.
         (GridLine::Line(a), end) => {
@@ -115,23 +111,23 @@ fn resolve_axis(start: GridLine, end: GridLine, num_tracks: usize) -> (Option<us
                 GridLine::Span(n) => usize::from(n.max(1)),
                 GridLine::Auto => 1,
             };
-            (Some(track(a)), span)
+            (Some(zero_based_track_of_line(a)), span)
         }
         // Span start, definite end line — anchor the item to the end line.
         (GridLine::Span(n), GridLine::Line(b)) => {
             let span = usize::from(n.max(1));
-            (Some(track(b).saturating_sub(span)), span)
+            (Some(zero_based_track_of_line(b).saturating_sub(span)), span)
         }
         // `auto / b`: item ends at line b, span 1 → starts at track b - 2.
-        (GridLine::Auto, GridLine::Line(b)) => (Some(track(b).saturating_sub(1)), 1),
+        (GridLine::Auto, GridLine::Line(b)) => {
+            (Some(zero_based_track_of_line(b).saturating_sub(1)), 1)
+        }
         // Fully auto-flowed start; only the span (if any) is definite.
         (GridLine::Span(n), _) | (GridLine::Auto, GridLine::Span(n)) => {
             (None, usize::from(n.max(1)))
         }
         (GridLine::Auto, GridLine::Auto) => (None, 1),
     };
-    // A from-end (negative) edge resolves against the real track grid: keep the
-    // block inside it. Positive-only placements are never touched here.
     match anchor {
         Some(a) if has_negative && num_tracks > 0 => {
             (Some(a.min(num_tracks.saturating_sub(span))), span)

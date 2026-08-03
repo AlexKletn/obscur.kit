@@ -108,23 +108,21 @@ fn apply_filter_layer(
 ) -> Option<wgpu::Texture> {
     let (sw, sh) = s_frame.size();
 
-    // Optional color-matrix pre-pass: transform the sub-scene into a scratch texture.
-    let scratch = layer.color_matrix.and_then(|matrix| {
+    let color_matrix_scratch = layer.color_matrix.and_then(|matrix| {
         let color_matrix = color_matrix?;
-        let scratch = color_matrix.scratch_texture(device, sw, sh);
-        let src_view = s_frame
+        let transformed = color_matrix.scratch_texture(device, sw, sh);
+        let sub_scene_view = s_frame
             .texture()
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let scratch_view = scratch.create_view(&wgpu::TextureViewDescriptor::default());
-        color_matrix.apply(device, encoder, &src_view, &scratch_view, &matrix);
-        Some(scratch)
+        let transformed_view = transformed.create_view(&wgpu::TextureViewDescriptor::default());
+        color_matrix.apply(device, encoder, &sub_scene_view, &transformed_view, &matrix);
+        Some(transformed)
     });
 
-    // The source for the following blur/composite is the color-matrix scratch (if a
-    // matrix was applied) or the raw sub-scene frame otherwise. A color-transformed
-    // scratch may be translucent (e.g. `opacity()`), so it composites premultiplied;
-    // the raw blur path stays `false` (byte-identical to the shipped opaque path).
-    let (source_view, premultiply) = match &scratch {
+    // A color-transformed scratch may be translucent (e.g. `opacity()`), so it
+    // composites premultiplied; the raw blur path stays `false` (byte-identical to
+    // the shipped opaque path).
+    let (source_view, premultiply) = match &color_matrix_scratch {
         Some(tex) => (
             tex.create_view(&wgpu::TextureViewDescriptor::default()),
             true,
@@ -161,5 +159,5 @@ fn apply_filter_layer(
         );
     }
 
-    scratch
+    color_matrix_scratch
 }

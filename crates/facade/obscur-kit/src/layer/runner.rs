@@ -86,8 +86,6 @@ pub(super) fn run(
 
     let mut last_frame: Option<std::time::Instant> = None;
     while !window.is_closed() && !handle.close_requested() {
-        // Idle blocks in the kernel; animating polls, so a running transition is
-        // not held hostage by an input-quiet compositor.
         // Idle sleeps until the compositor — or a `LayerWaker` — has something
         // to say. Animating bounds the wait, so a frame happens whether or not
         // anything arrived. The loop turns for both without a thread to spare.

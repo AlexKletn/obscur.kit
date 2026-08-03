@@ -27,8 +27,6 @@ static CHILD_LOCAL: AtomicUsize = AtomicUsize::new(0);
 #[doc = include_str!("spec_ch3_state.doc/COUNTERS.md")]
 static COUNTERS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-// --- Component X: reads signal A only. -----------------------------------
-
 #[doc = include_str!("spec_ch3_state.doc/XProps.md")]
 #[derive(Contract)]
 #[contract(name = "SpecX")]
@@ -64,8 +62,6 @@ impl ComponentFactory for XFactory {
     }
 }
 
-// --- Component Y: reads signal B only. -----------------------------------
-
 #[doc = include_str!("spec_ch3_state.doc/YProps.md")]
 #[derive(Contract)]
 #[contract(name = "SpecY")]
@@ -100,8 +96,6 @@ impl ComponentFactory for YFactory {
         Box::new(Y)
     }
 }
-
-// --- Component Child: receives one typed prop from its parent. ------------
 
 #[doc = include_str!("spec_ch3_state.doc/ChildProps.md")]
 #[derive(Contract)]
@@ -143,8 +137,6 @@ impl ComponentFactory for ChildFactory {
         Box::new(Child)
     }
 }
-
-// --- Helpers -------------------------------------------------------------
 
 fn host() -> UiRuntime {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));

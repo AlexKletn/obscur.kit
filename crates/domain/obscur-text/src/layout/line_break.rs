@@ -63,9 +63,6 @@ impl LineBreak {
         let mut breaks = Vec::new();
         let wraps = white_space.wraps();
         let preserves_breaks = white_space.preserves_segment_breaks();
-        // Whether the previous character was whitespace, and whether that
-        // whitespace run contained a preserved (hard) break, which already
-        // emitted a mandatory break and suppresses the run's soft break.
         let mut in_whitespace = false;
         let mut whitespace_had_hard_break = false;
         for (index, ch) in text.char_indices() {
@@ -135,8 +132,6 @@ impl LineBreaker for DefaultLineBreaker {
                 prev = Some(ch);
             }
             if breaks.len() != before {
-                // Merge the appended CJK breaks back into ascending order and drop
-                // any that coincide with an existing opportunity.
                 breaks.sort_unstable();
                 breaks.dedup();
             }

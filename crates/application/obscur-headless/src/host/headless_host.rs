@@ -610,8 +610,6 @@ mod tests {
         assert_eq!(host.run_tasks(), 0);
     }
 
-    // ---- styled rendering ---------------------------------------------------
-
     #[test]
     fn render_styled_paints_matched_background() {
         // Acceptance: authored CSS reaches paint through the host. A matched

@@ -90,7 +90,6 @@ pub(super) fn effective_paint_layer(
         return map;
     };
     let mut visited: HashSet<NodeId> = HashSet::new();
-    // Each stack entry carries the layer rank inherited from its parent chain.
     let mut stack: Vec<(NodeId, PaintLayer)> = vec![(root, PaintLayer::NonPositioned)];
     while let Some((node, inherited)) = stack.pop() {
         if !visited.insert(node) {
@@ -136,7 +135,6 @@ pub(super) fn effective_stacking_z(
         return zmap;
     };
     let mut visited: HashSet<NodeId> = HashSet::new();
-    // Each stack entry carries the effective z inherited from its parent chain.
     let mut stack: Vec<(NodeId, i32)> = vec![(root, 0)];
     while let Some((node, inherited)) = stack.pop() {
         if !visited.insert(node) {

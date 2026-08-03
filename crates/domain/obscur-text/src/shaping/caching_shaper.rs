@@ -84,7 +84,6 @@ impl TextShaper for CachingShaper {
         if let Some(run) = self.cache.borrow().get(&key) {
             return run.clone();
         }
-        // Miss: shape once through the inner engine, then memoize.
         let run = self.inner.shape(request);
         let mut cache = self.cache.borrow_mut();
         if cache.len() >= self.capacity && !cache.contains_key(&key) {

@@ -34,7 +34,6 @@ impl ExpressionLowering {
             _ => {}
         }
 
-        // A double-quoted string literal → text (quotes stripped).
         if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
             let inner = &trimmed[1..trimmed.len() - 1];
             return UiIrExpression::literal(UiIrValue::Text(inner.into()));

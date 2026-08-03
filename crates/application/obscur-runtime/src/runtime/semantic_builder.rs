@@ -304,14 +304,11 @@ mod tests {
         let ok = text(&mut tree, "OK");
         let hello = text(&mut tree, "hello");
 
-        // button → "OK"
         let button_node = tree.get_mut(button).unwrap();
         link(button_node, ok);
-        // panel → [button, hello]
         let panel_node = tree.get_mut(panel).unwrap();
         link(panel_node, button);
         link(panel_node, hello);
-        // root → panel
         let root_node = tree.get_mut(root).unwrap();
         link(root_node, panel);
 

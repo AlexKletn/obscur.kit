@@ -92,11 +92,8 @@ mod tests {
         let mut params = RouteParams::new();
         params.insert("id", "42");
         params.insert("bad", "not-a-number");
-        // Success.
         assert_eq!(params.get_parsed::<u32>("id"), Some(42));
-        // Parse failure returns None.
         assert_eq!(params.get_parsed::<u32>("bad"), None);
-        // Absent key returns None.
         assert_eq!(params.get_parsed::<u32>("missing"), None);
     }
 

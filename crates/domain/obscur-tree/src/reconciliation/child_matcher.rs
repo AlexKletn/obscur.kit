@@ -69,22 +69,11 @@ impl ChildMatcher {
                     _ => IdentityMatch::Create,
                 }
             } else {
-                // Forward scan for the next unused compatible unkeyed child.
-                let mut found: Option<usize> = None;
-                let mut i = cursor;
-                while i < unkeyed.len() {
-                    let (eid, ekind) = unkeyed[i];
-                    if !used.contains(&eid) && compatible(node, ekind) {
-                        found = Some(i);
-                        break;
-                    }
-                    i += 1;
-                }
-                match found {
-                    Some(i) => {
-                        let (eid, _) = unkeyed[i];
+                match next_unused_compatible(&unkeyed, &used, node, cursor) {
+                    Some(index) => {
+                        let (eid, _) = unkeyed[index];
                         used.insert(eid);
-                        cursor = i + 1;
+                        cursor = index + 1;
                         IdentityMatch::Reuse(eid)
                     }
                     None => IdentityMatch::Create,
@@ -102,6 +91,23 @@ impl ChildMatcher {
 
         ChildMatching::new(matches, removed)
     }
+}
+
+fn next_unused_compatible(
+    unkeyed: &[(NodeId, &NodeKind)],
+    used: &HashSet<NodeId>,
+    desired: &ViewNode,
+    from: usize,
+) -> Option<usize> {
+    let mut index = from;
+    while index < unkeyed.len() {
+        let (id, kind) = unkeyed[index];
+        if !used.contains(&id) && compatible(desired, kind) {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
 }
 
 #[doc = include_str!("child_matcher.doc/compatible.md")]

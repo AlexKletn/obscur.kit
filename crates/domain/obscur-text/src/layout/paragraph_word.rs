@@ -45,18 +45,18 @@ impl ParagraphWord {
     ) -> Vec<Self> {
         let mut words: Vec<Self> = Vec::new();
         let mut glyphs: Vec<TaggedGlyph> = Vec::new();
-        // Breaks are ascending by offset; `bi` is the next unconsumed break.
-        let mut bi = 0usize;
+        // Breaks are ascending by offset.
+        let mut next_break = 0usize;
         for tagged in stream {
             let cluster = tagged.glyph.cluster();
             // Consume every break at or before this glyph; the strongest (hard)
             // kind wins for the word we are about to close.
             let mut close = false;
             let mut close_hard = false;
-            while bi < breaks.len() && breaks[bi].offset() <= cluster {
+            while next_break < breaks.len() && breaks[next_break].offset() <= cluster {
                 close = true;
-                close_hard |= breaks[bi].is_mandatory();
-                bi += 1;
+                close_hard |= breaks[next_break].is_mandatory();
+                next_break += 1;
             }
             if close {
                 if !glyphs.is_empty() {
@@ -72,9 +72,9 @@ impl ParagraphWord {
         // Breaks after the last glyph (offset > every cluster): a trailing `\n`
         // whose cluster no glyph carries still forces a break on the final word.
         let mut trailing_hard = false;
-        while bi < breaks.len() {
-            trailing_hard |= breaks[bi].is_mandatory();
-            bi += 1;
+        while next_break < breaks.len() {
+            trailing_hard |= breaks[next_break].is_mandatory();
+            next_break += 1;
         }
         if !glyphs.is_empty() {
             words.push(Self::new(glyphs, trailing_hard, offsets));
@@ -187,10 +187,9 @@ impl ParagraphWord {
         if glyphs.len() < 2 {
             return None;
         }
-        // Greedily accumulate whole grapheme clusters up to `limit`.
-        let mut best_end = 0usize; // widest cluster-boundary head end with width <= limit
-        let mut first_end = 0usize; // end of the first cluster (forced-progress fallback)
-        let mut acc = 0.0_f32;
+        let mut widest_fitting_end = 0usize;
+        let mut first_cluster_end = 0usize;
+        let mut head_width = 0.0_f32;
         let mut index = 0usize;
         while index < glyphs.len() {
             let cluster = glyphs[index].glyph.cluster();
@@ -199,24 +198,24 @@ impl ParagraphWord {
                 width += glyphs[index].glyph.x_advance();
                 index += 1;
             }
-            if first_end == 0 {
-                first_end = index;
+            if first_cluster_end == 0 {
+                first_cluster_end = index;
             }
-            if acc + width <= limit {
-                acc += width;
-                best_end = index;
+            if head_width + width <= limit {
+                head_width += width;
+                widest_fitting_end = index;
             } else {
                 break;
             }
         }
-        let head_end = if best_end == 0 {
+        let head_end = if widest_fitting_end == 0 {
             if line_empty {
-                first_end
+                first_cluster_end
             } else {
                 return None;
             }
         } else {
-            best_end
+            widest_fitting_end
         };
         if head_end == 0 || head_end >= glyphs.len() {
             return None;

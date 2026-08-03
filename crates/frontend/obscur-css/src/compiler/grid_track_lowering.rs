@@ -465,8 +465,6 @@ mod tests {
         assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
     }
 
-    // ---- grid-auto-columns / grid-auto-rows ----
-
     #[test]
     fn lowers_grid_auto_rows_track_list() {
         // `grid-auto-rows: 40px` -> a single fixed 40px implicit-track size.
@@ -511,8 +509,6 @@ mod tests {
         let (result, _) = compile("grid-auto-columns: repeat(auto-fill, 100px)");
         assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
     }
-
-    // ---- grid-column / grid-row line placement ----
 
     #[test]
     fn grid_template_areas_parses_into_a_template() {

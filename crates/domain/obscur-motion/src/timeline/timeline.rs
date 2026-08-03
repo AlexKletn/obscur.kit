@@ -158,14 +158,12 @@ impl Timeline {
         }
 
         loop {
-            // Time left before the current iteration completes, in this direction.
             let time_to_end = match self.direction {
                 PlaybackDirection::Forward => self.duration - self.position.elapsed(),
                 PlaybackDirection::Reverse => self.position.elapsed(),
             };
 
             if remaining < time_to_end {
-                // Stays within the current iteration.
                 let elapsed = match self.direction {
                     PlaybackDirection::Forward => self.position.elapsed() + remaining,
                     PlaybackDirection::Reverse => self.position.elapsed() - remaining,
@@ -178,7 +176,6 @@ impl Timeline {
                 return;
             }
 
-            // The current iteration completes; consume the time it took.
             remaining -= time_to_end;
             let completed = self.position.iteration().saturating_add(1);
 
@@ -188,8 +185,6 @@ impl Timeline {
             };
 
             if exhausted {
-                // No iterations remain: clamp to the end of this direction and
-                // finish. Forward ends at progress 1, reverse ends at progress 0.
                 let (elapsed, progress) = match self.direction {
                     PlaybackDirection::Forward => (self.duration, 1.0),
                     PlaybackDirection::Reverse => (0.0, 0.0),
@@ -199,7 +194,6 @@ impl Timeline {
                 return;
             }
 
-            // Begin the next iteration, flipping direction first if alternating.
             if self.alternates {
                 self.direction = self.direction.flipped();
             }
@@ -208,7 +202,6 @@ impl Timeline {
                 PlaybackDirection::Reverse => (self.duration, 1.0),
             };
             self.position = TimelinePosition::new(elapsed, progress, completed);
-            // Loop again to carry `remaining` into this fresh iteration.
         }
     }
 

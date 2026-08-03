@@ -232,7 +232,6 @@ impl Default for Tree {
 mod tests {
     use super::*;
 
-    // root(0, parent), child(1, leaf), sibling(0, leaf)
     fn sample() -> Tree {
         Tree::new().with_nodes([
             TreeNode::new("root", 0, true),

@@ -28,7 +28,6 @@ impl LayoutAlgorithm for PositionedLayout {
     ) -> LayoutOutput {
         let padding = style.padding;
 
-        // Children measure at their natural size: loosen so nothing is forced.
         let child_constraints = BoxConstraints::loose(constraints.max);
 
         let mut child_boxes = Vec::with_capacity(children.len());
@@ -51,7 +50,6 @@ impl LayoutAlgorithm for PositionedLayout {
             max_bottom = max_bottom.max(origin.y + size.height);
         }
 
-        // Definite own size wins; otherwise the positioned bounding box.
         let width = style
             .width
             .resolve(constraints.max.width)

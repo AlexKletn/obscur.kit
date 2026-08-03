@@ -157,9 +157,7 @@ fn main() {
     println!("== all interaction assertions held; exiting 0 ==");
 }
 
-// ---------------------------------------------------------------------------
 // Command handlers — identical semantics to the windowed driver.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("controls_headless.doc/register_handlers.md")]
 fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>) {
@@ -227,10 +225,6 @@ fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>)
         });
     }
 }
-
-// ---------------------------------------------------------------------------
-// Interaction + rendering helpers.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("controls_headless.doc/refresh.md")]
 fn refresh(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>, sheets: &[Stylesheet]) {

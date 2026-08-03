@@ -15,16 +15,15 @@ impl StyleDiff {
     #[doc = include_str!("style_diff.doc/between.md")]
     #[must_use]
     pub fn between(old: &ComputedStyle, new: &ComputedStyle) -> Self {
-        // Union of property keys present in either style.
-        let mut keys: HashSet<PropertyId> = HashSet::new();
+        let mut properties_in_either: HashSet<PropertyId> = HashSet::new();
         for (property, _) in old {
-            keys.insert(*property);
+            properties_in_either.insert(*property);
         }
         for (property, _) in new {
-            keys.insert(*property);
+            properties_in_either.insert(*property);
         }
 
-        let mut changed: Vec<PropertyId> = keys
+        let mut changed: Vec<PropertyId> = properties_in_either
             .into_iter()
             .filter(|&property| old.get(property) != new.get(property))
             .collect();
@@ -63,15 +62,14 @@ impl StyleDiff {
 
     #[doc = include_str!("style_diff.doc/custom_changed.md")]
     fn custom_changed(old: &ComputedStyle, new: &ComputedStyle) -> bool {
-        // Union of custom-property names present in either style.
-        let mut names: HashSet<_> = HashSet::new();
+        let mut names_in_either: HashSet<_> = HashSet::new();
         for (name, _) in old.custom_properties() {
-            names.insert(*name);
+            names_in_either.insert(*name);
         }
         for (name, _) in new.custom_properties() {
-            names.insert(*name);
+            names_in_either.insert(*name);
         }
-        names
+        names_in_either
             .into_iter()
             .any(|name| old.custom_property(name) != new.custom_property(name))
     }

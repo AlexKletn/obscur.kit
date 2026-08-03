@@ -47,7 +47,6 @@ mod tests {
 
     #[test]
     fn collapse_bits_match_the_spec_table() {
-        // collapse spaces: normal / nowrap / pre-line.
         assert!(WhiteSpace::Normal.collapses_spaces());
         assert!(WhiteSpace::Nowrap.collapses_spaces());
         assert!(WhiteSpace::PreLine.collapses_spaces());
@@ -57,7 +56,6 @@ mod tests {
 
     #[test]
     fn segment_break_bits_match_the_spec_table() {
-        // preserve `\n` as a forced break: pre / pre-wrap / pre-line.
         assert!(WhiteSpace::Pre.preserves_segment_breaks());
         assert!(WhiteSpace::PreWrap.preserves_segment_breaks());
         assert!(WhiteSpace::PreLine.preserves_segment_breaks());
@@ -67,7 +65,6 @@ mod tests {
 
     #[test]
     fn wrap_bits_match_the_spec_table() {
-        // soft wrap: normal / pre-wrap / pre-line.
         assert!(WhiteSpace::Normal.wraps());
         assert!(WhiteSpace::PreWrap.wraps());
         assert!(WhiteSpace::PreLine.wraps());

@@ -114,8 +114,6 @@ mod tests {
         assert_eq!(value_of("font-family: initial"), PropertyValue::Initial);
     }
 
-    // ---- direction / font-weight / font-style ----
-
     #[test]
     fn font_weight_lowers_numbers_and_keywords() {
         assert_eq!(value_of("font-weight: 300"), PropertyValue::Number(300.0));

@@ -69,10 +69,6 @@ pub const RADIO_LABELS: [&str; RADIO_COUNT] = ["Small", "Medium", "Large"];
 #[doc = include_str!("scene.doc/SELECT_LABELS.md")]
 pub const SELECT_LABELS: [&str; SELECT_COUNT] = ["Apple", "Banana", "Cherry"];
 
-// ---------------------------------------------------------------------------
-// The shared interaction state.
-// ---------------------------------------------------------------------------
-
 #[doc = include_str!("scene.doc/GalleryState.md")]
 #[derive(Debug, Clone)]
 pub struct GalleryState {
@@ -180,10 +176,6 @@ input:disabled { color: #6b7280; background-color: #191c24; \
                  border: 1px dashed #4a4f5d; }\n\
 "
 }
-
-// ---------------------------------------------------------------------------
-// The view builder.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("scene.doc/view.md")]
 #[must_use]
@@ -339,10 +331,6 @@ fn select_block(state: &GalleryState) -> Vec<ViewNode> {
     ));
     block
 }
-
-// ---------------------------------------------------------------------------
-// Small view helpers.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("scene.doc/section.md")]
 fn section(label: &str, mut children: Vec<ViewNode>) -> ViewNode {

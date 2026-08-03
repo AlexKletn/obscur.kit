@@ -84,7 +84,6 @@ impl StyleAttributes {
     pub fn extract(props: &[ViewProperty]) -> Self {
         let mut attributes = Self::new();
         for prop in props {
-            // Boolean state attributes accept any value kind (presence = set).
             match prop.name() {
                 DISABLED => {
                     attributes.disabled = is_truthy(prop.value());
@@ -116,7 +115,6 @@ impl StyleAttributes {
                 };
                 continue;
             }
-            // The remaining reserved attributes are string-valued selector inputs.
             let ViewValue::Text(text) = prop.value() else {
                 continue;
             };

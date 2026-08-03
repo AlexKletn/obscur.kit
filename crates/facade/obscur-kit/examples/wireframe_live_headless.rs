@@ -322,9 +322,7 @@ fn capture_at(
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
-// ---------------------------------------------------------------------------
 // Command handlers — identical semantics to the windowed driver.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("wireframe_live_headless.doc/register_handlers.md")]
 fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>) {
@@ -403,10 +401,6 @@ fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>) {
         });
     }
 }
-
-// ---------------------------------------------------------------------------
-// Interaction + rendering helpers.
-// ---------------------------------------------------------------------------
 
 #[doc = include_str!("wireframe_live_headless.doc/refresh.md")]
 fn refresh(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>, sheets: &[Stylesheet]) {

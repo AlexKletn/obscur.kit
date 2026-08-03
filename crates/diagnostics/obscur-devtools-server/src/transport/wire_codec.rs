@@ -123,8 +123,6 @@ impl WireCodec {
     }
 }
 
-// --- Handshake -------------------------------------------------------------
-
 fn push_handshake_request(buf: &mut Vec<u8>, request: &HandshakeRequest) {
     push_version_range(buf, request.client_versions);
     push_str(buf, &request.token);
@@ -176,8 +174,6 @@ fn read_rejection(cursor: &mut Cursor<'_>) -> Result<HandshakeRejection, WireErr
         other => Err(WireError::UnknownTag(other)),
     }
 }
-
-// --- Command ---------------------------------------------------------------
 
 fn push_command(buf: &mut Vec<u8>, command: &CommandMessage) {
     push_u64(buf, command.id.raw());
@@ -283,8 +279,6 @@ fn read_injected_event(cursor: &mut Cursor<'_>) -> Result<InjectedEvent, WireErr
     }
 }
 
-// --- Snapshot / Event / Subscription --------------------------------------
-
 fn push_snapshot(buf: &mut Vec<u8>, snapshot: &SnapshotMessage) {
     push_u64(buf, snapshot.command.raw());
     push_u8(buf, inspectable_tag(snapshot.target));
@@ -371,8 +365,6 @@ fn read_subscription(cursor: &mut Cursor<'_>) -> Result<Subscription, WireError>
     })
 }
 
-// --- ProtocolError ---------------------------------------------------------
-
 fn push_protocol_error(buf: &mut Vec<u8>, error: &ProtocolError) {
     match error {
         ProtocolError::VersionUnsupported => push_u8(buf, 0),
@@ -407,8 +399,6 @@ fn read_protocol_error(cursor: &mut Cursor<'_>) -> Result<ProtocolError, WireErr
         other => Err(WireError::UnknownTag(other)),
     }
 }
-
-// --- Version / scope / small enum mappings ---------------------------------
 
 fn push_version(buf: &mut Vec<u8>, version: ProtocolVersion) {
     push_u16(buf, version.major);
@@ -556,8 +546,6 @@ fn read_severity(cursor: &mut Cursor<'_>) -> Result<EventSeverity, WireError> {
     }
 }
 
-// --- Primitive writers -----------------------------------------------------
-
 fn len_u32(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
@@ -591,8 +579,6 @@ fn push_str(buf: &mut Vec<u8>, value: &str) {
     push_u32(buf, len_u32(bytes.len()));
     buf.extend_from_slice(bytes);
 }
-
-// --- Reading cursor --------------------------------------------------------
 
 #[doc = include_str!("wire_codec.doc/Cursor.md")]
 struct Cursor<'a> {

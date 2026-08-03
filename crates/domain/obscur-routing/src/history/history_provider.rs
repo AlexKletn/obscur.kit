@@ -72,7 +72,6 @@ impl HistoryProvider for MemoryHistory {
             self.entries.push(entry);
             self.cursor = 0;
         } else {
-            // Truncate the forward history, then append and point at the new tail.
             self.entries.truncate(self.cursor + 1);
             self.entries.push(entry);
             self.cursor = self.entries.len() - 1;

@@ -126,6 +126,10 @@ impl MessagePattern {
     }
 }
 
+fn is_utf8_continuation(byte: u8) -> bool {
+    byte & 0b1100_0000 == 0b1000_0000
+}
+
 #[doc = include_str!("message_pattern.doc/Parser.md")]
 struct Parser<'a> {
     input: &'a [u8],
@@ -157,8 +161,7 @@ impl<'a> Parser<'a> {
                 _ => {
                     let start = self.at;
                     self.at += 1;
-                    // Walk to the end of this UTF-8 sequence so the slice is valid.
-                    while self.at < self.input.len() && self.input[self.at] & 0xC0 == 0x80 {
+                    while self.at < self.input.len() && is_utf8_continuation(self.input[self.at]) {
                         self.at += 1;
                     }
                     // Both ends land on char boundaries of the original `&str`.

@@ -39,12 +39,10 @@ impl ResourceHub {
         if let Some(&id) = self
             .by_source
             .get(&(request.source().clone(), request.kind()))
+            && let Some(entry) = self.entries.get_mut(&id)
         {
-            // Deduplication: an equal source+kind already exists — share it.
-            if let Some(entry) = self.entries.get_mut(&id) {
-                entry.retain();
-                return entry.handle();
-            }
+            entry.retain();
+            return entry.handle();
         }
 
         let (source, kind, namespace) = request.into_parts();

@@ -129,7 +129,6 @@ fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i
     }
     let start = start_f as i32 - 1;
     let mut end = end_f as i32 + 1;
-    // Bound the loop: never draw more than MAX_TILES_PER_AXIS copies on this axis.
     if end - start + 1 > MAX_TILES_PER_AXIS {
         end = start + MAX_TILES_PER_AXIS - 1;
     }

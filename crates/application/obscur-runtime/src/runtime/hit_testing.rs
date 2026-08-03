@@ -68,8 +68,8 @@ impl HitTesting {
         let mut current = node;
         // The tree is a DAG in practice; cap the walk at the node count so a
         // pathological cycle terminates deterministically.
-        let cap = tree.len();
-        for _ in 0..cap {
+        let ancestor_walk_limit = tree.len();
+        for _ in 0..ancestor_walk_limit {
             match tree.get(current).and_then(|n| n.logical_parent().parent()) {
                 Some(parent) => {
                     depth = depth.saturating_add(1);
@@ -130,10 +130,9 @@ impl HitTesting {
         mapped: Point,
         screen: Point,
     ) -> bool {
-        // Clip against every overflow-clipping logical ancestor.
-        let cap = tree.len();
+        let ancestor_walk_limit = tree.len();
         let mut current = node;
-        for _ in 0..cap {
+        for _ in 0..ancestor_walk_limit {
             let Some(parent) = tree.get(current).and_then(|n| n.logical_parent().parent()) else {
                 break;
             };
@@ -145,7 +144,6 @@ impl HitTesting {
             }
             current = parent;
         }
-        // Shape: a non-zero border-radius carves the corners out of the box.
         if let Some(b) = boxes.get(&node) {
             let radii = Self::corner_radii(computed, node, b.bounds);
             if !rounded_rect_contains(b.bounds, radii, mapped) {
@@ -215,8 +213,6 @@ fn rounded_rect_contains(bounds: Rect, radii: [(f32, f32); 4], point: Point) -> 
     let (trx, tr_y) = clamp_pair(trx, tr_y);
     let (brx, bry) = clamp_pair(brx, bry);
     let (blx, bly) = clamp_pair(blx, bly);
-    // For a corner with centre `(cx, cy)` and radii `(rx, ry)`, a point in that
-    // corner's outer quadrant is outside the box iff it is outside the ellipse.
     let outside_ellipse = |px: f32, py: f32, cx: f32, cy: f32, rx: f32, ry: f32| -> bool {
         if rx <= 0.0 || ry <= 0.0 {
             return false;
@@ -225,28 +221,24 @@ fn rounded_rect_contains(bounds: Rect, radii: [(f32, f32); 4], point: Point) -> 
         let dy = (py - cy) / ry;
         dx * dx + dy * dy > 1.0
     };
-    // Top-left.
     if point.x < l + tlx
         && point.y < t + tly
         && outside_ellipse(point.x, point.y, l + tlx, t + tly, tlx, tly)
     {
         return false;
     }
-    // Top-right.
     if point.x > r - trx
         && point.y < t + tr_y
         && outside_ellipse(point.x, point.y, r - trx, t + tr_y, trx, tr_y)
     {
         return false;
     }
-    // Bottom-right.
     if point.x > r - brx
         && point.y > b - bry
         && outside_ellipse(point.x, point.y, r - brx, b - bry, brx, bry)
     {
         return false;
     }
-    // Bottom-left.
     if point.x < l + blx
         && point.y > b - bly
         && outside_ellipse(point.x, point.y, l + blx, b - bly, blx, bly)

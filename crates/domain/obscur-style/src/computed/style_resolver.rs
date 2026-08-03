@@ -255,7 +255,6 @@ impl StyleResolver {
     ) -> Option<ComputedValue> {
         match cascaded_for(cascaded, property, rtl, wm) {
             Some(raw) => {
-                // Step 2: substitute var() (unresolved -> Unset).
                 let value = substitute(raw, custom);
                 // A relative `font-weight` (`bolder` / `lighter`) resolves here,
                 // at the computed-value step, against the parent's already-
@@ -267,7 +266,6 @@ impl StyleResolver {
                 }
                 self.resolve_specified(property, value, parent)
             }
-            // No cascaded value: default inheritance.
             None => {
                 if InheritedProperty::of(property).is_inherited() {
                     self.inherited_from(property, parent)
@@ -471,7 +469,6 @@ mod tests {
         );
         parent.set(PropertyId::Opacity, ComputedValue::number(0.4));
 
-        // Nothing cascaded on the child.
         let cascaded = ResolvedDeclarations::new();
         let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent), ctx());
 

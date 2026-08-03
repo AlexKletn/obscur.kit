@@ -652,14 +652,12 @@ mod tests {
         let sheet =
             compile(".counter { background-color: #ff0000 } #main .value { color: #00ff00 }");
         let first = &sheet.matchable.rules()[0];
-        // Selector `.counter` lowers to a single class simple selector.
         let selectors = first.selectors().selectors();
         assert_eq!(selectors.len(), 1);
         assert_eq!(
             selectors[0].subject().simples(),
             &[SimpleSelector::Class("counter".into())]
         );
-        // Its block is one `background-color: #ff0000` declaration.
         assert_eq!(first.block().len(), 1);
         assert_eq!(first.block()[0].property(), PropertyId::BackgroundColor);
         assert_eq!(

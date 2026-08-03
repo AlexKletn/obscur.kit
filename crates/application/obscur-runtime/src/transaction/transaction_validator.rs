@@ -18,10 +18,9 @@ impl TransactionValidator {
     #[doc = include_str!("transaction_validator.doc/validate.md")]
     pub fn validate(&self, tx: &UiTransaction) -> Result<(), TransactionError> {
         let mut root_replacements = 0usize;
-        // (discriminant tag, node) pairs already seen, used to detect a node
-        // targeted twice by the same kind of operation. A small linear scan is
-        // used to stay allocation-light and dependency-free.
-        let mut seen: Vec<(u8, u64)> = Vec::new();
+        // A small linear scan is used to stay allocation-light and
+        // dependency-free.
+        let mut seen_kind_and_target: Vec<(u8, u64)> = Vec::new();
 
         for op in tx.operations() {
             if op.is_root_replacement() {
@@ -33,12 +32,11 @@ impl TransactionValidator {
             }
 
             if let Some(node) = op.target() {
-                let tag = Self::kind_tag(op);
-                let key = (tag, node.raw());
-                if seen.contains(&key) {
+                let key = (Self::kind_tag(op), node.raw());
+                if seen_kind_and_target.contains(&key) {
                     return Err(TransactionError::DuplicateNodeOperation(node));
                 }
-                seen.push(key);
+                seen_kind_and_target.push(key);
             }
         }
 

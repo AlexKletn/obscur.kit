@@ -20,8 +20,6 @@ impl UiIrValidator {
         let mut result = UiIrValidationResult::new();
         let mut ctx = ValidationContext::new();
 
-        // Declared-capability well-formedness: an empty capability id is an
-        // undeclared capability.
         for cap in doc.required_capabilities() {
             if cap.as_str().is_empty() {
                 result.push_error(UiIrValidationError::UndeclaredCapability(Box::from("")));
@@ -39,24 +37,20 @@ impl UiIrValidator {
         ctx: &mut ValidationContext,
         result: &mut UiIrValidationResult,
     ) {
-        // (a) Duplicate ids: `record_id` returns false when already seen.
         if !ctx.record_id(node.id()) {
             result.push_error(UiIrValidationError::DuplicateNodeId(node.id()));
         }
 
-        // (b) Empty tag on an element or component.
         if matches!(node.kind(), UiIrNodeKind::Element | UiIrNodeKind::Component)
             && node.tag().is_empty()
         {
             result.push_error(UiIrValidationError::EmptyElementTag(node.id()));
         }
 
-        // (c) A text node must be a leaf.
         if node.kind() == UiIrNodeKind::Text && !node.children().is_empty() {
             result.push_error(UiIrValidationError::TextNodeHasChildren(node.id()));
         }
 
-        // (d) A property bound to an empty path.
         for property in node.properties() {
             if let UiIrExpression::Binding(path) = property.value() {
                 if path.is_empty() {

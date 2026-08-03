@@ -11,10 +11,6 @@ use super::media_query_parser::{MediaQueryParser, ParsedMediaQueryList};
 use super::property_parser::{ParsedDeclaration, PropertyParser};
 use super::selector_parser::{ParsedSelectorList, SelectorParser};
 
-// --------------------------------------------------------------------------
-// Top-level parsed AST
-// --------------------------------------------------------------------------
-
 #[doc = include_str!("stylesheet_parser.doc/ParsedStylesheet.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedStylesheet {
@@ -94,10 +90,6 @@ pub enum KeyframeSelector {
     #[doc = include_str!("stylesheet_parser.doc/Percent.md")]
     Percent(f64),
 }
-
-// --------------------------------------------------------------------------
-// Stylesheet parser
-// --------------------------------------------------------------------------
 
 #[doc = include_str!("stylesheet_parser.doc/StylesheetParser.md")]
 #[derive(Debug)]

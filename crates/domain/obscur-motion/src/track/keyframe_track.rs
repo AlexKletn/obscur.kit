@@ -135,7 +135,6 @@ impl MotionTrack for KeyframeTrack {
         let t = t.clamp(0.0, 1.0);
         let frames = &self.keyframes;
         let Some(first) = frames.first() else {
-            // Degenerate: a track with no keyframes has no value to present.
             return MotionValue::scalar(0.0);
         };
         // Safe: non-empty, so `last` exists.
@@ -146,13 +145,9 @@ impl MotionTrack for KeyframeTrack {
         if t >= last.offset {
             return last.value;
         }
-        // Find the last keyframe whose offset is <= t; its successor brackets t.
-        let mut i = 0;
-        while i + 1 < frames.len() && frames[i + 1].offset <= t {
-            i += 1;
-        }
-        let lower = frames[i];
-        let upper = frames[i + 1];
+        let lower_index = last_keyframe_at_or_before(frames, t);
+        let lower = frames[lower_index];
+        let upper = frames[lower_index + 1];
         let span = upper.offset - lower.offset;
         let local = if span == 0.0 {
             0.0
@@ -165,6 +160,14 @@ impl MotionTrack for KeyframeTrack {
             .interpolate_checked(&upper.value, eased)
             .unwrap_or(upper.value)
     }
+}
+
+fn last_keyframe_at_or_before(frames: &[Keyframe], t: f32) -> usize {
+    let mut index = 0;
+    while index + 1 < frames.len() && frames[index + 1].offset <= t {
+        index += 1;
+    }
+    index
 }
 
 #[cfg(test)]

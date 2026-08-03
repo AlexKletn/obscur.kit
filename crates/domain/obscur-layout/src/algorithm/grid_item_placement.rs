@@ -132,7 +132,6 @@ impl PlacedItems {
             n_cols = n_cols.max(place_col[i] + col_span[i]);
         }
 
-        // Total rows the grid spans (implicit auto rows past the template).
         let n_rows = (0..count)
             .map(|i| place_row[i] + row_span[i])
             .max()

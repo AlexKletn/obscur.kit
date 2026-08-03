@@ -41,7 +41,6 @@ pub fn check_expression(expr: &Expr) -> Result<(), String> {
 #[doc = include_str!("expression_validator.doc/check_expression_in.md")]
 pub fn check_expression_in(expr: &Expr, functions: &[Box<str>]) -> Result<(), String> {
     match expr {
-        // A read of a name, a field, or a constant.
         Expr::Path(_) | Expr::Lit(_) => Ok(()),
         Expr::Field(inner) => check_expression_in(&inner.base, functions),
         Expr::Paren(inner) => check_expression_in(&inner.expr, functions),

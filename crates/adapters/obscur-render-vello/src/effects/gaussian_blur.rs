@@ -30,7 +30,6 @@ impl GaussianBlur {
             source: wgpu::ShaderSource::Wgsl(include_str!("gaussian_blur.wgsl").into()),
         });
 
-        // Both pipelines bind: a sampled texture, a sampler, and a uniform buffer.
         let bind_layout = |label: &'static str| {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some(label),
@@ -166,39 +165,36 @@ impl GaussianBlur {
             return;
         }
 
-        // Ping-pong textures: horizontal writes `temp_a`, vertical writes `temp_b`.
-        let temp_a = scratch_texture(device, sw, sh, "obscur-gaussian-h");
-        let temp_b = scratch_texture(device, sw, sh, "obscur-gaussian-v");
-        let temp_a_view = temp_a.create_view(&wgpu::TextureViewDescriptor::default());
-        let temp_b_view = temp_b.create_view(&wgpu::TextureViewDescriptor::default());
+        let horizontally_blurred = scratch_texture(device, sw, sh, "obscur-gaussian-h");
+        let fully_blurred = scratch_texture(device, sw, sh, "obscur-gaussian-v");
+        let horizontally_blurred_view =
+            horizontally_blurred.create_view(&wgpu::TextureViewDescriptor::default());
+        let fully_blurred_view = fully_blurred.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Horizontal pass: sample the source, write `temp_a`.
         self.blur_pass(
             device,
             encoder,
             source,
-            &temp_a_view,
+            &horizontally_blurred_view,
             [1.0 / sw as f32, 0.0],
             radius,
         );
-        // Vertical pass: sample `temp_a`, write `temp_b`.
         self.blur_pass(
             device,
             encoder,
-            &temp_a_view,
-            &temp_b_view,
+            &horizontally_blurred_view,
+            &fully_blurred_view,
             [0.0, 1.0 / sh as f32],
             radius,
         );
 
-        // Composite `temp_b` back onto the target at its absolute pixel rect.
         // `filter: blur` composites the whole blurred quad, no rounded mask. The
         // source is a blurred Vello sub-scene (straight alpha); premultiplied `false`
         // keeps the shipped opaque path byte-identical.
         self.composite_texture(
             device,
             encoder,
-            &temp_b_view,
+            &fully_blurred_view,
             (sw, sh),
             source_origin,
             target_view,
@@ -275,8 +271,7 @@ impl GaussianBlur {
         let sw = rx1 - rx0;
         let sh = ry1 - ry0;
 
-        // Copy the padded region of the frame into a scratch, then H+V blur it.
-        let src = scratch_texture(device, sw, sh, "obscur-backdrop-src");
+        let copied_region = scratch_texture(device, sw, sh, "obscur-backdrop-src");
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: accum,
@@ -289,7 +284,7 @@ impl GaussianBlur {
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyTextureInfo {
-                texture: &src,
+                texture: &copied_region,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -300,24 +295,25 @@ impl GaussianBlur {
                 depth_or_array_layers: 1,
             },
         );
-        let src_view = src.create_view(&wgpu::TextureViewDescriptor::default());
-        let temp_a = scratch_texture(device, sw, sh, "obscur-backdrop-h");
-        let temp_b = scratch_texture(device, sw, sh, "obscur-backdrop-v");
-        let temp_a_view = temp_a.create_view(&wgpu::TextureViewDescriptor::default());
-        let temp_b_view = temp_b.create_view(&wgpu::TextureViewDescriptor::default());
+        let copied_region_view = copied_region.create_view(&wgpu::TextureViewDescriptor::default());
+        let horizontally_blurred = scratch_texture(device, sw, sh, "obscur-backdrop-h");
+        let fully_blurred = scratch_texture(device, sw, sh, "obscur-backdrop-v");
+        let horizontally_blurred_view =
+            horizontally_blurred.create_view(&wgpu::TextureViewDescriptor::default());
+        let fully_blurred_view = fully_blurred.create_view(&wgpu::TextureViewDescriptor::default());
         self.blur_pass(
             device,
             encoder,
-            &src_view,
-            &temp_a_view,
+            &copied_region_view,
+            &horizontally_blurred_view,
             [1.0 / sw as f32, 0.0],
             blur_radius,
         );
         self.blur_pass(
             device,
             encoder,
-            &temp_a_view,
-            &temp_b_view,
+            &horizontally_blurred_view,
+            &fully_blurred_view,
             [0.0, 1.0 / sh as f32],
             blur_radius,
         );
@@ -339,12 +335,12 @@ impl GaussianBlur {
             quad: [sw as f32, sh as f32],
             aa: 1.0,
         };
-        // `temp_b` is a blurred copy of the accumulating frame (already
+        // `fully_blurred` is a blurred copy of the accumulating frame (already
         // premultiplied), so premultiplied `false`; the mask frosts only the panel.
         self.composite_pass(
             device,
             encoder,
-            &temp_b_view,
+            &fully_blurred_view,
             accum_view,
             [x0, y_top, x1, y_bottom],
             Some(mask),

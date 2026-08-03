@@ -58,7 +58,6 @@ impl SelectorMatcher {
         {
             return false;
         }
-        // Test every simple except the pseudo-element target itself.
         let subject_ok = subject
             .simples()
             .iter()
@@ -414,8 +413,6 @@ mod tests {
         }
     }
 
-    // ---- selector-construction helpers -------------------------------------
-
     fn type_sel(name: &str) -> SimpleSelector {
         SimpleSelector::Type(name.into())
     }
@@ -435,8 +432,6 @@ mod tests {
     fn simple_complex(simples: Vec<SimpleSelector>) -> ComplexSelector {
         ComplexSelector::new(compound(simples), Vec::new())
     }
-
-    // ---- simple / compound -------------------------------------------------
 
     #[test]
     fn type_selector_is_case_insensitive() {
@@ -532,8 +527,6 @@ mod tests {
         let miss = compound(vec![type_sel("div"), class_sel("foo"), id_sel("other")]);
         assert!(!SelectorMatcher::matches_compound(&miss, &el));
     }
-
-    // ---- attribute matchers ------------------------------------------------
 
     fn attr(name: &str, matcher: Option<AttrMatch>) -> SimpleSelector {
         SimpleSelector::Attribute(AttributeSelector {
@@ -677,8 +670,6 @@ mod tests {
         ));
     }
 
-    // ---- combinators -------------------------------------------------------
-
     /// Builds `grandparent > parent > child` (all `div`) and returns the arena
     /// plus the child index.
     fn chain() -> (Arena, usize) {
@@ -760,8 +751,6 @@ mod tests {
         assert!(SelectorMatcher::matches_complex(&sel, &arena.get(c)));
     }
 
-    // ---- state pseudo-classes ---------------------------------------------
-
     #[test]
     fn hover_and_focus_via_pseudo_state() {
         let mut arena = Arena::default();
@@ -809,8 +798,6 @@ mod tests {
             &arena.get(disabled)
         ));
     }
-
-    // ---- structural pseudo-classes ----------------------------------------
 
     #[test]
     fn first_last_only_child() {
@@ -964,8 +951,6 @@ mod tests {
         assert!(!SelectorMatcher::matches_compound(&sel, &arena.get(idx)));
     }
 
-    // ---- selector list & specificity --------------------------------------
-
     #[test]
     fn list_returns_highest_specificity() {
         let mut arena = Arena::default();
@@ -1014,8 +999,6 @@ mod tests {
         let spec = SelectorMatcher::matches_list(&list, &arena.get(idx)).unwrap();
         assert_eq!(spec, SelectorSpecificity::new(1, 0, 0));
     }
-
-    // ---- selector-list pseudo-classes --------------------------------------
 
     /// `ul` with five children: `p`, then four `li.important`.
     fn nth_of_fixture() -> (Arena, Vec<usize>) {

@@ -35,8 +35,6 @@ impl SpatialNavigation {
             let dx = cx - fx;
             let dy = cy - fy;
 
-            // Reject candidates that are not strictly beyond `from` along the
-            // direction's axis and sign, and derive the along/across distances.
             let (along, across) = match direction {
                 NavigationDirection::Right if dx > 0.0 => (dx, dy.abs()),
                 NavigationDirection::Left if dx < 0.0 => (-dx, dy.abs()),

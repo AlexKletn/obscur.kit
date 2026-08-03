@@ -60,29 +60,26 @@ fn is_color_filter_name(name: &str) -> bool {
 
 #[doc = include_str!("filter_lowering.doc/lower_one_color_filter.md")]
 fn lower_one_color_filter(name: &str, args: &[ParsedValue]) -> Option<FilterOp> {
-    // Clamp helper for the `0..1` amount functions (grayscale/sepia/invert/opacity).
-    let unit = |amount: f32| amount.clamp(0.0, 1.0);
-    // Clamp helper for the unbounded-above, `>= 0` functions
-    // (brightness/contrast/saturate): negatives are clamped to `0`.
-    let non_negative = |amount: f32| amount.max(0.0);
+    let clamp_to_unit_range = |amount: f32| amount.clamp(0.0, 1.0);
+    let clamp_to_non_negative = |amount: f32| amount.max(0.0);
 
     Some(if name.eq_ignore_ascii_case("brightness") {
-        FilterOp::Brightness(non_negative(filter_amount(args, 1.0)?))
+        FilterOp::Brightness(clamp_to_non_negative(filter_amount(args, 1.0)?))
     } else if name.eq_ignore_ascii_case("contrast") {
-        FilterOp::Contrast(non_negative(filter_amount(args, 1.0)?))
+        FilterOp::Contrast(clamp_to_non_negative(filter_amount(args, 1.0)?))
     } else if name.eq_ignore_ascii_case("saturate") {
-        FilterOp::Saturate(non_negative(filter_amount(args, 1.0)?))
+        FilterOp::Saturate(clamp_to_non_negative(filter_amount(args, 1.0)?))
     } else if name.eq_ignore_ascii_case("grayscale") {
-        FilterOp::Grayscale(unit(filter_amount(args, 1.0)?))
+        FilterOp::Grayscale(clamp_to_unit_range(filter_amount(args, 1.0)?))
     } else if name.eq_ignore_ascii_case("sepia") {
-        FilterOp::Sepia(unit(filter_amount(args, 1.0)?))
+        FilterOp::Sepia(clamp_to_unit_range(filter_amount(args, 1.0)?))
     } else if name.eq_ignore_ascii_case("invert") {
-        FilterOp::Invert(unit(filter_amount(args, 1.0)?))
+        FilterOp::Invert(clamp_to_unit_range(filter_amount(args, 1.0)?))
     } else if name.eq_ignore_ascii_case("hue-rotate") {
         FilterOp::HueRotate(filter_angle_radians(args)?)
     } else {
         // `opacity` (the remaining color function per `is_color_filter_name`).
-        FilterOp::Opacity(unit(filter_amount(args, 1.0)?))
+        FilterOp::Opacity(clamp_to_unit_range(filter_amount(args, 1.0)?))
     })
 }
 

@@ -54,8 +54,6 @@ impl FramePipeline {
         // 1. Reconcile: update the retained tree through the transaction commit
         //    boundary (spec §3.2) rather than mutating it directly.
         let reconciled = self.commit_reconcile(tree, desired);
-
-        // 2-4. Style over caller-supplied inputs, layout, and compose.
         self.finish_frame(tree, scene, ctx, reconciled, inputs)
     }
 
@@ -77,8 +75,6 @@ impl FramePipeline {
         //    gating `@media`/`@container` rules by this frame's viewport (§4.13).
         let environment = MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
         let inputs = StyleMatchingCoordinator::new().build_inputs_env(tree, sheets, &environment);
-
-        // 3-5. Style over the matched inputs, layout, and compose.
         self.finish_frame(tree, scene, ctx, reconciled, &inputs)
     }
 

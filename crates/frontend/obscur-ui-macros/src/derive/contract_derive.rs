@@ -28,7 +28,6 @@ impl ContractDerive {
             ));
         };
 
-        // Struct-level attributes: component name + allowed children.
         let struct_attrs = StructAttrs::parse(&derive_input)?;
         let component_name = struct_attrs
             .name
@@ -37,15 +36,13 @@ impl ContractDerive {
         let name_sym = Literal::u32_unsuffixed(fnv32(&component_name));
         let component_name_literal = LitStr::new(&component_name, derive_input.ident.span());
 
-        // Per-field entries for both the typed contract (symbol-keyed) and the
-        // string tooling surface, skipping `#[contract(skip)]`.
-        let mut entries = TokenStream::new();
+        let mut contract_entries = TokenStream::new();
         let mut surface_entries = TokenStream::new();
         let mut field_inits = TokenStream::new();
         for field in &named.named {
             let parsed = FieldModel::parse(field)?;
             if let Some(tokens) = parsed.contract_tokens() {
-                entries.extend(tokens);
+                contract_entries.extend(tokens);
             }
             if let Some(tokens) = parsed.surface_tokens() {
                 surface_entries.extend(tokens);
@@ -63,7 +60,6 @@ impl ContractDerive {
             }
         });
 
-        // The parallel string surface's children rule mirrors the typed one.
         let surface_children_tokens = struct_attrs.children.map(|kind| match kind {
             ChildrenKind::Any => quote!(.any_children()),
             ChildrenKind::None => quote!(.no_children()),
@@ -104,7 +100,7 @@ impl ContractDerive {
                         ::obscur_kit::identity::ComponentId::from_raw(#component_id)
                     )
                     .with_name(::obscur_kit::identity::InternedSymbol::from_raw(#name_sym))
-                    #entries
+                    #contract_entries
                     #children_tokens
                     #slot_tokens
                     #style_scope_tokens
@@ -481,8 +477,6 @@ impl FieldModel {
             return Some(quote! { .with_event(#event) });
         }
 
-        // Props: an `Option<...>` or an explicit `#[contract(default)]` become a
-        // defaulted (non-required) prop; every other field is required.
         let name_sym = Literal::u32_unsuffixed(name_symbol(&self.name));
         let optional = self.is_option || self.attrs.default;
         let prop = quote! {
@@ -1030,7 +1024,6 @@ mod tests {
                 on_change: ChangePayload,
             }
         });
-        // Both associated functions are emitted.
         assert!(generated.contains("fn contract ()"));
         assert!(generated.contains("fn contract_surface ()"));
         assert!(generated.contains("ComponentSurface :: new"));

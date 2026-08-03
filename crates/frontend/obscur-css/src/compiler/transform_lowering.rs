@@ -30,10 +30,10 @@ pub(super) fn lower_transform(values: &[ParsedValue]) -> Option<PropertyValue> {
 // The `matrix(a, b, c, d, e, f)` arm binds the six canonical CSS coefficients.
 #[allow(clippy::many_single_char_names)]
 fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<AffineTransform> {
-    // The comma-separated argument groups, each expected to be one component.
-    let groups: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
+    let argument_groups: Vec<&[ParsedValue]> =
+        args.split(|v| matches!(v, ParsedValue::Comma)).collect();
     if name.eq_ignore_ascii_case("translate") {
-        match groups.as_slice() {
+        match argument_groups.as_slice() {
             [[x]] => Some(AffineTransform::translate(translate_px(x)?, 0.0)),
             [[x], [y]] => Some(AffineTransform::translate(
                 translate_px(x)?,
@@ -43,16 +43,16 @@ fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<AffineTr
         }
     } else if name.eq_ignore_ascii_case("translatex") {
         Some(AffineTransform::translate(
-            translate_px(single_arg(&groups)?)?,
+            translate_px(single_arg(&argument_groups)?)?,
             0.0,
         ))
     } else if name.eq_ignore_ascii_case("translatey") {
         Some(AffineTransform::translate(
             0.0,
-            translate_px(single_arg(&groups)?)?,
+            translate_px(single_arg(&argument_groups)?)?,
         ))
     } else if name.eq_ignore_ascii_case("scale") {
-        match groups.as_slice() {
+        match argument_groups.as_slice() {
             [[s]] => {
                 let s = arg_number(s)?;
                 Some(AffineTransform::scale(s, s))
@@ -62,20 +62,20 @@ fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<AffineTr
         }
     } else if name.eq_ignore_ascii_case("scalex") {
         Some(AffineTransform::scale(
-            arg_number(single_arg(&groups)?)?,
+            arg_number(single_arg(&argument_groups)?)?,
             1.0,
         ))
     } else if name.eq_ignore_ascii_case("scaley") {
         Some(AffineTransform::scale(
             1.0,
-            arg_number(single_arg(&groups)?)?,
+            arg_number(single_arg(&argument_groups)?)?,
         ))
     } else if name.eq_ignore_ascii_case("rotate") {
         Some(AffineTransform::rotate(arg_angle_rad(single_arg(
-            &groups,
+            &argument_groups,
         )?)?))
     } else if name.eq_ignore_ascii_case("skew") {
-        match groups.as_slice() {
+        match argument_groups.as_slice() {
             [[ax]] => Some(AffineTransform::skew(arg_angle_rad(ax)?, 0.0)),
             [[ax], [ay]] => Some(AffineTransform::skew(
                 arg_angle_rad(ax)?,
@@ -85,16 +85,16 @@ fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<AffineTr
         }
     } else if name.eq_ignore_ascii_case("skewx") {
         Some(AffineTransform::skew(
-            arg_angle_rad(single_arg(&groups)?)?,
+            arg_angle_rad(single_arg(&argument_groups)?)?,
             0.0,
         ))
     } else if name.eq_ignore_ascii_case("skewy") {
         Some(AffineTransform::skew(
             0.0,
-            arg_angle_rad(single_arg(&groups)?)?,
+            arg_angle_rad(single_arg(&argument_groups)?)?,
         ))
     } else if name.eq_ignore_ascii_case("matrix") {
-        match groups.as_slice() {
+        match argument_groups.as_slice() {
             [[a], [b], [c], [d], [e], [f]] => Some(AffineTransform::from_matrix(
                 arg_number(a)?,
                 arg_number(b)?,

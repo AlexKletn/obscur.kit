@@ -3,10 +3,6 @@
 use crate::error::{CssParseError, CssParseErrorKind};
 use crate::source::SourceSpan;
 
-// --------------------------------------------------------------------------
-// Token model
-// --------------------------------------------------------------------------
-
 #[doc = include_str!("css_tokenizer.doc/CssTokenKind.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum CssTokenKind {
@@ -91,10 +87,6 @@ fn is_ident_start(c: char) -> bool {
 fn is_ident_continue(c: char) -> bool {
     is_ident_start(c) || c.is_ascii_digit() || c == '-'
 }
-
-// --------------------------------------------------------------------------
-// Tokenizer
-// --------------------------------------------------------------------------
 
 #[doc = include_str!("css_tokenizer.doc/Tokenizer.md")]
 pub(crate) struct Tokenizer<'a> {

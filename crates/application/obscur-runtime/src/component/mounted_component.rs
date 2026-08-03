@@ -46,7 +46,6 @@ impl MountedComponent {
             instance,
             component,
             needs_update: false,
-            // A fresh instance has produced no output yet.
             needs_render: true,
             boundary,
             attempts: 0,

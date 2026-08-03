@@ -197,12 +197,12 @@ fn distribute_up_to_limits(
     base_of: impl Fn(&Track) -> f32,
     limit_of: impl Fn(&Track) -> f32,
 ) -> f32 {
+    let is_growable = |t: &Track| affected(t) && base_of(t) + t.increase < limit_of(t);
     while space > DISTRIBUTE_THRESHOLD {
-        // The growable set: affected tracks not yet at their limit.
         let mut count = 0.0_f32;
         let mut min_headroom = f32::INFINITY;
         for t in &tracks[lo..hi] {
-            if affected(t) && base_of(t) + t.increase < limit_of(t) {
+            if is_growable(t) {
                 count += 1.0;
                 min_headroom = min_headroom.min(limit_of(t) - (base_of(t) + t.increase));
             }
@@ -214,7 +214,7 @@ fn distribute_up_to_limits(
         // track freezes exactly at its limit this round.
         let per = (space / count).min(min_headroom);
         for t in &mut tracks[lo..hi] {
-            if affected(t) && base_of(t) + t.increase < limit_of(t) {
+            if is_growable(t) {
                 t.increase += per;
                 space -= per;
             }

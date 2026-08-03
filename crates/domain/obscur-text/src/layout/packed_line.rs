@@ -215,22 +215,35 @@ impl PackedLine {
         word_spacing: f32,
     ) {
         let glyphs = &mut self.glyphs;
-        // 1. Zero the trailing collapsible-whitespace run.
-        let mut last = glyphs.len();
-        while last > 0 && offsets.hangs(glyphs[last - 1].glyph.cluster()) {
-            let glyph = glyphs[last - 1].glyph;
-            glyphs[last - 1].glyph = glyph.with_x_advance(0.0);
-            last -= 1;
+        let last = zero_trailing_hang_run(glyphs, offsets);
+        trim_trailing_tracking(glyphs, last, text, letter_spacing, word_spacing);
+    }
+}
+
+fn zero_trailing_hang_run(glyphs: &mut [TaggedGlyph], offsets: &BreakOffsets) -> usize {
+    let mut last = glyphs.len();
+    while last > 0 && offsets.hangs(glyphs[last - 1].glyph.cluster()) {
+        let glyph = glyphs[last - 1].glyph;
+        glyphs[last - 1].glyph = glyph.with_x_advance(0.0);
+        last -= 1;
+    }
+    last
+}
+
+fn trim_trailing_tracking(
+    glyphs: &mut [TaggedGlyph],
+    last: usize,
+    text: &str,
+    letter_spacing: f32,
+    word_spacing: f32,
+) {
+    if (letter_spacing != 0.0 || word_spacing != 0.0) && last > 0 {
+        let tagged = glyphs[last - 1];
+        let mut advance = tagged.glyph.x_advance() - letter_spacing;
+        if tagged.is_word_separator(text) {
+            advance -= word_spacing;
         }
-        // 2. Trim the trailing letter-/word-spacing of the last remaining cluster.
-        if (letter_spacing != 0.0 || word_spacing != 0.0) && last > 0 {
-            let tagged = glyphs[last - 1];
-            let mut advance = tagged.glyph.x_advance() - letter_spacing;
-            if tagged.is_word_separator(text) {
-                advance -= word_spacing;
-            }
-            glyphs[last - 1].glyph = tagged.glyph.with_x_advance(advance);
-        }
+        glyphs[last - 1].glyph = tagged.glyph.with_x_advance(advance);
     }
 }
 

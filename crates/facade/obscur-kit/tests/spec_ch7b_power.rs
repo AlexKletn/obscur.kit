@@ -20,7 +20,6 @@ fn a_power_profile_is_a_public_named_type_an_author_can_supply() {
     // The author spells the name exactly as §7.11 spells it.
     let profile: PowerProfile = full_performance_profile();
 
-    // ... and hands it to the system-provider layer.
     let provider = FixedPowerProvider::new(profile);
     let boxed: Box<dyn PowerProvider> = Box::new(provider);
 

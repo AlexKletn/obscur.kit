@@ -2,7 +2,7 @@
 
 use obscur_geometry::{Point, Rect, Size};
 
-use super::TextLayout;
+use super::{TextLayout, TextLine};
 
 #[doc = include_str!("text_hit_test.doc/TextHitTest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,17 +52,9 @@ impl TextHitTest {
             return Self::new(0, 0, false);
         }
 
-        // Choose the line by vertical position, clamping to first/last.
-        let mut line_index = lines.len() - 1;
-        for (index, line) in lines.iter().enumerate() {
-            if point.y < line.top() + line.height() {
-                line_index = index;
-                break;
-            }
-        }
+        let line_index = line_index_at(lines, point.y);
         let line = &lines[line_index];
 
-        // Left of the line's first glyph: clamp to the line start.
         let mut pen = line.x_offset();
         if point.x < pen {
             return Self::new(line_index, line.range().start, false);
@@ -80,7 +72,6 @@ impl TextHitTest {
             }
         }
 
-        // Past the last glyph: clamp to the line end.
         Self::new(line_index, line.range().end, false)
     }
 
@@ -110,6 +101,15 @@ impl TextHitTest {
             Size::new(caret_width, line.height()),
         ))
     }
+}
+
+fn line_index_at(lines: &[TextLine], y: f32) -> usize {
+    for (index, line) in lines.iter().enumerate() {
+        if y < line.top() + line.height() {
+            return index;
+        }
+    }
+    lines.len() - 1
 }
 
 #[cfg(test)]

@@ -162,8 +162,6 @@ mod tests {
         }
     }
 
-    // ---- selector / rule construction helpers ------------------------------
-
     fn selectors(simples: Vec<SimpleSelector>) -> SelectorList {
         SelectorList::new(vec![ComplexSelector::new(
             CompoundSelector::new(simples),
@@ -190,8 +188,6 @@ mod tests {
     fn rule(sel: Vec<SimpleSelector>, block: Vec<BlockDeclaration>) -> StyleRule {
         StyleRule::new(selectors(sel), block)
     }
-
-    // ---- tests -------------------------------------------------------------
 
     #[test]
     fn single_sheet_matching_class_resolves_property() {

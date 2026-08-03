@@ -85,23 +85,21 @@ impl TreeTransaction {
     #[doc = include_str!("tree_transaction.doc/validate.md")]
     pub fn validate(&self, tree: &RetainedTree) -> Result<(), TxError> {
         let mut creation_count: u32 = 0;
-        // Projected child count per referenced node, populated lazily.
-        let mut projected: HashMap<StagedRef, usize> = HashMap::new();
+        let mut projected_child_count: HashMap<StagedRef, usize> = HashMap::new();
 
         for change in self.change_set.changes() {
             match change {
                 TreeChange::CreateNode { parent, index, .. } => {
                     Self::require_defined(*parent, tree, creation_count)?;
-                    let count = Self::projected_count(&mut projected, *parent, tree);
+                    let count = Self::projected_count(&mut projected_child_count, *parent, tree);
                     if *index > count {
                         return Err(TxError::IndexOutOfRange {
                             index: *index,
                             child_count: count,
                         });
                     }
-                    projected.insert(*parent, count + 1);
-                    // The newly created node starts with no children.
-                    projected.insert(StagedRef::New(creation_count), 0);
+                    projected_child_count.insert(*parent, count + 1);
+                    projected_child_count.insert(StagedRef::New(creation_count), 0);
                     creation_count = creation_count.saturating_add(1);
                 }
                 TreeChange::RemoveSubtree { target } => {

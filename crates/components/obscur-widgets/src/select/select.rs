@@ -233,7 +233,6 @@ impl Select {
             .or_else(|| options.first())
             .map_or("", |label| &**label)
             .into();
-        // The disclosure-arrow indicator sub-part.
         let (arrow_class, arrow_glyph) = if open {
             ("select-arrow open", "▲")
         } else {
@@ -252,33 +251,33 @@ impl Select {
                 arrow,
             ]));
         let mut children: Vec<ViewNode> = vec![header];
-        // The open dropdown popup: a `.select-list` of stacked `.select-option`
-        // rows, the selected one carrying a `selected` class. Absent when closed.
         if open {
-            let rows: Vec<ViewNode> = options
-                .iter()
-                .enumerate()
-                .map(|(i, label)| {
-                    let class = if selected == Some(i) {
-                        "select-option selected"
-                    } else {
-                        "select-option"
-                    };
-                    let id = ComponentId::from_raw(Self::OPTION_ID_BASE + i as u64);
-                    ViewNode::element(id)
-                        .with_prop(ViewProperty::new(CLASS, ViewValue::from(class)))
-                        .with_children(ViewFragment::from_nodes(vec![
-                            Text::new(label.clone()).into_view_node(),
-                        ]))
-                })
-                .collect();
-            children.push(
-                ViewNode::element(Self::LIST_ID)
-                    .with_prop(ViewProperty::new(CLASS, ViewValue::from("select-list")))
-                    .with_children(ViewFragment::from_nodes(rows)),
-            );
+            children.push(Self::open_option_list(options, selected));
         }
         ViewFragment::from_nodes(children)
+    }
+
+    fn open_option_list(options: &[Box<str>], selected: Option<usize>) -> ViewNode {
+        let rows: Vec<ViewNode> = options
+            .iter()
+            .enumerate()
+            .map(|(i, label)| {
+                let class = if selected == Some(i) {
+                    "select-option selected"
+                } else {
+                    "select-option"
+                };
+                let id = ComponentId::from_raw(Self::OPTION_ID_BASE + i as u64);
+                ViewNode::element(id)
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::from(class)))
+                    .with_children(ViewFragment::from_nodes(vec![
+                        Text::new(label.clone()).into_view_node(),
+                    ]))
+            })
+            .collect();
+        ViewNode::element(Self::LIST_ID)
+            .with_prop(ViewProperty::new(CLASS, ViewValue::from("select-list")))
+            .with_children(ViewFragment::from_nodes(rows))
     }
 }
 

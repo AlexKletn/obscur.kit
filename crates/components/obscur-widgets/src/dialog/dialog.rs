@@ -160,7 +160,6 @@ mod tests {
         d.open();
         let view = d.view();
         assert_eq!(view.root().len(), 1);
-        // Outer node is the portal.
         match &view.root().nodes()[0] {
             ViewNode::Element {
                 component,
@@ -172,7 +171,6 @@ mod tests {
                 assert!(props.iter().any(|p| p.name() == Portal::PROP_TARGET
                     && *p.value() == ViewValue::Text("dialog-root".into())));
                 assert_eq!(children.len(), 1);
-                // Inner node is the dialog element.
                 match &children.nodes()[0] {
                     ViewNode::Element {
                         component,

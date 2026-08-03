@@ -46,11 +46,10 @@ impl<'a> CaretScroll<'a> {
         if white_space_for(self.computed.get(&text_node)).wraps() {
             return Some(0.0);
         }
-        // The field's visible content width `W` (its scrollport): the border-box
-        // width minus the left/right padding + border edges. No retained box yet ⇒
-        // nothing to scroll into.
+        // No retained box yet ⇒ nothing to scroll into.
         let field_box = self.boxes.get(&field)?;
-        let w = field_content_width(self.computed.get(&field), field_box.size().width);
+        let scrollport_width =
+            field_content_width(self.computed.get(&field), field_box.size().width);
         // The caret's pen x and the whole run advance (content width), in the SAME
         // advance model the compose caret uses, over the live session text.
         let focus = session.selection().focus();
@@ -59,15 +58,16 @@ impl<'a> CaretScroll<'a> {
         let caret_x = caret_advance_x(self.composer.text(), text, style, focus);
         let content_width = caret_advance_x(self.composer.text(), text, style, text.len());
         let mut scroll_left = session.scroll_left();
-        // Scroll-into-view: keep the caret within `[scroll_left, scroll_left + W]`.
+        // Scroll-into-view: keep the caret within
+        // `[scroll_left, scroll_left + scrollport_width]`.
         if caret_x - scroll_left < 0.0 {
             scroll_left = caret_x;
         }
-        if caret_x - scroll_left > w {
-            scroll_left = caret_x - w;
+        if caret_x - scroll_left > scrollport_width {
+            scroll_left = caret_x - scrollport_width;
         }
         // Never scroll past the text (and never negative).
-        Some(scroll_left.clamp(0.0, (content_width - w).max(0.0)))
+        Some(scroll_left.clamp(0.0, (content_width - scrollport_width).max(0.0)))
     }
 
     #[doc = include_str!("caret_scroll.doc/vertical.md")]
@@ -83,11 +83,10 @@ impl<'a> CaretScroll<'a> {
         }
         let text_node = EditableField::first_text_descendant(self.tree, field)?;
         let (text_box, field_box) = (self.boxes.get(&text_node)?, self.boxes.get(&field)?);
-        // The field's visible content height `H` (border box minus vertical padding
-        // + border) — the scrollport the caret's line must stay within. A definite
-        // height keeps `field_box` stable across typing, so `H` is exact even before
-        // the grown frame lays out.
-        let h = field_content_height(self.computed.get(&field), field_box.size().height);
+        // A definite height keeps `field_box` stable across typing, so this is exact
+        // even before the grown frame lays out.
+        let scrollport_height =
+            field_content_height(self.computed.get(&field), field_box.size().height);
         // The caret's line box top/bottom and the wrapped content height, measured
         // from the text box origin over the live session text — the frame the
         // container's `translate(0, −scroll_top)` shifts the painted line by.
@@ -105,16 +104,18 @@ impl<'a> CaretScroll<'a> {
         let caret_top = line_top;
         let caret_bottom = line_top + line_height;
         let mut scroll_top = stored;
-        // Scroll-into-view: keep the caret's line within `[scroll_top, scroll_top + H]`.
+        // Scroll-into-view: keep the caret's line within
+        // `[scroll_top, scroll_top + scrollport_height]`.
         if caret_top - scroll_top < 0.0 {
             scroll_top = caret_top;
         }
-        if caret_bottom - scroll_top > h {
-            scroll_top = caret_bottom - h;
+        if caret_bottom - scroll_top > scrollport_height {
+            scroll_top = caret_bottom - scrollport_height;
         }
         // Never scroll past the content (and never negative); a fitting textarea
-        // (`content_height ≤ H`) resolves to `0` — byte-identical, unscrolled.
-        Some(scroll_top.clamp(0.0, (content_height - h).max(0.0)))
+        // (`content_height ≤ scrollport_height`) resolves to `0` — byte-identical,
+        // unscrolled.
+        Some(scroll_top.clamp(0.0, (content_height - scrollport_height).max(0.0)))
     }
 }
 

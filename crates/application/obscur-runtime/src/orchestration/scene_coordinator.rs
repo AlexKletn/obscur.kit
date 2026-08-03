@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+use obscur_geometry::CornerRadii;
 use obscur_identity::NodeId;
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
@@ -194,25 +195,7 @@ impl SceneCoordinator {
             next_index += 1;
             brackets.enter(node, parent, depth, tree_index);
 
-            // A node's per-corner `border-radius` (all four corners), read off its
-            // computed style and resolved against its arranged border box. The box is
-            // needed twice over, which is why this is the one place the radii are
-            // derived: a `%` corner resolves against it per axis (CSS Backgrounds 3
-            // §4.1 — width for the horizontal radius, height for the vertical, so
-            // `50%` is a circle only on a square box), and the §4.5
-            // overlapping-curves correction then measures the radii against it. Both
-            // run ONCE here, so the SAME resolved, normalized radii feed every
-            // consumer — background fill, subtree clip, border ring, box-shadow and
-            // outline. Radii that already fit are returned unchanged
-            // (byte-identical); a node without an arranged box has no basis for a `%`
-            // and no box to correct against, so it keeps its absolute radii.
-            let radii = boxes.get(&node).map_or_else(
-                || corner_radii_of(computed, node, None),
-                |layout_box| {
-                    corner_radii_of(computed, node, Some(layout_box.bounds))
-                        .normalized(layout_box.bounds)
-                },
-            );
+            let radii = resolved_corner_radii(computed, boxes, node);
             let has_radius = radii.any_positive();
             // A node with `overflow` other than `visible` clips its subtree to its
             // box (`hidden` / `clip` / `scroll` / `auto`; scroll/auto clip like
@@ -371,14 +354,11 @@ impl SceneCoordinator {
                     Some(brush)
                 } else {
                     background_color_of(computed, node)
-                        // Skip fully transparent backgrounds: they paint nothing.
                         .filter(|color| color.a > 0.0)
                         .map(|color| Brush::solid(scene_color_from(color)))
                 };
                 if let Some(brush) = brush {
                     if has_radius {
-                        // A rounded element fills a rounded-rect outline of its
-                        // border box instead of a plain rectangle.
                         node_paint.fill(Path::rounded_rect(layout_box.bounds, radii), brush);
                     } else {
                         node_paint.fill_rect(layout_box.bounds, brush);
@@ -641,6 +621,28 @@ impl fmt::Debug for SceneCoordinator {
             .field("text", &self.text)
             .finish()
     }
+}
+
+// The arranged border box is needed twice over, which is why this is the one
+// place the radii are derived: a `%` corner resolves against it per axis (CSS
+// Backgrounds 3 §4.1 — width for the horizontal radius, height for the vertical,
+// so `50%` is a circle only on a square box), and the §4.5 overlapping-curves
+// correction then measures the radii against it. Both run ONCE, so the SAME
+// resolved, normalized radii feed every consumer — background fill, subtree clip,
+// border ring, box-shadow and outline. Radii that already fit are returned
+// unchanged (byte-identical); a node without an arranged box has no basis for a
+// `%` and no box to correct against, so it keeps its absolute radii.
+fn resolved_corner_radii(
+    computed: &ComputedStyles,
+    boxes: &LayoutBoxes,
+    node: NodeId,
+) -> CornerRadii {
+    boxes.get(&node).map_or_else(
+        || corner_radii_of(computed, node, None),
+        |layout_box| {
+            corner_radii_of(computed, node, Some(layout_box.bounds)).normalized(layout_box.bounds)
+        },
+    )
 }
 
 #[cfg(test)]
@@ -4578,8 +4580,6 @@ mod tests {
         );
     }
 
-    // ---- Text caret + selection highlight (this step) ------------------------
-
     /// Collects the fill rects (path bounds + brush) of a display list, in paint
     /// order — the caret and selection highlight are the fills over a text node
     /// that carries no background.
@@ -4967,8 +4967,6 @@ mod tests {
         assert_eq!(runs[1].1.len(), 2, "line 1 draws only 'c' and 'd'");
         assert!(list.is_balanced(), "the display list stays balanced");
     }
-
-    // ---- Caret geometry under letter-spacing + text-align (this step) --------
 
     /// A single text node carrying `content` at the origin in a `box_w`×16 box,
     /// red text, with `mutate` applied to its computed style so a test can author

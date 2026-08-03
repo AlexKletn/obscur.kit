@@ -25,7 +25,6 @@ impl GridAreaTemplate {
         if column_count == 0 {
             return None;
         }
-        // Every row must have the same column count.
         if rows.iter().any(|row| row.len() != column_count) {
             return None;
         }

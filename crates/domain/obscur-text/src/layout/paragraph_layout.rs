@@ -296,9 +296,7 @@ impl ParagraphLayout {
         // rather than laying out one overflowing line (CSS 2.1 §10.8).
         let bounded = max_width.is_finite();
 
-        // Split the flattened stream into per-line packed groups.
-        let mut lines_glyphs = if stream.is_empty() {
-            // Empty input still yields a single (empty) line.
+        let mut packed_lines = if stream.is_empty() {
             vec![PackedLine::empty()]
         } else if bounded {
             PackedLine::pack(
@@ -311,7 +309,6 @@ impl ParagraphLayout {
                 word_break,
             )
         } else {
-            // Unconstrained width: the whole paragraph is one line.
             vec![PackedLine::whole(stream)]
         };
 
@@ -324,7 +321,7 @@ impl ParagraphLayout {
         // line-0 tab is unchanged (its line start is the paragraph origin). A no-op
         // unless a real stop width is supplied and `text` still holds a `\t`.
         if tab_width > 0.0 && text.contains('\t') {
-            PackedLine::retab(&mut lines_glyphs, text, tab_width);
+            PackedLine::retab(&mut packed_lines, text, tab_width);
         }
 
         // Hang the trailing collapsible whitespace and trailing letter-/word-spacing
@@ -332,7 +329,7 @@ impl ParagraphLayout {
         // line's trailing collapsible-space run, then trim the trailing tracking of
         // the last remaining cluster. This is what excludes the hung advance from a
         // line's used `width()`, its alignment `x_offset`, and justification's base.
-        for packed in &mut lines_glyphs {
+        for packed in &mut packed_lines {
             packed.hang_trailing(text, &offsets, letter_spacing, word_spacing);
         }
 
@@ -340,7 +337,7 @@ impl ParagraphLayout {
         // `max_width`. Only meaningful under a positive constraint (the unbounded
         // and empty branches produce a single, non-justified last line).
         if alignment == TextAlignment::Justify && bounded {
-            justify_lines(&mut lines_glyphs, &breaks, max_width);
+            justify_lines(&mut packed_lines, &breaks, max_width);
         }
 
         // Apply `text-overflow` truncation. Only lines that *still* overflow
@@ -351,25 +348,17 @@ impl ParagraphLayout {
         // Truncation needs a *positive* finite box to clip against; a genuinely
         // 0-width box wraps to min-content (above) but is not clipped to nothing.
         if overflow.is_truncating() && bounded && max_width > 0.0 {
-            truncate_lines(&mut lines_glyphs, max_width, overflow, ellipsis_glyph);
+            truncate_lines(&mut packed_lines, max_width, overflow, ellipsis_glyph);
         }
 
-        // The end byte of the last line falls back to the text length.
         let text_end = text.len();
 
-        // Build a `ParagraphLine` per group, assigning cumulative tops, byte
-        // ranges, same-font segments, and alignment offsets.
         let mut top = 0.0_f32;
-        let mut lines = Vec::with_capacity(lines_glyphs.len());
-        for (index, packed) in lines_glyphs.iter().enumerate() {
+        let mut lines = Vec::with_capacity(packed_lines.len());
+        for (index, packed) in packed_lines.iter().enumerate() {
             let glyphs = &packed.glyphs;
-            // The line's byte range runs from its first glyph's cluster to the
-            // next line's first glyph cluster (or the text end).
             let start = glyphs.first().map_or(0, |t| t.glyph.cluster());
-            let end = lines_glyphs
-                .get(index + 1)
-                .and_then(|next| next.glyphs.first())
-                .map_or(text_end, |t| t.glyph.cluster());
+            let end = Self::next_line_start(&packed_lines, index, text_end);
             let range = TextRange::new(start.min(end), start.max(end));
 
             let segments = line_segments(glyphs, end);
@@ -398,6 +387,13 @@ impl ParagraphLayout {
         let before = text.get(..offset).and_then(|head| head.chars().next_back());
         let after = text.get(offset..).and_then(|tail| tail.chars().next());
         matches!((before, after), (Some(a), Some(b)) if is_cjk_ideograph(a) && is_cjk_ideograph(b))
+    }
+
+    fn next_line_start(packed_lines: &[PackedLine], index: usize, text_end: usize) -> usize {
+        packed_lines
+            .get(index + 1)
+            .and_then(|next| next.glyphs.first())
+            .map_or(text_end, |tagged| tagged.glyph.cluster())
     }
 
     #[doc = include_str!("paragraph_layout.doc/aligned_to.md")]

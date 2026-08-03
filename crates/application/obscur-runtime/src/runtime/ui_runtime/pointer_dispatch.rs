@@ -115,10 +115,8 @@ impl UiRuntime {
             press_changed = true;
         }
 
-        // 4. Recompute the interaction pseudo-states from the new hover/focus.
         if hover_changed || focus_changed || press_changed {
             self.recompute_pseudo_states();
-            // 5. Schedule a restyle for the next frame.
             self.request_frame(FrameReason::Input);
         }
 

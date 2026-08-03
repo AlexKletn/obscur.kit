@@ -165,8 +165,6 @@ pub(crate) mod tests {
         assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
     }
 
-    // ---- grid-area shorthand ----
-
     #[test]
     fn grid_auto_flow_maps_to_reserved_symbols() {
         assert_eq!(

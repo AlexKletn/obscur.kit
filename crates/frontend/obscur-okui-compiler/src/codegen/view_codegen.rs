@@ -368,7 +368,6 @@ fn emit_element(
         );
     }
 
-    // The key modifier (if any) closes the builder chain before the comma.
     let _ = write!(out, "{inner}");
     emit_key(node, out, key, root);
     out.push_str(");\n");

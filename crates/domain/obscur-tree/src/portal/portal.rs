@@ -38,16 +38,13 @@ impl Portal {
     #[doc = include_str!("portal.doc/apply.md")]
     pub fn apply(self, tree: &mut RetainedTree) -> bool {
         let host = self.target.host_node();
-        // Both endpoints must be live before mutating anything.
         if !tree.contains(self.source) || !tree.contains(host) {
             return false;
         }
-        // Move only the visual parent; the logical parent is untouched.
         let Some(source) = tree.get_mut(self.source) else {
             return false;
         };
         source.set_visual_parent(VisualParent::of(host));
-        // Mark the destination as a portal host.
         let Some(host_node) = tree.get_mut(host) else {
             return false;
         };

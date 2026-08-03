@@ -64,7 +64,6 @@ fn the_endpoint_is_disabled_by_default_and_binds_only_loopback() {
         "the bind address is loopback only, not 0.0.0.0 — got {addr}"
     );
 
-    // Loopback connect succeeds.
     TcpStream::connect_timeout(&addr, Duration::from_secs(2))
         .expect("a loopback connection is accepted");
 

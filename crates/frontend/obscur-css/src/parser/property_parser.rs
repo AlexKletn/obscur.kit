@@ -50,7 +50,6 @@ impl PropertyParser {
         eof: u32,
     ) -> Result<ParsedDeclaration, CssParseError> {
         let span = slice_span(tokens, eof);
-        // Property name.
         let mut idx = skip_ws(tokens, 0);
         let name = match tokens.get(idx).map(CssToken::kind) {
             Some(CssTokenKind::Ident(name)) => name.clone(),
@@ -63,7 +62,6 @@ impl PropertyParser {
         };
         idx = skip_ws(tokens, idx + 1);
 
-        // Colon.
         if !matches!(
             tokens.get(idx).map(CssToken::kind),
             Some(CssTokenKind::Colon)
@@ -76,7 +74,6 @@ impl PropertyParser {
         }
         idx += 1;
 
-        // Value tokens (everything after the colon), trimmed of whitespace.
         let value_tokens = trim_ws(&tokens[idx..]);
         let (value_tokens, important) = strip_important(value_tokens);
         let value_tokens = trim_ws(value_tokens);
