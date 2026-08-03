@@ -129,6 +129,7 @@ impl SceneCoordinator {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         )
     }
 
@@ -144,6 +145,7 @@ impl SceneCoordinator {
         vectors: &HashMap<Box<str>, SceneVector>,
         scroll: &HashMap<NodeId, ScrollPaint>,
         generated: &HashMap<NodeId, GeneratedContent>,
+        canvases: &HashMap<NodeId, Vec<PaintCommand>>,
     ) -> DisplayList {
         let Some(root) = tree.root() else {
             return DisplayListBuilder::new().build();
@@ -501,6 +503,17 @@ impl SceneCoordinator {
                 && !vector.is_empty()
             {
                 emit_vector(&mut node_paint, computed, node, vector, layout_box.bounds);
+            }
+
+            // §5.3 Canvas. The painter already ran — before this walk, because it
+            // is application code needing `&mut` while this walk takes `&self` —
+            // and left a group that is balanced by construction, stated in the
+            // node's own laid-out coordinates exactly as `emit_vector`'s output
+            // is. So it splices into the node's own paint unit and inherits every
+            // bracket the walk puts around the subtree: the clip, the transform,
+            // the scroll translation, the opacity layer.
+            if let Some(commands) = canvases.get(&node) {
+                node_paint.splice_balanced(commands.clone());
             }
 
             // §4.16 generated content (`::before` / `::after`) paints inside THIS
@@ -4012,6 +4025,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(
             plain.commands(),
@@ -4043,6 +4057,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &scroll,
+            &HashMap::new(),
             &HashMap::new(),
         );
         let cmds = list.commands();
@@ -5593,6 +5608,7 @@ mod tests {
                 &vectors(),
                 &HashMap::new(),
                 &HashMap::new(),
+                &HashMap::new(),
             )
         }
 
@@ -5662,6 +5678,7 @@ mod tests {
                 &computed,
                 &boxes,
                 None,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),

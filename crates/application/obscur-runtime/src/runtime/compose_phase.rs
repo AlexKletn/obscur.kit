@@ -32,6 +32,8 @@ pub(crate) struct ComposePhase<'a> {
     scroll: &'a ScrollOffsets,
     #[doc = include_str!("compose_phase.doc/generated_content.md")]
     generated_content: &'a HashMap<NodeId, GeneratedContent>,
+    #[doc = include_str!("compose_phase.doc/canvases.md")]
+    canvases: &'a HashMap<NodeId, Vec<PaintCommand>>,
     #[doc = include_str!("compose_phase.doc/motion.md")]
     motion: &'a MotionDriver,
     #[doc = include_str!("compose_phase.doc/inspector.md")]
@@ -55,6 +57,7 @@ impl<'a> ComposePhase<'a> {
         resources: &'a ResourceBridge,
         scroll: &'a ScrollOffsets,
         generated_content: &'a HashMap<NodeId, GeneratedContent>,
+        canvases: &'a HashMap<NodeId, Vec<PaintCommand>>,
         motion: &'a MotionDriver,
         inspector: &'a TreeInspector,
         surface: &'a SurfaceGeometry,
@@ -68,6 +71,7 @@ impl<'a> ComposePhase<'a> {
             resources,
             scroll,
             generated_content,
+            canvases,
             motion,
             inspector,
             surface,
@@ -116,6 +120,7 @@ impl<'a> ComposePhase<'a> {
             self.resources.vectors(),
             &scroll,
             self.generated_content,
+            self.canvases,
         );
         // Inspect overlay (spec §7.6): when inspect mode is on, append a
         // highlight over the hovered node's border box on top of the scene.

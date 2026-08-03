@@ -5,9 +5,9 @@
 mod runtime;
 
 pub use runtime::{
-    AppCommands, CommandHandler, CommandTarget, FrameBudget, ImageCache, InputDispatch, InputEvent,
-    IntoCommandHandler, KeyDispatch, PointerDispatch, SemanticTreeBuilder, UiRuntime, WithEvent,
-    WithoutEvent,
+    AppCommands, CanvasPainter, CommandHandler, CommandTarget, FrameBudget, ImageCache,
+    InputDispatch, InputEvent, IntoCommandHandler, KeyDispatch, PointerDispatch,
+    SemanticTreeBuilder, UiRuntime, WithEvent, WithoutEvent,
 };
 
 pub mod component;

@@ -20,6 +20,24 @@ pub struct DisplayListBuilder {
     open: Vec<BracketKind>,
 }
 
+#[doc = include_str!("display_list_builder.doc/balanced.md")]
+fn balanced(commands: &[PaintCommand]) -> bool {
+    let mut depth: i32 = 0;
+    for command in commands {
+        depth += match command {
+            PaintCommand::PushTransform(_)
+            | PaintCommand::PushClip(_)
+            | PaintCommand::PushLayer(_) => 1,
+            PaintCommand::PopTransform | PaintCommand::PopClip | PaintCommand::PopLayer => -1,
+            _ => 0,
+        };
+        if depth < 0 {
+            return false;
+        }
+    }
+    depth == 0
+}
+
 #[doc = include_str!("display_list_builder.doc/BracketKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BracketKind {
@@ -165,6 +183,21 @@ impl DisplayListBuilder {
         self.commands.push(PaintCommand::PopLayer);
         self.depth = self.depth.saturating_sub(1);
         self.open.pop();
+        self
+    }
+
+    #[doc = include_str!("display_list_builder.doc/splice_balanced.md")]
+    pub fn splice_balanced(&mut self, commands: Vec<PaintCommand>) -> &mut Self {
+        // Depth and the open-bracket stack are deliberately untouched, and the
+        // name is the precondition that makes that correct: a balanced group
+        // opens and closes everything it opens, so it changes neither. A group
+        // that is NOT balanced would desync both — which is why this is not
+        // called `extend`.
+        debug_assert!(
+            balanced(&commands),
+            "splice_balanced was handed a group that opens more than it closes"
+        );
+        self.commands.extend(commands);
         self
     }
 

@@ -20,9 +20,9 @@ use crate::orchestration::{
     PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs, StyleMatchingCoordinator,
 };
 use crate::runtime::{
-    AccessibilityPublisher, BackgroundWork, CascadeSheets, FrameTelemetry, HandlerRegistry,
-    HitTesting, InputQueue, MotionDriver, PointerEventBindings, PointerSessions, ResourceBridge,
-    ScrollOffsets, SurfaceGeometry, TreeInspector, VirtualLists,
+    AccessibilityPublisher, BackgroundWork, CanvasPainters, CascadeSheets, FrameTelemetry,
+    HandlerRegistry, HitTesting, InputQueue, MotionDriver, PointerEventBindings, PointerSessions,
+    ResourceBridge, ScrollOffsets, SurfaceGeometry, TreeInspector, VirtualLists,
 };
 use crate::scheduler::FrameScheduler;
 use crate::transaction::ReconcileEnactor;
@@ -60,6 +60,7 @@ impl UiRuntime {
             hover: HoverChain::new(),
             last_layout_inputs: None,
             inspector: TreeInspector::new(),
+            canvas_painters: CanvasPainters::new(),
             focused: None,
             focus_visible: false,
             pointers: PointerSessions::new(),

@@ -255,6 +255,11 @@ impl UiRuntime {
             // are disjoint fields: a legal split borrow.
             let editing = self.editing.as_ref().map(TextEditSession::view);
             let hovered = self.hover.topmost();
+            // §5.3: every canvas's painter runs HERE — after layout, so it knows
+            // its own box, and before compose, because it is application code
+            // that needs `&mut` while the compose walk takes `&self`. What it
+            // draws is spliced into its node's own paint unit.
+            let canvases = self.canvas_painters.paint(&self.tree, &self.boxes);
             ComposePhase::new(
                 &mut self.scene,
                 &self.scene_composer,
@@ -263,6 +268,7 @@ impl UiRuntime {
                 &self.resources,
                 &self.scroll,
                 &self.generated_content,
+                &canvases,
                 &self.motion,
                 &self.inspector,
                 &self.surface,

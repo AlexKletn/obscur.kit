@@ -15,10 +15,10 @@ use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
 use super::{
-    AccessibilityPublisher, BackgroundWork, CascadeSheets, FramePlan, FrameTelemetry,
-    HandlerRegistry, HitTesting, InputQueue, LayoutInputs, MotionDriver, PointerEventBindings,
-    PointerSessions, ResourceBridge, ScrollOffsets, StyleKey, SurfaceGeometry, TextEditSession,
-    TreeInspector, VirtualLists,
+    AccessibilityPublisher, BackgroundWork, CanvasPainters, CascadeSheets, FramePlan,
+    FrameTelemetry, HandlerRegistry, HitTesting, InputQueue, LayoutInputs, MotionDriver,
+    PointerEventBindings, PointerSessions, ResourceBridge, ScrollOffsets, StyleKey,
+    SurfaceGeometry, TextEditSession, TreeInspector, VirtualLists,
 };
 use crate::frame::FrameId;
 
@@ -33,6 +33,7 @@ use crate::scheduler::FrameScheduler;
 use crate::transaction::ReconcileEnactor;
 
 mod accessibility;
+mod canvas;
 mod caret_visibility;
 mod command_routing;
 mod composition;
@@ -121,6 +122,8 @@ pub struct UiRuntime {
     focus_visible: bool,
     #[doc = include_str!("ui_runtime.doc/pointers.md")]
     pointers: PointerSessions,
+    #[doc = include_str!("ui_runtime.doc/canvas_painters.md")]
+    canvas_painters: CanvasPainters,
     #[doc = include_str!("ui_runtime.doc/pointer_bindings.md")]
     pointer_bindings: PointerEventBindings,
     #[doc = include_str!("ui_runtime.doc/environment.md")]

@@ -25,6 +25,12 @@ impl DisplayList {
         Self { commands }
     }
 
+    #[doc = include_str!("display_list.doc/into_commands.md")]
+    #[must_use]
+    pub fn into_commands(self) -> Vec<PaintCommand> {
+        self.commands
+    }
+
     #[doc = include_str!("display_list.doc/commands.md")]
     #[must_use]
     pub fn commands(&self) -> &[PaintCommand] {
