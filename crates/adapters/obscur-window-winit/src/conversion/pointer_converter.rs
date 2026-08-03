@@ -324,9 +324,21 @@ mod tests {
         );
     }
 
+    /// The drop is the decision `button.md` records, so it is pinned as one:
+    /// **no** platform code folds onto a modelled button. A single sampled code
+    /// only proved that `Other(9)` was not mapped; the rule is that none is,
+    /// because a thumb button arriving as a `Middle` would be a press the user
+    /// never made and a handler could not tell it from a real one.
     #[test]
     fn unmodeled_button_is_none() {
         assert_eq!(PointerConverter::button(MouseButton::Other(9)), None);
+        for code in [0, 1, 2, 3, 4, 5, 8, 16, u16::MAX] {
+            assert_eq!(
+                PointerConverter::button(MouseButton::Other(code)),
+                None,
+                "Other({code}) must not be folded onto a modelled button"
+            );
+        }
     }
 
     #[test]

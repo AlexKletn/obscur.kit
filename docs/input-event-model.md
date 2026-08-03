@@ -27,6 +27,13 @@ it is asserted in both directions, so `pointerover`, `pointerout`, `focusin`,
 Measured on this tree, not copied from a stage report. The `HEAD` figure was
 measured by stashing the working tree and re-running the suite.
 
+**2026-08-04.** The suite row is this campaign's measurement at `628d7f40` and is
+kept as the record of it; the tree has moved since. Measured today:
+**6,439 passed / 0 failed / 9 ignored**, clippy **360**, `fmt` clean, `xtask check`
+and `xtask consumer` both passing. The count is *lower* than 6,453 and nothing
+here regressed — the decomposition campaign has since deleted several zero-caller
+types along with the unit tests that belonged to them.
+
 | | |
 |---|---|
 | Suite | **6,453 passed / 0 failed** (6,392 at `HEAD` — **+61**, none lost, none weakened) |
@@ -46,23 +53,33 @@ Every reserved name, its emitter, and what refusing it suppresses. "Nothing" is 
 result, not an omission — five of the sixteen have no default action to decline,
 and each says so in its own `.doc` rather than being given an invented one.
 
+**Line numbers re-verified 2026-08-04, and four had drifted** — the failure mode
+this workspace has hit before, where a reader follows a citation, finds something
+else there, and concludes the claim is closed. `keydown`/`keyup` were `95`/`97`
+and are `115`/`117`; `focus`/`blur` were `53`/`50` and are `120`/`117` — `focus.rs:53`
+is now `focus_node`, an unrelated function, which is the worst kind of drift;
+`wheel` was `154` and is `151`. A fifth, in *The cost gate* below, was `scrolling.rs:139`
+— a comment line — and is `157`. All five moved because `bdf83278` and `628d7f40`
+inserted lines above them. Every other citation on this page was re-checked by
+grep and is unchanged.
+
 | Event | Symbol | Emitter | `prevent_default` suppresses |
 |---|---|---|---|
 | `click` | `0x101` | `CommandDispatch::activation_command_for`, `command_dispatch.rs:56`, from `release_landed` | — it *is* a `pointerup`'s default action; refuse that instead |
 | `input` | `0x102` | `EditableField`, `editable_field.rs:19`; `text_edit_commands.rs:109` | — |
 | `change` | `0x103` | `text_editing.rs:112` (commit on blur); `command_dispatch.rs:64` (toggle/select activation) | — |
 | `longpress` | `0x104` | `gestures.rs:106`, from the hold recognizer | — |
-| `keydown` | `0x105` | `dispatch_raw_key`, `keyboard.rs:95` | the text edit, the shortcut, and the activation |
-| `keyup` | `0x106` | `dispatch_raw_key`, `keyboard.rs:97` | **nothing** — `acts` is false for a release regardless |
+| `keydown` | `0x105` | `dispatch_raw_key`, `keyboard.rs:115` | the text edit, the shortcut, and the activation |
+| `keyup` | `0x106` | `dispatch_raw_key`, `keyboard.rs:117` | **nothing** — `acts` is false for a release regardless |
 | `pointerdown` | `0x107` | `dispatch_raw_pointer`, step 2b of `handle_pointer` | the focus move, the caret, the press anchor, gesture arming — and so any `click` that would have followed |
 | `pointerup` | `0x108` | same site | the click, the `on:click`/`on:change` activation, the virtualized row click |
 | `pointermove` | `0x109` | same site | the live drag-selection |
 | `pointercancel` | `0x10A` | same site | **nothing** |
 | `pointerenter` | `0x10B` | `dispatch_hover_crossings`, step 2a, from the hover transition | **nothing** |
 | `pointerleave` | `0x10C` | same site | **nothing** |
-| `wheel` | `0x10D` | `dispatch_wheel`, `scrolling.rs:154`, before the container moves | the container scroll, **and** the fall-through to `App::on_scroll` |
-| `focus` | `0x10E` | `dispatch_focus_change`, `focus.rs:53` | **nothing** |
-| `blur` | `0x10F` | `dispatch_focus_change`, `focus.rs:50` | **nothing** |
+| `wheel` | `0x10D` | `dispatch_wheel`, `scrolling.rs:151`, before the container moves | the container scroll, **and** the fall-through to `App::on_scroll` |
+| `focus` | `0x10E` | `dispatch_focus_change`, `focus.rs:120` | **nothing** |
+| `blur` | `0x10F` | `dispatch_focus_change`, `focus.rs:117` | **nothing** |
 | `contextmenu` | `0x110` | `dispatch_context_menu`, `pointer_dispatch.rs:305`, from a secondary press | the focus move — which is the whole of what a secondary press performs |
 
 Three names sit in `handle_pointer` in a fixed order, and the order is the
@@ -147,13 +164,18 @@ Reusing `EventPayload::Pointer` would have made a notch arrive as a `Move` that
 never happened, with the delta riding in `PointerDelta` — "how far the pointer
 travelled" — meaning something else for that one event.
 
-**No programmatic focus setter.** The stage brief assumed one existed; it does
+~~**No programmatic focus setter.** The stage brief assumed one existed; it does
 not, and that was verified rather than assumed — `self.focused` had exactly one
 assignment site in the workspace. Building a setter means answering whether it
 honours focusability and whether `FocusTree`/`TabOrder` finally get wired, which
-is a feature, not an event name. What was built instead makes it cheap: the
-transition was extracted into `move_focus_to`, the one door, so any future mover
-emits `blur`/`focus` without remembering to.
+is a feature, not an event name.~~ — **CLOSED at `bdf83278`, and this page did not
+notice.** `UiRuntime::focus_node(Option<NodeId>)` is public
+(`ui_runtime/focus.rs:53`); it refuses a node the tree does not have and
+otherwise goes through the one door. Re-measured 2026-08-04 by reading the
+function and its callers. What made it cheap is what this paragraph said it
+would: the transition had already been extracted into `move_focus_to`, so the
+setter emits `blur`/`focus`, commits the outgoing field's `change` and recomputes
+`:focus` without knowing it does any of them.
 
 **`WindowEvent::Focused` is still ignored**, with an explicit no-op arm carrying
 the reasoning rather than falling into `_ => {}`. Routing a deactivated window
@@ -171,7 +193,7 @@ nothing. Established by reading the code, in three parts:
    bits, one per gated name. `binds` is a `const fn`: one `bit_for` comparison
    chain and one `AND` on a `Copy` field. No allocation, no walk.
 2. The gate is checked **before** the resolve at all three sites —
-   `pointer_dispatch.rs:329` (raw), `:351`/`:352` (crossings), `scrolling.rs:139`
+   `pointer_dispatch.rs:329` (raw), `:351`/`:352` (crossings), `scrolling.rs:157`
    (wheel). The alternative is real: `CommandDispatch::binding_for` calls
    `AncestorChain::of`, which does `vec![target]` — a guaranteed heap allocation —
    plus an O(depth) walk with a `tree.get` per level. The walk is skipped, not
@@ -279,19 +301,44 @@ over highlighted for the rest of the session.
   toolkit's policy rather than a platform's fact.
   Still open beneath it: **nothing scrolls horizontally.** `ScrollOffsets` holds
   one axis, so `delta_x` reaches a handler and goes no further.
-- **Only a pointer press moves focus.** No tab traversal, no programmatic focus.
+- ~~**Only a pointer press moves focus.** No tab traversal, no programmatic focus.
   `TabOrder`, `FocusTree` and `SpatialNavigation` exist in the domain tier with no
-  runtime caller — the only non-test use of `FocusTree` in the workspace is a spec
-  test constructing one directly.
-- **Focus is never reconciled against the tree.** A structural frame that removes
-  the focused node leaves `focused` naming a dead id. It degrades quietly — the
-  binding lookup finds no node and dispatches nothing — but the accessibility
-  projection still publishes the stale id. Pre-existing, not introduced and not
-  closed here; it is a focus-lifecycle defect rather than a naming one.
+  runtime caller~~ — **two thirds of that closed at `bdf83278`**, one commit before
+  this page was last written, and the page was not revisited. Re-measured
+  2026-08-04: Tab and Shift+Tab move focus (`move_focus_by_tab`,
+  `ui_runtime/focus.rs:67`, called from `keyboard.rs:57` and `:90`), an open
+  trapping `FocusScope` narrows the ring, and `TabOrder` has a production caller —
+  `TabOrder::compute(&nodes)` at `runtime/focus_order.rs:27`. A programmatic
+  setter ships too; see the refusal above. What is still true is the remainder:
+  **`FocusTree` and `SpatialNavigation` have no runtime caller.** The ring is
+  computed from the retained tree on demand, so `FocusTree`'s registration model
+  answers a question nothing asks, and its only non-test use in the workspace is a
+  spec test constructing one directly.
+- ~~**Focus is never reconciled against the tree.** A structural frame that removes
+  the focused node leaves `focused` naming a dead id.~~ — **CLOSED at `bdf83278`**,
+  same commit, same oversight. `drop_focus_if_removed` (`ui_runtime/focus.rs:91`)
+  runs from `frame_pipeline.rs:133` on a structural frame and moves focus to
+  `None` when the tree no longer has the node, so the accessibility projection
+  cannot publish a dead id. No `blur` reaches anyone, deliberately: the node whose
+  handler would run is gone, and synthesising an ancestor to run it on would
+  invent a target the author never bound.
 - **`MouseButton::Other(_)` is dropped**, rather than folded onto a modelled
-  neighbour. Five buttons are delivered; a sixth is not invented.
+  neighbour. Five buttons are delivered; a sixth is not invented. **The reasoning
+  is recorded now** (2026-08-04) rather than left as a `None` on an arm:
+  `pointer_converter.doc/button.md` states why the domain models exactly the five
+  the web platform names, why folding is worse than dropping — a press the user
+  never made, which a handler cannot tell from a real one — and why the drop being
+  symmetric is what keeps the runner's held set honest. Pinned by
+  `unmodeled_button_is_none`, widened from one sampled code to nine so the claim
+  is "none folds" rather than "`Other(9)` did not".
 - **The gesture arena is still bypassed.** The runtime resolves pan / long-press /
   fling through its own state, and a custom recognizer has no registration point
   on `UiRuntime`.
-- **The `u8` is full.** Seven of eight bits are spent. An eighth gated name forces
-  it to `u16`, which is a decision to take deliberately rather than discover.
+- **The `u8` is full**, and **it says so out loud now** (2026-08-04). Seven of
+  eight bits are spent. It was not widened: no eighth name exists, and widening
+  ahead of one is a surface with no caller. What was added instead is the alarm —
+  `the_gate_has_one_bit_left_and_the_eighth_name_must_widen_the_word` fails on the
+  **eighth** name rather than the ninth, so the commit that spends the last bit is
+  the one that has to take the decision. The failure it forestalls is silent, not
+  loud: `bit_for` answers `0` for a name it does not know and `binds` reads `0` as
+  "not bound", so a gated name with nowhere to go would simply never dispatch.

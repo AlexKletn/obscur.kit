@@ -263,4 +263,61 @@ mod tests {
         );
         assert_eq!(u32::from(ALL_BITS).count_ones(), 7);
     }
+
+    /// 2026-08-04. The word is nearly full and nothing said so out loud, which
+    /// is the only reason this test exists: seven of `u8`'s eight bits are
+    /// spent, so **one** gated name is still affordable and the one after it has
+    /// nowhere to go.
+    ///
+    /// A name added without a bit does not fail — it fails *silently*. `bit_for`
+    /// answers `0` for a name it does not know and `binds` reads `0` as "not
+    /// bound", so the gate simply stays shut and the event is never dispatched:
+    /// exactly the vocabulary-with-nothing-behind-it defect this whole gate was
+    /// built alongside. Nothing else in the workspace would notice.
+    ///
+    /// So this fails one name EARLY — at the eighth, not the ninth — because the
+    /// commit that spends the last bit is the one that has to decide, and
+    /// widening `bound` to `u16` is that decision. It is not hypothetical:
+    /// `contextmenu`, `focus` and `blur` are outside the gate today partly on
+    /// this budget (the module docs say why), and any one of them joining it
+    /// takes the bit.
+    #[test]
+    fn the_gate_has_one_bit_left_and_the_eighth_name_must_widen_the_word() {
+        assert_eq!(
+            u8::BITS - ALL_BITS.count_ones(),
+            1,
+            "the gate has spent {} of {} bits. If a name was ADDED, widen \
+             `bound` to `u16` in the same commit — `bit_for`'s `0` sentinel \
+             makes a name with no bit fail closed and silent. If one was \
+             REMOVED, this note is the budget it freed.",
+            ALL_BITS.count_ones(),
+            u8::BITS
+        );
+
+        // And the budget has to be measured against what `bit_for` actually
+        // hands out, not only against the constants. The test above ORs the
+        // seven constants and compares them to `ALL_BITS` — constants against a
+        // constant, which cannot see the function. This walks the names.
+        let mut handed_out = 0;
+        for name in [
+            EVENT_POINTER_DOWN,
+            EVENT_POINTER_UP,
+            EVENT_POINTER_MOVE,
+            EVENT_POINTER_CANCEL,
+            EVENT_POINTER_ENTER,
+            EVENT_POINTER_LEAVE,
+            EVENT_WHEEL,
+        ] {
+            let bit = bit_for(name);
+            assert!(bit.is_power_of_two(), "one bit per name, never two");
+            handed_out |= bit;
+        }
+        assert_eq!(
+            handed_out, ALL_BITS,
+            "`ALL_BITS` is what stops the scan early, so it must be exactly the \
+             set `bit_for` can return: a bit in one and not the other means \
+             either a name whose binding never stops the walk, or a walk that \
+             stops before a name is seen"
+        );
+    }
 }

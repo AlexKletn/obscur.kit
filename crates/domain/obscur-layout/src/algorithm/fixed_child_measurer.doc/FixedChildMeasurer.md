@@ -3,7 +3,7 @@ A [`ChildMeasurer`] backed by a fixed natural size per child index.
 [`ChildMeasurer`]: super::ChildMeasurer
 
 This exists so layout algorithms can be exercised in isolation — without a
-runtime, a retained tree, or the intrinsic-measure port. Each child index is
+runtime, a retained tree, or a text shaper. Each child index is
 assigned one *natural* size; a measurement returns that natural size clamped
 into the requested constraints (via [`BoxConstraints::constrain`]). An index
 outside the backing vector measures as [`Size::ZERO`], so the measurer never

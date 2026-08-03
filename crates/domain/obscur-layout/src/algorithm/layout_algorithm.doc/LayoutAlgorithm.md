@@ -19,8 +19,9 @@ An algorithm never walks the retained tree. It is handed the node's own
 [`LayoutChild`]), the `constraints` under which it must size itself, and a
 [`ChildMeasurer`] it calls to size any child under constraints of its
 choosing. The runtime owns traversal and, behind the measurer, decides
-whether a child is a leaf (routed to the intrinsic-measure port) or a nested
-container (laid out recursively).
+whether a child is a text leaf (shaped and wrapped directly, without a box
+algorithm) or a nested container (laid out recursively). Either way the
+algorithm sees only a [`Size`](obscur_geometry::Size).
 
 # Dispatch
 

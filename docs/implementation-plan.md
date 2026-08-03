@@ -153,25 +153,47 @@ with keys preserves ids); `TreeSnapshot` insta-snapshots are stable.
    `computed/{computed_style, computed_value, style_snapshot, style_diff}`.
 5. **Scopes** — `scope/*`: module scoping (no artificial specificity bump), theme
    scopes, exported style parts; portals keep logical scope (drafts §4.15).
-6. **Invalidation** — `invalidation/*`: dependency graph + typed reasons + `StyleCache`;
+6. **Invalidation** — `invalidation/*`: dependency graph + typed reasons + ~~`StyleCache`~~;
    invalidate only affected consumers.
+   > **`StyleCache` deleted (2026-08-04).** It was built and never wired. "Reuse an
+   > unchanged node's style" is real and it ships, but the runtime's retained
+   > `ComputedStyles` map does it: the style phase moves the previous frame's map out
+   > and resolves only the `StyleInvalidation` set this sub-step *did* deliver. The
+   > cache's `VersionStamp` key was also the weaker one — production mints only
+   > `RetainedTree::version`, one counter for the whole tree.
 **Done when:** given a stylesheet (from `obscur-css`) + tree, `ComputedStyle` snapshots
 are deterministic; cascade order + `!important` covered by table tests.
 
 ## `obscur-layout` — *partial → flow/flex in P1, rest in P4 (large: sub-stepped)*
 **Depends on:** geometry, style (computed layout style), a narrow text-measure port.
+> **Answered differently (2026-08-02).** The "narrow text-measure port" below —
+> `port/intrinsic_measure` with `IntrinsicSize` — was built, never wired, and is now
+> **deleted**. The seam that shipped instead is `algorithm/child_measurer::ChildMeasurer`:
+> an index-and-constraints callback the runtime implements, which intercepts a text leaf
+> before any box algorithm is chosen and shapes it directly, and which never sees a
+> replaced element at all (an image's intrinsic size is written onto its `width`/`height`
+> *before* the layout pass). Sub-step 4 is therefore closed as not-to-be-done rather than
+> as done. See `docs/api/12-reality.md`, zero-caller table.
 **Sub-steps (Phase 1):**
 1. **Contract** — `pass/*` measure→arrange; `context/*` (`LayoutContext`,
-   containment, dependency), `model/*` (`LayoutStyle`, `LayoutBox`, `LayoutResult`,
-   `IntrinsicSize`) (drafts §4.2).
+   containment, dependency), `model/*` (`LayoutStyle`, `LayoutBox`, ~~`LayoutResult`~~)
+   (drafts §4.2).
 2. **Flow/block + flex** — `algorithm/{flow_layout, flex_layout}`. Wrap **Taffy behind
    `algorithm/taffy/*`** (style mapper, tree view, result mapper); no `taffy::*` in the
    public API (crate-arch §4.4).
 3. **Incremental** — `invalidation/*`: start at nearest affected context, propagate up
    only on geometry change / down only on constraint change; measure/layout caches;
    early-exit (drafts §4.3).
-4. **Intrinsic port** — `port/intrinsic_measure`: layout asks text/replaced content for
-   sizes; a mock provider serves the P1 slice.
+   > **Delivered, but not here (2026-08-04).** `LayoutInvalidation` is real and the
+   > runtime consumes it per node. The *caches* it names shipped one layer up, as the
+   > runtime's `MeasureCache`/`ArrangeCache`, and this crate's `LayoutCache` — which
+   > was written for this sub-step and never wired — is **deleted**, along with its
+   > `CacheEntry` and the `model::LayoutResult` that entry carried. It could not have
+   > been used as written: `get_arrange` was keyed on the `NodeId` alone, where an
+   > absolute box also depends on origin, containing block, viewport and scroll.
+4. ~~**Intrinsic port** — `port/intrinsic_measure`: layout asks text/replaced content for
+   sizes; a mock provider serves the P1 slice.~~ **Not done, and deleted** — see the note
+   above; `ChildMeasurer` is the seam that shipped.
 **Sub-steps (deferred to Phase 4):** `grid_layout`, `positioned_layout`,
 `constraint_layout`, `docking_layout`, `custom_layout`; `observer/*` (resize/visibility/
 intersection); `virtualization/*`.
@@ -274,7 +296,8 @@ lives here (crate-arch §2.4).
 
 ## `obscur-primitives` — *stub → partial in P1, more in P4*
 **Depends on:** view, tree, style, layout, scene.
-**Steps (P1):** `container`, `text` (via text-measure port + mock), `image` (static),
+**Steps (P1):** `container`, `text` (in the event shipped via the runtime's
+`ChildMeasurer`, not a text-measure port — see `obscur-layout`), `image` (static),
 `portal`, `layer`. **Deferred (P4):** `scroll`, `canvas`, `foreign_surface`.
 **Done when:** a small primitive tree renders to a Scene snapshot headless.
 
@@ -331,8 +354,9 @@ any domain API** (crate-arch §2.7).
 **Sub-steps (Phase 2 — shaping/layout):**
 1. `font/*` incl. `FontProvider` (system fonts native, bundled fallback for WASM).
 2. `shaping/*` behind `TextShaper` (Parley/HarfRust/Skrifa internal); bidi, fallback.
-3. `layout/*` line breaking, alignment, overflow, hit-test; satisfies layout's
-   intrinsic-measure port.
+3. `layout/*` line breaking, alignment, overflow, hit-test. ~~satisfies layout's
+   intrinsic-measure port.~~ **No adapter was ever written and the port is deleted**: the
+   runtime calls `ParagraphShaper` directly from its `ChildMeasurer` (see `obscur-layout`).
 4. `span/*` rich spans + CSS typography integration.
 **Sub-steps (Phase 3 — editing):** `selection/*` (caret/affinity/geometry),
 `editing/*` (buffer, edit transactions, deletion/navigation units, local undo),

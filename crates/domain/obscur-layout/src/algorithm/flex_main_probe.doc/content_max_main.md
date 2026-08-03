@@ -8,7 +8,8 @@ height, an atomic / single-word inline) this equals the min-content size, so it
 is the exact automatic minimum. For reflowable content (a multi-word inline in
 a row) it is an upper bound of the true min-content — a deliberately safe
 over-approximation, since the engine cannot measure a text leaf's min-content
-through the constraint-clamping measure port.
+through [`ChildMeasurer`](super::ChildMeasurer): that callback answers a size
+under given constraints and has no min-content question to ask.
 
 The result may be [`f32::INFINITY`] for a fill-available container whose
 max-content is unbounded; the caller resolves that to a finite floor.
