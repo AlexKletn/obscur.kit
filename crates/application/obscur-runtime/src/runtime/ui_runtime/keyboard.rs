@@ -1,6 +1,6 @@
 #![doc = include_str!("keyboard.doc/_module.md")]
 
-use obscur_interaction::command::{KeyEvent, LogicalKey, Modifiers, NamedKey};
+use obscur_interaction::command::{KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey};
 use obscur_interaction::event::UiEvent;
 use obscur_view::view::{EVENT_KEY_DOWN, EVENT_KEY_UP};
 
@@ -47,10 +47,20 @@ impl UiRuntime {
             // No frame is requested on this path: with nothing focused and
             // nothing resolving, a keystroke changes nothing to draw, and any
             // handler that did run asked for its own frame.
-            let command = acts
-                .then(|| self.resolve_and_dispatch_shortcut(event))
-                .flatten();
-            return KeyDispatch::new(None, command);
+            let mut command = None;
+            if acts {
+                command = self.resolve_and_dispatch_shortcut(event);
+                if command.is_none() && is_tab(event.logical()) {
+                    // Tab needs no focused node to work from — it is how focus
+                    // ENTERS the surface. `TabOrder` answers `first()` for an
+                    // absent current, which is exactly the fresh-window case.
+                    self.move_focus_by_tab(
+                        event.modifiers().contains(Modifier::Shift),
+                        UiEvent::from_key(event),
+                    );
+                }
+            }
+            return KeyDispatch::new(self.focused, command);
         };
 
         // Whether the key was consumed as a text EDIT. When it was, the editing
@@ -71,7 +81,17 @@ impl UiRuntime {
                 consumed_edit = true;
             } else {
                 command = self.resolve_and_dispatch_shortcut(event);
-                if is_activation_key(event.logical()) && !event.is_repeat() {
+                if command.is_none() && is_tab(event.logical()) {
+                    // Tab is a default action, so a `keydown` listener that
+                    // refuses it keeps focus where it is — which is how a grid
+                    // or an editor takes Tab for itself. And a chord an
+                    // application *bound* wins outright: doing both would move
+                    // focus and run a command for one press.
+                    self.move_focus_by_tab(
+                        event.modifiers().contains(Modifier::Shift),
+                        UiEvent::from_key(event),
+                    );
+                } else if is_activation_key(event.logical()) && !event.is_repeat() {
                     // Auto-repeat does not re-activate. Holding Space on a
                     // button fires at the platform's repeat rate for as long as
                     // the finger is down, and a control that ran its command
@@ -120,6 +140,11 @@ impl UiRuntime {
         self.dispatch_command_event(self.focused, resolved, UiEvent::from_key(event));
         Some(resolved)
     }
+}
+
+#[doc = include_str!("keyboard.doc/is_tab.md")]
+fn is_tab(key: Option<LogicalKey>) -> bool {
+    matches!(key, Some(LogicalKey::Named(NamedKey::Tab)))
 }
 
 #[doc = include_str!("keyboard.doc/is_activation_key.md")]

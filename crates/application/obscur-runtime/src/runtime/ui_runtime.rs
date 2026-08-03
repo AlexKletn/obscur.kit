@@ -117,6 +117,8 @@ pub struct UiRuntime {
     inspector: TreeInspector,
     #[doc = include_str!("ui_runtime.doc/focused.md")]
     focused: Option<NodeId>,
+    #[doc = include_str!("ui_runtime.doc/focus_visible.md")]
+    focus_visible: bool,
     #[doc = include_str!("ui_runtime.doc/pointers.md")]
     pointers: PointerSessions,
     #[doc = include_str!("ui_runtime.doc/pointer_bindings.md")]

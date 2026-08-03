@@ -177,6 +177,8 @@ mod key_dispatch;
 
 pub use key_dispatch::KeyDispatch;
 
+mod focus_order;
+pub(crate) use focus_order::FocusOrder;
 mod semantic_builder;
 
 pub use semantic_builder::SemanticTreeBuilder;

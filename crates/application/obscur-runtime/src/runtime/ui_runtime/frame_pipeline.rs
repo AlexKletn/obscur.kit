@@ -121,6 +121,16 @@ impl UiRuntime {
         //     four.
         if reconciled {
             self.pointer_bindings = PointerEventBindings::scan(&self.tree);
+            // 1c. …and re-answer "is the focused node still there?". A structural
+            //     frame can remove it, and nothing used to notice: `focused` went
+            //     on naming a dead id. It degraded quietly wherever a dispatch
+            //     looked the node up and found nothing, but the accessibility
+            //     projection is built from this field and published the stale id
+            //     to the platform — a screen reader following focus into a node
+            //     that no longer exists. Cleared through the same one door every
+            //     other focus move goes through, so the editing session is
+            //     released with it.
+            self.drop_focus_if_removed();
         }
 
         // 2-3. Match + style: rebuild cascade inputs and resolve computed styles.

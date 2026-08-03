@@ -300,9 +300,49 @@ rt.bind_command(Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl),
 rt.on_command(InternedSymbol::named("save"), || save());
 ```
 
-> **Tab does not move focus.** There is no tab-order traversal on the key path;
-> `TabOrder`, `FocusTree`, `SpatialNavigation` and `NavigationDirection` exist in
-> the domain tier with no runtime caller. Focus moves on a pointer press.
+### Tab moves focus
+
+~~**Tab does not move focus.** There is no tab-order traversal on the key path;
+`TabOrder`, `FocusTree`, `SpatialNavigation` and `NavigationDirection` exist in
+the domain tier with no runtime caller.~~ **Closed.** `TabOrder` has a caller:
+Tab and Shift+Tab walk the controls, wrapping in both directions, and a Tab with
+nothing focused is how focus *enters* the surface.
+
+The ring is **not** the set a pointer can focus, and the difference is
+deliberate. A press focuses whatever it hit — a plain box, the text leaf inside
+a field — which is what a user expects from a click and what `spec_ch2_interaction`
+pins. Tab visits only nodes whose **semantic role is interactive**, skipping
+disabled ones. That is the same answer the accessibility projection publishes: a
+control a screen reader is told it can focus and a control Tab refuses to reach
+would be two truths about one node.
+
+Order is document order. An authored `tabindex` is not modelled — nothing in the
+view model carries one — so every stop sorts equal. `FocusNode` and `TabOrder`
+already understand a tab index; giving them one here would mean inventing an
+attribute no author can write.
+
+Tab is a **default action of `keydown`**, so a handler that calls
+`prevent_default()` keeps it: that is how a grid or a code editor takes Tab for
+itself. A chord an application *bound* wins outright — doing both would move
+focus and run a command for one press. An empty ring moves nothing rather than
+blurring: "nowhere to go" must not become "nowhere".
+
+An open `FocusScope` with `trapping(true)` narrows the ring to its own members,
+which is what stops Tab wandering out of a modal.
+
+```rust
+rt.focus_node(Some(node));   // programmatic; `None` clears
+rt.is_focus_visible();       // whether `:focus-visible` currently matches
+```
+
+**`:focus-visible` means keyboard.** A Tab shows the ring; a press does not; a
+programmatic move does not, because it is not the user navigating. The selector
+was modelled and set by nothing before this, so the rule matched nothing.
+
+> **Still not built:** spatial (arrow-key) navigation. `SpatialNavigation` and
+> `NavigationDirection` remain domain types with no runtime caller — arrow keys
+> belong to the editing session, and taking them for navigation needs a rule
+> about when a control is a *grid* that does not exist yet.
 
 ## Focus
 
@@ -438,20 +478,14 @@ covers half the screen. `App` does this after every window event.
   modelled; nothing produces one.
 - **Haptics.** `HapticRequest` and `HapticPattern` are modelled; nothing consumes
   one.
-- **Keyboard focus traversal.** As above.
-- **Programmatic focus.** There is no `UiRuntime::focus(node)`. A pointer press is
-  the only thing that moves focus, and `move_focus_to` is the only assignment site
-  in the workspace — which is what makes adding a setter cheap rather than what
-  makes it unnecessary. The questions it has to answer first are real ones:
-  whether it honours focusability, whether an unfocusable node is rejected or
-  focused anyway, and whether `FocusTree`/`TabOrder` finally get wired. Whatever
-  answers them goes through the same door and gets `blur`/`focus` for free.
-- **Focus is not reconciled against the tree.** Nothing clears `focused` when the
-  focused node leaves the tree, so a structural frame that removes it leaves
-  `focused` naming a dead id. It degrades quietly rather than panicking — the
-  binding lookup finds no node and dispatches nothing — but the accessibility
-  projection still publishes the stale id. This predates the event vocabulary and
-  is a focus-lifecycle defect, not a naming one.
+- **Spatial navigation.** Arrow keys do not move focus. `SpatialNavigation` and
+  `NavigationDirection` are modelled with no runtime caller: arrows belong to the
+  editing session, and taking them for navigation needs a rule about when a
+  control is a *grid* that this toolkit does not have.
+- **`FocusTree` and `FocusRestore`.** Still no runtime caller. The Tab ring is
+  computed from the retained tree on demand rather than from a registered focus
+  tree, so `FocusTree`'s registration model answers a question nothing asks; and
+  nothing saves or restores a focus position across a dialog yet.
 - **The rest of the raw vocabulary.** The DOM's bubbling `pointerover` /
   `pointerout` are not reserved names, because a command routes either way here
   and they would be a second name for `pointerenter` / `pointerleave`. A

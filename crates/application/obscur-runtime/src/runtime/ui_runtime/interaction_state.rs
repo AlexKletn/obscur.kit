@@ -29,7 +29,13 @@ impl UiRuntime {
     #[doc = include_str!("interaction_state.doc/recompute_pseudo_states.md")]
     pub(super) fn recompute_pseudo_states(&mut self) {
         let pressed = self.pointers.pressed_targets();
-        self.pseudo =
-            PseudoStateProjection::new(&self.tree, &self.hover, self.focused, &pressed).project();
+        self.pseudo = PseudoStateProjection::new(
+            &self.tree,
+            &self.hover,
+            self.focused,
+            &pressed,
+            self.focus_visible,
+        )
+        .project();
     }
 }

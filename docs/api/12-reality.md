@@ -37,7 +37,7 @@ kept here so the correction is visible next to the claim it replaces.
 | Vello `GlyphCache` / `PathCache` / `TextureCache` | dead scaffolding — Vello's own atlases make them redundant. To delete, not to bound |
 | `GamepadEvent`, `GamepadButton`, `GamepadAxis`, `GamepadId` | modelled; nothing produces one |
 | `HapticRequest`, `HapticPattern` | modelled; nothing consumes one |
-| `TabOrder`, `FocusTree`, `SpatialNavigation`, `NavigationDirection` | focus traversal; **Tab does not move focus** |
+| `FocusTree`, `FocusRestore`, `SpatialNavigation`, `NavigationDirection` | ~~focus traversal; **Tab does not move focus**~~ — **`TabOrder` is wired**: Tab and Shift+Tab walk the interactive roles, an open trapping `FocusScope` narrows the ring, and keyboard focus sets `:focus-visible`. These four are what is left: the ring is computed from the retained tree on demand, so `FocusTree`'s registration model answers a question nothing asks; nothing saves or restores a focus position across a dialog; and arrow keys belong to the editing session, so spatial navigation needs a "when is this a grid" rule that does not exist |
 | `GestureArena`, `GestureContender` | the runtime resolves gestures through its own state instead |
 | `InjectionSink` | no shipped host installs one, so DevTools injection is always refused |
 | `ReplaySession` and the record/replay tier | only a spec test drives it |

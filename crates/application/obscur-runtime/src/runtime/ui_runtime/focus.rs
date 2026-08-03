@@ -1,10 +1,10 @@
 #![doc = include_str!("focus.doc/_module.md")]
 
 use obscur_identity::{InternedSymbol, NodeId};
-use obscur_interaction::event::UiEvent;
+use obscur_interaction::event::{EventOrigin, UiEvent};
 use obscur_view::view::{EVENT_BLUR, EVENT_FOCUS};
 
-use crate::runtime::{CommandDispatch, EditableField};
+use crate::runtime::{CommandDispatch, EditableField, FocusOrder};
 
 use super::UiRuntime;
 
@@ -16,6 +16,11 @@ impl UiRuntime {
         }
         let blurred = self.focused;
         self.focused = next;
+        // `:focus-visible` is decided here and only here, from the envelope that
+        // caused the move: a keyboard move shows the ring, a press does not.
+        // Reading it off the cause rather than taking a parameter is what stops
+        // the two ever disagreeing.
+        self.focus_visible = next.is_some() && cause.origin() == EventOrigin::Keyboard;
         // Focus moved: begin/clear the runtime-owned editing session so the
         // focused editable's text/caret/selection is live for keys (and step-2
         // rendering). This is also what commits the outgoing field's `change`,
@@ -32,8 +37,70 @@ impl UiRuntime {
         {
             self.scroll_into_view(field);
         }
+        // `:focus` and `:focus-visible` moved with it, so the projection the
+        // style phase reads is stale until this runs. It sits in the one door
+        // rather than in each caller because that is what makes every mover
+        // correct by construction — the pointer path recomputes again at the end
+        // of its own dispatch, for the hover and press states this cannot know
+        // about, and one extra projection per press is a better trade than a
+        // future caller that forgets.
+        self.recompute_pseudo_states();
         self.dispatch_focus_change(blurred, next, cause);
         true
+    }
+
+    #[doc = include_str!("focus.doc/focus_node.md")]
+    pub fn focus_node(&mut self, node: Option<NodeId>) -> bool {
+        if node.is_some_and(|id| self.tree.get(id).is_none()) {
+            return false;
+        }
+        self.move_focus_to(node, UiEvent::detached(EventOrigin::Synthetic))
+    }
+
+    #[doc = include_str!("focus.doc/is_focus_visible.md")]
+    #[must_use]
+    pub const fn is_focus_visible(&self) -> bool {
+        self.focus_visible
+    }
+
+    #[doc = include_str!("focus.doc/move_focus_by_tab.md")]
+    pub(super) fn move_focus_by_tab(&mut self, backwards: bool, cause: UiEvent) -> bool {
+        // The innermost open scope that traps, if any: a modal is exactly the
+        // thing that must not let Tab wander back to the page behind it. A
+        // non-trapping scope groups commands without owning the ring, so it is
+        // not consulted here — `traps()` is the whole test.
+        let trapping = self
+            .routing
+            .scopes()
+            .iter()
+            .rev()
+            .find(|scope| scope.traps())
+            .cloned();
+        let order = FocusOrder::of(&self.tree, trapping.as_ref());
+        // An empty ring must not blur what is focused. `step` answering `None`
+        // means "there is nowhere to go", and a Tab that unfocused the field the
+        // user was typing in because the screen holds one control would be worse
+        // than a Tab that does nothing.
+        let Some(next) = order.step(self.focused, backwards) else {
+            return false;
+        };
+        self.move_focus_to(Some(next), cause)
+    }
+
+    #[doc = include_str!("focus.doc/drop_focus_if_removed.md")]
+    pub(super) fn drop_focus_if_removed(&mut self) {
+        let Some(node) = self.focused else {
+            return;
+        };
+        if self.tree.get(node).is_some() {
+            return;
+        }
+        // No `blur` reaches anyone: `binding_for` starts at a node the tree no
+        // longer has, finds nothing, and reports nothing. That is the honest
+        // outcome rather than a missing one — the node whose handler would run
+        // is gone, and synthesising an ancestor to run it on would be inventing
+        // a target the author never bound.
+        self.move_focus_to(None, UiEvent::detached(EventOrigin::Synthetic));
     }
 
     #[doc = include_str!("focus.doc/dispatch_focus_change.md")]

@@ -168,7 +168,7 @@ impl SemanticTreeBuilder {
     }
 
     #[doc = include_str!("semantic_builder.doc/role_of.md")]
-    fn role_of(node: &RetainedNode) -> SemanticRole {
+    pub(crate) fn role_of(node: &RetainedNode) -> SemanticRole {
         match node.kind() {
             // The structural root and system-generated synthetic parts are both
             // plain groupings with no stronger semantics.

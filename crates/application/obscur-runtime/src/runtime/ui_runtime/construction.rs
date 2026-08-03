@@ -61,6 +61,7 @@ impl UiRuntime {
             last_layout_inputs: None,
             inspector: TreeInspector::new(),
             focused: None,
+            focus_visible: false,
             pointers: PointerSessions::new(),
             pointer_bindings: PointerEventBindings::none(),
             environment: EnvironmentValues::none(),
