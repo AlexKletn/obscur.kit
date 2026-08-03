@@ -13,6 +13,9 @@ use crate::runtime::{CommandDispatch, FoldInputs, ScrollTargets};
 use super::UiRuntime;
 
 impl UiRuntime {
+    #[doc = include_str!("scrolling.doc/WHEEL_LINE_STEP.md")]
+    pub const WHEEL_LINE_STEP: f32 = 48.0;
+
     #[doc = include_str!("scrolling.doc/scroll_into_view.md")]
     pub fn scroll_into_view(&mut self, node: NodeId) -> bool {
         let Some(target) = self.boxes.get(&node).copied() else {
@@ -105,7 +108,18 @@ impl UiRuntime {
 
     #[doc = include_str!("scrolling.doc/handle_scroll.md")]
     pub fn handle_scroll(&mut self, delta_y: f32, position: Point) -> Option<NodeId> {
-        let content = self.to_content_point(position);
+        self.handle_wheel(WheelEvent::new(position, delta_y))
+    }
+
+    #[doc = include_str!("scrolling.doc/handle_wheel.md")]
+    pub fn handle_wheel(&mut self, wheel: WheelEvent) -> Option<NodeId> {
+        let content = self.to_content_point(wheel.position());
+        // Lines become pixels HERE and not in the platform adapter. How far a
+        // notch scrolls is this toolkit's policy, not winit's fact, and the
+        // adapter that used to multiply by 48 before the runtime saw anything
+        // both hid the policy where nobody would look for it and destroyed the
+        // one thing a handler might want to treat differently.
+        let delta_y = wheel.pixels_y(Self::WHEEL_LINE_STEP);
 
         // 1. The raw `wheel` event (§2.3), dispatched to the node under the point
         //    BEFORE the scroll it can refuse. Same ordering as `pointerdown` and
@@ -114,7 +128,7 @@ impl UiRuntime {
         //    decline it. A refusal is a claim — the node that refused is returned
         //    as the node that took the event, so the host's own `on_scroll`
         //    fallback does not then run as if nothing had wanted it.
-        if let Some(claimed) = self.dispatch_wheel(delta_y, content) {
+        if let Some(claimed) = self.dispatch_wheel(wheel, content) {
             return Some(claimed);
         }
 
@@ -122,6 +136,10 @@ impl UiRuntime {
         //    the CSS sense — it clips and can be scrolled programmatically — but the
         //    wheel must pass through it, or a row that clips a long name eats the
         //    scroll meant for the list it sits in.
+        //
+        //    Vertical only: `delta_x` reaches a handler and nothing else, because
+        //    `ScrollOffsets` holds one axis. That is a limit of the scroll model,
+        //    not of the event.
         let target = ScrollTargets::new(&self.tree, &self.computed, &self.boxes, &self.scroll)
             .scrollable_at(content)?;
         self.scroll_by(target, delta_y);
@@ -130,7 +148,7 @@ impl UiRuntime {
     }
 
     #[doc = include_str!("scrolling.doc/dispatch_wheel.md")]
-    fn dispatch_wheel(&mut self, delta_y: f32, content: Point) -> Option<NodeId> {
+    fn dispatch_wheel(&mut self, wheel: WheelEvent, content: Point) -> Option<NodeId> {
         // Cost, and the same gate the raw pointer names use. A trackpad's
         // two-finger scroll arrives as pixel deltas at nearly the rate its moves
         // do, and everything below — folding the point, hit-testing it, walking
@@ -152,12 +170,11 @@ impl UiRuntime {
             .hits
             .resolve(&self.tree, &self.computed, &self.boxes, folded, content)?;
         let (node, command) = CommandDispatch::binding_for(&self.tree, target, EVENT_WHEEL)?;
+        // Aimed at the FOLDED point so a listener and a hit test agree about
+        // where the notch landed; everything else — both deltas, the unit, the
+        // clock, the trust — is the platform's own report, untouched.
         let prevented = self
-            .dispatch_command_outcome(
-                Some(node),
-                command,
-                UiEvent::from_wheel(WheelEvent::new(folded, delta_y)),
-            )
+            .dispatch_command_outcome(Some(node), command, UiEvent::from_wheel(wheel.at(folded)))
             .default_prevented;
         // Only a refusal claims the notch. A listener that merely watched it gets
         // the scroll it would have got anyway.

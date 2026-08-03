@@ -11,6 +11,7 @@ use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::{ComponentId, InternedSymbol, NodeId, RuntimeId};
 use obscur_kit::interaction::event::UiEvent;
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
+use obscur_kit::interaction::pointer::{WheelDeltaMode, WheelEvent};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{
@@ -29,6 +30,13 @@ const CSS: &str = ".list{width:200px;height:100px;overflow:scroll}\
 /// Where the wheel is aimed in every test below: inside the first row, which is
 /// inside the scrolling list.
 const OVER_FIRST_ROW: Point = Point::new(50.0, 10.0);
+
+/// What the self-describing-notch case records: the two deltas, the unit, the
+/// host clock and whether the platform vouched for it.
+type NotchLog = Rc<RefCell<Vec<(f32, f32, WheelDeltaMode, u64, bool)>>>;
+
+/// What the bare-delta case records: everything two floats cannot say.
+type BareLog = Rc<RefCell<Vec<(WheelDeltaMode, f32, u64, bool)>>>;
 
 #[doc = include_str!("wheel_events.doc/compile.md")]
 fn compile(css: &str) -> Stylesheet {
@@ -343,4 +351,109 @@ fn an_unbound_wheel_name_is_never_dispatched() {
     // And the scroll it would have refused happened, exactly as it did before
     // the event existed.
     assert!(rt.scroll_top(list) > 0.0);
+}
+
+#[doc = include_str!("wheel_events.doc/a_notch_carries_its_unit_its_clock_and_its_trust.md")]
+#[test]
+fn a_notch_carries_its_unit_its_clock_and_its_trust() {
+    // The last input path that had no self-describing event at its door. A
+    // pointer arrives as a `PointerEvent` and a key as a `KeyEvent`, each with
+    // trust and a timestamp; a wheel arrived as two floats, so `UiEvent::from_wheel`
+    // had to leave both at their defaults and said so in a comment.
+    let mut rt = staged(&list_of_rows(Watch::Rows));
+    let seen: NotchLog = Rc::new(RefCell::new(Vec::new()));
+    let sink = Rc::clone(&seen);
+    rt.on_command(ON_WHEEL, move |e: &mut UiEvent| {
+        if let Some(wheel) = e.wheel() {
+            sink.borrow_mut().push((
+                wheel.delta_y(),
+                wheel.delta_x(),
+                wheel.mode(),
+                wheel.timestamp(),
+                wheel.is_trusted(),
+            ));
+        }
+    });
+
+    rt.handle_wheel(
+        WheelEvent::new(OVER_FIRST_ROW, -3.0)
+            .with_delta_x(-2.0)
+            .in_lines()
+            .with_timestamp(4_242)
+            .as_trusted(),
+    );
+
+    let (dy, dx, mode, stamp, trusted) = seen.borrow()[0];
+    assert!((dy + 3.0).abs() < f32::EPSILON, "the platform's own number");
+    assert!(
+        (dx + 2.0).abs() < f32::EPSILON,
+        "and the horizontal one, which the winit runner used to drop with a `_`"
+    );
+    assert_eq!(
+        mode,
+        WheelDeltaMode::Lines,
+        "a notched wheel, not a trackpad"
+    );
+    assert_eq!(stamp, 4_242);
+    assert!(
+        trusted,
+        "trust travels with the notch, conferred at the door"
+    );
+}
+
+#[doc = include_str!("wheel_events.doc/lines_scroll_further_than_the_same_number_of_pixels.md")]
+#[test]
+fn lines_scroll_further_than_the_same_number_of_pixels() {
+    // The unit is not decoration: it decides how far the container moves. The
+    // adapter used to multiply lines by 48 before the runtime saw anything, so
+    // this distinction could not exist.
+    let by_lines = {
+        let mut rt = staged(&list_of_rows(Watch::Nothing));
+        rt.handle_wheel(WheelEvent::new(OVER_FIRST_ROW, 2.0).in_lines());
+        rt.scroll_top(list_node(&rt))
+    };
+    let by_pixels = {
+        let mut rt = staged(&list_of_rows(Watch::Nothing));
+        rt.handle_wheel(WheelEvent::new(OVER_FIRST_ROW, 2.0));
+        rt.scroll_top(list_node(&rt))
+    };
+    assert!(
+        by_lines > by_pixels,
+        "two lines move further than two pixels: {by_lines} vs {by_pixels}"
+    );
+    assert!(
+        (by_lines - 2.0 * UiRuntime::WHEEL_LINE_STEP).abs() < 0.01,
+        "and by exactly the line step the runtime owns: {by_lines}"
+    );
+}
+
+#[doc = include_str!("wheel_events.doc/the_bare_delta_door_still_means_what_it_did.md")]
+#[test]
+fn the_bare_delta_door_still_means_what_it_did() {
+    // `handle_scroll` is every existing caller's shape and must keep answering
+    // identically: pixels, no horizontal, untrusted, unstamped.
+    let mut rt = staged(&list_of_rows(Watch::Rows));
+    let seen: BareLog = Rc::new(RefCell::new(Vec::new()));
+    let sink = Rc::clone(&seen);
+    rt.on_command(ON_WHEEL, move |e: &mut UiEvent| {
+        if let Some(wheel) = e.wheel() {
+            sink.borrow_mut().push((
+                wheel.mode(),
+                wheel.delta_x(),
+                wheel.timestamp(),
+                wheel.is_trusted(),
+            ));
+        }
+    });
+
+    rt.handle_scroll(40.0, OVER_FIRST_ROW);
+    let (mode, dx, stamp, trusted) = seen.borrow()[0];
+    assert_eq!(
+        mode,
+        WheelDeltaMode::Pixels,
+        "two floats can say nothing else"
+    );
+    assert_eq!(dx, 0.0);
+    assert_eq!(stamp, 0);
+    assert!(!trusted, "and it fails closed, as it always did");
 }

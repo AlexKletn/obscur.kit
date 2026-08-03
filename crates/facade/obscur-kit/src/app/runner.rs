@@ -29,9 +29,6 @@ use crate::text::ime::{CompositionEvent, Preedit};
 use crate::view::view::{View, ViewNode};
 use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 
-#[doc = include_str!("runner.doc/WHEEL_LINE_STEP.md")]
-const WHEEL_LINE_STEP: f32 = 48.0;
-
 #[doc = include_str!("runner.doc/MAX_FRAME_DELTA.md")]
 const MAX_FRAME_DELTA: f32 = 0.1;
 
@@ -691,14 +688,16 @@ impl ApplicationHandler for AppRunner {
                 // cursor is passed in the same (physical) space the pointer
                 // converter uses, so the hit that finds the container matches the
                 // one a click would make.
-                let step = match delta {
-                    MouseScrollDelta::LineDelta(_, lines) => -lines * WHEEL_LINE_STEP,
-                    #[allow(clippy::cast_possible_truncation)]
-                    MouseScrollDelta::PixelDelta(position) => -(position.y as f32),
-                };
                 #[allow(clippy::cast_possible_truncation)]
                 let at = Point::new(self.cursor.0 as f32, self.cursor.1 as f32);
-                if self.runtime.handle_scroll(step, at).is_some() {
+                // Converted whole — both axes, the platform's own unit, and the
+                // trust this boundary confers — rather than flattened to one
+                // float. The line-to-pixel policy lives on the runtime now, so
+                // the fallback below asks for the same answer instead of
+                // keeping a second copy of the constant.
+                let wheel = PointerConverter::wheel(delta, at).with_timestamp(self.now_micros());
+                let step = wheel.pixels_y(UiRuntime::WHEEL_LINE_STEP);
+                if self.runtime.handle_wheel(wheel).is_some() {
                     self.runtime.request_frame(FrameReason::WindowChange);
                     self.request_redraw();
                 } else if let Some(handler) = self.scroll.as_mut() {

@@ -97,13 +97,14 @@ impl UiEvent {
         // and a second enum saying the same thing is a second thing to keep in
         // step.
         let mut event = Self::detached(EventOrigin::Pointer);
-        // Trust and the timestamp are deliberately left at their defaults —
-        // untrusted, unstamped. Unlike a key or a pointer, a wheel has no
-        // platform converter to confer them: `UiRuntime::handle_scroll` takes two
-        // floats, so there is nothing at the door that knows whether this notch
-        // came from a device or from a queued `InputEvent::Scroll` an
-        // application pushed. `EventTrust` fails closed, and conferring trust
-        // here would confer it on both.
+        // The envelope reports what the notch reported, the way `from_pointer`
+        // and `from_key` do. This used to leave both at their defaults, and the
+        // reason was honest at the time: a wheel had no platform converter to
+        // confer them, because `UiRuntime::handle_scroll` took two floats and
+        // nothing at the door could know whether the notch came from a device or
+        // from an application pushing one. `handle_wheel` is that door now.
+        event.trust = wheel.trust();
+        event.timestamp_micros = wheel.timestamp();
         event.payload = EventPayload::Wheel(wheel);
         event
     }

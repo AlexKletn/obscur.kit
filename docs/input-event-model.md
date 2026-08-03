@@ -267,12 +267,18 @@ over highlighted for the rest of the session.
   *after* `propagate` returns.
 - **`EventPropagation` has no production consumer.** `UiEvent` carries the
   propagation flags inline; the type is exercised only by `spec_ch2_interaction.rs`.
-- **The wheel is untrusted and unstamped.** `handle_scroll(delta_y, position)`
-  takes two floats, so there is no self-describing event at the door and no
-  converter to confer either. It fails closed rather than vouching for a notch it
-  cannot distinguish from a queued `InputEvent::Scroll`. Closing it means a
-  `WheelEvent` at the door and a converter, the way `PointerConverter` does — a
-  public-surface change with six call sites behind it.
+- ~~**The wheel is untrusted and unstamped.**~~ **CLOSED 2026-08-03.**
+  `UiRuntime::handle_wheel(WheelEvent)` is the door and `PointerConverter::wheel`
+  is the converter. `WheelEvent` gained `delta_x`, a `WheelDeltaMode`, a
+  timestamp and trust; `handle_scroll(delta_y, position)` stayed as the shape
+  every existing caller uses, meaning exactly what two floats can say.
+  Two things the adapter had been destroying came back with it: the horizontal
+  delta, dropped by a `_` pattern, and the line-versus-pixel distinction,
+  flattened by a `WHEEL_LINE_STEP` that lived in the winit runner. The constant
+  is `UiRuntime::WHEEL_LINE_STEP` now, because how far a notch scrolls is this
+  toolkit's policy rather than a platform's fact.
+  Still open beneath it: **nothing scrolls horizontally.** `ScrollOffsets` holds
+  one axis, so `delta_x` reaches a handler and goes no further.
 - **Only a pointer press moves focus.** No tab traversal, no programmatic focus.
   `TabOrder`, `FocusTree` and `SpatialNavigation` exist in the domain tier with no
   runtime caller — the only non-test use of `FocusTree` in the workspace is a spec

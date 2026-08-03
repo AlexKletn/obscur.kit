@@ -390,11 +390,29 @@ is no separate `focusin` / `focusout`, because that is what these already are.
 
 ## Scrolling
 
-`handle_scroll(delta_y, position)` routes a wheel notch to the innermost
+`handle_wheel(WheelEvent)` routes a wheel notch to the innermost
 `overflow: scroll` container under the point and returns which node took it, or
 `None`. An app that windows its own list registers `App::on_scroll` for the
 leftovers — so "which node took it" includes a node that took it by *refusing*
 it; see below.
+
+```rust
+rt.handle_wheel(
+    WheelEvent::new(at, -3.0).in_lines().with_timestamp(micros).as_trusted(),
+);
+rt.handle_scroll(-144.0, at);   // the same thing, said with two floats
+```
+
+A `WheelEvent` reports **both axes**, the **unit** the platform used, a
+timestamp and trust — the same shape `PointerEvent` and `KeyEvent` have. A
+notched wheel reports whole `Lines`; a trackpad reports `Pixels` it already
+smoothed. `WheelDeltaMode::resolve` — and `pixels_y` / `pixels_x` — convert,
+against `UiRuntime::WHEEL_LINE_STEP` (48 px).
+
+That constant lives on the runtime rather than in the winit adapter, which is
+where it used to be: how far a notch scrolls is this toolkit's policy, not
+winit's fact, and multiplying at the adapter meant the runtime could never tell
+a wheel from a trackpad because everything arrived as pixels.
 
 An `overflow: hidden` box clips and scrolls but paints no scrollbar; the wheel
 passes through it to whatever is beneath.
@@ -442,11 +460,16 @@ row.
 
 Two limits, both deliberate:
 
-- **The event is untrusted and unstamped.** `handle_scroll(delta_y, position)`
-  takes two floats, so unlike `handle_pointer` and `handle_key` there is no
-  self-describing event at the door and no converter to confer trust or a
-  timestamp on. `EventTrust` fails closed rather than vouching for a notch the
-  runtime cannot distinguish from a queued `InputEvent::Scroll`.
+- ~~**The event is untrusted and unstamped.**~~ **Closed.**
+  `handle_wheel(WheelEvent)` is the door, and `PointerConverter::wheel` is the
+  converter that confers trust the way it does for a pointer.
+  `handle_scroll(delta_y, position)` remains, meaning exactly what two floats
+  can say — pixels, no horizontal, untrusted, unstamped.
+- **Nothing scrolls horizontally.** `delta_x` reaches a handler and goes no
+  further: `ScrollOffsets` holds one axis. That is a limit of the scroll model,
+  not of the event, and dropping the number at the door — which the winit runner
+  used to do with a `_` pattern — is what left a sideways swipe reaching nothing
+  at all.
 - **A fling or a pan is not a wheel.** Both move containers through the gesture
   recognizers and neither is dispatched here, so neither is refusable this way.
 

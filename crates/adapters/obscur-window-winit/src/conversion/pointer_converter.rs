@@ -3,6 +3,7 @@
 use obscur_geometry::Point;
 use obscur_interaction::pointer::{
     PointerButton, PointerButtons, PointerDevice, PointerEvent, PointerEventKind, PointerId,
+    WheelEvent,
 };
 
 #[doc = include_str!("pointer_converter.doc/PointerConverter.md")]
@@ -37,6 +38,25 @@ impl PointerConverter {
             winit::event::ElementState::Pressed => PointerEventKind::Down,
             winit::event::ElementState::Released => PointerEventKind::Up,
         }
+    }
+
+    #[doc = include_str!("pointer_converter.doc/wheel.md")]
+    #[must_use]
+    pub fn wheel(delta: winit::event::MouseScrollDelta, at: Point) -> WheelEvent {
+        use winit::event::MouseScrollDelta as Winit;
+        // Both axes are inverted so that scrolling DOWN increases `scroll_top` —
+        // reveals content further down — which is the direction every scroll
+        // container in this toolkit counts in. Every platform reports the
+        // opposite sign, and mapping a platform convention onto the model's is
+        // exactly what an adapter is for.
+        match delta {
+            Winit::LineDelta(x, y) => WheelEvent::new(at, -y).with_delta_x(-x).in_lines(),
+            #[allow(clippy::cast_possible_truncation)]
+            Winit::PixelDelta(position) => {
+                WheelEvent::new(at, -(position.y as f32)).with_delta_x(-(position.x as f32))
+            }
+        }
+        .as_trusted()
     }
 
     #[doc = include_str!("pointer_converter.doc/moved.md")]
@@ -486,5 +506,50 @@ mod tests {
         let plain =
             PointerConverter::new().touch(contact(3, winit::event::TouchPhase::Moved, 2.0, 2.0));
         assert!((plain.pressure - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_notched_wheel_reports_lines_and_a_trackpad_reports_pixels() {
+        use obscur_interaction::pointer::WheelDeltaMode;
+        use winit::event::MouseScrollDelta;
+
+        let notched =
+            PointerConverter::wheel(MouseScrollDelta::LineDelta(0.0, 1.0), Point::new(5.0, 6.0));
+        assert_eq!(notched.mode(), WheelDeltaMode::Lines);
+        assert_eq!(
+            notched.delta_y(),
+            -1.0,
+            "inverted: down increases scroll_top"
+        );
+        assert_eq!(notched.position(), Point::new(5.0, 6.0));
+
+        let trackpad = PointerConverter::wheel(
+            MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(0.0, 25.0)),
+            Point::new(0.0, 0.0),
+        );
+        assert_eq!(trackpad.mode(), WheelDeltaMode::Pixels);
+        assert_eq!(trackpad.delta_y(), -25.0);
+    }
+
+    #[test]
+    fn the_horizontal_delta_survives_the_boundary() {
+        use winit::event::MouseScrollDelta;
+        // It used to be discarded by a `_` pattern on the way in, so a sideways
+        // two-finger swipe reached nothing at all.
+        let sideways =
+            PointerConverter::wheel(MouseScrollDelta::LineDelta(2.0, 0.0), Point::new(0.0, 0.0));
+        assert_eq!(sideways.delta_x(), -2.0);
+        assert_eq!(sideways.delta_y(), 0.0);
+    }
+
+    #[test]
+    fn a_converted_notch_is_trusted() {
+        use winit::event::MouseScrollDelta;
+        // The converter is the platform boundary for a wheel exactly as it is
+        // for a pointer, and the single place a notch can be vouched for.
+        assert!(
+            PointerConverter::wheel(MouseScrollDelta::LineDelta(0.0, 1.0), Point::new(0.0, 0.0))
+                .is_trusted()
+        );
     }
 }
