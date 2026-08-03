@@ -16,6 +16,16 @@ use super::{DisplayList, PaintCommand};
 pub struct DisplayListBuilder {
     commands: Vec<PaintCommand>,
     depth: u32,
+    #[doc = include_str!("display_list_builder.doc/open.md")]
+    open: Vec<BracketKind>,
+}
+
+#[doc = include_str!("display_list_builder.doc/BracketKind.md")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BracketKind {
+    Transform,
+    Clip,
+    Layer,
 }
 
 impl DisplayListBuilder {
@@ -25,6 +35,7 @@ impl DisplayListBuilder {
         Self {
             commands: Vec::new(),
             depth: 0,
+            open: Vec::new(),
         }
     }
 
@@ -113,6 +124,7 @@ impl DisplayListBuilder {
     pub fn push_transform(&mut self, transform: AffineTransform) -> &mut Self {
         self.commands.push(PaintCommand::PushTransform(transform));
         self.depth = self.depth.saturating_add(1);
+        self.open.push(BracketKind::Transform);
         self
     }
 
@@ -120,6 +132,7 @@ impl DisplayListBuilder {
     pub fn pop_transform(&mut self) -> &mut Self {
         self.commands.push(PaintCommand::PopTransform);
         self.depth = self.depth.saturating_sub(1);
+        self.open.pop();
         self
     }
 
@@ -127,6 +140,7 @@ impl DisplayListBuilder {
     pub fn push_clip(&mut self, clip: Clip) -> &mut Self {
         self.commands.push(PaintCommand::PushClip(clip));
         self.depth = self.depth.saturating_add(1);
+        self.open.push(BracketKind::Clip);
         self
     }
 
@@ -134,6 +148,7 @@ impl DisplayListBuilder {
     pub fn pop_clip(&mut self) -> &mut Self {
         self.commands.push(PaintCommand::PopClip);
         self.depth = self.depth.saturating_sub(1);
+        self.open.pop();
         self
     }
 
@@ -141,6 +156,7 @@ impl DisplayListBuilder {
     pub fn push_layer(&mut self, layer: SceneLayer) -> &mut Self {
         self.commands.push(PaintCommand::PushLayer(layer));
         self.depth = self.depth.saturating_add(1);
+        self.open.push(BracketKind::Layer);
         self
     }
 
@@ -148,7 +164,18 @@ impl DisplayListBuilder {
     pub fn pop_layer(&mut self) -> &mut Self {
         self.commands.push(PaintCommand::PopLayer);
         self.depth = self.depth.saturating_sub(1);
+        self.open.pop();
         self
+    }
+
+    #[doc = include_str!("display_list_builder.doc/pop_any.md")]
+    pub fn pop_any(&mut self) -> &mut Self {
+        match self.open.last() {
+            Some(BracketKind::Transform) => self.pop_transform(),
+            Some(BracketKind::Clip) => self.pop_clip(),
+            Some(BracketKind::Layer) => self.pop_layer(),
+            None => self,
+        }
     }
 
     #[doc = include_str!("display_list_builder.doc/depth.md")]
