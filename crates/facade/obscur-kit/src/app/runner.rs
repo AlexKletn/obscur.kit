@@ -648,13 +648,31 @@ impl ApplicationHandler for AppRunner {
                     self.request_redraw();
                 }
             }
+            WindowEvent::ModifiersChanged(state) => {
+                // The platform's own answer, which beats the runtime's folded
+                // one: a modifier released while this window was unfocused
+                // produces no key event here, so the fold would keep believing
+                // it is held. Alt-tab away, let go of Alt, come back.
+                self.runtime
+                    .set_modifiers(KeyboardConverter::modifiers(state.state()));
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let WinitPhysicalKey::Code(code) = event.physical_key {
                     if let Some(physical) = KeyboardConverter::physical_key(code) {
                         let logical = KeyboardConverter::logical_key(&event.logical_key);
                         let pressed = event.state == ElementState::Pressed;
-                        self.runtime
-                            .handle_key(KeyEvent::new(physical, logical, pressed));
+                        // Trusted here and nowhere else, the way the pointer
+                        // converter is the single `as_trusted` call site for a
+                        // pointer: this is the platform boundary, the OS event is
+                        // on the other side of it, and everything that reaches
+                        // `handle_key` by any other road stays untrusted.
+                        let mut key = KeyEvent::new(physical, logical, pressed)
+                            .with_timestamp(self.now_micros())
+                            .as_trusted();
+                        if event.repeat {
+                            key = key.as_repeat();
+                        }
+                        self.runtime.handle_key(key);
                         self.request_redraw();
                     }
                 }

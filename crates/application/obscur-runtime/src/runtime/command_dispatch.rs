@@ -14,6 +14,8 @@ pub(crate) struct CommandDispatchOutcome {
     pub(crate) claimed: bool,
     #[doc = include_str!("command_dispatch.doc/anything_ran.md")]
     pub(crate) anything_ran: bool,
+    #[doc = include_str!("command_dispatch.doc/default_prevented.md")]
+    pub(crate) default_prevented: bool,
 }
 
 #[doc = include_str!("command_dispatch.doc/CommandDispatch.md")]
@@ -73,6 +75,7 @@ impl<'a> CommandDispatch<'a> {
             return CommandDispatchOutcome {
                 claimed: false,
                 anything_ran: false,
+                default_prevented: false,
             };
         }
         let mut event = match origin {
@@ -81,7 +84,9 @@ impl<'a> CommandDispatch<'a> {
         };
         // §2.3 steps 1-3: capture, target, bubble.
         let listeners_run = self.propagate(origin, command, &mut event);
-        // §2.3 step 4: the default action — §2.6's routing chain.
+        // §2.3 step 4: the default action — §2.6's routing chain. Gated on what
+        // the three propagation phases decided; a handler cannot refuse the
+        // chain it is itself being run by.
         let claimed = if event.is_default_prevented() {
             false
         } else {
@@ -91,6 +96,14 @@ impl<'a> CommandDispatch<'a> {
         CommandDispatchOutcome {
             claimed,
             anything_ran: claimed || listeners_run > 0,
+            // Read AFTER the routing chain, not before it, because a §2.6
+            // window- or application-level handler is a legitimate place to
+            // refuse from and `on_command` registers exactly those. Reported out
+            // rather than only acted on here, because §2.3's step 4 is larger
+            // than this routing chain: the runtime's OWN default actions — the
+            // text edit, the activation, the focus move, the scroll — are what a
+            // `keydown` listener means to refuse, and the caller performs those.
+            default_prevented: event.is_default_prevented(),
         }
     }
 
@@ -204,6 +217,7 @@ mod tests {
             CommandDispatchOutcome {
                 claimed: false,
                 anything_ran: false,
+                default_prevented: false,
             }
         );
     }

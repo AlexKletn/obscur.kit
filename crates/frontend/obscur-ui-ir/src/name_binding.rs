@@ -46,6 +46,20 @@ pub const EVENT_INPUT: InternedSymbol = InternedSymbol::from_raw(0x0000_0102);
 pub const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x0000_0103);
 #[doc = include_str!("name_binding.doc/EVENT_LONG_PRESS.md")]
 pub const EVENT_LONG_PRESS: InternedSymbol = InternedSymbol::from_raw(0x0000_0104);
+#[doc = include_str!("name_binding.doc/EVENT_KEY_DOWN.md")]
+pub const EVENT_KEY_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0105);
+#[doc = include_str!("name_binding.doc/EVENT_KEY_UP.md")]
+pub const EVENT_KEY_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0106);
+
+#[doc = include_str!("name_binding.doc/RESERVED_EVENTS.md")]
+pub const RESERVED_EVENTS: &[InternedSymbol] = &[
+    EVENT_CLICK,
+    EVENT_INPUT,
+    EVENT_CHANGE,
+    EVENT_LONG_PRESS,
+    EVENT_KEY_DOWN,
+    EVENT_KEY_UP,
+];
 
 // --- Primitive component ids (mirror `obscur_primitives::*::COMPONENT_ID`). ---
 
@@ -229,8 +243,16 @@ pub fn event_symbol(name: &str) -> InternedSymbol {
         // are markup attribute names (`on:longpress=…`), and one convention
         // across all of them is worth more than matching any outside spelling.
         "longpress" => EVENT_LONG_PRESS,
+        "keydown" => EVENT_KEY_DOWN,
+        "keyup" => EVENT_KEY_UP,
         other => fallback_symbol(other),
     }
+}
+
+#[doc = include_str!("name_binding.doc/is_reserved_event.md")]
+#[must_use]
+pub fn is_reserved_event(name: &str) -> bool {
+    RESERVED_EVENTS.contains(&event_symbol(name))
 }
 
 #[doc = include_str!("name_binding.doc/fallback_symbol.md")]

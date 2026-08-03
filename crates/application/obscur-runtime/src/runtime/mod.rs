@@ -61,7 +61,7 @@ pub(crate) use ancestor_chain::AncestorChain;
 
 mod command_dispatch;
 
-pub(crate) use command_dispatch::CommandDispatch;
+pub(crate) use command_dispatch::{CommandDispatch, CommandDispatchOutcome};
 
 mod layout_inputs;
 

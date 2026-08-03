@@ -1,6 +1,6 @@
 #![doc = include_str!("keyboard_converter.doc/_module.md")]
 
-use obscur_interaction::command::{LogicalKey, NamedKey, PhysicalKey};
+use obscur_interaction::command::{LogicalKey, Modifier, Modifiers, NamedKey, PhysicalKey};
 
 #[doc = include_str!("keyboard_converter.doc/KeyboardConverter.md")]
 #[derive(Debug, Clone, Copy, Default)]
@@ -91,6 +91,23 @@ impl KeyboardConverter {
             _ => return None,
         };
         Some(mapped)
+    }
+
+    #[doc = include_str!("keyboard_converter.doc/modifiers.md")]
+    #[must_use]
+    pub fn modifiers(state: winit::keyboard::ModifiersState) -> Modifiers {
+        let mut modifiers = Modifiers::new();
+        for (held, modifier) in [
+            (state.shift_key(), Modifier::Shift),
+            (state.control_key(), Modifier::Ctrl),
+            (state.alt_key(), Modifier::Alt),
+            (state.super_key(), Modifier::Meta),
+        ] {
+            if held {
+                modifiers = modifiers.with(modifier);
+            }
+        }
+        modifiers
     }
 
     #[doc = include_str!("keyboard_converter.doc/logical_key.md")]
@@ -199,6 +216,42 @@ mod tests {
         assert_eq!(
             KeyboardConverter::logical_key(&Key::Named(WinitNamed::MediaPlay)),
             None
+        );
+    }
+
+    #[test]
+    fn an_empty_modifier_state_converts_to_an_empty_chord() {
+        assert!(KeyboardConverter::modifiers(winit::keyboard::ModifiersState::empty()).is_empty());
+    }
+
+    #[test]
+    fn each_modifier_crosses_the_boundary_on_its_own() {
+        use winit::keyboard::ModifiersState as State;
+        for (state, modifier) in [
+            (State::SHIFT, Modifier::Shift),
+            (State::CONTROL, Modifier::Ctrl),
+            (State::ALT, Modifier::Alt),
+            (State::SUPER, Modifier::Meta),
+        ] {
+            let chord = KeyboardConverter::modifiers(state);
+            assert!(chord.contains(modifier), "{modifier:?} did not cross");
+            assert_eq!(
+                chord,
+                Modifiers::new().with(modifier),
+                "{modifier:?} brought something else with it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_chord_converts_whole() {
+        use winit::keyboard::ModifiersState as State;
+        // The case the fold gets wrong after a focus loss, and the reason this
+        // conversion exists: the platform states the whole chord at once.
+        let chord = KeyboardConverter::modifiers(State::CONTROL | State::SHIFT);
+        assert_eq!(
+            chord,
+            Modifiers::new().with(Modifier::Ctrl).with(Modifier::Shift)
         );
     }
 }

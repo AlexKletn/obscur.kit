@@ -9,8 +9,8 @@ use obscur_interaction::focus::{FocusScope, FocusScopeId};
 
 use crate::frame::FrameReason;
 use crate::runtime::{
-    AppCommands, CommandDispatch, CommandTarget, EditableField, IntoCommandHandler,
-    StructuralStates,
+    AppCommands, CommandDispatch, CommandDispatchOutcome, CommandTarget, EditableField,
+    IntoCommandHandler, StructuralStates,
 };
 
 use super::UiRuntime;
@@ -166,12 +166,23 @@ impl UiRuntime {
         command: InternedSymbol,
         envelope: UiEvent,
     ) -> bool {
+        self.dispatch_command_outcome(origin, command, envelope)
+            .claimed
+    }
+
+    #[doc = include_str!("command_routing.doc/dispatch_command_outcome.md")]
+    pub(super) fn dispatch_command_outcome(
+        &mut self,
+        origin: Option<NodeId>,
+        command: InternedSymbol,
+        envelope: UiEvent,
+    ) -> CommandDispatchOutcome {
         let outcome =
             CommandDispatch::new(&self.tree, &mut self.routing).dispatch(origin, command, envelope);
         if outcome.anything_ran {
             self.request_frame(FrameReason::Input);
         }
-        outcome.claimed
+        outcome
     }
 
     #[doc = include_str!("command_routing.doc/dispatch_text_input.md")]

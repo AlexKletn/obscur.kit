@@ -77,6 +77,12 @@ impl UiEvent {
     #[must_use]
     pub const fn from_key(key: KeyEvent) -> Self {
         let mut event = Self::detached(EventOrigin::Keyboard);
+        // The envelope reports what the key reported, the way `from_pointer`
+        // already did. It used to carry neither, so a keyboard-originated event
+        // arrived untrusted and unstamped however the platform had marked it,
+        // and every caller that wanted trust had to re-confer it by hand.
+        event.trust = key.trust();
+        event.timestamp_micros = key.timestamp();
         event.payload = EventPayload::Key(key);
         event
     }

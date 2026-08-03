@@ -204,21 +204,56 @@ fn unregistered_command_symbol_is_not_gated_by_the_registry() {
     assert_eq!(ran.get(), 1);
 }
 
+/// CHANGED 2026-08-03, and the name changed with it. This was
+/// `handle_key_without_focus_is_a_noop`, and it pinned that a bound chord
+/// resolved to nothing while nothing was focused — because the whole body of
+/// `handle_key` returned early on `focused == None`.
+///
+/// That was a defect wearing a test. §2.6's own route ends at the window surface
+/// and the application, and those two links were unreachable from the keyboard:
+/// `Ctrl+S` did nothing until the user had clicked something first. The shortcut
+/// leg now runs whether or not anything is focused.
+///
+/// What genuinely still needs a focused node is the *node* leg — the raw
+/// `keydown`, the text edit, the activation — because those need a target, and
+/// that half is asserted here too.
 #[test]
-fn handle_key_without_focus_is_a_noop() {
+fn an_unfocused_runtime_still_resolves_a_shortcut_but_targets_no_node() {
     let mut runtime = TestFixture::runtime();
     let sheet = InteractionPanel::sheet();
     let sheets = std::slice::from_ref(&sheet);
     let _ = runtime.render_now(&InteractionPanel::view(), sheets);
     runtime.bind_command(Shortcut::new(LogicalKey::character('a')), CMD_SAVE);
 
-    // Nothing focused: even a bound key resolves to nothing and schedules
-    // no frame — the runtime state is unchanged.
+    let ran = Rc::new(Cell::new(0_u32));
+    let counter = Rc::clone(&ran);
+    runtime.on_command(CMD_SAVE, move || counter.set(counter.get() + 1));
+
+    assert_eq!(runtime.focused(), None);
+    let dispatch = runtime.handle_key(key_a());
+    assert_eq!(dispatch.command(), Some(CMD_SAVE), "the chord resolves");
+    assert_eq!(ran.get(), 1, "and its handler runs");
+    assert_eq!(
+        dispatch.target(),
+        None,
+        "with no node target, because there is no focused node to be one"
+    );
+}
+
+#[test]
+fn an_unbound_key_without_focus_changes_nothing() {
+    // The half of the old `handle_key_without_focus_is_a_noop` that is still
+    // true: with nothing focused AND nothing bound, there is no node leg and no
+    // shortcut leg, so the key resolves to nothing at all.
+    let mut runtime = TestFixture::runtime();
+    let sheet = InteractionPanel::sheet();
+    let sheets = std::slice::from_ref(&sheet);
+    let _ = runtime.render_now(&InteractionPanel::view(), sheets);
+
     let dispatch = runtime.handle_key(key_a());
     assert_eq!(dispatch, KeyDispatch::unhandled());
     assert!(!dispatch.is_handled());
     assert_eq!(dispatch.command(), None);
-    assert!(!runtime.has_pending_frame());
 }
 
 #[test]

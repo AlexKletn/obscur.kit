@@ -368,8 +368,18 @@ fn the_zero_argument_handler_shape_still_works() {
 }
 
 /// §2.6's keyboard leg carries its own payload: an Enter activation delivers
-/// the key that caused it, and `handle_key` is the platform boundary, so the
-/// event is trusted there.
+/// the key that caused it, and the key's own trust travels with it.
+///
+/// CHANGED 2026-08-03. This used to assert `trusted == true` with the reason
+/// "handle_key is the platform adapter's door" — `handle_key` conferred trust on
+/// every key that reached it. It no longer does: `KeyEvent` carries a `trust`
+/// field of its own and `UiEvent::from_key` reports it, exactly as
+/// `PointerEvent` and `UiEvent::from_pointer` already did. A field the runtime
+/// overwrote would be a lie, and the pointer side had already settled the
+/// question — trust is conferred at the platform boundary, by the converter, and
+/// fails closed everywhere else. The winit runner now calls `as_trusted`.
+///
+/// Both directions are asserted below, which is more than the old case did.
 #[test]
 fn an_enter_activation_delivers_the_key_that_caused_it() {
     let sheet = InteractionPanel::sheet();
@@ -397,7 +407,19 @@ fn an_enter_activation_delivers_the_key_that_caused_it() {
         "the handler reads the key, not just that one arrived"
     );
     assert_eq!(origin, EventOrigin::Keyboard);
-    assert!(trusted, "handle_key is the platform adapter's door");
+    assert!(
+        !trusted,
+        "a key nobody marked is untrusted — `handle_key` is reachable by more \
+         than the platform adapter, so it confers nothing"
+    );
+
+    // And the other direction: what the converter marks arrives marked.
+    let trusted_enter =
+        KeyEvent::press(PhysicalKey::Enter, Some(LogicalKey::named(NamedKey::Enter))).as_trusted();
+    runtime.handle_key(trusted_enter);
+    let (key, _origin, trusted) = seen.get().expect("the second activation ran the handler");
+    assert_eq!(key, Some(trusted_enter));
+    assert!(trusted, "the platform boundary is what confers trust");
 }
 
 /// A programmatic [`UiRuntime::dispatch_command`] has no device behind it, so

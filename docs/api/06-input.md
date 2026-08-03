@@ -29,8 +29,10 @@ pub const fn with_timestamp(self, timestamp_micros: u64) -> Self
 pub const fn as_trusted(self) -> Self
 ```
 
-Readers: `pointer()`, `device()`, `kind()`, `position()`, `buttons()`,
-`pressure()`, `timestamp()`, `is_pressed()`, `trust()`, `is_trusted()`.
+Readers: `pointer()`, `device()`, `kind()`, `position()`, `delta()`,
+`buttons()`, `pressure()`, `tilt()`, `rotation()`, `is_primary()`,
+`hover_capable()`, `timestamp()`, `is_pressed()`, `trust()`, `is_trusted()` —
+which is every field §2.4 names.
 
 | | |
 |---|---|
@@ -102,12 +104,38 @@ rt.handle_key(KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character('a')
 
 `KeyEvent` carries both a **physical** key (layout-independent, what modifier
 folding reads) and a **logical** key (what the layout produced, what text entry
-reads). `LogicalKey` is a character or a `NamedKey`; `Modifiers` is folded from
-the physical transitions `handle_key` has seen and readable with
-`held_modifiers()`.
+reads). `LogicalKey` is a character or a `NamedKey`.
+
+It is self-describing, the way `PointerEvent` is: `modifiers()` is the chord it
+was pressed under, `is_repeat()` tells an auto-repeat from a new press,
+`timestamp()` is the host clock, and `trust()` fails closed. `as_trusted()` is
+conferred at the platform boundary and nowhere else — `handle_key` no longer
+confers it, so a synthesised key stays untrusted.
+
+`Modifiers` is folded from the physical transitions `handle_key` has seen and
+readable with `held_modifiers()`. A platform that knows better says so with
+`set_modifiers` — winit's `ModifiersChanged`. Without it the fold goes stale the
+moment a modifier is released while the window is unfocused.
+
+### The raw key events
+
+```rust
+<input on:keydown="handleKey" on:keyup="released"/>
+```
+
+`keydown` and `keyup` are reserved event names dispatched to the focused node,
+through §2.3's capture / target / bubble like any other. `keydown` runs **before**
+the runtime does anything with the key, so a handler calling `prevent_default()`
+suppresses the text edit, the shortcut and the activation that would otherwise
+follow. That ordering is the point: a `keydown` delivered afterwards could report
+a key but never refuse it.
+
+> The full reserved set is `RESERVED_EVENTS`. Any other `on:` name hashes to a
+> symbol nothing dispatches — `is_reserved_event` is what tells the two apart.
 
 A key press routes to the focused node, then resolves against the shortcut
-bindings:
+bindings — **with or without a focused node**, since §2.6's route ends at the
+window surface and the application:
 
 ```rust
 rt.bind_command(Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl),
@@ -152,3 +180,14 @@ covers half the screen. `App` does this after every window event.
 - **Haptics.** `HapticRequest` and `HapticPattern` are modelled; nothing consumes
   one.
 - **Keyboard focus traversal.** As above.
+- **A raw pointer vocabulary.** `keydown` and `keyup` exist; `pointerdown`,
+  `pointerup`, `pointermove`, `pointerenter`, `pointerleave`, `wheel`, `focus`,
+  `blur` and `contextmenu` do not, so an application still observes a pointer
+  only through `click` and `longpress`, and `prevent_default` has nothing to
+  refuse on those paths.
+- **Secondary and middle buttons.** `PointerButtons` models `PRIMARY`,
+  `SECONDARY`, `MIDDLE`, `BACK` and `FORWARD`; the winit runner is guarded to
+  `MouseButton::Left`, so nothing else ever arrives. There is no context menu
+  because there is no right click.
+- **`CursorLeft`.** The runner handles no leave event, so `:hover` does not clear
+  when the pointer leaves the window.
