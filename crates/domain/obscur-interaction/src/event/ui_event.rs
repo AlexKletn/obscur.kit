@@ -4,7 +4,7 @@ use obscur_identity::NodeId;
 
 use super::{EventOrigin, EventPayload, EventPhase, EventPropagation, EventTrust};
 use crate::command::KeyEvent;
-use crate::pointer::PointerEvent;
+use crate::pointer::{PointerEvent, WheelEvent};
 
 #[doc = include_str!("ui_event.doc/UiEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,6 +84,27 @@ impl UiEvent {
         event.trust = key.trust();
         event.timestamp_micros = key.timestamp();
         event.payload = EventPayload::Key(key);
+        event
+    }
+
+    #[doc = include_str!("ui_event.doc/from_wheel.md")]
+    #[must_use]
+    pub const fn from_wheel(wheel: WheelEvent) -> Self {
+        // The pointing device's origin, because that is where a notch comes
+        // from: it is aimed by the same cursor a click is, and `is_direct_input`
+        // is true of it for the same reason. A `Wheel` origin was considered and
+        // refused — the payload already says which of the three kinds this is,
+        // and a second enum saying the same thing is a second thing to keep in
+        // step.
+        let mut event = Self::detached(EventOrigin::Pointer);
+        // Trust and the timestamp are deliberately left at their defaults —
+        // untrusted, unstamped. Unlike a key or a pointer, a wheel has no
+        // platform converter to confer them: `UiRuntime::handle_scroll` takes two
+        // floats, so there is nothing at the door that knows whether this notch
+        // came from a device or from a queued `InputEvent::Scroll` an
+        // application pushed. `EventTrust` fails closed, and conferring trust
+        // here would confer it on both.
+        event.payload = EventPayload::Wheel(wheel);
         event
     }
 
@@ -182,6 +203,12 @@ impl UiEvent {
     #[must_use]
     pub const fn key(&self) -> Option<KeyEvent> {
         self.payload.key()
+    }
+
+    #[doc = include_str!("ui_event.doc/wheel.md")]
+    #[must_use]
+    pub const fn wheel(&self) -> Option<WheelEvent> {
+        self.payload.wheel()
     }
 
     #[doc = include_str!("ui_event.doc/timestamp.md")]
@@ -369,5 +396,35 @@ mod tests {
         assert_eq!(e.pointer(), None);
         assert!(!e.is_trusted());
         assert!(e.as_trusted().is_trusted());
+    }
+
+    /// A notch is the pointing device's, and it is not a pointer event: the
+    /// origin says where it came from, the payload says what it is, and asking
+    /// for the wrong payload gets nothing rather than a plausible-looking
+    /// pointer at the wheel's position.
+    #[test]
+    fn from_wheel_carries_the_notch_under_the_pointer_origin() {
+        let wheel = WheelEvent::new(Point::new(30.0, 40.0), -25.0);
+        let e = UiEvent::from_wheel(wheel).at_target(node(9));
+        assert_eq!(e.origin(), EventOrigin::Pointer);
+        assert_eq!(e.target(), Some(node(9)));
+        assert_eq!(e.wheel(), Some(wheel));
+        assert_eq!(e.wheel().map(|w| w.delta_y()), Some(-25.0));
+        assert_eq!(e.pointer(), None);
+        assert_eq!(e.key(), None);
+    }
+
+    /// Unlike `from_pointer` / `from_key`, which report what their device event
+    /// reported, a wheel has no converter to report from — so it arrives
+    /// untrusted and unstamped, and a host that knows better says so on the
+    /// envelope rather than being lied to by it.
+    #[test]
+    fn a_wheel_is_untrusted_and_unstamped_until_a_host_vouches() {
+        let e = UiEvent::from_wheel(WheelEvent::new(Point::new(1.0, 1.0), 10.0));
+        assert!(!e.is_trusted());
+        assert_eq!(e.timestamp(), 0);
+        let vouched = e.as_trusted().with_timestamp(77);
+        assert!(vouched.is_trusted());
+        assert_eq!(vouched.timestamp(), 77);
     }
 }

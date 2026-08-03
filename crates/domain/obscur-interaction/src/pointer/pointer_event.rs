@@ -2,7 +2,7 @@
 
 use obscur_geometry::Point;
 
-use super::{PointerButtons, PointerDelta, PointerDevice, PointerId, PointerTilt};
+use super::{PointerButton, PointerButtons, PointerDelta, PointerDevice, PointerId, PointerTilt};
 use crate::event::EventTrust;
 
 #[doc = include_str!("pointer_event.doc/PointerEventKind.md")]
@@ -45,6 +45,8 @@ pub struct PointerEvent {
     pub delta: PointerDelta,
     #[doc = include_str!("pointer_event.doc/buttons.md")]
     pub buttons: PointerButtons,
+    #[doc = include_str!("pointer_event.doc/button.md")]
+    pub button: Option<PointerButton>,
     #[doc = include_str!("pointer_event.doc/pressure.md")]
     pub pressure: f32,
     #[doc = include_str!("pointer_event.doc/tilt.md")]
@@ -77,6 +79,7 @@ impl PointerEvent {
             position,
             delta: PointerDelta::ZERO,
             buttons: PointerButtons::new(),
+            button: None,
             pressure: 0.0,
             tilt: PointerTilt::UPRIGHT,
             rotation: 0.0,
@@ -110,6 +113,13 @@ impl PointerEvent {
     #[must_use]
     pub const fn with_buttons(mut self, buttons: PointerButtons) -> Self {
         self.buttons = buttons;
+        self
+    }
+
+    #[doc = include_str!("pointer_event.doc/with_button.md")]
+    #[must_use]
+    pub const fn with_button(mut self, button: PointerButton) -> Self {
+        self.button = Some(button);
         self
     }
 
@@ -192,6 +202,12 @@ impl PointerEvent {
         self.buttons
     }
 
+    #[doc = include_str!("pointer_event.doc/button_2.md")]
+    #[must_use]
+    pub const fn button(&self) -> Option<PointerButton> {
+        self.button
+    }
+
     #[doc = include_str!("pointer_event.doc/pressure_2.md")]
     #[must_use]
     pub const fn pressure(&self) -> f32 {
@@ -263,6 +279,12 @@ mod tests {
         assert_eq!(e.kind(), PointerEventKind::Down);
         assert_eq!(e.position(), Point::new(3.0, 4.0));
         assert!(e.buttons().is_empty());
+        assert_eq!(
+            e.button(),
+            None,
+            "a producer that does not name the moved button must say nothing \
+             rather than claim the primary one"
+        );
         assert_eq!(e.pressure(), 0.0);
         assert_eq!(e.timestamp(), 0);
         assert!(!e.is_pressed());
@@ -305,6 +327,30 @@ mod tests {
         assert!(e.buttons().contains(PointerButton::Primary));
         assert_eq!(e.pressure(), 0.5);
         assert_eq!(e.timestamp(), 1_000);
+    }
+
+    /// The held set and the moved button answer two different questions, and a
+    /// chord is where the difference stops being academic: with the primary
+    /// already down, pressing the secondary reports both as held while naming
+    /// only the one that moved. Reading "which button" off the set would call
+    /// this press a primary one.
+    #[test]
+    fn the_moved_button_is_not_recoverable_from_the_held_set() {
+        let mut chord = PointerButtons::new();
+        chord.press(PointerButton::Primary);
+        chord.press(PointerButton::Secondary);
+
+        let secondary_joined = base()
+            .with_buttons(chord)
+            .with_button(PointerButton::Secondary);
+        let primary_joined = base()
+            .with_buttons(chord)
+            .with_button(PointerButton::Primary);
+
+        assert_eq!(secondary_joined.buttons(), primary_joined.buttons());
+        assert_eq!(secondary_joined.button(), Some(PointerButton::Secondary));
+        assert_eq!(primary_joined.button(), Some(PointerButton::Primary));
+        assert_ne!(secondary_joined.button(), primary_joined.button());
     }
 
     #[test]

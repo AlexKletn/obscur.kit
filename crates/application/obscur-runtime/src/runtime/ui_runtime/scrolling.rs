@@ -2,10 +2,13 @@
 
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
+use obscur_interaction::event::UiEvent;
+use obscur_interaction::pointer::WheelEvent;
+use obscur_view::view::EVENT_WHEEL;
 
 use crate::frame::FrameReason;
 use crate::orchestration::scroll_containers;
-use crate::runtime::{FoldInputs, ScrollTargets};
+use crate::runtime::{CommandDispatch, FoldInputs, ScrollTargets};
 
 use super::UiRuntime;
 
@@ -102,16 +105,63 @@ impl UiRuntime {
 
     #[doc = include_str!("scrolling.doc/handle_scroll.md")]
     pub fn handle_scroll(&mut self, delta_y: f32, position: Point) -> Option<NodeId> {
-        // Only what the user may scroll. A `hidden` box is a scroll container in the
-        // CSS sense — it clips and can be scrolled programmatically — but the wheel
-        // must pass through it, or a row that clips a long name eats the scroll meant
-        // for the list it sits in.
         let content = self.to_content_point(position);
+
+        // 1. The raw `wheel` event (§2.3), dispatched to the node under the point
+        //    BEFORE the scroll it can refuse. Same ordering as `pointerdown` and
+        //    `keydown`, and for the same reason: a wheel delivered after the
+        //    container had already moved could report the notch but never
+        //    decline it. A refusal is a claim — the node that refused is returned
+        //    as the node that took the event, so the host's own `on_scroll`
+        //    fallback does not then run as if nothing had wanted it.
+        if let Some(claimed) = self.dispatch_wheel(delta_y, content) {
+            return Some(claimed);
+        }
+
+        // 2. Only what the user may scroll. A `hidden` box is a scroll container in
+        //    the CSS sense — it clips and can be scrolled programmatically — but the
+        //    wheel must pass through it, or a row that clips a long name eats the
+        //    scroll meant for the list it sits in.
         let target = ScrollTargets::new(&self.tree, &self.computed, &self.boxes, &self.scroll)
             .scrollable_at(content)?;
         self.scroll_by(target, delta_y);
         self.request_frame(FrameReason::Input);
         Some(target)
+    }
+
+    #[doc = include_str!("scrolling.doc/dispatch_wheel.md")]
+    fn dispatch_wheel(&mut self, delta_y: f32, content: Point) -> Option<NodeId> {
+        // Cost, and the same gate the raw pointer names use. A trackpad's
+        // two-finger scroll arrives as pixel deltas at nearly the rate its moves
+        // do, and everything below — folding the point, hit-testing it, walking
+        // the target's ancestors — is skipped rather than merely fruitless for a
+        // tree that binds nothing.
+        if !self.pointer_bindings.binds(EVENT_WHEEL) {
+            return None;
+        }
+        // The node under the point, resolved exactly as a click's would be: fold
+        // the content point through the scroll containers it lies within, then
+        // hit-test in both spaces (a clip is tested on screen, a box in
+        // unscrolled layout space). Deliberately NOT the scroll container that
+        // would take the notch — that container is normally an ancestor of the
+        // hit node, and the ancestor walk below reaches it anyway, so targeting
+        // it directly would only rob a row of the chance to hear its own wheel.
+        let folded = ScrollTargets::new(&self.tree, &self.computed, &self.boxes, &self.scroll)
+            .fold_point(content);
+        let target = self
+            .hits
+            .resolve(&self.tree, &self.computed, &self.boxes, folded, content)?;
+        let (node, command) = CommandDispatch::binding_for(&self.tree, target, EVENT_WHEEL)?;
+        let prevented = self
+            .dispatch_command_outcome(
+                Some(node),
+                command,
+                UiEvent::from_wheel(WheelEvent::new(folded, delta_y)),
+            )
+            .default_prevented;
+        // Only a refusal claims the notch. A listener that merely watched it gets
+        // the scroll it would have got anyway.
+        prevented.then_some(node)
     }
 
     #[doc = include_str!("scrolling.doc/to_content_point.md")]

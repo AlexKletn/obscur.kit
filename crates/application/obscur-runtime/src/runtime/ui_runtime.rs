@@ -16,9 +16,9 @@ use obscur_view::view::View;
 
 use super::{
     AccessibilityPublisher, BackgroundWork, CascadeSheets, FramePlan, FrameTelemetry,
-    HandlerRegistry, HitTesting, InputQueue, LayoutInputs, MotionDriver, PointerSessions,
-    ResourceBridge, ScrollOffsets, StyleKey, SurfaceGeometry, TextEditSession, TreeInspector,
-    VirtualLists,
+    HandlerRegistry, HitTesting, InputQueue, LayoutInputs, MotionDriver, PointerEventBindings,
+    PointerSessions, ResourceBridge, ScrollOffsets, StyleKey, SurfaceGeometry, TextEditSession,
+    TreeInspector, VirtualLists,
 };
 use crate::frame::FrameId;
 
@@ -39,6 +39,7 @@ mod composition;
 mod construction;
 mod diagnostics;
 mod event_listeners;
+mod focus;
 mod frame_classification;
 mod frame_entry;
 mod frame_output;
@@ -118,6 +119,8 @@ pub struct UiRuntime {
     focused: Option<NodeId>,
     #[doc = include_str!("ui_runtime.doc/pointers.md")]
     pointers: PointerSessions,
+    #[doc = include_str!("ui_runtime.doc/pointer_bindings.md")]
+    pointer_bindings: PointerEventBindings,
     #[doc = include_str!("ui_runtime.doc/environment.md")]
     environment: EnvironmentValues,
     #[doc = include_str!("ui_runtime.doc/routing.md")]

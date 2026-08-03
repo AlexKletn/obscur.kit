@@ -1,4 +1,9 @@
-Builds the press/release for a left-button change.
+Builds the press/release for **any** of the five modelled buttons.
+
+It used to build one: the caller was guarded to `MouseButton::Left` and this
+hardcoded `PointerButtons::PRIMARY`, so a right click reached nothing and there
+was no context menu because there was no right click. The mapping had been
+written and tested in `PointerConverter::button` the whole time, with no caller.
 
 It goes through [`PointerConverter`]'s `pressed`/`released` builders rather
 than `PointerEvent::new`, because those are the ones that mark the event

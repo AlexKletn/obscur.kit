@@ -1,3 +1,3 @@
-Assembles a domain button [`PointerEvent`] at the tracked cursor, reusing
-[`PointerConverter::kind`] to map the winit state (the converter has no
-public builder for a button transition *at a position*).
+Assembles a domain button [`PointerEvent`] at the tracked cursor, folding
+`button` into the held set first so the event carries both the set held
+**after** the transition and the one member that moved.

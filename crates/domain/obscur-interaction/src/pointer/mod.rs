@@ -15,3 +15,5 @@ mod pointer_id;
 pub use pointer_id::PointerId;
 mod pointer_tilt;
 pub use pointer_tilt::PointerTilt;
+mod wheel_event;
+pub use wheel_event::WheelEvent;

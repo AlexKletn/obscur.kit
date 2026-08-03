@@ -20,6 +20,36 @@ pub const EVENT_KEY_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0105)
 #[doc = include_str!("event_name.doc/EVENT_KEY_UP.md")]
 pub const EVENT_KEY_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0106);
 
+#[doc = include_str!("event_name.doc/EVENT_POINTER_DOWN.md")]
+pub const EVENT_POINTER_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0107);
+
+#[doc = include_str!("event_name.doc/EVENT_POINTER_UP.md")]
+pub const EVENT_POINTER_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0108);
+
+#[doc = include_str!("event_name.doc/EVENT_POINTER_MOVE.md")]
+pub const EVENT_POINTER_MOVE: InternedSymbol = InternedSymbol::from_raw(0x0000_0109);
+
+#[doc = include_str!("event_name.doc/EVENT_POINTER_CANCEL.md")]
+pub const EVENT_POINTER_CANCEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010A);
+
+#[doc = include_str!("event_name.doc/EVENT_POINTER_ENTER.md")]
+pub const EVENT_POINTER_ENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_010B);
+
+#[doc = include_str!("event_name.doc/EVENT_POINTER_LEAVE.md")]
+pub const EVENT_POINTER_LEAVE: InternedSymbol = InternedSymbol::from_raw(0x0000_010C);
+
+#[doc = include_str!("event_name.doc/EVENT_WHEEL.md")]
+pub const EVENT_WHEEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010D);
+
+#[doc = include_str!("event_name.doc/EVENT_FOCUS.md")]
+pub const EVENT_FOCUS: InternedSymbol = InternedSymbol::from_raw(0x0000_010E);
+
+#[doc = include_str!("event_name.doc/EVENT_BLUR.md")]
+pub const EVENT_BLUR: InternedSymbol = InternedSymbol::from_raw(0x0000_010F);
+
+#[doc = include_str!("event_name.doc/EVENT_CONTEXT_MENU.md")]
+pub const EVENT_CONTEXT_MENU: InternedSymbol = InternedSymbol::from_raw(0x0000_0110);
+
 #[doc = include_str!("event_name.doc/RESERVED_EVENTS.md")]
 pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_CLICK,
@@ -28,6 +58,16 @@ pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_LONG_PRESS,
     EVENT_KEY_DOWN,
     EVENT_KEY_UP,
+    EVENT_POINTER_DOWN,
+    EVENT_POINTER_UP,
+    EVENT_POINTER_MOVE,
+    EVENT_POINTER_CANCEL,
+    EVENT_POINTER_ENTER,
+    EVENT_POINTER_LEAVE,
+    EVENT_WHEEL,
+    EVENT_FOCUS,
+    EVENT_BLUR,
+    EVENT_CONTEXT_MENU,
 ];
 
 #[cfg(test)]
@@ -46,6 +86,21 @@ mod tests {
             RESERVED_EVENTS.len(),
             "two reserved event names share a symbol"
         );
+    }
+
+    #[test]
+    fn the_reserved_event_range_is_dense_from_one() {
+        // The allocation rule, pinned rather than remembered: names are taken in
+        // order from `0x0000_0101` and no hole is left behind. A hole is how two
+        // people later pick the same next number — the collision check above
+        // catches that only if both spellings land in this list, and a name added
+        // to one crate's mirror and not the other never does.
+        let mut raws: Vec<u32> = RESERVED_EVENTS.iter().map(|name| name.raw()).collect();
+        raws.sort_unstable();
+        for (offset, raw) in raws.iter().enumerate() {
+            let expected = 0x0000_0101 + u32::try_from(offset).expect("a small set");
+            assert_eq!(*raw, expected, "the reserved event range has a hole");
+        }
     }
 
     #[test]

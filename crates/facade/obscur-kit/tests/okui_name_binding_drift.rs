@@ -81,6 +81,108 @@ fn reserved_event_symbols_match_obscur_view() {
         name_binding::event_symbol("longpress"),
         view::EVENT_LONG_PRESS
     );
+    assert_eq!(name_binding::EVENT_KEY_DOWN, view::EVENT_KEY_DOWN);
+    assert_eq!(name_binding::EVENT_KEY_UP, view::EVENT_KEY_UP);
+    assert_eq!(name_binding::EVENT_POINTER_DOWN, view::EVENT_POINTER_DOWN);
+    assert_eq!(name_binding::EVENT_POINTER_UP, view::EVENT_POINTER_UP);
+    assert_eq!(name_binding::EVENT_POINTER_MOVE, view::EVENT_POINTER_MOVE);
+    assert_eq!(
+        name_binding::EVENT_POINTER_CANCEL,
+        view::EVENT_POINTER_CANCEL
+    );
+    // The crossings, which are emitted from the hover transition rather than
+    // from a `PointerEventKind` — so drift here is invisible on the runtime side
+    // and shows up only as a hover interaction that never runs.
+    assert_eq!(name_binding::EVENT_POINTER_ENTER, view::EVENT_POINTER_ENTER);
+    assert_eq!(name_binding::EVENT_POINTER_LEAVE, view::EVENT_POINTER_LEAVE);
+    // The wheel, which is neither a pointer kind nor a key: it is dispatched
+    // from `handle_scroll`, so drift here is invisible on both other paths and
+    // shows up only as a scroll nobody can refuse.
+    assert_eq!(name_binding::EVENT_WHEEL, view::EVENT_WHEEL);
+    // The focus pair, which is emitted from neither a pointer kind nor a key:
+    // the runtime dispatches them from the one place focus changes, so drift
+    // here is invisible on every other path and shows up only as an `on:blur`
+    // that never runs.
+    assert_eq!(name_binding::EVENT_FOCUS, view::EVENT_FOCUS);
+    assert_eq!(name_binding::EVENT_BLUR, view::EVENT_BLUR);
+    // The context request, which is emitted from one button of one pointer kind:
+    // drift here is invisible everywhere else and shows up only as an
+    // `on:contextmenu` that never runs under a right click.
+    assert_eq!(name_binding::EVENT_CONTEXT_MENU, view::EVENT_CONTEXT_MENU);
+}
+
+#[test]
+fn the_whole_reserved_event_set_is_the_same_set_on_both_sides() {
+    // Naming the constants one at a time is what let `keydown` and `keyup` be
+    // added to two crates and pinned in neither. The two lists are restated by
+    // hand — `obscur-ui-ir` is a frontend crate and cannot depend on the view
+    // tier — so pin the whole set, in order, from the one place that sees both.
+    // A name added to one side and not the other fails here and nowhere else.
+    assert_eq!(
+        name_binding::RESERVED_EVENTS,
+        view::RESERVED_EVENTS,
+        "the two reserved-event tables have drifted"
+    );
+}
+
+#[test]
+fn every_reserved_event_has_an_authored_spelling_that_reaches_it() {
+    // The other half of the same guard: a symbol both crates agree on is still
+    // useless if no `on:` name lowers to it. Every reserved event must be
+    // reachable from markup, and `is_reserved_event` must agree — that pair is
+    // what lets a front end call `on:pointerdwon` a typo.
+    for (spelling, symbol) in [
+        ("click", view::EVENT_CLICK),
+        ("input", view::EVENT_INPUT),
+        ("change", view::EVENT_CHANGE),
+        ("longpress", view::EVENT_LONG_PRESS),
+        ("keydown", view::EVENT_KEY_DOWN),
+        ("keyup", view::EVENT_KEY_UP),
+        ("pointerdown", view::EVENT_POINTER_DOWN),
+        ("pointerup", view::EVENT_POINTER_UP),
+        ("pointermove", view::EVENT_POINTER_MOVE),
+        ("pointercancel", view::EVENT_POINTER_CANCEL),
+        ("pointerenter", view::EVENT_POINTER_ENTER),
+        ("pointerleave", view::EVENT_POINTER_LEAVE),
+        ("wheel", view::EVENT_WHEEL),
+        ("focus", view::EVENT_FOCUS),
+        ("blur", view::EVENT_BLUR),
+        ("contextmenu", view::EVENT_CONTEXT_MENU),
+    ] {
+        assert_eq!(name_binding::event_symbol(spelling), symbol, "{spelling}");
+        assert!(name_binding::is_reserved_event(spelling), "{spelling}");
+    }
+    // The DOM's bubbling crossings are deliberately NOT reserved: a command
+    // routes either way here, so `pointerover` would be a second name for
+    // `pointerenter`. They hash like any other author name, and nothing
+    // dispatches them.
+    for absent in ["pointerover", "pointerout"] {
+        assert!(!name_binding::is_reserved_event(absent), "{absent}");
+    }
+    // The DOM's second focus pair is absent for a neighbouring reason: this
+    // toolkit resolves an `on:focus` binding through the ancestor chain, so
+    // `focus` here already *is* `focusin` and a second spelling would be a
+    // second name for one event.
+    for absent in ["focusin", "focusout"] {
+        assert!(!name_binding::is_reserved_event(absent), "{absent}");
+    }
+    // `scroll` is not an alias for `wheel`, and not for want of one: the wheel
+    // event fires *before* the scroll and can refuse it, so a name meaning "it
+    // scrolled" would name a different event — one nothing emits.
+    assert!(!name_binding::is_reserved_event("scroll"));
+    // `menu` is not an alias for `contextmenu` either: this toolkit opens no
+    // menu of its own, so a name meaning "a menu opened" would name an event
+    // nothing emits — the exact defect this campaign exists to stop creating.
+    assert!(!name_binding::is_reserved_event("menu"));
+    // And the set is exactly that large — a reserved symbol with no spelling
+    // would slip through the loop above unnoticed.
+    //
+    // 2026-08-03. This asserted 12, before `wheel` was reserved, then 13, before
+    // `focus` / `blur` were, and then 15, before `contextmenu` was. The rule is
+    // unchanged — the count must equal the number of spellings pinned above —
+    // and the loop is what pins the pairing; this line only stops a symbol being
+    // added with no spelling at all.
+    assert_eq!(view::RESERVED_EVENTS.len(), 16);
 }
 
 #[test]

@@ -26,6 +26,32 @@ without one. They are methods rather than free functions because each of them
 mutates half the runtime, and they stay in this file because the order they run
 in is the only thing that makes them correct.
 
+Focus is the one thing this file no longer decides. `press_landed` calls
+[`move_focus_to`](UiRuntime::move_focus_to) — the single door focus moves
+through — because the claim that every focus change emits §2.3's `blur` /
+`focus` pair is only keepable if there is exactly one place that assigns it. The
+order still lives here: only a press moves focus, and only an unrefused one.
+
+Three more methods here dispatch §2.3's raw vocabulary rather than decide
+anything: [`dispatch_raw_pointer`](UiRuntime::dispatch_raw_pointer) delivers the
+event's own name to the hit target,
+[`dispatch_hover_crossings`](UiRuntime::dispatch_hover_crossings) delivers
+`pointerenter` / `pointerleave` to the nodes the hover chain crossed — which are
+not the hit target — and
+[`dispatch_context_menu`](UiRuntime::dispatch_context_menu) delivers
+`contextmenu` for a secondary press. All three sit here for the same reason as
+the rest: *when* they run is the whole of what they are. The raw event runs
+before the runtime's own reaction so a refusal is reachable; the crossings run
+after the chain is seated so a handler reads the state its own event produced;
+the context request runs between the two, because it is a second reading of the
+same press and refusing it must reach the same focus move.
+
+The one decision this file does make about buttons is which of them engage.
+[`engages_controls`] is a one-line predicate with a whole paragraph behind it:
+every default action below was written when the platform layer delivered nothing
+but the left button, so delivering the other four without it would have made a
+right click press, activate and long-press whatever it landed on.
+
 [`PointerLandingResolver`]: crate::runtime::PointerLandingResolver
 [`HoverUpdate`]: crate::runtime::HoverUpdate
 [`GestureArming`]: crate::runtime::GestureArming

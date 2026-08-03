@@ -1,5 +1,11 @@
 Builds a [`PointerEventKind::Down`] event at `position` for pointer `id`,
-with `buttons` held **after** the press (spec §4.7).
+naming the `button` that went down and the `held` set **after** the press
+(spec §4.7).
+
+The two are not the same fact and neither can be recovered from the other:
+`held` is what the hand is holding, `button` is what just moved. A press of the
+secondary button while the primary is already down reports both as held, and
+only `button` says which of them the press was.
 
 This exists because without it §2.3's trusted flag answers nothing where it
 matters. A host had no way to obtain a *trusted* press: the builders were

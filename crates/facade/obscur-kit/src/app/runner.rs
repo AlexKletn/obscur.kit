@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, Ime, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::PhysicalKey as WinitPhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -19,7 +19,7 @@ use crate::geometry::{Point, Size};
 use crate::identity::{InternedSymbol, RuntimeId};
 use crate::interaction::command::KeyEvent;
 use crate::interaction::event::UiEvent;
-use crate::interaction::pointer::{PointerButtons, PointerEvent, PointerId};
+use crate::interaction::pointer::{PointerButton, PointerButtons, PointerEvent, PointerId};
 use crate::render::frame::{FrameSubmission, RenderFrame};
 use crate::render::renderer::RendererId;
 use crate::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
@@ -223,6 +223,10 @@ fn run_inner(
         renderer: None,
         scale_factor: 1.0,
         cursor: (0.0, 0.0),
+        held_buttons: PointerButtons::new(),
+        // The cursor is outside the window until winit says otherwise, so the
+        // first move it reports is an entry.
+        entry_pending: true,
         epoch: std::time::Instant::now(),
         last_frame: None,
         init_failure: None,
@@ -306,6 +310,10 @@ struct AppRunner {
     scale_factor: f64,
     #[doc = include_str!("runner.doc/cursor.md")]
     cursor: (f64, f64),
+    #[doc = include_str!("runner.doc/held_buttons.md")]
+    held_buttons: PointerButtons,
+    #[doc = include_str!("runner.doc/entry_pending.md")]
+    entry_pending: bool,
     #[doc = include_str!("runner.doc/epoch.md")]
     epoch: std::time::Instant,
     #[doc = include_str!("runner.doc/last_frame.md")]
@@ -476,17 +484,16 @@ impl AppRunner {
     #[doc = include_str!("runner.doc/pointer_button_event.md")]
     #[allow(clippy::cast_possible_truncation)]
     #[doc = include_str!("runner.doc/pointer_button_event_2.md")]
-    fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
+    fn pointer_button_event(&mut self, button: PointerButton, state: ElementState) -> PointerEvent {
         let at = PhysicalPosition::new(self.cursor.0, self.cursor.1);
         let converter = PointerConverter::new();
+        self.held_buttons = held_after(self.held_buttons, button, state);
         match state {
-            ElementState::Pressed => converter.pressed(
-                PointerId::MOUSE,
-                at,
-                PointerButtons::from_bits(PointerButtons::PRIMARY),
-            ),
+            ElementState::Pressed => {
+                converter.pressed(PointerId::MOUSE, at, button, self.held_buttons)
+            }
             ElementState::Released => {
-                converter.released(PointerId::MOUSE, at, PointerButtons::new())
+                converter.released(PointerId::MOUSE, at, button, self.held_buttons)
             }
         }
         .with_timestamp(self.now_micros())
@@ -598,16 +605,70 @@ impl ApplicationHandler for AppRunner {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
-                let moved = PointerConverter::new()
-                    .moved(PointerId::MOUSE, position)
-                    .with_timestamp(self.now_micros());
-                self.runtime.handle_pointer(moved);
+                let converter = PointerConverter::new();
+                // The entry winit could not place: `CursorEntered` carries no
+                // position, and this is the first event that knows one. See
+                // `entry_pending` — synthesising the crossing back there would
+                // enter whatever node sat where the pointer *left*.
+                let event = if std::mem::take(&mut self.entry_pending) {
+                    converter.entered(PointerId::MOUSE, position, self.held_buttons)
+                } else {
+                    converter.moved(PointerId::MOUSE, position, self.held_buttons)
+                };
+                self.runtime
+                    .handle_pointer(event.with_timestamp(self.now_micros()));
                 self.request_redraw();
             }
-            WindowEvent::MouseInput { state, button, .. } if button == MouseButton::Left => {
-                let event = self.pointer_button_event(state);
-                self.runtime.handle_pointer(event);
+            WindowEvent::CursorEntered { .. } => {
+                self.entry_pending = true;
+            }
+            WindowEvent::CursorLeft { .. } => {
+                // Unhandled until now, which is why `:hover` never cleared when
+                // the pointer left the window: the last row it was over stayed
+                // highlighted for the rest of the session. A leave needs no
+                // fresh position — the runtime treats it as "nothing is under
+                // the pointer" whatever the hit test says — so the tracked
+                // cursor is a record of where it went out, not a guess.
+                let at = PhysicalPosition::new(self.cursor.0, self.cursor.1);
+                let left = PointerConverter::new()
+                    .left(PointerId::MOUSE, at, self.held_buttons)
+                    .with_timestamp(self.now_micros());
+                self.runtime.handle_pointer(left);
                 self.request_redraw();
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                // Every modelled button, not just the left one. `Other(_)` is
+                // the only one dropped, and dropped rather than folded onto a
+                // modelled neighbour: a mouse's fourth thumb button is not a
+                // middle click, and claiming it were would be a press the user
+                // never made.
+                if let Some(button) = PointerConverter::button(button) {
+                    let event = self.pointer_button_event(button, state);
+                    self.runtime.handle_pointer(event);
+                    self.request_redraw();
+                }
+            }
+            WindowEvent::Focused(_) => {
+                // Deliberately nothing, and named here so it reads as a decision
+                // rather than an oversight. Window activation is a concept the
+                // runtime does not have: `UiRuntime` models NODE focus, and the
+                // only door into it moves focus, fires `blur`/`focus` and
+                // commits the outgoing field's `change`. Routing a deactivated
+                // window through that door would empty the field's caret and
+                // commit it because the user alt-tabbed — the browsers this
+                // toolkit takes its vocabulary from keep `activeElement` across
+                // exactly that.
+                //
+                // Doing it right needs a window-activation state on the runtime
+                // and a selector that reads it (a `:window-inactive`-shaped
+                // one), so an inactive window can dim its selection and rest its
+                // caret without losing either. None of that exists, and
+                // inventing it here would put the state in the adapter, which is
+                // the one place it must not live.
+                //
+                // The one cost of ignoring this that would have bitten is
+                // already paid elsewhere: a modifier released while the window
+                // was unfocused is corrected by `ModifiersChanged` below.
             }
             WindowEvent::Touch(contact) => {
                 // A finger enters through the same door as the mouse: the runtime's
@@ -785,4 +846,80 @@ fn init_gpu(
         println!("[present-mode] {:?}", config.present_mode);
     }
     Ok((surface, config, device, queue))
+}
+
+#[doc = include_str!("runner.doc/held_after.md")]
+fn held_after(held: PointerButtons, button: PointerButton, state: ElementState) -> PointerButtons {
+    let mut held = held;
+    match state {
+        ElementState::Pressed => held.press(button),
+        ElementState::Released => held.release(button),
+    }
+    held
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A chord is a real state, and winit never reports one: it sends a
+    /// transition per button and leaves the set to whoever is counting. Before
+    /// this the runner counted nothing — a press was always exactly
+    /// `{PRIMARY}` and a release always `{}` — so two buttons held at once was
+    /// unrepresentable and, since the guard dropped every button but the left,
+    /// unreachable as well.
+    #[test]
+    fn two_buttons_held_at_once_are_two_buttons_held_at_once() {
+        let mut held = PointerButtons::new();
+
+        held = held_after(held, PointerButton::Primary, ElementState::Pressed);
+        assert!(held.contains(PointerButton::Primary));
+        assert!(!held.contains(PointerButton::Secondary));
+
+        held = held_after(held, PointerButton::Secondary, ElementState::Pressed);
+        assert!(
+            held.contains(PointerButton::Primary) && held.contains(PointerButton::Secondary),
+            "the second press must join the first, not replace it"
+        );
+
+        // And releasing one leaves the other, which is the half a per-event
+        // guess gets wrong: the set is not "the button that just moved".
+        held = held_after(held, PointerButton::Primary, ElementState::Released);
+        assert!(!held.contains(PointerButton::Primary));
+        assert!(
+            held.contains(PointerButton::Secondary),
+            "the button still down is still down"
+        );
+
+        held = held_after(held, PointerButton::Secondary, ElementState::Released);
+        assert!(held.is_empty());
+    }
+
+    /// The set an event carries is the one held *after* the transition — a
+    /// press includes itself, a release excludes itself. That is what
+    /// `PointerEvent::buttons` means, and it is why the press half of the old
+    /// hardcoding (`{PRIMARY}`, then `{}`) looked right for one button.
+    #[test]
+    fn the_set_is_taken_after_the_transition_not_before() {
+        let pressed = held_after(
+            PointerButtons::new(),
+            PointerButton::Middle,
+            ElementState::Pressed,
+        );
+        assert!(pressed.contains(PointerButton::Middle));
+
+        let released = held_after(pressed, PointerButton::Middle, ElementState::Released);
+        assert!(released.is_empty());
+    }
+
+    /// A release of a button that was never pressed — the window was not
+    /// focused when it went down, or the fold started mid-chord — must not
+    /// corrupt the set. It clears a bit that is already clear.
+    #[test]
+    fn releasing_an_unheld_button_is_inert() {
+        let mut held = PointerButtons::new();
+        held.press(PointerButton::Primary);
+        let after = held_after(held, PointerButton::Forward, ElementState::Released);
+        assert_eq!(after, held);
+    }
 }

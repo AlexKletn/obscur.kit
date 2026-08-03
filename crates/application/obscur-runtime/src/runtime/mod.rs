@@ -131,6 +131,10 @@ mod hover_update;
 
 pub(crate) use hover_update::HoverUpdate;
 
+mod pointer_event_bindings;
+
+pub(crate) use pointer_event_bindings::PointerEventBindings;
+
 mod pointer_release;
 
 pub(crate) use pointer_release::PointerRelease;

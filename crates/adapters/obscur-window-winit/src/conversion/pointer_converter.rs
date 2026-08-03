@@ -45,8 +45,10 @@ impl PointerConverter {
         &self,
         id: PointerId,
         position: winit::dpi::PhysicalPosition<f64>,
+        held: PointerButtons,
     ) -> PointerEvent {
         self.event(id, PointerEventKind::Move, position)
+            .with_buttons(held)
     }
 
     #[doc = include_str!("pointer_converter.doc/entered.md")]
@@ -55,14 +57,22 @@ impl PointerConverter {
         &self,
         id: PointerId,
         position: winit::dpi::PhysicalPosition<f64>,
+        held: PointerButtons,
     ) -> PointerEvent {
         self.event(id, PointerEventKind::Enter, position)
+            .with_buttons(held)
     }
 
     #[doc = include_str!("pointer_converter.doc/left.md")]
     #[must_use]
-    pub fn left(&self, id: PointerId, position: winit::dpi::PhysicalPosition<f64>) -> PointerEvent {
+    pub fn left(
+        &self,
+        id: PointerId,
+        position: winit::dpi::PhysicalPosition<f64>,
+        held: PointerButtons,
+    ) -> PointerEvent {
         self.event(id, PointerEventKind::Leave, position)
+            .with_buttons(held)
     }
 
     #[doc = include_str!("pointer_converter.doc/pressed.md")]
@@ -71,10 +81,12 @@ impl PointerConverter {
         &self,
         id: PointerId,
         position: winit::dpi::PhysicalPosition<f64>,
-        buttons: PointerButtons,
+        button: PointerButton,
+        held: PointerButtons,
     ) -> PointerEvent {
         self.event(id, PointerEventKind::Down, position)
-            .with_buttons(buttons)
+            .with_buttons(held)
+            .with_button(button)
     }
 
     #[doc = include_str!("pointer_converter.doc/released.md")]
@@ -83,10 +95,12 @@ impl PointerConverter {
         &self,
         id: PointerId,
         position: winit::dpi::PhysicalPosition<f64>,
-        buttons: PointerButtons,
+        button: PointerButton,
+        held: PointerButtons,
     ) -> PointerEvent {
         self.event(id, PointerEventKind::Up, position)
-            .with_buttons(buttons)
+            .with_buttons(held)
+            .with_button(button)
     }
 
     #[doc = include_str!("pointer_converter.doc/touch.md")]
@@ -175,7 +189,12 @@ mod tests {
         let mut held = PointerButtons::new();
         held.press(PointerButton::Primary);
 
-        let real = converter.pressed(PointerId::MOUSE, PhysicalPosition::new(4.0, 8.0), held);
+        let real = converter.pressed(
+            PointerId::MOUSE,
+            PhysicalPosition::new(4.0, 8.0),
+            PointerButton::Primary,
+            held,
+        );
         assert_eq!(
             real.trust,
             EventTrust::Trusted,
@@ -207,10 +226,58 @@ mod tests {
         let event = converter.released(
             PointerId::MOUSE,
             PhysicalPosition::new(1.0, 2.0),
+            PointerButton::Primary,
             PointerButtons::new(),
         );
         assert_eq!(event.trust, EventTrust::Trusted);
         assert_eq!(event.kind, PointerEventKind::Up);
+    }
+
+    /// The chord, which is the whole reason the moved button is a field of its
+    /// own: `buttons` after the press names both, so it cannot say which one
+    /// this press was. A right click while the left is held must still read as a
+    /// right click.
+    #[test]
+    fn a_press_names_the_button_that_moved_as_well_as_the_set_it_joined() {
+        let converter = PointerConverter::new();
+        let at = PhysicalPosition::new(4.0, 8.0);
+        let mut held = PointerButtons::new();
+        held.press(PointerButton::Primary);
+        held.press(PointerButton::Secondary);
+
+        let event = converter.pressed(PointerId::MOUSE, at, PointerButton::Secondary, held);
+        assert_eq!(event.button(), Some(PointerButton::Secondary));
+        assert!(event.buttons().contains(PointerButton::Primary));
+        assert!(event.buttons().contains(PointerButton::Secondary));
+
+        // The release half, where the two facts diverge the other way: the
+        // button that came up is NOT in the set that survived it.
+        let mut still_held = PointerButtons::new();
+        still_held.press(PointerButton::Primary);
+        let up = converter.released(PointerId::MOUSE, at, PointerButton::Secondary, still_held);
+        assert_eq!(up.button(), Some(PointerButton::Secondary));
+        assert!(
+            !up.buttons().contains(PointerButton::Secondary),
+            "the released button is no longer held"
+        );
+        assert!(
+            up.buttons().contains(PointerButton::Primary),
+            "and the one the other hand is still holding is"
+        );
+    }
+
+    /// A move transitions nothing, so it must not claim a button — but it does
+    /// carry what is held, which is what `is_pressed` reads.
+    #[test]
+    fn a_move_carries_the_held_set_and_names_no_button() {
+        let converter = PointerConverter::new();
+        let mut held = PointerButtons::new();
+        held.press(PointerButton::Middle);
+
+        let event = converter.moved(PointerId::MOUSE, PhysicalPosition::new(1.0, 2.0), held);
+        assert_eq!(event.button(), None);
+        assert!(event.buttons().contains(PointerButton::Middle));
+        assert!(event.is_pressed(), "a drag with a button down is pressed");
     }
 
     #[test]
@@ -257,7 +324,11 @@ mod tests {
     #[test]
     fn moved_builds_a_move_at_the_position() {
         let converter = PointerConverter::new();
-        let event = converter.moved(PointerId::MOUSE, PhysicalPosition::new(12.0, 34.0));
+        let event = converter.moved(
+            PointerId::MOUSE,
+            PhysicalPosition::new(12.0, 34.0),
+            PointerButtons::new(),
+        );
         assert_eq!(event.pointer(), PointerId::MOUSE);
         assert_eq!(event.device(), PointerDevice::Mouse);
         assert_eq!(event.kind(), PointerEventKind::Move);
@@ -269,14 +340,21 @@ mod tests {
     fn entered_and_left_build_the_matching_kinds() {
         let converter = PointerConverter::new();
         let pos = PhysicalPosition::new(1.0, 2.0);
+        let none = PointerButtons::new();
         assert_eq!(
-            converter.entered(PointerId::MOUSE, pos).kind(),
+            converter.entered(PointerId::MOUSE, pos, none).kind(),
             PointerEventKind::Enter
         );
         assert_eq!(
-            converter.left(PointerId::MOUSE, pos).kind(),
+            converter.left(PointerId::MOUSE, pos, none).kind(),
             PointerEventKind::Leave
         );
+        // Neither transitions a button: crossing the window edge is not a click.
+        assert_eq!(
+            converter.entered(PointerId::MOUSE, pos, none).button(),
+            None
+        );
+        assert_eq!(converter.left(PointerId::MOUSE, pos, none).button(), None);
     }
 
     /// §2.3: this converter is the *only* place in the workspace where a real OS
@@ -290,16 +368,17 @@ mod tests {
     fn a_converted_os_event_is_trusted() {
         let converter = PointerConverter::new();
         let pos = PhysicalPosition::new(5.0, 6.0);
+        let none = PointerButtons::new();
 
         // Every builder funnels through `event`, so every one must be trusted.
         assert!(
-            converter.moved(PointerId::MOUSE, pos).is_trusted(),
+            converter.moved(PointerId::MOUSE, pos, none).is_trusted(),
             "a real cursor move is a user gesture"
         );
-        assert!(converter.entered(PointerId::MOUSE, pos).is_trusted());
-        assert!(converter.left(PointerId::MOUSE, pos).is_trusted());
+        assert!(converter.entered(PointerId::MOUSE, pos, none).is_trusted());
+        assert!(converter.left(PointerId::MOUSE, pos, none).is_trusted());
         assert_eq!(
-            converter.moved(PointerId::MOUSE, pos).trust(),
+            converter.moved(PointerId::MOUSE, pos, none).trust(),
             EventTrust::Trusted
         );
     }

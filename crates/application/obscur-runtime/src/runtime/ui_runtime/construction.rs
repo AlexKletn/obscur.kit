@@ -21,8 +21,8 @@ use crate::orchestration::{
 };
 use crate::runtime::{
     AccessibilityPublisher, BackgroundWork, CascadeSheets, FrameTelemetry, HandlerRegistry,
-    HitTesting, InputQueue, MotionDriver, PointerSessions, ResourceBridge, ScrollOffsets,
-    SurfaceGeometry, TreeInspector, VirtualLists,
+    HitTesting, InputQueue, MotionDriver, PointerEventBindings, PointerSessions, ResourceBridge,
+    ScrollOffsets, SurfaceGeometry, TreeInspector, VirtualLists,
 };
 use crate::scheduler::FrameScheduler;
 use crate::transaction::ReconcileEnactor;
@@ -62,6 +62,7 @@ impl UiRuntime {
             inspector: TreeInspector::new(),
             focused: None,
             pointers: PointerSessions::new(),
+            pointer_bindings: PointerEventBindings::none(),
             environment: EnvironmentValues::none(),
             routing: HandlerRegistry::new(),
             editing: None,

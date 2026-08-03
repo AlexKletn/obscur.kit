@@ -1,7 +1,7 @@
 #![doc = include_str!("event_payload.doc/_module.md")]
 
 use crate::command::KeyEvent;
-use crate::pointer::PointerEvent;
+use crate::pointer::{PointerEvent, WheelEvent};
 
 #[doc = include_str!("event_payload.doc/EventPayload.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -13,6 +13,8 @@ pub enum EventPayload {
     Pointer(PointerEvent),
     #[doc = include_str!("event_payload.doc/Key.md")]
     Key(KeyEvent),
+    #[doc = include_str!("event_payload.doc/Wheel.md")]
+    Wheel(WheelEvent),
 }
 
 impl EventPayload {
@@ -34,6 +36,15 @@ impl EventPayload {
         }
     }
 
+    #[doc = include_str!("event_payload.doc/wheel.md")]
+    #[must_use]
+    pub const fn wheel(&self) -> Option<WheelEvent> {
+        match self {
+            Self::Wheel(wheel) => Some(*wheel),
+            _ => None,
+        }
+    }
+
     #[doc = include_str!("event_payload.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -48,6 +59,10 @@ mod tests {
     use super::*;
     use crate::command::{LogicalKey, PhysicalKey};
     use crate::pointer::{PointerDevice, PointerEventKind, PointerId};
+
+    fn wheel() -> WheelEvent {
+        WheelEvent::new(Point::new(5.0, 6.0), 40.0)
+    }
 
     fn pointer() -> PointerEvent {
         PointerEvent::new(
@@ -67,6 +82,7 @@ mod tests {
         assert!(EventPayload::default().is_empty());
         assert_eq!(EventPayload::default().pointer(), None);
         assert_eq!(EventPayload::default().key(), None);
+        assert_eq!(EventPayload::default().wheel(), None);
     }
 
     /// The accessors are narrowing, not coercing: a keyboard payload never reads
@@ -83,5 +99,17 @@ mod tests {
         assert_eq!(k.key(), Some(key()));
         assert_eq!(k.pointer(), None);
         assert!(!k.is_empty());
+
+        // The wheel is the case the narrowing rule was most at risk of losing: a
+        // notch reused the pointer variant, it would read out as a pointer that
+        // moved to the wheel's position — a move that never happened, and one
+        // the model could not tell from a real one.
+        let w = EventPayload::Wheel(wheel());
+        assert_eq!(w.wheel(), Some(wheel()));
+        assert_eq!(w.pointer(), None);
+        assert_eq!(w.key(), None);
+        assert!(!w.is_empty());
+        assert_eq!(EventPayload::Pointer(pointer()).wheel(), None);
+        assert_eq!(EventPayload::Key(key()).wheel(), None);
     }
 }

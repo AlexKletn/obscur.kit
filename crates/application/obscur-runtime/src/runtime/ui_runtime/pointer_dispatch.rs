@@ -3,12 +3,14 @@
 use obscur_geometry::Point;
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_interaction::event::UiEvent;
-use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
+use obscur_interaction::hover::HoverTransition;
+use obscur_interaction::pointer::{PointerButton, PointerEvent, PointerEventKind};
+use obscur_view::view::{EVENT_CONTEXT_MENU, EVENT_POINTER_ENTER, EVENT_POINTER_LEAVE};
 
 use crate::frame::FrameReason;
 use crate::runtime::{
     CommandDispatch, EditableField, HoverUpdate, PointerCompletion, PointerDispatch,
-    PointerLandingResolver, PointerRelease, StructuralStates,
+    PointerEventBindings, PointerLandingResolver, PointerRelease, StructuralStates,
 };
 
 use super::UiRuntime;
@@ -63,12 +65,73 @@ impl UiRuntime {
         //    device's business as much as the hit test's — see [`HoverUpdate`].
         let hover = HoverUpdate::for_event(&self.tree, &self.hover, &event, target);
         let hover_changed = hover.changed();
-        self.hover = hover.into_chain();
+        let (chain, crossed) = hover.into_parts();
+        self.hover = chain;
+
+        // 2a. The crossings (§2.3): `pointerenter` / `pointerleave`, one per node
+        //     the chain newly holds or newly dropped — which is NOT the node this
+        //     event targets. A move from one row to its sibling leaves one row
+        //     and enters another while targeting only the second.
+        //
+        //     After the chain is seated: a handler asked what it just entered
+        //     reads the hover state, and reading the state from before its own
+        //     event would be a lie. Before the raw event at 2b, matching the
+        //     order the DOM fires its crossings in — out/leave, over/enter, then
+        //     move — so that an author porting a hover interaction gets the
+        //     sequence they already know.
+        self.dispatch_hover_crossings(&event, &crossed);
+
+        // 2b. The raw pointer event (§2.3): `pointerdown` / `pointerup` /
+        //     `pointermove` / `pointercancel`, dispatched to the hit target
+        //     through capture / target / bubble BEFORE the runtime does anything
+        //     of its own with this event. That ordering is the whole reason the
+        //     raw event exists — a `pointerdown` delivered after focus had
+        //     already moved could report the press but never refuse it — and it
+        //     is what makes each `prevent_default` below reachable.
+        //
+        //     Here, and not before 1b: the pan has already decided whether this
+        //     contact is scrolling, and if it is, `target` is the capture target
+        //     rather than the row under the finger. So the raw event names the
+        //     same node hover and focus were computed from, and a refusal cannot
+        //     cancel a scroll already under way — deliberate, and stated on
+        //     [`EVENT_POINTER_MOVE`](obscur_view::view::EVENT_POINTER_MOVE).
+        //
+        //     Here, and not after the drag-in-flight return below: a data drag
+        //     consumes the runtime's OWN reactions to the pointer, not the
+        //     device's report of it. An application drawing its own drag
+        //     affordance is exactly when it most wants the moves, and refusing
+        //     one costs nothing because the drag has already taken away every
+        //     default action a refusal could have suppressed.
+        let raw_prevented = self.dispatch_raw_pointer(&event, target);
+
+        // 2c. The context request (§2.3): `contextmenu`, from a secondary press
+        //     and from nothing else. After the raw `pointerdown` — it is the
+        //     more specific reading of the same press — and before step 3, so
+        //     that refusing it reaches the one thing a secondary press goes on
+        //     to do.
+        //
+        //     Dispatched even when `pointerdown` was refused, and the two
+        //     refusals are OR-ed rather than short-circuited: a listener
+        //     declining the focus move has not declined the *request for a
+        //     menu*, and an application that draws one wants to hear the right
+        //     click either way.
+        let menu_prevented = self.dispatch_context_menu(&event, target);
+        let prevented = raw_prevented || menu_prevented;
 
         // 3. Focus: only a press moves focus. A press also anchors click
         //    detection on the pressed node.
+        //    A refused `pointerdown` performs NONE of that: no focus move, no
+        //    caret, no press anchor and no gesture arming. Nothing was begun, so
+        //    nothing is left outstanding — and because the anchor is what a later
+        //    release is matched against, a refused press is also why no click can
+        //    follow it — and, since the pair describes a move, why no `blur` or
+        //    `focus` is announced either.
+        //    §2.3's `blur` / `focus` themselves are emitted one level down, from
+        //    the single door focus moves through, so this ordering is the last
+        //    one that matters to them: the refusal above is reachable, and the
+        //    notification below reports a move that has already happened.
         let mut focus_changed = false;
-        if event.kind() == PointerEventKind::Down {
+        if event.kind() == PointerEventKind::Down && !prevented {
             focus_changed = self.press_landed(&event, screen_point, target, &mut press_changed);
         }
 
@@ -78,7 +141,9 @@ impl UiRuntime {
         //    perturbs focus or click detection.
         //    A move the pan consumed is not a selection gesture: the finger is
         //    dragging the list, not sweeping over text.
-        if event.kind() == PointerEventKind::Move && !panning {
+        //    A refused `pointermove` is not one either — that is the default
+        //    action a `pointermove` listener has to refuse.
+        if event.kind() == PointerEventKind::Move && !panning && !prevented {
             self.update_text_drag(event.position());
         }
 
@@ -103,14 +168,33 @@ impl UiRuntime {
         //
         // §2.3's `current_target`: the node whose binding resolved `command` —
         // an ancestor of `target` whenever the click bubbled to find one.
-        let (command, current_target) = if event.kind() == PointerEventKind::Up {
-            self.release_landed(&event, screen_point, target, &mut press_changed)
-        } else {
-            (None, None)
-        };
+        //
+        // A refused `pointerup` suppresses the click and everything that hangs
+        // off it, but NOT the bookkeeping the release owes either way — the
+        // release is still consumed, the pointer still completed, capture still
+        // released, a travelling pan still thrown. Those are not default actions
+        // an application can decline; declining them would leave a stuck
+        // `:active`, a capture nothing releases, and a finger that lifted while
+        // the runtime still believes it is down.
+        //
+        // A release that is not the primary button's does none of it, including
+        // the bookkeeping — because the matching press did none either. Letting
+        // a secondary release through would make it consume, and click, the
+        // press the primary button is still holding down.
+        let (command, current_target) =
+            if event.kind() == PointerEventKind::Up && engages_controls(&event) {
+                self.release_landed(&event, screen_point, target, &mut press_changed, prevented)
+            } else {
+                (None, None)
+            };
 
         // 3c. Cancel: the system took the sequence away — a gesture claimed it, the
         //    window lost the contact, the device went away.
+        //    `pointercancel` was dispatched at 2b and its refusal is deliberately
+        //    inert: what follows a cancel is not a default action but the
+        //    unwinding of state the system has already destroyed. Honouring a
+        //    refusal here would reinstate exactly the stuck press this branch was
+        //    written to clear.
         if event.kind() == PointerEventKind::Cancel && self.cancel_landed(&event) {
             press_changed = true;
         }
@@ -149,50 +233,47 @@ impl UiRuntime {
         // blurs, exactly as before.
         let disabled_press =
             target.is_some_and(|t| StructuralStates::of(&self.tree).is_within_disabled(t));
+        // Which of the two halves below this press earns. A secondary or middle
+        // press moves focus and stops there: a right click focuses the field its
+        // context menu is about, the way every platform's does, but it presses
+        // nothing — no `:active`, no caret, no drag-selection, no armed pan, and
+        // no click on release. See [`engages_controls`].
+        let engages = engages_controls(event);
         if !disabled_press {
             let interactive_target = target;
-            if self.focused != interactive_target {
-                self.focused = interactive_target;
-                focus_changed = true;
-                // Focus moved: begin/clear the runtime-owned editing session so
-                // the focused editable's text/caret/selection is live for keys
-                // (and step-2 rendering).
-                self.sync_editing_to_focus();
-                // §6.15 "Focused inputs may be scrolled into view". A field
-                // half off the edge of its scroller — or behind the on-screen
-                // keyboard, which is the case that matters on a device with no
-                // hardware one — is brought into the visible region. A field
-                // already fully visible does not move.
-                if let Some(field) =
-                    interactive_target.and_then(|t| EditableField::editable_ancestor(&self.tree, t))
-                {
-                    self.scroll_into_view(field);
+            // The one door focus moves through, wherever the move came from —
+            // the assignment, the editing session it re-seats, §6.15's
+            // scroll-into-view and §2.3's `blur` / `focus` pair are all on the
+            // other side of it. The press is its only caller today; that is
+            // what makes it the only path, not what makes it the only door.
+            focus_changed = self.move_focus_to(interactive_target, UiEvent::from_pointer(*event));
+            if engages {
+                // Flattened deliberately: "no press outstanding" and "a press on
+                // empty space" are the same *styling* state (nothing is
+                // `:active`), which is what `press_changed` schedules a restyle
+                // for.
+                // Records the press and resolves its click count (single /
+                // double / triple) from this pointer's *own* previous press, so a
+                // double click can select the word and a triple click the line
+                // under the pointer (spec §5.11). The reported previous target is
+                // what says whether the `:active` styling state changed.
+                let replaced = self.pointers.begin_press(
+                    event.pointer(),
+                    interactive_target,
+                    event.position(),
+                    event.timestamp(),
+                );
+                if replaced != interactive_target {
+                    *press_changed = true;
                 }
+                // Click → caret / word / line: after `sync_editing_to_focus` has
+                // (re)seated the session for the clicked editable, a single click
+                // places the caret and arms a potential drag-selection; a double
+                // click selects the word and a triple click the line under the
+                // point. A press on a non-editable target clears any armed drag and
+                // leaves the session untouched.
+                self.begin_text_pointer(interactive_target, event.position());
             }
-            // Flattened deliberately: "no press outstanding" and "a press on
-            // empty space" are the same *styling* state (nothing is `:active`),
-            // which is what `press_changed` schedules a restyle for.
-            // Records the press and resolves its click count (single /
-            // double / triple) from this pointer's *own* previous press, so a
-            // double click can select the word and a triple click the line
-            // under the pointer (spec §5.11). The reported previous target is
-            // what says whether the `:active` styling state changed.
-            let replaced = self.pointers.begin_press(
-                event.pointer(),
-                interactive_target,
-                event.position(),
-                event.timestamp(),
-            );
-            if replaced != interactive_target {
-                *press_changed = true;
-            }
-            // Click → caret / word / line: after `sync_editing_to_focus` has
-            // (re)seated the session for the clicked editable, a single click
-            // places the caret and arms a potential drag-selection; a double
-            // click selects the word and a triple click the line under the
-            // point. A press on a non-editable target clears any armed drag and
-            // leaves the session untouched.
-            self.begin_text_pointer(interactive_target, event.position());
         }
         // 3a-arm. A direct contact arms what it speculatively started: a pan
         //    for the user-scrollable container it landed in, and the hold that
@@ -200,8 +281,115 @@ impl UiRuntime {
         //    press. Arming is not panning and not holding — the recognizers
         //    stay `Possible` until the finger travels or waits — so a tap here
         //    costs two structs and changes nothing.
-        self.arm_gestures(event, screen_point, target);
+        //    A non-engaging press arms neither: dragging with the right button
+        //    held is not a scroll, and holding it is not a long press.
+        if engages {
+            self.arm_gestures(event, screen_point, target);
+        }
         focus_changed
+    }
+
+    #[doc = include_str!("pointer_dispatch.doc/dispatch_context_menu.md")]
+    fn dispatch_context_menu(&mut self, event: &PointerEvent, target: Option<NodeId>) -> bool {
+        if event.kind() != PointerEventKind::Down
+            || event.button() != Some(PointerButton::Secondary)
+        {
+            return false;
+        }
+        // No target is no node leg, the same rule the raw names follow: a right
+        // click on empty space names nothing to open a menu for.
+        let Some(target) = target else {
+            return false;
+        };
+        let Some((node, command)) =
+            CommandDispatch::binding_for(&self.tree, target, EVENT_CONTEXT_MENU)
+        else {
+            return false;
+        };
+        self.dispatch_command_outcome(Some(node), command, UiEvent::from_pointer(*event))
+            .default_prevented
+    }
+
+    #[doc = include_str!("pointer_dispatch.doc/dispatch_raw_pointer.md")]
+    fn dispatch_raw_pointer(&mut self, event: &PointerEvent, target: Option<NodeId>) -> bool {
+        // The crossing KINDS are dispatched under no name here. `pointerenter` /
+        // `pointerleave` describe a node the hover chain crossed, not a kind of
+        // report, so step 2a emits them from the transition — which already sees
+        // the two crossings these kinds cause, an `Enter` entering whatever it
+        // landed on and a `Leave` emptying the chain. Naming them here as well
+        // would dispatch each surface crossing twice.
+        let Some(name) = PointerEventBindings::name_for(event.kind()) else {
+            return false;
+        };
+        // Cost. A move arrives at the pointer's report rate, and resolving a
+        // binding means an ancestor walk that allocates. Nothing below runs
+        // unless some node in the committed tree actually binds this name: the
+        // walk is skipped, not merely empty. Same trade `CommandDispatch::
+        // propagate` makes with `has_listeners`.
+        if !self.pointer_bindings.binds(name) {
+            return false;
+        }
+        // No target is no node leg. A press on empty space has nothing to
+        // capture, target or bubble through; §2.6's window and application links
+        // belong to the shortcut path, not to an event that is *about* a node.
+        let Some(target) = target else {
+            return false;
+        };
+        let Some((node, command)) = CommandDispatch::binding_for(&self.tree, target, name) else {
+            return false;
+        };
+        self.dispatch_command_outcome(Some(node), command, UiEvent::from_pointer(*event))
+            .default_prevented
+    }
+
+    #[doc = include_str!("pointer_dispatch.doc/dispatch_hover_crossings.md")]
+    fn dispatch_hover_crossings(&mut self, event: &PointerEvent, crossed: &HoverTransition) {
+        // Cost, and the same gate `dispatch_raw_pointer` uses. A crossing is
+        // already rarer than a move — the lists below are empty unless the chain
+        // actually changed — but sweeping down a list crosses two boundaries per
+        // row, so an application that binds neither name must still pay nothing.
+        let leaving = self.pointer_bindings.binds(EVENT_POINTER_LEAVE);
+        let entering = self.pointer_bindings.binds(EVENT_POINTER_ENTER);
+        if !leaving && !entering {
+            return;
+        }
+        // Leave before enter, and the old chain innermost-first: a row is left
+        // before the container that held it, so the two sequences nest the way a
+        // stack unwinds. A handler that tears down on leave what it built on
+        // enter is then never interleaved with the next node's setup, even when
+        // the pointer crosses straight from one sibling into another.
+        if leaving {
+            for node in crossed.left() {
+                self.dispatch_crossing(*node, EVENT_POINTER_LEAVE, event);
+            }
+        }
+        // Enter outermost-first, which is the reverse of the chain's own order:
+        // a container is entered before the row inside it, so a handler opening a
+        // panel on entering the container runs before the row that lives in it
+        // asks to be highlighted.
+        if entering {
+            for node in crossed.entered().iter().rev() {
+                self.dispatch_crossing(*node, EVENT_POINTER_ENTER, event);
+            }
+        }
+    }
+
+    #[doc = include_str!("pointer_dispatch.doc/dispatch_crossing.md")]
+    fn dispatch_crossing(&mut self, node: NodeId, name: InternedSymbol, event: &PointerEvent) {
+        // The node's OWN binding, with no ancestor walk — unlike every other
+        // event here. The crossing set is already the whole chain, so resolving
+        // through ancestors would dispatch a container's binding once per
+        // descendant that crossed with it: N deliveries for one boundary. A node
+        // that left the tree between frames resolves to nothing and is skipped.
+        let Some(command) = self.tree.get(node).and_then(|n| n.command_for_event(name)) else {
+            return;
+        };
+        // The outcome is deliberately dropped: a hover transition has no default
+        // action to suppress. The chain is already seated and `:hover` already
+        // matches differently — that is not the crossing's default action, it is
+        // the crossing. `prevent_default` on one of these is inert, and
+        // [`EVENT_POINTER_ENTER`](obscur_view::view::EVENT_POINTER_ENTER) says so.
+        self.dispatch_command_outcome(Some(node), command, UiEvent::from_pointer(*event));
     }
 
     #[doc = include_str!("pointer_dispatch.doc/drag_in_flight.md")]
@@ -236,6 +424,7 @@ impl UiRuntime {
         screen_point: Point,
         target: Option<NodeId>,
         press_changed: &mut bool,
+        prevented: bool,
     ) -> (Option<InternedSymbol>, Option<NodeId>) {
         let mut command = None;
         let mut current_target = None;
@@ -243,7 +432,7 @@ impl UiRuntime {
         // — the three conditions and why each of them is one are
         // [`PointerRelease`]'s. It consumes the press either way.
         let release = PointerRelease::take(&mut self.pointers, event, target);
-        if let Some(pressed) = release.clicked() {
+        if let Some(pressed) = release.clicked().filter(|_| !prevented) {
             if let Some((bound, resolved)) = CommandDispatch::activation_command_for(
                 &self.tree,
                 pressed,
@@ -302,4 +491,9 @@ impl UiRuntime {
             .end_pointer(event.pointer(), PointerCompletion::Cancelled);
         press_changed
     }
+}
+
+#[doc = include_str!("pointer_dispatch.doc/engages_controls.md")]
+const fn engages_controls(event: &PointerEvent) -> bool {
+    matches!(event.button(), None | Some(PointerButton::Primary))
 }

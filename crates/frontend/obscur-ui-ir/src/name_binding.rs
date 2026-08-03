@@ -51,6 +51,30 @@ pub const EVENT_KEY_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0105)
 #[doc = include_str!("name_binding.doc/EVENT_KEY_UP.md")]
 pub const EVENT_KEY_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0106);
 
+#[doc = include_str!("name_binding.doc/EVENT_POINTER_DOWN.md")]
+pub const EVENT_POINTER_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0107);
+#[doc = include_str!("name_binding.doc/EVENT_POINTER_UP.md")]
+pub const EVENT_POINTER_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0108);
+#[doc = include_str!("name_binding.doc/EVENT_POINTER_MOVE.md")]
+pub const EVENT_POINTER_MOVE: InternedSymbol = InternedSymbol::from_raw(0x0000_0109);
+#[doc = include_str!("name_binding.doc/EVENT_POINTER_CANCEL.md")]
+pub const EVENT_POINTER_CANCEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010A);
+#[doc = include_str!("name_binding.doc/EVENT_POINTER_ENTER.md")]
+pub const EVENT_POINTER_ENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_010B);
+#[doc = include_str!("name_binding.doc/EVENT_POINTER_LEAVE.md")]
+pub const EVENT_POINTER_LEAVE: InternedSymbol = InternedSymbol::from_raw(0x0000_010C);
+
+#[doc = include_str!("name_binding.doc/EVENT_WHEEL.md")]
+pub const EVENT_WHEEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010D);
+
+#[doc = include_str!("name_binding.doc/EVENT_FOCUS.md")]
+pub const EVENT_FOCUS: InternedSymbol = InternedSymbol::from_raw(0x0000_010E);
+#[doc = include_str!("name_binding.doc/EVENT_BLUR.md")]
+pub const EVENT_BLUR: InternedSymbol = InternedSymbol::from_raw(0x0000_010F);
+
+#[doc = include_str!("name_binding.doc/EVENT_CONTEXT_MENU.md")]
+pub const EVENT_CONTEXT_MENU: InternedSymbol = InternedSymbol::from_raw(0x0000_0110);
+
 #[doc = include_str!("name_binding.doc/RESERVED_EVENTS.md")]
 pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_CLICK,
@@ -59,6 +83,16 @@ pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_LONG_PRESS,
     EVENT_KEY_DOWN,
     EVENT_KEY_UP,
+    EVENT_POINTER_DOWN,
+    EVENT_POINTER_UP,
+    EVENT_POINTER_MOVE,
+    EVENT_POINTER_CANCEL,
+    EVENT_POINTER_ENTER,
+    EVENT_POINTER_LEAVE,
+    EVENT_WHEEL,
+    EVENT_FOCUS,
+    EVENT_BLUR,
+    EVENT_CONTEXT_MENU,
 ];
 
 // --- Primitive component ids (mirror `obscur_primitives::*::COMPONENT_ID`). ---
@@ -245,6 +279,36 @@ pub fn event_symbol(name: &str) -> InternedSymbol {
         "longpress" => EVENT_LONG_PRESS,
         "keydown" => EVENT_KEY_DOWN,
         "keyup" => EVENT_KEY_UP,
+        // Same no-separator convention as `keydown`/`longpress`, and the same
+        // spelling the DOM uses for the same four events.
+        "pointerdown" => EVENT_POINTER_DOWN,
+        "pointerup" => EVENT_POINTER_UP,
+        "pointermove" => EVENT_POINTER_MOVE,
+        "pointercancel" => EVENT_POINTER_CANCEL,
+        // The crossings. The DOM's bubbling spellings — `pointerover` and
+        // `pointerout` — are deliberately absent rather than aliased onto these:
+        // a command routes either way here, so the two DOM pairs would be one
+        // event under two names, and a name that means what another name means
+        // is how an author learns the difference is real when it is not.
+        "pointerenter" => EVENT_POINTER_ENTER,
+        "pointerleave" => EVENT_POINTER_LEAVE,
+        // The wheel, spelled the way the DOM spells it — and it is one word
+        // either way, so the no-separator convention above costs nothing here.
+        // Not `scroll`: this fires *before* the scroll and can refuse it, so
+        // naming it after the thing it prevents would be exactly backwards.
+        "wheel" => EVENT_WHEEL,
+        // The focus pair, spelled the way the DOM spells it and one word either
+        // way. The DOM's second pair — `focusin` / `focusout` — is deliberately
+        // absent: this binding already resolves through the ancestor chain, so
+        // `focus` here *is* what the DOM calls `focusin`, and a second spelling
+        // would be a second name for one event.
+        "focus" => EVENT_FOCUS,
+        "blur" => EVENT_BLUR,
+        // One word in the DOM too, and the same no-separator convention. There
+        // is no `menu` alias: this names the *request* for a menu, which the
+        // runtime does not itself open, so a name that promised an opened menu
+        // would promise something nothing does.
+        "contextmenu" => EVENT_CONTEXT_MENU,
         other => fallback_symbol(other),
     }
 }
@@ -614,6 +678,107 @@ mod tests {
         assert_eq!(event_symbol("click"), EVENT_CLICK);
         assert_eq!(event_symbol("input"), EVENT_INPUT);
         assert_eq!(event_symbol("change"), EVENT_CHANGE);
+    }
+
+    #[test]
+    fn the_raw_pointer_names_lower_to_their_reserved_symbols() {
+        // The defect this campaign closes, one stage at a time: a name the
+        // runtime dispatches but the front end hashes is a binding that compiles
+        // and never fires. Each of these has a real emitter in `handle_pointer`.
+        assert_eq!(event_symbol("pointerdown"), EVENT_POINTER_DOWN);
+        assert_eq!(event_symbol("pointerup"), EVENT_POINTER_UP);
+        assert_eq!(event_symbol("pointermove"), EVENT_POINTER_MOVE);
+        assert_eq!(event_symbol("pointercancel"), EVENT_POINTER_CANCEL);
+        // 2026-08-03. `pointerenter` and `pointerleave` were in the *unreserved*
+        // list below, on the rule that a name with no emitter must stay
+        // unreserved. They have one now — `handle_pointer` dispatches them from
+        // the hover transition — so they move up here. The rule did not change;
+        // what changed is which side of it these two are on, and this test
+        // asserts both sides.
+        assert_eq!(event_symbol("pointerenter"), EVENT_POINTER_ENTER);
+        assert_eq!(event_symbol("pointerleave"), EVENT_POINTER_LEAVE);
+        for name in [
+            "pointerdown",
+            "pointerup",
+            "pointermove",
+            "pointercancel",
+            "pointerenter",
+            "pointerleave",
+        ] {
+            assert!(is_reserved_event(name), "{name}");
+            assert_ne!(event_symbol(name), fallback_symbol(name), "{name}");
+        }
+        // And the names the runtime still does not emit stay unreserved, so a
+        // front end reports them rather than blessing them. `pointerover` and
+        // `pointerout` are here on purpose and not for want of an emitter: a
+        // command routes either way in this toolkit, so the DOM's bubbling pair
+        // would be a second name for `pointerenter` / `pointerleave`.
+        //
+        // 2026-08-03. `wheel` used to be in this list, on the same rule the two
+        // crossings moved under: a name with no emitter must stay unreserved. It
+        // has one now — `handle_scroll` dispatches it before the scroll it can
+        // refuse — so it moved to its own test below. `contextmenu` followed it
+        // out of this list the same day and for the same reason, once the winit
+        // runner started delivering the secondary button that emits it; it has
+        // its own test below too. The rule did not change — only which side of
+        // it each name is on — and both sides are asserted.
+        for name in ["pointerover", "pointerout"] {
+            assert!(!is_reserved_event(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_context_menu_name_lowers_to_its_reserved_symbol() {
+        // Its own test rather than a line in the pointer one: this is not a
+        // pointer *report*. It names a request the secondary button makes, and
+        // the runtime emits it from that press alone — there is no context-menu
+        // key and no long-press route to it, so a second emitter would have to be
+        // invented before either could claim this name.
+        assert_eq!(event_symbol("contextmenu"), EVENT_CONTEXT_MENU);
+        assert!(is_reserved_event("contextmenu"));
+        assert_ne!(
+            event_symbol("contextmenu"),
+            fallback_symbol("contextmenu"),
+            "a hashed name would compile and never fire"
+        );
+        // And no alias: `menu` would promise an opened menu, which nothing here
+        // opens.
+        assert!(!is_reserved_event("menu"));
+    }
+
+    #[test]
+    fn the_focus_pair_lowers_to_its_reserved_symbols() {
+        // Its own test rather than a line in the pointer one: focus is not a
+        // pointer report. A press is what moves it today, but the event names the
+        // node that gained or lost focus, and the runtime emits both from the one
+        // place focus changes — so any future mover emits them too.
+        assert_eq!(event_symbol("focus"), EVENT_FOCUS);
+        assert_eq!(event_symbol("blur"), EVENT_BLUR);
+        for name in ["focus", "blur"] {
+            assert!(is_reserved_event(name), "{name}");
+            assert_ne!(event_symbol(name), fallback_symbol(name), "{name}");
+        }
+        // The DOM's second pair is deliberately NOT reserved: `focus` here is
+        // resolved through the ancestor chain, so it already *is* `focusin`, and
+        // a second spelling would be a second name for one event. They hash like
+        // any other author name.
+        for absent in ["focusin", "focusout"] {
+            assert!(!is_reserved_event(absent), "{absent}");
+        }
+    }
+
+    #[test]
+    fn the_wheel_name_lowers_to_its_reserved_symbol() {
+        // Its own test rather than a line in the pointer one: a wheel is not a
+        // `PointerEventKind` and is dispatched from `handle_scroll`, not from
+        // `handle_pointer`.
+        assert_eq!(event_symbol("wheel"), EVENT_WHEEL);
+        assert!(is_reserved_event("wheel"));
+        assert_ne!(event_symbol("wheel"), fallback_symbol("wheel"));
+        // `scroll` is deliberately NOT an alias: this event fires before the
+        // scroll and can refuse it, and there is no separate event for the
+        // scroll having happened.
+        assert!(!is_reserved_event("scroll"));
     }
 
     #[test]

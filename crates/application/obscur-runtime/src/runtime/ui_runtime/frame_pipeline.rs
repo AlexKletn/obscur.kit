@@ -6,7 +6,7 @@ use crate::frame::{FrameContext, FrameReason, FrameResult};
 use crate::orchestration::scroll_containers;
 use crate::runtime::{
     ArrangePhase, ComposePhase, DesiredView, FoldInputs, FramePhaseClock, LayoutClassifier,
-    LayoutInputs, ReconcilePhase, StylePhase, TextEditSession,
+    LayoutInputs, PointerEventBindings, ReconcilePhase, StylePhase, TextEditSession,
 };
 
 use super::UiRuntime;
@@ -109,6 +109,18 @@ impl UiRuntime {
         //     never runs, so the user's in-flight edit is never fought.
         if plan.reconcile() {
             self.reseed_editing_from_retained();
+        }
+
+        // 1b. Re-answer "does anything bind a raw pointer event?" — the gate that
+        //     keeps `pointermove` free. A binding can only appear or disappear on
+        //     a commit that carried an operation, so this is the one moment the
+        //     answer can change, and it costs one pass over the live nodes on a
+        //     frame that already walks the tree several times. Asking per pointer
+        //     event instead would mean an ancestor walk — and its allocation — at
+        //     the pointer's report rate for an application that binds none of the
+        //     four.
+        if reconciled {
+            self.pointer_bindings = PointerEventBindings::scan(&self.tree);
         }
 
         // 2-3. Match + style: rebuild cascade inputs and resolve computed styles.
