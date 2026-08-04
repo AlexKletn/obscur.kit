@@ -4,6 +4,7 @@ use obscur_geometry::{AffineTransform, Point, Rect, Size};
 
 use super::DisplayListBuilder;
 use crate::clip::Clip;
+use crate::paint::{BufferFit, ExternalBuffer, SceneImage};
 use crate::path::Path;
 
 #[doc = include_str!("canvas_region.doc/CanvasRegion.md")]
@@ -53,6 +54,38 @@ impl<'a> CanvasRegion<'a> {
         self.builder
     }
 
+    #[doc = include_str!("canvas_region.doc/draw_buffer.md")]
+    pub fn draw_buffer(&mut self, buffer: &ExternalBuffer<'_>, fit: BufferFit) -> bool {
+        if buffer.is_empty() {
+            // A camera that has not produced a frame yet is a real state, and
+            // drawing a nothing-sized image would put a leaf command in the list
+            // for every frame it takes to arrive.
+            return false;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let source = Size::new(buffer.width() as f32, buffer.height() as f32);
+        self.draw_image_into(buffer.to_scene_image(), fit.place(source, self.bounds.size))
+    }
+
+    #[doc = include_str!("canvas_region.doc/draw_image_into.md")]
+    pub fn draw_image_into(&mut self, image: SceneImage, dest: Rect) -> bool {
+        if dest.size.width <= 0.0 || dest.size.height <= 0.0 {
+            return false;
+        }
+        // `tile` is the one copy, `region` is the clip — and the region here is
+        // the canvas's own box in its OWN coordinates, so a `Cover` frame that
+        // hangs off both edges is trimmed by the same clip that already brackets
+        // every other thing the painter draws.
+        self.builder.draw_image(
+            image,
+            dest,
+            Rect::new(Point::new(0.0, 0.0), self.bounds.size),
+            false,
+            false,
+        );
+        true
+    }
+
     #[doc = include_str!("canvas_region.doc/hit_region.md")]
     pub fn hit_region(&mut self, path: Path) {
         self.hit = Some(path);
@@ -88,9 +121,9 @@ impl<'a> CanvasRegion<'a> {
 #[cfg(test)]
 mod tests {
     use super::CanvasRegion;
-    use crate::color::Color;
+    use crate::color::{AlphaMode, Color};
     use crate::command::{DisplayListBuilder, PaintCommand};
-    use crate::paint::Brush;
+    use crate::paint::{Brush, BufferFit, BufferFormat, ExternalBuffer};
     use obscur_geometry::{Point, Rect, Size};
 
     fn bounds() -> Rect {
@@ -212,5 +245,94 @@ mod tests {
         assert_eq!(region.size(), Size::new(0.0, 0.0));
         assert_eq!(region.at(0.5, 0.5), Point::new(0.0, 0.0));
         assert!(region.close());
+    }
+
+    /// A 2×1 BGRA frame with a padded row — what a real capture looks like.
+    const FRAME: [u8; 12] = [30, 20, 10, 255, 60, 50, 40, 255, 0xDE, 0xAD, 0xBE, 0xEF];
+
+    fn frame() -> ExternalBuffer<'static> {
+        ExternalBuffer::new(&FRAME, 2, 1, 12, BufferFormat::Bgra8, AlphaMode::Straight)
+            .expect("a valid frame")
+    }
+
+    #[test]
+    fn a_foreign_buffer_is_drawn_in_the_regions_own_coordinates() {
+        // The whole point: the painter never learns where its box sits on
+        // screen. The translation the region already opened puts it there.
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, bounds());
+        assert!(region.draw_buffer(&frame(), BufferFit::Stretch));
+        assert!(region.close());
+
+        let list = builder.build();
+        let drawn = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                PaintCommand::DrawImage {
+                    image,
+                    tile,
+                    region,
+                    repeat_x,
+                    repeat_y,
+                } => Some((image, *tile, *region, *repeat_x, *repeat_y)),
+                _ => None,
+            })
+            .expect("the frame reached the list");
+        let (image, tile, clip, repeat_x, repeat_y) = drawn;
+        assert_eq!(
+            tile.origin,
+            Point::new(0.0, 0.0),
+            "region-local, not absolute"
+        );
+        assert_eq!(tile.size, bounds().size, "stretched to fill");
+        assert_eq!(clip.size, bounds().size);
+        assert!(!repeat_x && !repeat_y, "one copy, not a tiling");
+        assert_eq!(
+            image.pixels(),
+            &[10, 20, 30, 255, 40, 50, 60, 255],
+            "channels in order and no padding byte in the picture"
+        );
+    }
+
+    #[test]
+    fn a_covering_frame_hangs_off_the_edges_and_the_region_clips_it() {
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, bounds());
+        assert!(region.draw_buffer(&frame(), BufferFit::Cover));
+        assert!(region.close());
+
+        let list = builder.build();
+        let PaintCommand::DrawImage { tile, .. } = list
+            .commands()
+            .iter()
+            .find(|c| matches!(c, PaintCommand::DrawImage { .. }))
+            .expect("the frame reached the list")
+        else {
+            unreachable!()
+        };
+        // 2:1 source into a 200×100 box covers exactly; a taller box would
+        // overflow, and either way the region's own clip trims it.
+        assert!(tile.size.width >= bounds().size.width);
+        assert!(tile.size.height >= bounds().size.height);
+    }
+
+    #[test]
+    fn a_camera_that_has_not_woken_up_yet_draws_nothing() {
+        // A real state, not an error — and it must not put a leaf command in
+        // the list for every frame it takes to arrive.
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, bounds());
+        let empty = ExternalBuffer::packed(&[], 0, 0, BufferFormat::Bgra8, AlphaMode::Straight)
+            .expect("an empty buffer is a buffer");
+        assert!(!region.draw_buffer(&empty, BufferFit::Contain));
+        assert!(region.close());
+        assert!(
+            !builder
+                .build()
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::DrawImage { .. }))
+        );
     }
 }

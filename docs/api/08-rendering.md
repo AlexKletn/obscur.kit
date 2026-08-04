@@ -120,6 +120,54 @@ The window is always created transparent with a premultiplied composite mode, so
 through the whole app. There is deliberately no API for it — a flag would be a
 second source of truth about the same pixel.
 
+## Canvas: drawing pixels somebody else produced
+
+A canvas painter draws with the ordinary Paint model (spec §5.3), and one thing
+it can draw is a buffer of foreign pixels — a video frame, a camera image, a
+screen capture, the output of a software rasterizer.
+
+```rust
+runtime.register_canvas(CAMERA, Box::new(move |region, _paint| {
+    let frame = source.latest();           // whatever your producer hands over
+    let buffer = ExternalBuffer::new(
+        frame.bytes(),
+        frame.width(), frame.height(),
+        frame.stride(),                    // BYTES per row, not width * 4
+        BufferFormat::Bgra8,
+        AlphaMode::Straight,
+    ).expect("the description holds");
+    region.draw_buffer(&buffer, BufferFit::Cover);
+    true                                   // "still moving" — ask me again
+}));
+```
+
+Two things fail *silently* rather than loudly, and `ExternalBuffer` exists to
+close both:
+
+* **Channel order.** `Bgra8` is what Windows, X11, Wayland and most of ffmpeg's
+  packed output hand over. Reading it as RGBA draws a blue face.
+* **Row stride.** Nearly every real producer pads rows to an alignment. Reading
+  a padded buffer as a tight one shears the picture — every row slides further
+  sideways than the last.
+
+`Rgbx8` / `Bgrx8` / `Rgb8` / `Bgr8` / `Gray8` are also accepted, all opaque; the
+`x` byte is padding and is deliberately **not** read as alpha.
+
+`BufferFit` is `Stretch` (default), `Contain`, `Cover` or `Natural`, all centred;
+the region clips whatever overflows. The painter's return value is "still
+animating" — a live source returns `true` and gets a frame per tick.
+
+**The cost.** `draw_buffer` repacks into RGBA8 once per call: for a 1080p frame,
+a few milliseconds of memory traffic. A producer that can already speak tightly
+packed RGBA8 into an `Arc<[u8]>` should skip `ExternalBuffer` entirely, build a
+`SceneImage` directly and use `draw_image_into` — that path copies nothing.
+
+> **unbuilt** — spec §5.5 also allows a *texture-backed* foreign surface handed
+> to the GPU without ever touching the CPU, and a native child surface/window.
+> `ForeignSurface` in `obscur-scene` describes the policy (kind, limits) but
+> carries no content and paints nothing. This CPU-buffer road is the one that
+> works.
+
 ## Caches
 
 > **unwired** — the three Vello caches (`glyph_cache`, `path_cache`,

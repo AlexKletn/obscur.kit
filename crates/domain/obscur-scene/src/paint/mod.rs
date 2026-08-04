@@ -1,10 +1,16 @@
 #![doc = include_str!("mod.doc/_module.md")]
 mod blend_mode;
 pub use blend_mode::BlendMode;
+mod buffer_format;
+pub use buffer_format::BufferFormat;
 mod brush;
 pub use brush::Brush;
 mod conic_gradient;
 pub use conic_gradient::ConicGradient;
+mod buffer_fit;
+pub use buffer_fit::BufferFit;
+mod external_buffer;
+pub use external_buffer::ExternalBuffer;
 mod extend_mode;
 pub use extend_mode::ExtendMode;
 mod gradient_stop;
