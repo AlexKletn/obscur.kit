@@ -1179,6 +1179,68 @@ mod tests {
         SceneImage::new(2, 2, Arc::from(px), alpha).expect("2x2 image")
     }
 
+    /// Renders a 2×2 image stretched over (4,4)..(12,12) on white and answers the
+    /// pixel at the centre.
+    fn image_over_white(image: SceneImage, generation: u64) -> tiny_skia::PremultipliedColorU8 {
+        let dst = Rect::new(Point::new(4.0, 4.0), Size::new(8.0, 8.0));
+        let list = DisplayList::from_commands(vec![
+            white_bg(),
+            PaintCommand::DrawImage {
+                image,
+                tile: dst,
+                region: dst,
+                repeat_x: false,
+                repeat_y: false,
+            },
+        ]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(generation));
+        let submission = FrameSubmission::new(RenderFrame::new(snapshot, Size::new(16.0, 16.0)));
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        renderer
+            .pixmap()
+            .expect("a frame was rendered")
+            .pixel(8, 8)
+            .expect("centre pixel exists")
+    }
+
+    #[test]
+    fn a_premultiplied_image_is_passed_through_and_agrees_with_the_straight_one() {
+        // The premultiplied branch had NO test at all, and it is the one that
+        // borrows the image's bytes instead of duplicating them — so this is
+        // where a passthrough that quietly stopped being a passthrough would
+        // show up.
+        //
+        // The same colour said twice: half-alpha red as straight (255,0,0,128)
+        // and as its own premultiplied form (128,0,0,128). Over white they must
+        // land on the same pixel, because they ARE the same picture.
+        let straight = image_over_white(solid_image(255, 0, 0, 128, AlphaMode::Straight), 31);
+        let premultiplied =
+            image_over_white(solid_image(128, 0, 0, 128, AlphaMode::Premultiplied), 32);
+
+        assert_eq!(
+            (
+                premultiplied.red(),
+                premultiplied.green(),
+                premultiplied.blue()
+            ),
+            (straight.red(), straight.green(), straight.blue()),
+            "the borrowed path and the converted one paint the same colour"
+        );
+        // And it really is a half-alpha red over white, not an opaque red or an
+        // untouched background: both channels sit near the midpoint.
+        assert!(
+            premultiplied.red() > 200,
+            "red stays high over white: {premultiplied:?}"
+        );
+        assert!(
+            (100..200).contains(&premultiplied.green()),
+            "and green is halfway, not 0 (opaque red) or 255 (no image): {premultiplied:?}"
+        );
+    }
+
     #[test]
     fn draw_image_fills_dst_with_red_over_white() {
         // A 2×2 opaque-red image stretched to the dst rect (4,4)..(12,12) over a

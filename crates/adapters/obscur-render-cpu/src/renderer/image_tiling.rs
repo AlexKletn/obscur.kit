@@ -42,14 +42,21 @@ pub(crate) fn draw_image(
 
     // tiny-skia stores premultiplied RGBA: premultiply a straight image, pass a
     // premultiplied one through unchanged, so both backends show the same picture.
-    let premultiplied = match image.alpha_mode() {
-        AlphaMode::Premultiplied => image.pixels().to_vec(),
-        AlphaMode::Straight => premultiply_rgba(image.pixels()),
+    //
+    // A premultiplied image is ALREADY in tiny-skia's storage order, so its bytes
+    // are BORROWED rather than copied — a `Pixmap` was an owned `Vec` and cost a
+    // full duplicate of the image every frame it was drawn, which for a live
+    // video or camera frame is megabytes of memory traffic buying nothing. A
+    // straight one still has to be multiplied, and that has to write somewhere.
+    let multiplied;
+    let bytes: &[u8] = match image.alpha_mode() {
+        AlphaMode::Premultiplied => image.pixels(),
+        AlphaMode::Straight => {
+            multiplied = premultiply_rgba(image.pixels());
+            &multiplied
+        }
     };
-    let Some(size) = tiny_skia::IntSize::from_wh(iw, ih) else {
-        return;
-    };
-    let Some(src) = tiny_skia::Pixmap::from_vec(premultiplied, size) else {
+    let Some(src) = tiny_skia::PixmapRef::from_bytes(bytes, iw, ih) else {
         return;
     };
 
@@ -111,7 +118,7 @@ pub(crate) fn draw_image(
             let place = transform
                 .pre_concat(tiny_skia::Transform::from_translate(ox, oy))
                 .pre_concat(tiny_skia::Transform::from_scale(sx, sy));
-            pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, place, effective_clip);
+            pixmap.draw_pixmap(0, 0, src, &paint, place, effective_clip);
         }
     }
 }

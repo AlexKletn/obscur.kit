@@ -157,10 +157,22 @@ close both:
 the region clips whatever overflows. The painter's return value is "still
 animating" — a live source returns `true` and gets a frame per tick.
 
-**The cost.** `draw_buffer` repacks into RGBA8 once per call: for a 1080p frame,
-a few milliseconds of memory traffic. A producer that can already speak tightly
-packed RGBA8 into an `Arc<[u8]>` should skip `ExternalBuffer` entirely, build a
-`SceneImage` directly and use `draw_image_into` — that path copies nothing.
+**What it costs.** Counting copies of the pixels for one foreign frame:
+
+| | |
+| --- | --- |
+| `ExternalBuffer::new` | **0** — it borrows, and only checks the description |
+| `to_scene_image()` | **1** — the repack and the channel swizzle |
+| display list, snapshot, scene clones | **0** — a `SceneImage` holds an `Arc<[u8]>` |
+| Vello | **0** — the `Arc` is wrapped in a `Blob`, a refcount bump; then the GPU upload |
+| CPU, premultiplied | **0** — the bytes are borrowed as a `PixmapRef` |
+| CPU, straight alpha | **1** — premultiplying has to write somewhere |
+
+So the repack is the whole price, and it is only unavoidable because the buffer
+arrived in a layout the scene does not speak. A producer that can already hand
+over tightly packed **premultiplied** RGBA8 in an `Arc<[u8]>` should skip
+`ExternalBuffer` entirely, build a `SceneImage` directly and use
+`draw_image_into` — that path copies the pixels **not once**, on either backend.
 
 > **unbuilt** — spec §5.5 also allows a *texture-backed* foreign surface handed
 > to the GPU without ever touching the CPU, and a native child surface/window.
