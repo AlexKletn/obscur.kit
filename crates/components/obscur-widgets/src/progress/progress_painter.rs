@@ -3,7 +3,7 @@
 use obscur_geometry::{Point, Size};
 use obscur_scene::command::CanvasRegion;
 use obscur_scene::paint::{Brush, LineCap, Stroke};
-use obscur_scene::path::{Path, PathTrim};
+use obscur_scene::path::{Path, PathTrim, parse_path_data};
 use obscur_view::view::{CanvasPaint, ViewProperty, ViewValue};
 
 use super::{Progress, ProgressShape};
@@ -27,7 +27,7 @@ pub fn paint_progress(
     let size = region.size();
     let tracked = read_tracked(props);
     let shape = ProgressShape::from_int(read_shape(props));
-    let track_path = track_path(shape, size);
+    let track_path = read_path(props).unwrap_or_else(|| track_path(shape, size));
     if track_path.is_empty() {
         return false;
     }
@@ -74,6 +74,22 @@ fn sweep(elapsed: f32) -> (f32, f32) {
     let head = phase * (1.0 + SWEEP_FRACTION);
     let tail = head - SWEEP_FRACTION;
     (tail.clamp(0.0, 1.0), head.clamp(0.0, 1.0))
+}
+
+#[doc = include_str!("progress_painter.doc/read_path.md")]
+fn read_path(props: &[ViewProperty]) -> Option<Path> {
+    let data = props
+        .iter()
+        .find(|p| p.name() == Progress::PROP_PATH)
+        .and_then(|p| match p.value() {
+            ViewValue::Text(text) if !text.is_empty() => Some(&**text),
+            _ => None,
+        })?;
+    // Unparseable data falls back to the built-in shape rather than to nothing:
+    // a bar that vanished because of a typo in its outline would be a worse
+    // answer than a plain bar. The parse itself refuses loudly — see
+    // `PathDataError` — so a host that wants to report it can.
+    parse_path_data(data).ok().filter(|path| !path.is_empty())
 }
 
 #[doc = include_str!("progress_painter.doc/read_tracked.md")]
@@ -373,6 +389,65 @@ mod tests {
             assert!(from <= to, "the window never inverts: {from}..{to}");
             assert!((0.0..=1.0).contains(&from) && (0.0..=1.0).contains(&to));
         }
+    }
+
+    #[test]
+    fn an_authored_path_replaces_the_built_in_shape() {
+        // The point of the whole path-data road: a shape this widget never
+        // designed, filled by the same trim as a line or a ring.
+        let props = vec![
+            ViewProperty::new(Progress::PROP_SHAPE, ViewValue::Int(0)),
+            ViewProperty::new(Progress::PROP_TRACKED, ViewValue::Bool(true)),
+            ViewProperty::new(Progress::PROP_VALUE, ViewValue::Float(0.5)),
+            // A triangle, which is neither of the shipped shapes.
+            ViewProperty::new(
+                Progress::PROP_PATH,
+                ViewValue::Text("M0 0 L60 0 L30 40 Z".into()),
+            ),
+        ];
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, Rect::new(Point::new(0.0, 0.0), BOX));
+        let _ = paint_progress(&mut region, &CanvasPaint::new(&props, 0.0), accent());
+        let _ = region.close();
+        let bounds = builder
+            .build()
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                PaintCommand::DrawPath { path, .. } => path.bounds(),
+                _ => None,
+            })
+            .expect("the authored path was drawn");
+        assert!(
+            bounds.size.width <= 61.0 && bounds.size.height <= 41.0,
+            "the triangle, not a bar across the box: {bounds:?}"
+        );
+    }
+
+    #[test]
+    fn unparseable_path_data_falls_back_to_the_shape_rather_than_to_nothing() {
+        // A bar that vanished because of a typo in its outline would be a worse
+        // answer than a plain bar.
+        let props = vec![
+            ViewProperty::new(Progress::PROP_SHAPE, ViewValue::Int(0)),
+            ViewProperty::new(Progress::PROP_TRACKED, ViewValue::Bool(true)),
+            ViewProperty::new(Progress::PROP_VALUE, ViewValue::Float(1.0)),
+            ViewProperty::new(Progress::PROP_PATH, ViewValue::Text("not a path".into())),
+        ];
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, Rect::new(Point::new(0.0, 0.0), BOX));
+        let _ = paint_progress(&mut region, &CanvasPaint::new(&props, 0.0), accent());
+        let _ = region.close();
+        let drawn = builder
+            .build()
+            .commands()
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .count();
+        assert_eq!(
+            drawn, 2,
+            "the line's track and its fill, as if no path was given"
+        );
     }
 
     #[test]

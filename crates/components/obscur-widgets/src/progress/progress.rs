@@ -7,7 +7,7 @@ use obscur_view::view::{
 };
 
 #[doc = include_str!("progress.doc/Progress.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Progress {
     #[doc = include_str!("progress.doc/value.md")]
     value: f32,
@@ -15,6 +15,8 @@ pub struct Progress {
     tracked: bool,
     #[doc = include_str!("progress.doc/shape.md")]
     shape: ProgressShape,
+    #[doc = include_str!("progress.doc/path.md")]
+    path: Option<Box<str>>,
 }
 
 #[doc = include_str!("progress.doc/ProgressShape.md")]
@@ -63,6 +65,8 @@ impl Progress {
     pub const PROP_SHAPE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0703);
     #[doc = include_str!("progress.doc/PROP_TRACKED.md")]
     pub const PROP_TRACKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0704);
+    #[doc = include_str!("progress.doc/PROP_PATH.md")]
+    pub const PROP_PATH: InternedSymbol = InternedSymbol::from_raw(0x00D1_0705);
 
     #[doc = include_str!("progress.doc/new.md")]
     #[must_use]
@@ -77,16 +81,25 @@ impl Progress {
                 0.0
             },
             shape: ProgressShape::Line,
+            path: None,
             tracked: true,
         }
     }
 
+    #[doc = include_str!("progress.doc/along.md")]
+    #[must_use]
+    pub fn along(mut self, path_data: impl Into<Box<str>>) -> Self {
+        self.path = Some(path_data.into());
+        self
+    }
+
     #[doc = include_str!("progress.doc/indeterminate.md")]
     #[must_use]
-    pub const fn indeterminate() -> Self {
+    pub fn indeterminate() -> Self {
         Self {
             value: 0.0,
             shape: ProgressShape::Line,
+            path: None,
             tracked: false,
         }
     }
@@ -99,7 +112,7 @@ impl Progress {
 
     #[doc = include_str!("progress.doc/shaped.md")]
     #[must_use]
-    pub const fn shaped(mut self, shape: ProgressShape) -> Self {
+    pub fn shaped(mut self, shape: ProgressShape) -> Self {
         self.shape = shape;
         self
     }
@@ -123,7 +136,12 @@ impl Progress {
 
     #[doc = include_str!("progress.doc/contents.md")]
     #[must_use]
-    pub fn contents(value: f32, shape: ProgressShape, tracked: bool) -> ViewFragment {
+    pub fn contents(
+        value: f32,
+        shape: ProgressShape,
+        tracked: bool,
+        path: Option<&str>,
+    ) -> ViewFragment {
         // The bar is a `<canvas>` that names the built-in painter and carries
         // what the painter needs. The widget draws nothing itself: one painter
         // serves every progress on the screen, and each instance parameterises
@@ -143,6 +161,10 @@ impl Progress {
                 .with_prop(ViewProperty::new(
                     Self::PROP_TRACKED,
                     ViewValue::Bool(tracked),
+                ))
+                .with_prop(ViewProperty::new(
+                    Self::PROP_PATH,
+                    ViewValue::Text(path.unwrap_or("").into()),
                 )),
         ])
     }
@@ -154,7 +176,12 @@ impl Progress {
         for prop in self.props() {
             node = node.with_prop(prop);
         }
-        View::single(node.with_children(Self::contents(self.value, self.shape, self.tracked)))
+        View::single(node.with_children(Self::contents(
+            self.value,
+            self.shape,
+            self.tracked,
+            self.path.as_deref(),
+        )))
     }
 }
 
