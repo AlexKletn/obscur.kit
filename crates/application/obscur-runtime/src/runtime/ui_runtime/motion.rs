@@ -72,6 +72,11 @@ impl UiRuntime {
         // else happened to be animating.
         self.advance_flings(delta);
         self.advance_holds(delta);
+        // §5.3: a canvas that draws a moving thing reads this clock. It rides
+        // the same signal for the same reason the flings and the holds do — a
+        // host already drives one "time passed" tick, and a second clock would
+        // be a second thing to forget.
+        self.canvas_clock += delta.max(0.0);
         // Remember where each timeline that finished on this tick settled: the
         // scheduler prunes it, and the overlay still has to apply the value the
         // animation ended on, which for a reversed final iteration is progress

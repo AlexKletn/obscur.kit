@@ -61,6 +61,7 @@ impl UiRuntime {
             last_layout_inputs: None,
             inspector: TreeInspector::new(),
             canvas_painters: CanvasPainters::new(),
+            canvas_clock: 0.0,
             focused: None,
             focus_visible: false,
             pointers: PointerSessions::new(),

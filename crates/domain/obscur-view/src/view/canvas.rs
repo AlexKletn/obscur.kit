@@ -4,6 +4,35 @@ use obscur_identity::InternedSymbol;
 
 use super::{ViewProperty, ViewValue};
 
+#[doc = include_str!("canvas.doc/CanvasPaint.md")]
+#[derive(Debug, Clone, Copy)]
+pub struct CanvasPaint<'a> {
+    #[doc = include_str!("canvas.doc/paint_props.md")]
+    props: &'a [ViewProperty],
+    #[doc = include_str!("canvas.doc/paint_elapsed.md")]
+    elapsed: f32,
+}
+
+impl<'a> CanvasPaint<'a> {
+    #[doc = include_str!("canvas.doc/paint_new.md")]
+    #[must_use]
+    pub const fn new(props: &'a [ViewProperty], elapsed: f32) -> Self {
+        Self { props, elapsed }
+    }
+
+    #[doc = include_str!("canvas.doc/paint_props_2.md")]
+    #[must_use]
+    pub const fn props(&self) -> &'a [ViewProperty] {
+        self.props
+    }
+
+    #[doc = include_str!("canvas.doc/paint_elapsed_2.md")]
+    #[must_use]
+    pub const fn elapsed(&self) -> f32 {
+        self.elapsed
+    }
+}
+
 #[doc = include_str!("canvas.doc/CANVAS_PAINTER.md")]
 pub const CANVAS_PAINTER: InternedSymbol = InternedSymbol::from_raw(0x0000_0401);
 

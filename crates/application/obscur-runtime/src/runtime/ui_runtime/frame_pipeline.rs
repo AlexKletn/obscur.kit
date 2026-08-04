@@ -76,6 +76,7 @@ impl UiRuntime {
         //    whether the commit carried any operation — identical to the previous
         //    `!plan.is_empty()`.
         let phase_clock = FramePhaseClock::start();
+        let mut animating_canvas = false;
         let (reconciled, reconcile_roots) = if plan.reconcile() {
             // `tree`, `reconciler`, `enactor`, `components`, `virtual_lists`,
             // `scroll`, `telemetry` and `diagnostics` are disjoint fields: a legal
@@ -253,13 +254,17 @@ impl UiRuntime {
             // `scene_composer`, `tree`, `boxes`, `resources`, `scroll`,
             // `generated_content`, `motion`, `inspector`, `surface` and `telemetry`
             // are disjoint fields: a legal split borrow.
-            let editing = self.editing.as_ref().map(TextEditSession::view);
-            let hovered = self.hover.topmost();
             // §5.3: every canvas's painter runs HERE — after layout, so it knows
             // its own box, and before compose, because it is application code
             // that needs `&mut` while the compose walk takes `&self`. What it
-            // draws is spliced into its node's own paint unit.
-            let canvases = self.canvas_painters.paint(&self.tree, &self.boxes);
+            // draws is spliced into its node's own paint unit. Run BEFORE the
+            // borrows below, because painting is the one step in this block that
+            // needs `&mut self`.
+            let (canvases, canvas_animating) =
+                self.canvas_painters
+                    .paint(&self.tree, &self.boxes, self.canvas_clock);
+            let editing = self.editing.as_ref().map(TextEditSession::view);
+            let hovered = self.hover.topmost();
             ComposePhase::new(
                 &mut self.scene,
                 &self.scene_composer,
@@ -275,6 +280,14 @@ impl UiRuntime {
                 &mut self.telemetry,
             )
             .run(&ctx, &computed, editing, hovered, &phase_clock);
+            // A painter that says it is still moving must be asked again, or it
+            // draws one frame and freezes. One that says it is not must not be,
+            // or an idle application renders forever. Requested after the block
+            // so the borrows above are done with.
+            animating_canvas = canvas_animating;
+        }
+        if animating_canvas {
+            self.request_frame(FrameReason::Animation);
         }
         let snapshot = self.scene.snapshot();
 

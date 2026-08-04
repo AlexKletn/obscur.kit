@@ -11,6 +11,8 @@ use obscur_view::view::{
 pub struct Progress {
     #[doc = include_str!("progress.doc/value.md")]
     value: f32,
+    #[doc = include_str!("progress.doc/tracked.md")]
+    tracked: bool,
     #[doc = include_str!("progress.doc/shape.md")]
     shape: ProgressShape,
 }
@@ -59,6 +61,8 @@ impl Progress {
     pub const PROP_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0702);
     #[doc = include_str!("progress.doc/PROP_SHAPE.md")]
     pub const PROP_SHAPE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0703);
+    #[doc = include_str!("progress.doc/PROP_TRACKED.md")]
+    pub const PROP_TRACKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0704);
 
     #[doc = include_str!("progress.doc/new.md")]
     #[must_use]
@@ -73,7 +77,24 @@ impl Progress {
                 0.0
             },
             shape: ProgressShape::Line,
+            tracked: true,
         }
+    }
+
+    #[doc = include_str!("progress.doc/indeterminate.md")]
+    #[must_use]
+    pub const fn indeterminate() -> Self {
+        Self {
+            value: 0.0,
+            shape: ProgressShape::Line,
+            tracked: false,
+        }
+    }
+
+    #[doc = include_str!("progress.doc/is_tracked.md")]
+    #[must_use]
+    pub const fn is_tracked(&self) -> bool {
+        self.tracked
     }
 
     #[doc = include_str!("progress.doc/shaped.md")]
@@ -96,12 +117,13 @@ impl Progress {
             ViewProperty::new(LOCAL_NAME, ViewValue::Text("progress".into())),
             ViewProperty::new(Self::PROP_VALUE, ViewValue::Float(f64::from(self.value))),
             ViewProperty::new(Self::PROP_SHAPE, ViewValue::Int(self.shape.as_int())),
+            ViewProperty::new(Self::PROP_TRACKED, ViewValue::Bool(self.tracked)),
         ]
     }
 
     #[doc = include_str!("progress.doc/contents.md")]
     #[must_use]
-    pub fn contents(value: f32, shape: ProgressShape) -> ViewFragment {
+    pub fn contents(value: f32, shape: ProgressShape, tracked: bool) -> ViewFragment {
         // The bar is a `<canvas>` that names the built-in painter and carries
         // what the painter needs. The widget draws nothing itself: one painter
         // serves every progress on the screen, and each instance parameterises
@@ -117,6 +139,10 @@ impl Progress {
                 .with_prop(ViewProperty::new(
                     Self::PROP_SHAPE,
                     ViewValue::Int(shape.as_int()),
+                ))
+                .with_prop(ViewProperty::new(
+                    Self::PROP_TRACKED,
+                    ViewValue::Bool(tracked),
                 )),
         ])
     }
@@ -128,7 +154,7 @@ impl Progress {
         for prop in self.props() {
             node = node.with_prop(prop);
         }
-        View::single(node.with_children(Self::contents(self.value, self.shape)))
+        View::single(node.with_children(Self::contents(self.value, self.shape, self.tracked)))
     }
 }
 

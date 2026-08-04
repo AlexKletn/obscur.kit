@@ -58,11 +58,12 @@ fn a_registered_painter_reaches_the_display_list() {
 
     rt.register_canvas(
         CHART,
-        Box::new(|region, _props| {
+        Box::new(|region, _paint| {
             let size = region.size();
             region
                 .painter()
                 .fill_rect(Rect::new(Point::new(0.0, 0.0), size), red());
+            false
         }),
     );
     let _ = rt.render_now(&staged_view(), std::slice::from_ref(&compile(CSS)));
@@ -97,11 +98,12 @@ fn the_painter_is_told_its_laid_out_size() {
     let mut rt = staged();
     rt.register_canvas(
         CHART,
-        Box::new(move |region, _props| {
+        Box::new(move |region, _paint| {
             sink.set(region.size());
             region
                 .painter()
                 .fill_rect(Rect::new(Point::new(0.0, 0.0), Size::new(1.0, 1.0)), red());
+            false
         }),
     );
     let _ = rt.render_now(&staged_view(), std::slice::from_ref(&compile(CSS)));
@@ -132,7 +134,7 @@ fn an_unbalanced_painter_is_contained_and_named() {
     let mut rt = staged();
     rt.register_canvas(
         CHART,
-        Box::new(|region, _props| {
+        Box::new(|region, _paint| {
             region
                 .painter()
                 .push_clip(obscur_kit::scene::clip::Clip::rect(Rect::new(
@@ -142,6 +144,7 @@ fn an_unbalanced_painter_is_contained_and_named() {
             region
                 .painter()
                 .fill_rect(Rect::new(Point::new(0.0, 0.0), Size::new(5.0, 5.0)), red());
+            false
         }),
     );
     let _ = rt.render_now(&staged_view(), std::slice::from_ref(&compile(CSS)));

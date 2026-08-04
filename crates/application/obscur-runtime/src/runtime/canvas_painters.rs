@@ -5,17 +5,17 @@ use std::collections::HashMap;
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_scene::command::{CanvasRegion, DisplayListBuilder, PaintCommand};
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::{ViewProperty, canvas_painter};
+use obscur_view::view::{CanvasPaint, canvas_painter};
 
 use crate::orchestration::LayoutBoxes;
 
 #[doc = include_str!("canvas_painters.doc/CanvasPainter.md")]
-pub type CanvasPainter = Box<dyn FnMut(&mut CanvasRegion<'_>, &[ViewProperty])>;
+pub type CanvasPainter = Box<dyn FnMut(&mut CanvasRegion<'_>, &CanvasPaint<'_>) -> bool>;
 
 #[doc = include_str!("canvas_painters.doc/CanvasPainters.md")]
 #[derive(Default)]
 pub(crate) struct CanvasPainters {
-    #[doc = include_str!("canvas_painters.doc/painters.md")]
+    #[doc = include_str!("canvas_painters.doc/painters_field.md")]
     painters: HashMap<InternedSymbol, CanvasPainter>,
     #[doc = include_str!("canvas_painters.doc/unbalanced.md")]
     unbalanced: Vec<InternedSymbol>,
@@ -42,13 +42,15 @@ impl CanvasPainters {
         &mut self,
         tree: &RetainedTree,
         boxes: &LayoutBoxes,
-    ) -> HashMap<NodeId, Vec<PaintCommand>> {
+        elapsed: f32,
+    ) -> (HashMap<NodeId, Vec<PaintCommand>>, bool) {
         let mut painted = HashMap::new();
+        let mut animating = false;
         // An application that registered no painter pays one branch. The walk
         // below is over every live node, and a canvas is rare — most trees hold
         // none at all.
         if self.painters.is_empty() {
-            return painted;
+            return (painted, animating);
         }
         for (node, retained) in tree.iter() {
             let Some(id) = canvas_painter(retained.props()) else {
@@ -70,7 +72,7 @@ impl CanvasPainters {
                 &mut builder,
                 obscur_geometry::Rect::new(bounds.origin(), bounds.size()),
             );
-            painter(&mut region, retained.props());
+            animating |= painter(&mut region, &CanvasPaint::new(retained.props(), elapsed));
             if !region.close() {
                 self.unbalanced.push(id);
             }
@@ -79,7 +81,7 @@ impl CanvasPainters {
                 painted.insert(node, commands);
             }
         }
-        painted
+        (painted, animating)
     }
 }
 
@@ -159,15 +161,16 @@ mod tests {
         let mut painters = CanvasPainters::new();
         painters.register(
             CHART,
-            Box::new(|region, _props| {
+            Box::new(|region, _paint| {
                 let size = region.size();
                 region
                     .painter()
                     .fill_rect(Rect::new(Point::new(0.0, 0.0), size), red());
+                false
             }),
         );
 
-        let painted = painters.paint(&tree, &boxes);
+        let painted = painters.paint(&tree, &boxes, 0.0).0;
         let commands = painted.get(&node).expect("the canvas painted");
         assert!(
             commands
@@ -181,15 +184,15 @@ mod tests {
     fn nothing_registered_costs_one_branch_and_paints_nothing() {
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        assert!(painters.paint(&tree, &boxes).is_empty());
+        assert!(painters.paint(&tree, &boxes, 0.0).0.is_empty());
     }
 
     #[test]
     fn a_canvas_naming_an_unregistered_painter_draws_nothing_and_does_not_panic() {
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        painters.register(InternedSymbol::from_raw(0x0F99), Box::new(|_, _| {}));
-        assert!(painters.paint(&tree, &boxes).is_empty());
+        painters.register(InternedSymbol::from_raw(0x0F99), Box::new(|_, _| false));
+        assert!(painters.paint(&tree, &boxes, 0.0).0.is_empty());
     }
 
     #[test]
@@ -200,8 +203,8 @@ mod tests {
         // every frame.
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        painters.register(CHART, Box::new(|_, _| {}));
-        assert!(painters.paint(&tree, &boxes).is_empty());
+        painters.register(CHART, Box::new(|_, _| false));
+        assert!(painters.paint(&tree, &boxes, 0.0).0.is_empty());
     }
 
     #[test]
@@ -210,17 +213,18 @@ mod tests {
         let mut painters = CanvasPainters::new();
         painters.register(
             CHART,
-            Box::new(|region, _props| {
+            Box::new(|region, _paint| {
                 region
                     .painter()
                     .push_clip(obscur_scene::clip::Clip::rect(Rect::new(
                         Point::new(0.0, 0.0),
                         Size::new(1.0, 1.0),
                     )));
+                false
             }),
         );
 
-        let _ = painters.paint(&tree, &boxes);
+        let _ = painters.paint(&tree, &boxes, 0.0);
         assert_eq!(
             painters.take_unbalanced(),
             vec![CHART],
@@ -238,14 +242,15 @@ mod tests {
         let mut painters = CanvasPainters::new();
         painters.register(
             CHART,
-            Box::new(|region, _props| {
+            Box::new(|region, _paint| {
                 region
                     .painter()
                     .fill_rect(Rect::new(Point::new(0.0, 0.0), Size::new(1.0, 1.0)), red());
+                false
             }),
         );
         assert!(
-            painters.paint(&tree, &LayoutBoxes::new()).is_empty(),
+            painters.paint(&tree, &LayoutBoxes::new(), 0.0).0.is_empty(),
             "a display:none branch has nowhere to paint into"
         );
     }

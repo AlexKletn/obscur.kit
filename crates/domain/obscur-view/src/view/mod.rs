@@ -10,7 +10,7 @@ pub use view_key::ViewKey;
 mod view_node;
 pub use view_node::ViewNode;
 mod canvas;
-pub use canvas::{CANVAS_PAINTER, canvas_painter, canvas_painter_prop};
+pub use canvas::{CANVAS_PAINTER, CanvasPaint, canvas_painter, canvas_painter_prop};
 mod event_name;
 pub use event_name::{
     EVENT_BLUR, EVENT_CHANGE, EVENT_CLICK, EVENT_CONTEXT_MENU, EVENT_FOCUS, EVENT_INPUT,

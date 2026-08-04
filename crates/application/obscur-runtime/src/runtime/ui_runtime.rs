@@ -124,6 +124,8 @@ pub struct UiRuntime {
     pointers: PointerSessions,
     #[doc = include_str!("ui_runtime.doc/canvas_painters.md")]
     canvas_painters: CanvasPainters,
+    #[doc = include_str!("ui_runtime.doc/canvas_clock.md")]
+    canvas_clock: f32,
     #[doc = include_str!("ui_runtime.doc/pointer_bindings.md")]
     pointer_bindings: PointerEventBindings,
     #[doc = include_str!("ui_runtime.doc/environment.md")]

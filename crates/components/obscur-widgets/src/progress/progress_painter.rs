@@ -4,21 +4,32 @@ use obscur_geometry::{Point, Size};
 use obscur_scene::command::CanvasRegion;
 use obscur_scene::paint::{Brush, LineCap, Stroke};
 use obscur_scene::path::{Path, PathTrim};
-use obscur_view::view::{ViewProperty, ViewValue};
+use obscur_view::view::{CanvasPaint, ViewProperty, ViewValue};
 
 use super::{Progress, ProgressShape};
 
 #[doc = include_str!("progress_painter.doc/THICKNESS.md")]
 const THICKNESS: f32 = 6.0;
 
+#[doc = include_str!("progress_painter.doc/SWEEP_SECONDS.md")]
+const SWEEP_SECONDS: f32 = 1.4;
+
+#[doc = include_str!("progress_painter.doc/SWEEP_FRACTION.md")]
+const SWEEP_FRACTION: f32 = 0.25;
+
 #[doc = include_str!("progress_painter.doc/paint_progress.md")]
-pub fn paint_progress(region: &mut CanvasRegion<'_>, props: &[ViewProperty], accent: Brush) {
+pub fn paint_progress(
+    region: &mut CanvasRegion<'_>,
+    paint: &CanvasPaint<'_>,
+    accent: Brush,
+) -> bool {
+    let props = paint.props();
     let size = region.size();
-    let value = read_value(props);
+    let tracked = read_tracked(props);
     let shape = ProgressShape::from_int(read_shape(props));
     let track_path = track_path(shape, size);
     if track_path.is_empty() {
-        return;
+        return false;
     }
 
     let thickness = THICKNESS.min(size.width.min(size.height));
@@ -34,10 +45,49 @@ pub fn paint_progress(region: &mut CanvasRegion<'_>, props: &[ViewProperty], acc
         .painter()
         .stroke(track_path.clone(), pen(track_brush()));
 
-    let filled = PathTrim::of(&track_path).slice(0.0, value);
+    let measured = PathTrim::of(&track_path);
+    // A tracked bar fills from the start to its value. An untracked one sweeps a
+    // window along the track instead — it has no value to show, and a bar frozen
+    // at zero would say "nothing is happening" when the truth is "I do not know
+    // how much has".
+    let (from, to) = if tracked {
+        (0.0, read_value(props))
+    } else {
+        sweep(paint.elapsed())
+    };
+    let filled = measured.slice(from, to);
     if !filled.is_empty() {
         region.painter().stroke(filled, pen(accent));
     }
+    // The whole reason a painter votes: only an untracked bar needs the next
+    // frame. A tracked one is redrawn when its value changes, like anything else.
+    !tracked
+}
+
+#[doc = include_str!("progress_painter.doc/sweep.md")]
+fn sweep(elapsed: f32) -> (f32, f32) {
+    // The window's LEADING edge runs the whole track and wraps; the trailing
+    // edge follows a fixed distance behind. Clamping rather than wrapping the
+    // span is deliberate: a window that wrapped would appear at both ends at
+    // once, which reads as two bars rather than one travelling.
+    let phase = (elapsed / SWEEP_SECONDS).fract();
+    let head = phase * (1.0 + SWEEP_FRACTION);
+    let tail = head - SWEEP_FRACTION;
+    (tail.clamp(0.0, 1.0), head.clamp(0.0, 1.0))
+}
+
+#[doc = include_str!("progress_painter.doc/read_tracked.md")]
+fn read_tracked(props: &[ViewProperty]) -> bool {
+    props
+        .iter()
+        .find(|p| p.name() == Progress::PROP_TRACKED)
+        .and_then(|p| match p.value() {
+            ViewValue::Bool(v) => Some(*v),
+            _ => None,
+        })
+        // A node that says nothing is tracked: a bar showing a fraction it was
+        // given is the safer default than one that animates forever.
+        .unwrap_or(true)
 }
 
 #[doc = include_str!("progress_painter.doc/track_path.md")]
@@ -147,7 +197,7 @@ mod tests {
     use obscur_scene::command::{CanvasRegion, DisplayListBuilder, PaintCommand};
     use obscur_scene::paint::{Brush, LineCap};
     use obscur_scene::path::PathTrim;
-    use obscur_view::view::{ViewProperty, ViewValue};
+    use obscur_view::view::{CanvasPaint, ViewProperty, ViewValue};
 
     const BOX: Size = Size {
         width: 100.0,
@@ -158,7 +208,32 @@ mod tests {
         vec![
             ViewProperty::new(Progress::PROP_VALUE, ViewValue::Float(value)),
             ViewProperty::new(Progress::PROP_SHAPE, ViewValue::Int(shape.as_int())),
+            ViewProperty::new(Progress::PROP_TRACKED, ViewValue::Bool(true)),
         ]
+    }
+
+    /// Paints an untracked bar at `elapsed` and reports `(spans, animating)`.
+    fn untracked(elapsed: f32) -> (Vec<(f32, f32)>, bool) {
+        let props = vec![
+            ViewProperty::new(Progress::PROP_SHAPE, ViewValue::Int(0)),
+            ViewProperty::new(Progress::PROP_TRACKED, ViewValue::Bool(false)),
+        ];
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, Rect::new(Point::new(0.0, 0.0), BOX));
+        let animating = paint_progress(&mut region, &CanvasPaint::new(&props, elapsed), accent());
+        let _ = region.close();
+        let spans = builder
+            .build()
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().map(|b| (b.origin.x, b.right()))
+                }
+                _ => None,
+            })
+            .collect();
+        (spans, animating)
     }
 
     fn accent() -> Brush {
@@ -169,7 +244,11 @@ mod tests {
     fn strokes(value: f64, shape: ProgressShape) -> Vec<(f32, LineCap)> {
         let mut builder = DisplayListBuilder::new();
         let mut region = CanvasRegion::open(&mut builder, Rect::new(Point::new(0.0, 0.0), BOX));
-        paint_progress(&mut region, &props(value, shape), accent());
+        paint_progress(
+            &mut region,
+            &CanvasPaint::new(&props(value, shape), 0.0),
+            accent(),
+        );
         let _ = region.close();
         builder
             .build()
@@ -256,10 +335,51 @@ mod tests {
     }
 
     #[test]
+    fn an_untracked_bar_moves_and_keeps_asking_for_frames() {
+        // The two halves of an unbounded bar, and neither works without the
+        // other: it must move, and it must be asked again or it moves once.
+        let (early, animating) = untracked(0.1);
+        assert!(animating, "an untracked bar votes for the next frame");
+        let (later, _) = untracked(0.7);
+        assert_ne!(
+            early.last(),
+            later.last(),
+            "and the window is somewhere else a moment later: {early:?} vs {later:?}"
+        );
+    }
+
+    #[test]
+    fn a_tracked_bar_does_not_ask_for_frames() {
+        // The other half: a bar that knows its value is redrawn when the value
+        // changes, like anything else. Voting yes here would make an idle
+        // application render forever.
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, Rect::new(Point::new(0.0, 0.0), BOX));
+        let animating = paint_progress(
+            &mut region,
+            &CanvasPaint::new(&props(0.5, ProgressShape::Line), 3.0),
+            accent(),
+        );
+        let _ = region.close();
+        assert!(!animating);
+    }
+
+    #[test]
+    fn the_sweep_window_never_appears_at_both_ends_at_once() {
+        // Clamped rather than wrapped: a window that wrapped would read as two
+        // bars rather than one travelling.
+        for step in 0..40 {
+            let (from, to) = super::sweep(step as f32 * 0.1);
+            assert!(from <= to, "the window never inverts: {from}..{to}");
+            assert!((0.0..=1.0).contains(&from) && (0.0..=1.0).contains(&to));
+        }
+    }
+
+    #[test]
     fn a_node_carrying_no_properties_paints_an_empty_line() {
         let mut builder = DisplayListBuilder::new();
         let mut region = CanvasRegion::open(&mut builder, Rect::new(Point::new(0.0, 0.0), BOX));
-        paint_progress(&mut region, &[], accent());
+        let _ = paint_progress(&mut region, &CanvasPaint::new(&[], 0.0), accent());
         assert!(region.close(), "and leaves the region balanced");
     }
 }
