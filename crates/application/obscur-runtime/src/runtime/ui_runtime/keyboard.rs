@@ -79,6 +79,14 @@ impl UiRuntime {
             // field edits the field.
             if self.try_text_edit(target, &event) {
                 consumed_edit = true;
+            } else if event
+                .logical()
+                .is_some_and(|key| self.nudge_focused_slider(key))
+            {
+                // A focused slider owns the arrows, Home and End. It can,
+                // because a slider is not editable — the editing session above
+                // has already declined this key — so nothing else on the
+                // keyboard wanted them.
             } else {
                 command = self.resolve_and_dispatch_shortcut(event);
                 if command.is_none() && is_tab(event.logical()) {

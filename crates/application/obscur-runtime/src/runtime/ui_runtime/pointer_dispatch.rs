@@ -130,6 +130,29 @@ impl UiRuntime {
         //    the single door focus moves through, so this ordering is the last
         //    one that matters to them: the refusal above is reachable, and the
         //    notification below reports a move that has already happened.
+        // 2c-slider. A slider takes the press before anything else does: a drag
+        //    on it is not a text selection, not a pan, and not a click on
+        //    whatever the hit test happened to land on inside it. It runs after
+        //    the raw `pointerdown`, so refusing that still stops it — and before
+        //    focus, so the press still focuses the control it moved.
+        if event.kind() == PointerEventKind::Down
+            && !prevented
+            && let Some(hit) = target
+        {
+            self.begin_slider_drag(event.pointer(), hit, event.position());
+        }
+        if event.kind() == PointerEventKind::Move && !prevented {
+            self.continue_slider_drag(event.pointer(), event.position());
+        }
+        if matches!(
+            event.kind(),
+            PointerEventKind::Up | PointerEventKind::Cancel
+        ) {
+            // Forgotten on both endings, and unconditionally: a drag the system
+            // took away must not outlive the contact that owned it.
+            self.end_slider_drag(event.pointer());
+        }
+
         let mut focus_changed = false;
         if event.kind() == PointerEventKind::Down && !prevented {
             focus_changed = self.press_landed(&event, screen_point, target, &mut press_changed);

@@ -32,6 +32,8 @@ pub(crate) struct HandlerRegistry {
     text_input_handlers: TextHandlers,
     #[doc = include_str!("handler_registry.doc/change_handlers.md")]
     change_handlers: TextHandlers,
+    #[doc = include_str!("handler_registry.doc/value_handlers.md")]
+    value_handlers: HashMap<InternedSymbol, Box<dyn FnMut(f32, f32)>>,
     #[doc = include_str!("handler_registry.doc/commands.md")]
     commands: CommandRouter,
     #[doc = include_str!("handler_registry.doc/command_registry.md")]
@@ -50,6 +52,7 @@ impl HandlerRegistry {
             app_commands: AppCommands::new(),
             text_input_handlers: TextHandlers::new(),
             change_handlers: TextHandlers::new(),
+            value_handlers: HashMap::new(),
             commands: CommandRouter::new(),
             command_registry: CommandRegistry::new(),
         }
@@ -292,6 +295,30 @@ impl HandlerRegistry {
     }
 
     #[doc = include_str!("handler_registry.doc/dispatch_text_input.md")]
+    #[doc = include_str!("handler_registry.doc/set_value_input.md")]
+    pub(crate) fn set_value_input(
+        &mut self,
+        command: InternedSymbol,
+        handler: impl FnMut(f32, f32) + 'static,
+    ) {
+        self.value_handlers.insert(command, Box::new(handler));
+    }
+
+    #[doc = include_str!("handler_registry.doc/dispatch_value_input.md")]
+    pub(crate) fn dispatch_value_input(
+        &mut self,
+        command: InternedSymbol,
+        low: f32,
+        high: f32,
+    ) -> bool {
+        if let Some(handler) = self.value_handlers.get_mut(&command) {
+            handler(low, high);
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn dispatch_text_input(&mut self, command: InternedSymbol, text: &str) -> bool {
         if let Some(handler) = self.text_input_handlers.get_mut(&command) {
             handler(text);

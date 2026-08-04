@@ -30,6 +30,15 @@ impl UiRuntime {
         self.routing.set_text_input(command, handler);
     }
 
+    #[doc = include_str!("event_listeners.doc/on_value_input.md")]
+    pub fn on_value_input(
+        &mut self,
+        command: InternedSymbol,
+        handler: impl FnMut(f32, f32) + 'static,
+    ) {
+        self.routing.set_value_input(command, handler);
+    }
+
     #[doc = include_str!("event_listeners.doc/has_text_input_handler.md")]
     #[must_use]
     pub fn has_text_input_handler(&self, command: InternedSymbol) -> bool {

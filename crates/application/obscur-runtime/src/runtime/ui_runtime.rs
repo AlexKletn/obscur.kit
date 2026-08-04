@@ -57,6 +57,7 @@ mod queued_input;
 mod resource_resolution;
 mod resources;
 mod scrolling;
+mod slider;
 mod styling;
 mod surface;
 mod text_edit_commands;
@@ -126,6 +127,8 @@ pub struct UiRuntime {
     canvas_painters: CanvasPainters,
     #[doc = include_str!("ui_runtime.doc/canvas_clock.md")]
     canvas_clock: f32,
+    #[doc = include_str!("ui_runtime.doc/slider_drags.md")]
+    slider_drags: HashMap<obscur_interaction::pointer::PointerId, (NodeId, crate::runtime::Grab)>,
     #[doc = include_str!("ui_runtime.doc/pointer_bindings.md")]
     pointer_bindings: PointerEventBindings,
     #[doc = include_str!("ui_runtime.doc/environment.md")]

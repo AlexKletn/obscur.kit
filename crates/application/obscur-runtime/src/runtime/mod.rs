@@ -182,6 +182,8 @@ pub use key_dispatch::KeyDispatch;
 
 mod focus_order;
 pub(crate) use focus_order::FocusOrder;
+mod slider_control;
+pub(crate) use slider_control::{Grab, SliderControl};
 mod semantic_builder;
 
 pub use semantic_builder::SemanticTreeBuilder;

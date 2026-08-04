@@ -62,6 +62,7 @@ impl UiRuntime {
             inspector: TreeInspector::new(),
             canvas_painters: CanvasPainters::new(),
             canvas_clock: 0.0,
+            slider_drags: HashMap::new(),
             focused: None,
             focus_visible: false,
             pointers: PointerSessions::new(),
