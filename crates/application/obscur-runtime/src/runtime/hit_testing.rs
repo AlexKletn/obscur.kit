@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use obscur_geometry::{Point, Rect};
 use obscur_identity::NodeId;
 use obscur_interaction::spatial::SpatialIndex;
+use obscur_scene::path::PathTrim;
 use obscur_style::computed::ComputedValue;
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_tree::tree::RetainedTree;
@@ -15,6 +16,8 @@ use crate::orchestration::{ComputedStyles, LayoutBoxes};
 pub(crate) struct HitTesting {
     #[doc = include_str!("hit_testing.doc/index.md")]
     index: SpatialIndex,
+    #[doc = include_str!("hit_testing.doc/canvas_regions.md")]
+    canvas_regions: HashMap<NodeId, PathTrim>,
 }
 
 impl HitTesting {
@@ -22,10 +25,16 @@ impl HitTesting {
     pub(crate) fn new() -> Self {
         Self {
             index: SpatialIndex::new(),
+            canvas_regions: HashMap::new(),
         }
     }
 
     #[doc = include_str!("hit_testing.doc/rebuild.md")]
+    #[doc = include_str!("hit_testing.doc/set_canvas_regions.md")]
+    pub(crate) fn set_canvas_regions(&mut self, regions: HashMap<NodeId, PathTrim>) {
+        self.canvas_regions = regions;
+    }
+
     pub(crate) fn rebuild(&mut self, tree: &RetainedTree, boxes: &LayoutBoxes) {
         self.index.clear();
         for (&node, layout_box) in boxes {
@@ -48,6 +57,16 @@ impl HitTesting {
         for hit in self.index.hits_at(mapped) {
             let node = hit.node();
             if !Self::is_hittable(tree, computed, boxes, node, mapped, screen) {
+                continue;
+            }
+            // §4.13's Canvas custom hit test. A canvas that declared a shape is
+            // hit only inside it, so the corners of a round knob's box belong to
+            // whatever is behind it — which is the whole reason the hook exists.
+            // A canvas that declared none is hit anywhere in its box, like every
+            // other element.
+            if let Some(region) = self.canvas_regions.get(&node)
+                && !region.contains(mapped)
+            {
                 continue;
             }
             let key = (

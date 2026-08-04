@@ -112,6 +112,30 @@ impl PathTrim {
         self.lengths.last().copied().unwrap_or(0.0)
     }
 
+    #[doc = include_str!("path_trim.doc/contains.md")]
+    #[must_use]
+    pub fn contains(&self, point: Point) -> bool {
+        // Even-odd ray casting: count how many edges a ray from the point
+        // crosses. Each subpath is treated as CLOSED whether or not it was
+        // written that way, which is what a fill does and therefore what a hit
+        // region means — an open shape still has an inside.
+        let mut inside = false;
+        let mut start = 0;
+        for end in self
+            .breaks
+            .iter()
+            .copied()
+            .chain(core::iter::once(self.points.len()))
+        {
+            let subpath = &self.points[start..end];
+            if subpath.len() >= 3 && crosses_odd_number_of_edges(subpath, point) {
+                inside = !inside;
+            }
+            start = end;
+        }
+        inside
+    }
+
     #[doc = include_str!("path_trim.doc/slice.md")]
     #[must_use]
     pub fn slice(&self, start: f32, end: f32) -> Path {
@@ -164,6 +188,25 @@ impl PathTrim {
         }
         out
     }
+}
+
+#[doc = include_str!("path_trim.doc/crosses_odd_number_of_edges.md")]
+fn crosses_odd_number_of_edges(polygon: &[Point], point: Point) -> bool {
+    let mut inside = false;
+    let mut j = polygon.len() - 1;
+    for i in 0..polygon.len() {
+        let (a, b) = (polygon[i], polygon[j]);
+        // The half-open rule on the vertical span is what stops a ray that
+        // passes exactly through a vertex from counting it twice.
+        if (a.y > point.y) != (b.y > point.y) {
+            let span = b.y - a.y;
+            if span != 0.0 && point.x < (b.x - a.x) * (point.y - a.y) / span + a.x {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
 }
 
 #[doc = include_str!("path_trim.doc/flatten_quad.md")]
@@ -380,6 +423,61 @@ mod tests {
             .filter(|s| matches!(s, PathSegment::MoveTo(_)))
             .count();
         assert_eq!(moves, 2, "the gap stays a gap: {:?}", whole.segments());
+    }
+
+    #[test]
+    fn a_point_inside_a_shape_is_inside_it() {
+        let path = Path::rect(Rect::new(Point::new(10.0, 10.0), Size::new(40.0, 20.0)));
+        let trim = PathTrim::of(&path);
+        assert!(trim.contains(Point::new(30.0, 20.0)), "the middle");
+        assert!(!trim.contains(Point::new(5.0, 20.0)), "left of it");
+        assert!(!trim.contains(Point::new(30.0, 40.0)), "below it");
+    }
+
+    #[test]
+    fn a_shape_is_closed_for_the_purpose_of_being_inside_it() {
+        // An open triangle still has an inside — which is what a fill does, and
+        // therefore what a hit region means.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        path.line_to(Point::new(40.0, 0.0));
+        path.line_to(Point::new(20.0, 30.0));
+        let trim = PathTrim::of(&path);
+        assert!(trim.contains(Point::new(20.0, 10.0)), "inside the triangle");
+        assert!(
+            !trim.contains(Point::new(2.0, 25.0)),
+            "outside it, in the bounding box's corner — which is the whole point"
+        );
+    }
+
+    #[test]
+    fn a_hole_is_a_hole() {
+        // Two subpaths, the inner one reversed or not: even-odd says the ring
+        // is solid and its middle is not.
+        let mut path = Path::rect(Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0)));
+        let inner = Path::rect(Rect::new(Point::new(30.0, 30.0), Size::new(40.0, 40.0)));
+        for segment in inner.segments() {
+            match segment {
+                PathSegment::MoveTo(p) => {
+                    path.move_to(*p);
+                }
+                PathSegment::LineTo(p) => {
+                    path.line_to(*p);
+                }
+                PathSegment::Close => {
+                    path.close();
+                }
+                _ => {}
+            }
+        }
+        let trim = PathTrim::of(&path);
+        assert!(trim.contains(Point::new(10.0, 50.0)), "in the ring");
+        assert!(!trim.contains(Point::new(50.0, 50.0)), "in the hole");
+    }
+
+    #[test]
+    fn an_empty_path_contains_nothing() {
+        assert!(!PathTrim::of(&Path::new()).contains(Point::new(0.0, 0.0)));
     }
 
     #[test]

@@ -9,6 +9,7 @@ use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::{Point, Rect, Size};
 use obscur_kit::identity::{ComponentId, InternedSymbol, RuntimeId};
+use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 use obscur_kit::primitives::Canvas;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::color::Color;
@@ -31,6 +32,20 @@ fn staged() -> UiRuntime {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 400.0));
     let _ = rt.render_now(&staged_view(), std::slice::from_ref(&compile(CSS)));
     rt
+}
+
+#[doc = include_str!("canvas_paints.doc/target_at.md")]
+fn target_at(rt: &mut UiRuntime, x: f32, y: f32) -> Option<obscur_kit::identity::NodeId> {
+    rt.handle_pointer(
+        PointerEvent::new(
+            PointerId::MOUSE,
+            PointerDevice::Mouse,
+            PointerEventKind::Move,
+            Point::new(x, y),
+        )
+        .as_trusted(),
+    )
+    .target()
 }
 
 fn red() -> Brush {
@@ -157,5 +172,62 @@ fn an_unbalanced_painter_is_contained_and_named() {
         rt.take_unbalanced_canvases(),
         vec![CHART],
         "and the painter that did it is named"
+    );
+}
+
+#[doc = include_str!("canvas_paints.doc/a_declared_hit_region_narrows_the_canvas_to_its_own_shape.md")]
+#[test]
+fn a_declared_hit_region_narrows_the_canvas_to_its_own_shape() {
+    // §4.13. A canvas that draws a triangle should not be hit in the corners of
+    // its box — that space belongs to whatever is behind it.
+    let mut rt = staged();
+    rt.register_canvas(
+        CHART,
+        Box::new(|region, _paint| {
+            let size = region.size();
+            let mut shape = obscur_kit::scene::path::Path::new();
+            shape.move_to(Point::new(0.0, 0.0));
+            shape.line_to(Point::new(size.width, 0.0));
+            shape.line_to(Point::new(size.width / 2.0, size.height));
+            shape.close();
+            region
+                .painter()
+                .fill_rect(Rect::new(Point::new(0.0, 0.0), Size::new(1.0, 1.0)), red());
+            region.hit_region(shape);
+            false
+        }),
+    );
+    let _ = rt.render_now(&staged_view(), std::slice::from_ref(&compile(CSS)));
+
+    // The canvas is laid out at the panel's origin, 100x60.
+    let inside = target_at(&mut rt, 50.0, 10.0);
+    let corner = target_at(&mut rt, 2.0, 55.0);
+    assert_ne!(
+        inside, corner,
+        "a point inside the triangle and one in the box's corner cannot resolve \
+         to the same node: {inside:?} vs {corner:?}"
+    );
+}
+
+#[doc = include_str!("canvas_paints.doc/a_canvas_that_declares_nothing_is_hit_anywhere_in_its_box.md")]
+#[test]
+fn a_canvas_that_declares_nothing_is_hit_anywhere_in_its_box() {
+    // The default, and it is the one every other element already has.
+    let mut rt = staged();
+    rt.register_canvas(
+        CHART,
+        Box::new(|region, _paint| {
+            region
+                .painter()
+                .fill_rect(Rect::new(Point::new(0.0, 0.0), Size::new(1.0, 1.0)), red());
+            false
+        }),
+    );
+    let _ = rt.render_now(&staged_view(), std::slice::from_ref(&compile(CSS)));
+    let inside = target_at(&mut rt, 50.0, 10.0);
+    let corner = target_at(&mut rt, 2.0, 55.0);
+    assert_eq!(
+        inside, corner,
+        "with no declared region both points land on the same node"
     );
 }

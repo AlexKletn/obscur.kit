@@ -495,6 +495,21 @@ covers half the screen. `App` does this after every window event.
 [03 — The runtime](03-runtime.md#drag-and-drop). Data transfer types live in
 `obscur_kit::data_transfer`.
 
+## Canvas hit regions
+
+A `<canvas>` is hit anywhere in its box, like every other element — unless its
+painter declares a shape:
+
+```rust
+region.hit_region(outline);   // §4.13, in the canvas's own coordinates
+```
+
+Then a pointer is on it only inside that shape, and the corners of its box
+belong to whatever is behind. Declared while painting, because that is the one
+moment a painter knows its own size; measured once per frame and tested by the
+even-odd rule, with each subpath treated as closed — an open shape still has an
+inside, which is what a fill does and therefore what a hit region means.
+
 ## Not built
 
 - **Gamepad.** `GamepadEvent`, `GamepadButton`, `GamepadAxis`, `GamepadId` are

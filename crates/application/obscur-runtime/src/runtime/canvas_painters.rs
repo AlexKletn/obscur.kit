@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_scene::command::{CanvasRegion, DisplayListBuilder, PaintCommand};
+use obscur_scene::path::{Path, PathSegment, PathTrim};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{CanvasPaint, canvas_painter};
 
@@ -19,6 +20,8 @@ pub(crate) struct CanvasPainters {
     painters: HashMap<InternedSymbol, CanvasPainter>,
     #[doc = include_str!("canvas_painters.doc/unbalanced.md")]
     unbalanced: Vec<InternedSymbol>,
+    #[doc = include_str!("canvas_painters.doc/hits.md")]
+    hits: HashMap<NodeId, PathTrim>,
 }
 
 impl CanvasPainters {
@@ -30,6 +33,11 @@ impl CanvasPainters {
     #[doc = include_str!("canvas_painters.doc/register.md")]
     pub(crate) fn register(&mut self, id: InternedSymbol, painter: CanvasPainter) {
         self.painters.insert(id, painter);
+    }
+
+    #[doc = include_str!("canvas_painters.doc/hits.md")]
+    pub(crate) fn hits(&self) -> &HashMap<NodeId, PathTrim> {
+        &self.hits
     }
 
     #[doc = include_str!("canvas_painters.doc/take_unbalanced.md")]
@@ -46,6 +54,7 @@ impl CanvasPainters {
     ) -> (HashMap<NodeId, Vec<PaintCommand>>, bool) {
         let mut painted = HashMap::new();
         let mut animating = false;
+        self.hits.clear();
         // An application that registered no painter pays one branch. The walk
         // below is over every live node, and a canvas is rare — most trees hold
         // none at all.
@@ -73,6 +82,15 @@ impl CanvasPainters {
                 obscur_geometry::Rect::new(bounds.origin(), bounds.size()),
             );
             animating |= painter(&mut region, &CanvasPaint::new(retained.props(), elapsed));
+            // §4.13: the shape a pointer must be inside. Measured once here —
+            // the same flattening a trim would do — and kept in LAYOUT space, so
+            // hit testing compares it against the point it already has rather
+            // than translating on every pointer report.
+            if let Some(shape) = region.take_hit_region() {
+                let origin = bounds.origin();
+                self.hits
+                    .insert(node, PathTrim::of(&translated(&shape, origin)));
+            }
             if !region.close() {
                 self.unbalanced.push(id);
             }
@@ -104,6 +122,44 @@ fn drew_anything(commands: &[PaintCommand]) -> bool {
     })
 }
 
+#[doc = include_str!("canvas_painters.doc/translated.md")]
+fn translated(path: &Path, origin: obscur_geometry::Point) -> Path {
+    let mut out = Path::new();
+    for segment in path.segments() {
+        match segment {
+            PathSegment::MoveTo(p) => {
+                out.move_to(shift(*p, origin));
+            }
+            PathSegment::LineTo(p) => {
+                out.line_to(shift(*p, origin));
+            }
+            PathSegment::QuadTo { control, end } => {
+                out.quad_to(shift(*control, origin), shift(*end, origin));
+            }
+            PathSegment::CubicTo {
+                control1,
+                control2,
+                end,
+            } => {
+                out.cubic_to(
+                    shift(*control1, origin),
+                    shift(*control2, origin),
+                    shift(*end, origin),
+                );
+            }
+            PathSegment::Close => {
+                out.close();
+            }
+        }
+    }
+    out
+}
+
+#[doc = include_str!("canvas_painters.doc/shift.md")]
+fn shift(p: obscur_geometry::Point, by: obscur_geometry::Point) -> obscur_geometry::Point {
+    obscur_geometry::Point::new(p.x + by.x, p.y + by.y)
+}
+
 impl std::fmt::Debug for CanvasPainters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // The painters are closures and cannot be shown; the count is what a
@@ -111,6 +167,7 @@ impl std::fmt::Debug for CanvasPainters {
         f.debug_struct("CanvasPainters")
             .field("painters", &self.painters.len())
             .field("unbalanced", &self.unbalanced)
+            .field("hits", &self.hits.len())
             .finish()
     }
 }

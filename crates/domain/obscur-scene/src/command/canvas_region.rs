@@ -4,6 +4,7 @@ use obscur_geometry::{AffineTransform, Point, Rect, Size};
 
 use super::DisplayListBuilder;
 use crate::clip::Clip;
+use crate::path::Path;
 
 #[doc = include_str!("canvas_region.doc/CanvasRegion.md")]
 #[derive(Debug)]
@@ -14,6 +15,8 @@ pub struct CanvasRegion<'a> {
     bounds: Rect,
     #[doc = include_str!("canvas_region.doc/entry_depth.md")]
     entry_depth: u32,
+    #[doc = include_str!("canvas_region.doc/hit.md")]
+    hit: Option<Path>,
 }
 
 impl<'a> CanvasRegion<'a> {
@@ -29,6 +32,7 @@ impl<'a> CanvasRegion<'a> {
             builder,
             bounds,
             entry_depth,
+            hit: None,
         }
     }
 
@@ -47,6 +51,16 @@ impl<'a> CanvasRegion<'a> {
     #[doc = include_str!("canvas_region.doc/painter.md")]
     pub fn painter(&mut self) -> &mut DisplayListBuilder {
         self.builder
+    }
+
+    #[doc = include_str!("canvas_region.doc/hit_region.md")]
+    pub fn hit_region(&mut self, path: Path) {
+        self.hit = Some(path);
+    }
+
+    #[doc = include_str!("canvas_region.doc/take_hit_region.md")]
+    pub fn take_hit_region(&mut self) -> Option<Path> {
+        self.hit.take()
     }
 
     #[doc = include_str!("canvas_region.doc/close.md")]
