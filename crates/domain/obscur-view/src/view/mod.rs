@@ -32,6 +32,10 @@ pub use virtual_collection::{
     is_virtual_collection, realize_virtual_collections, realize_virtual_lists, virtual_item_count,
     virtual_list_id, virtual_row_extent, virtual_scroll_reset, virtual_scroll_resets,
 };
+mod slider;
+pub use slider::{
+    SLIDER_HIGH, SLIDER_LOW, SLIDER_MAX, SLIDER_MIN, SLIDER_RANGED, SLIDER_STEP, SliderScale,
+};
 mod stable_selector;
 pub use stable_selector::{AUTOMATION_ID, TEST_ID};
 mod style_attribute;
