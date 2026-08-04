@@ -29,6 +29,8 @@ mod vector_paint;
 pub use vector_paint::VectorPaint;
 mod radial_gradient;
 pub use radial_gradient::RadialGradient;
+mod shared_pixels;
+pub use shared_pixels::SharedPixels;
 mod scene_image;
 pub use scene_image::SceneImage;
 mod solid_brush;

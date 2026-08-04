@@ -1,8 +1,8 @@
 #![doc = include_str!("scene_image.doc/_module.md")]
 
-use std::sync::Arc;
-
 use crate::color::AlphaMode;
+
+use super::SharedPixels;
 
 #[doc = include_str!("scene_image.doc/SceneImage.md")]
 #[derive(Debug, Clone, PartialEq)]
@@ -12,7 +12,7 @@ pub struct SceneImage {
     #[doc = include_str!("scene_image.doc/height.md")]
     height: u32,
     #[doc = include_str!("scene_image.doc/pixels.md")]
-    pixels: Arc<[u8]>,
+    pixels: SharedPixels,
     #[doc = include_str!("scene_image.doc/alpha.md")]
     alpha: AlphaMode,
     #[doc = include_str!("scene_image.doc/scale.md")]
@@ -22,7 +22,13 @@ pub struct SceneImage {
 impl SceneImage {
     #[doc = include_str!("scene_image.doc/new.md")]
     #[must_use]
-    pub fn new(width: u32, height: u32, pixels: Arc<[u8]>, alpha: AlphaMode) -> Option<Self> {
+    pub fn new(
+        width: u32,
+        height: u32,
+        pixels: impl Into<SharedPixels>,
+        alpha: AlphaMode,
+    ) -> Option<Self> {
+        let pixels = pixels.into();
         let expected = (width as usize)
             .checked_mul(height as usize)
             .and_then(|px| px.checked_mul(4))?;
@@ -62,13 +68,13 @@ impl SceneImage {
     #[doc = include_str!("scene_image.doc/pixels_2.md")]
     #[must_use]
     pub fn pixels(&self) -> &[u8] {
-        &self.pixels
+        self.pixels.as_bytes()
     }
 
-    #[doc = include_str!("scene_image.doc/pixels_arc.md")]
+    #[doc = include_str!("scene_image.doc/shared_pixels.md")]
     #[must_use]
-    pub fn pixels_arc(&self) -> Arc<[u8]> {
-        Arc::clone(&self.pixels)
+    pub fn shared_pixels(&self) -> SharedPixels {
+        self.pixels.clone()
     }
 
     #[doc = include_str!("scene_image.doc/alpha_mode.md")]
@@ -97,6 +103,7 @@ impl SceneImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     /// A 2×2 image: opaque red, opaque green, opaque blue, opaque white.
     fn rgba_2x2() -> Vec<u8> {
@@ -136,11 +143,13 @@ mod tests {
     }
 
     #[test]
-    fn pixels_arc_shares_the_same_allocation() {
+    fn shared_pixels_shares_the_same_allocation() {
         let img = SceneImage::new(2, 2, Arc::from(rgba_2x2()), AlphaMode::Premultiplied)
             .expect("valid image");
-        let handle = img.pixels_arc();
-        assert!(Arc::ptr_eq(&handle, &img.pixels_arc()));
+        assert!(std::ptr::eq(
+            img.shared_pixels().as_bytes().as_ptr(),
+            img.pixels().as_ptr()
+        ));
         assert_eq!(img.alpha_mode(), AlphaMode::Premultiplied);
     }
 
@@ -185,6 +194,6 @@ mod tests {
         let clone = img.clone();
         assert_eq!(img, clone);
         // Cloning shares the pixel allocation (cheap clone).
-        assert!(Arc::ptr_eq(&img.pixels_arc(), &clone.pixels_arc()));
+        assert!(std::ptr::eq(img.pixels().as_ptr(), clone.pixels().as_ptr()));
     }
 }

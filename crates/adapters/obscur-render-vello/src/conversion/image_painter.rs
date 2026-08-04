@@ -6,15 +6,6 @@ use vello::Scene;
 use vello::kurbo::{Affine, Rect as KurboRect};
 use vello::peniko::{self, Blob, ImageAlphaType, ImageData, ImageFormat};
 
-#[doc = include_str!("image_painter.doc/SharedPixels.md")]
-struct SharedPixels(std::sync::Arc<[u8]>);
-
-impl AsRef<[u8]> for SharedPixels {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
 #[doc = include_str!("image_painter.doc/MAX_TILES_PER_AXIS.md")]
 const MAX_TILES_PER_AXIS: i32 = 8192;
 
@@ -51,10 +42,10 @@ pub(super) fn draw_image(
         AlphaMode::Premultiplied => ImageAlphaType::AlphaPremultiplied,
     };
     let data = ImageData {
-        // Zero-copy: wrap the image's shared `Arc<[u8]>` in a `Sized` newtype so it
-        // coerces to the `Arc<dyn AsRef<[u8]>>` a `Blob` holds — only a refcount
-        // bump, never a pixel copy.
-        data: Blob::new(std::sync::Arc::new(SharedPixels(image.pixels_arc()))),
+        // Zero-copy: `SharedPixels` is `Sized + AsRef<[u8]>`, so it coerces to
+        // the `Arc<dyn AsRef<[u8]>>` a `Blob` holds — only a refcount bump,
+        // never a pixel copy, whichever shape the bytes arrived in.
+        data: Blob::new(std::sync::Arc::new(image.shared_pixels())),
         format: ImageFormat::Rgba8,
         alpha_type,
         width: iw,

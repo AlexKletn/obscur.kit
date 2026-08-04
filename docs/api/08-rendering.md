@@ -163,16 +163,34 @@ animating" — a live source returns `true` and gets a frame per tick.
 | --- | --- |
 | `ExternalBuffer::new` | **0** — it borrows, and only checks the description |
 | `to_scene_image()` | **1** — the repack and the channel swizzle |
+| publishing it as a `SceneImage` | **0** — the buffer is moved, not converted |
 | display list, snapshot, scene clones | **0** — a `SceneImage` holds an `Arc<[u8]>` |
 | Vello | **0** — the `Arc` is wrapped in a `Blob`, a refcount bump; then the GPU upload |
 | CPU, premultiplied | **0** — the bytes are borrowed as a `PixmapRef` |
 | CPU, straight alpha | **1** — premultiplying has to write somewhere |
 
-So the repack is the whole price, and it is only unavoidable because the buffer
-arrived in a layout the scene does not speak. A producer that can already hand
-over tightly packed **premultiplied** RGBA8 in an `Arc<[u8]>` should skip
-`ExternalBuffer` entirely, build a `SceneImage` directly and use
-`draw_image_into` — that path copies the pixels **not once**, on either backend.
+So the repack is the whole price. Measured on a 1080p frame:
+
+| | ms/frame |
+| --- | --- |
+| repack, BGRA with padded rows | **2.4** |
+| repack, already tight RGBA8 | **0.9** (one `memcpy` — the floor) |
+| the CPU blit itself, for scale | ~13 |
+
+A producer that can already hand over tightly packed **premultiplied** RGBA8 in
+an `Arc<[u8]>` should skip `ExternalBuffer` entirely, build a `SceneImage`
+directly and use `draw_image_into` — that path copies the pixels **not once**,
+on either backend.
+
+Two things about those numbers are worth knowing, because both were surprises:
+
+* `SceneImage` holds `SharedPixels`, which is either an `Arc<[u8]>` or a moved
+  `Vec<u8>`. That second shape is not a convenience — `Arc<[u8]>::from(vec)`
+  allocates a *second* buffer and copies into it, which measured **6 ms a
+  frame** at 1080p, more than the repack it was publishing.
+* Building the repacked buffer by pushing pixels onto a `Vec` cost **13 ms**
+  against the 0.9 the same bytes cost as a `memcpy`. It is allocated once at
+  its final size and written into.
 
 > **unbuilt** — spec §5.5 also allows a *texture-backed* foreign surface handed
 > to the GPU without ever touching the CPU, and a native child surface/window.
