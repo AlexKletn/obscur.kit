@@ -60,8 +60,8 @@ mod ancestor_chain;
 pub(crate) use ancestor_chain::AncestorChain;
 
 mod canvas_painters;
-pub use canvas_painters::CanvasPainter;
 pub(crate) use canvas_painters::CanvasPainters;
+pub use canvas_painters::{CanvasPainter, PainterKey};
 mod command_dispatch;
 
 pub(crate) use command_dispatch::{CommandDispatch, CommandDispatchOutcome};

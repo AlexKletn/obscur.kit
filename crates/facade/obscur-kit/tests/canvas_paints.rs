@@ -170,7 +170,7 @@ fn an_unbalanced_painter_is_contained_and_named() {
     );
     assert_eq!(
         rt.take_unbalanced_canvases(),
-        vec![CHART],
+        vec![obscur_kit::runtime::PainterKey::Symbol(CHART)],
         "and the painter that did it is named"
     );
 }

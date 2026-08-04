@@ -5,21 +5,32 @@ use std::collections::HashMap;
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_scene::command::{CanvasRegion, DisplayListBuilder, PaintCommand};
 use obscur_scene::path::{Path, PathSegment, PathTrim};
+use obscur_style::computed::ComputedValue;
+use obscur_style::property::{PropertyId, PropertyValue};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{CanvasPaint, canvas_painter};
 
-use crate::orchestration::LayoutBoxes;
+use crate::orchestration::{ComputedStyles, LayoutBoxes};
 
 #[doc = include_str!("canvas_painters.doc/CanvasPainter.md")]
 pub type CanvasPainter = Box<dyn FnMut(&mut CanvasRegion<'_>, &CanvasPaint<'_>) -> bool>;
+
+#[doc = include_str!("canvas_painters.doc/PainterKey.md")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PainterKey {
+    #[doc = include_str!("canvas_painters.doc/Symbol.md")]
+    Symbol(InternedSymbol),
+    #[doc = include_str!("canvas_painters.doc/Name.md")]
+    Name(Box<str>),
+}
 
 #[doc = include_str!("canvas_painters.doc/CanvasPainters.md")]
 #[derive(Default)]
 pub(crate) struct CanvasPainters {
     #[doc = include_str!("canvas_painters.doc/painters_field.md")]
-    painters: HashMap<InternedSymbol, CanvasPainter>,
+    painters: HashMap<PainterKey, CanvasPainter>,
     #[doc = include_str!("canvas_painters.doc/unbalanced.md")]
-    unbalanced: Vec<InternedSymbol>,
+    unbalanced: Vec<PainterKey>,
     #[doc = include_str!("canvas_painters.doc/hits.md")]
     hits: HashMap<NodeId, PathTrim>,
 }
@@ -31,8 +42,8 @@ impl CanvasPainters {
     }
 
     #[doc = include_str!("canvas_painters.doc/register.md")]
-    pub(crate) fn register(&mut self, id: InternedSymbol, painter: CanvasPainter) {
-        self.painters.insert(id, painter);
+    pub(crate) fn register(&mut self, key: PainterKey, painter: CanvasPainter) {
+        self.painters.insert(key, painter);
     }
 
     #[doc = include_str!("canvas_painters.doc/hits.md")]
@@ -41,7 +52,7 @@ impl CanvasPainters {
     }
 
     #[doc = include_str!("canvas_painters.doc/take_unbalanced.md")]
-    pub(crate) fn take_unbalanced(&mut self) -> Vec<InternedSymbol> {
+    pub(crate) fn take_unbalanced(&mut self) -> Vec<PainterKey> {
         std::mem::take(&mut self.unbalanced)
     }
 
@@ -50,6 +61,7 @@ impl CanvasPainters {
         &mut self,
         tree: &RetainedTree,
         boxes: &LayoutBoxes,
+        computed: &ComputedStyles,
         elapsed: f32,
     ) -> (HashMap<NodeId, Vec<PaintCommand>>, bool) {
         let mut painted = HashMap::new();
@@ -62,10 +74,10 @@ impl CanvasPainters {
             return (painted, animating);
         }
         for (node, retained) in tree.iter() {
-            let Some(id) = canvas_painter(retained.props()) else {
+            let Some(key) = painter_key(retained.props(), computed.get(&node)) else {
                 continue;
             };
-            let Some(painter) = self.painters.get_mut(&id) else {
+            let Some(painter) = self.painters.get_mut(&key) else {
                 // A canvas naming a painter nobody registered draws nothing.
                 // That is the same shape as an `on:click` bound to a command
                 // with no handler, and it is not this type's business to report.
@@ -92,7 +104,7 @@ impl CanvasPainters {
                     .insert(node, PathTrim::of(&translated(&shape, origin)));
             }
             if !region.close() {
-                self.unbalanced.push(id);
+                self.unbalanced.push(key);
             }
             let commands = builder.build().into_commands();
             if drew_anything(&commands) {
@@ -100,6 +112,27 @@ impl CanvasPainters {
             }
         }
         (painted, animating)
+    }
+}
+
+#[doc = include_str!("canvas_painters.doc/painter_key.md")]
+fn painter_key(
+    props: &[obscur_view::view::ViewProperty],
+    style: Option<&obscur_style::computed::ComputedStyle>,
+) -> Option<PainterKey> {
+    // The node's own declaration wins. A widget binds its painter as a prop —
+    // that is part of what the widget IS — and a stylesheet rule matching it
+    // must not be able to replace the routine that draws a progress bar with
+    // one that draws a clock. CSS supplies a painter for the elements that
+    // declare none, which is the case `-obscur-painter` exists for.
+    if let Some(id) = canvas_painter(props) {
+        return Some(PainterKey::Symbol(id));
+    }
+    match style?.get(PropertyId::Painter).map(ComputedValue::value) {
+        Some(PropertyValue::Name(name)) => Some(PainterKey::Name(name.clone())),
+        // `-obscur-painter: none` — the keyword that unbinds what a lower
+        // origin bound. Any other keyword names nothing either.
+        _ => None,
     }
 }
 
@@ -174,7 +207,7 @@ impl std::fmt::Debug for CanvasPainters {
 
 #[cfg(test)]
 mod tests {
-    use super::CanvasPainters;
+    use super::{CanvasPainters, PainterKey};
     use obscur_geometry::{Point, Rect, Size};
     use obscur_identity::{InternedSymbol, NodeId};
     use obscur_scene::color::Color;
@@ -183,7 +216,7 @@ mod tests {
     use obscur_tree::node::NodeKind;
     use obscur_tree::tree::RetainedTree;
 
-    use crate::orchestration::LayoutBoxes;
+    use crate::orchestration::{ComputedStyles, LayoutBoxes};
 
     const CHART: InternedSymbol = InternedSymbol::from_raw(0x0F01);
 
@@ -217,7 +250,7 @@ mod tests {
         let (tree, boxes, node) = one_canvas();
         let mut painters = CanvasPainters::new();
         painters.register(
-            CHART,
+            PainterKey::Symbol(CHART),
             Box::new(|region, _paint| {
                 let size = region.size();
                 region
@@ -227,7 +260,7 @@ mod tests {
             }),
         );
 
-        let painted = painters.paint(&tree, &boxes, 0.0).0;
+        let painted = painters.paint(&tree, &boxes, &ComputedStyles::new(), 0.0).0;
         let commands = painted.get(&node).expect("the canvas painted");
         assert!(
             commands
@@ -241,15 +274,28 @@ mod tests {
     fn nothing_registered_costs_one_branch_and_paints_nothing() {
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        assert!(painters.paint(&tree, &boxes, 0.0).0.is_empty());
+        assert!(
+            painters
+                .paint(&tree, &boxes, &ComputedStyles::new(), 0.0)
+                .0
+                .is_empty()
+        );
     }
 
     #[test]
     fn a_canvas_naming_an_unregistered_painter_draws_nothing_and_does_not_panic() {
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        painters.register(InternedSymbol::from_raw(0x0F99), Box::new(|_, _| false));
-        assert!(painters.paint(&tree, &boxes, 0.0).0.is_empty());
+        painters.register(
+            PainterKey::Symbol(InternedSymbol::from_raw(0x0F99)),
+            Box::new(|_, _| false),
+        );
+        assert!(
+            painters
+                .paint(&tree, &boxes, &ComputedStyles::new(), 0.0)
+                .0
+                .is_empty()
+        );
     }
 
     #[test]
@@ -260,8 +306,89 @@ mod tests {
         // every frame.
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        painters.register(CHART, Box::new(|_, _| false));
-        assert!(painters.paint(&tree, &boxes, 0.0).0.is_empty());
+        painters.register(PainterKey::Symbol(CHART), Box::new(|_, _| false));
+        assert!(
+            painters
+                .paint(&tree, &boxes, &ComputedStyles::new(), 0.0)
+                .0
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn css_binds_a_painter_to_an_element_that_declares_none() {
+        // The whole point of `-obscur-painter`: an ordinary element, no props,
+        // a stylesheet naming a painter.
+        let (mut tree, boxes, node) = one_canvas();
+        tree.get_mut(node)
+            .expect("live")
+            .set_props(Vec::new().into_boxed_slice());
+        let mut styles = ComputedStyles::new();
+        let mut style = obscur_style::computed::ComputedStyle::new();
+        style.set(
+            obscur_style::property::PropertyId::Painter,
+            obscur_style::computed::ComputedValue::from_concrete(
+                obscur_style::property::PropertyValue::Name("sparkline".into()),
+            )
+            .expect("a name is a concrete value"),
+        );
+        styles.insert(node, style);
+
+        let mut painters = CanvasPainters::new();
+        painters.register(
+            PainterKey::Name("sparkline".into()),
+            Box::new(|region, _paint| {
+                let size = region.size();
+                region
+                    .painter()
+                    .fill_rect(Rect::new(Point::new(0.0, 0.0), size), red());
+                false
+            }),
+        );
+
+        let painted = painters.paint(&tree, &boxes, &styles, 0.0).0;
+        assert!(painted.contains_key(&node), "the stylesheet's painter ran");
+    }
+
+    #[test]
+    fn a_nodes_own_painter_is_not_something_a_stylesheet_can_replace() {
+        // A widget binds its painter as a prop — that is part of what the widget
+        // IS. A rule matching it must not be able to swap the routine that draws
+        // a progress bar for one that draws a clock.
+        let (tree, boxes, node) = one_canvas();
+        let mut styles = ComputedStyles::new();
+        let mut style = obscur_style::computed::ComputedStyle::new();
+        style.set(
+            obscur_style::property::PropertyId::Painter,
+            obscur_style::computed::ComputedValue::from_concrete(
+                obscur_style::property::PropertyValue::Name("hijack".into()),
+            )
+            .expect("a name is a concrete value"),
+        );
+        styles.insert(node, style);
+
+        let mut painters = CanvasPainters::new();
+        painters.register(
+            PainterKey::Name("hijack".into()),
+            Box::new(|_region, _paint| panic!("the stylesheet must not win")),
+        );
+        painters.register(
+            PainterKey::Symbol(CHART),
+            Box::new(|region, _paint| {
+                let size = region.size();
+                region
+                    .painter()
+                    .fill_rect(Rect::new(Point::new(0.0, 0.0), size), red());
+                false
+            }),
+        );
+
+        assert!(
+            painters
+                .paint(&tree, &boxes, &styles, 0.0)
+                .0
+                .contains_key(&node)
+        );
     }
 
     #[test]
@@ -269,7 +396,7 @@ mod tests {
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
         painters.register(
-            CHART,
+            PainterKey::Symbol(CHART),
             Box::new(|region, _paint| {
                 region
                     .painter()
@@ -281,10 +408,10 @@ mod tests {
             }),
         );
 
-        let _ = painters.paint(&tree, &boxes, 0.0);
+        let _ = painters.paint(&tree, &boxes, &ComputedStyles::new(), 0.0);
         assert_eq!(
             painters.take_unbalanced(),
-            vec![CHART],
+            vec![PainterKey::Symbol(CHART)],
             "the painter that left a bracket open is named"
         );
         assert!(
@@ -298,7 +425,7 @@ mod tests {
         let (tree, _boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
         painters.register(
-            CHART,
+            PainterKey::Symbol(CHART),
             Box::new(|region, _paint| {
                 region
                     .painter()
@@ -307,7 +434,10 @@ mod tests {
             }),
         );
         assert!(
-            painters.paint(&tree, &LayoutBoxes::new(), 0.0).0.is_empty(),
+            painters
+                .paint(&tree, &LayoutBoxes::new(), &ComputedStyles::new(), 0.0)
+                .0
+                .is_empty(),
             "a display:none branch has nowhere to paint into"
         );
     }

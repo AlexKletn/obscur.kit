@@ -121,6 +121,8 @@ pub(super) const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::TabSize,
     // Overflow (pure paint/clip; no layout effect).
     PropertyId::Overflow,
+    // The kit's own namespace.
+    PropertyId::Painter,
 ];
 
 #[doc = include_str!("computed_property_set.doc/FACE_PROPERTIES.md")]
@@ -272,7 +274,8 @@ mod tests {
                 // it is deliberately NOT a computed property of a real box (it
                 // decorates a `::before`/`::after` pseudo-element), so it is
                 // classified here but excluded from `COMPUTED_PROPERTIES`.
-                | PropertyId::Content => {}
+                | PropertyId::Content
+                | PropertyId::Painter => {}
             }
         }
         let all = [
@@ -374,6 +377,7 @@ mod tests {
             PropertyId::WordBreak,
             PropertyId::TabSize,
             PropertyId::Overflow,
+            PropertyId::Painter,
         ];
         for id in all {
             assert_known(id);

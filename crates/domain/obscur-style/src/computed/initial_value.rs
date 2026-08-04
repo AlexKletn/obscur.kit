@@ -307,6 +307,9 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         | PropertyId::Overflow
         // `content` is never a real element's computed value (it decorates a
         // generated pseudo-element box only), so it has no element initial.
-        | PropertyId::Content => None,
+        | PropertyId::Content
+        // No painter. The initial value is the keyword `none`, which needs the
+        // interner, so an absent value means the same thing: nothing to draw.
+        | PropertyId::Painter => None,
     }
 }

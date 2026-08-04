@@ -6,7 +6,7 @@ mod runtime;
 
 pub use runtime::{
     AppCommands, CanvasPainter, CommandHandler, CommandTarget, FrameBudget, ImageCache,
-    InputDispatch, InputEvent, IntoCommandHandler, KeyDispatch, PointerDispatch,
+    InputDispatch, InputEvent, IntoCommandHandler, KeyDispatch, PainterKey, PointerDispatch,
     SemanticTreeBuilder, UiRuntime, WithEvent, WithoutEvent,
 };
 

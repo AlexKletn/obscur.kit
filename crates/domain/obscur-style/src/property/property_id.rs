@@ -286,6 +286,10 @@ pub enum PropertyId {
 
     #[doc = include_str!("property_id.doc/Content.md")]
     Content,
+
+    // ---- The kit's own vendor namespace, `-obscur-` (spec §4.13) ----
+    #[doc = include_str!("property_id.doc/Painter.md")]
+    Painter,
 }
 
 impl PropertyId {
@@ -293,6 +297,10 @@ impl PropertyId {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            // The one property whose name carries a vendor prefix, because it
+            // names something no CSS specification has a word for. The prefix is
+            // the whole point: a renderer that is not this one must ignore it.
+            Self::Painter => "-obscur-painter",
             Self::Color => "color",
             Self::BackgroundColor => "background-color",
             Self::BackgroundImage => "background-image",
@@ -551,7 +559,10 @@ impl PropertyId {
             | Self::Overflow
             // `content` selects generated text on a pseudo-element; it does not
             // inherit (CSS Content 3).
-            | Self::Content => Inheritance::NotInherited,
+            | Self::Content
+            // A painter draws ONE element's box. Inheriting it would repaint
+            // every descendant with the same routine.
+            | Self::Painter => Inheritance::NotInherited,
         }
     }
 }

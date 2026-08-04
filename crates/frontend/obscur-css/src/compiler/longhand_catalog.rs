@@ -9,7 +9,7 @@ use obscur_style::property::{PropertyId, layout_keyword};
 #[doc = include_str!("longhand_catalog.doc/property_id_from_name.md")]
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 118] = [
+    const ALL: [PropertyId; 119] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -131,6 +131,10 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::TabSize,
         PropertyId::Overflow,
         PropertyId::Content,
+        // The kit's own namespace. Its `name()` carries the `-obscur-` prefix,
+        // so it is found by the same lookup as everything else — a vendor
+        // property is a property, not a separate kind of thing.
+        PropertyId::Painter,
     ];
     // `word-wrap` is the legacy alias for `overflow-wrap` (CSS Text 3 §5.2).
     if name.eq_ignore_ascii_case("word-wrap") {

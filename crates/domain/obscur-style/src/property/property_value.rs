@@ -52,6 +52,8 @@ pub enum PropertyValue {
     GridAreas(GridAreaTemplate),
     #[doc = include_str!("property_value.doc/GridAreaName.md")]
     GridAreaName(Box<str>),
+    #[doc = include_str!("property_value.doc/Name.md")]
+    Name(Box<str>),
     #[doc = include_str!("property_value.doc/String.md")]
     String(Box<str>),
     #[doc = include_str!("property_value.doc/Transform.md")]
@@ -101,8 +103,10 @@ impl PropertyValue {
             | Self::GridAreas(_)
             | Self::GridAreaName(_)
             | Self::Transform(_)
-            // A `content` string carries no length.
+            // A `content` string and a registry name are both plain text; they
+            // carry no length.
             | Self::String(_)
+            | Self::Name(_)
             | Self::CustomRef(_)
             | Self::Inherit
             | Self::Initial

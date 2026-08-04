@@ -24,6 +24,7 @@ use super::shorthand_expansion::{
 use super::stylesheet_compiler::CssSymbolInterner;
 use super::transform_lowering::{lower_transform, lower_transform_origin};
 use super::value_lowering::{css_wide_keyword, lower_value};
+use super::vendor_prefix::{VendorNamespace, vendor_namespace};
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
@@ -70,6 +71,21 @@ impl PropertyCompiler {
             let value = lower_value(&decl.value, interner).unwrap_or(PropertyValue::Initial);
             let symbol = interner.intern(name);
             return CompiledDeclaration::Custom(CustomProperty::new(symbol, value));
+        }
+        // Another vendor's property is passed over in SILENCE — recorded, but
+        // as a note rather than a fault. That is the entire contract of a
+        // prefix: a renderer that does not know it ignores it, which is what
+        // lets one stylesheet serve renderers that do not know each other.
+        // Reporting it as unsupported would make a portable sheet look broken.
+        // Our own namespace gets no such indulgence: `-obscur-paintr` is a typo
+        // in a name this compiler is supposed to know, and it falls through to
+        // the ordinary unknown-property path below.
+        if let Some(VendorNamespace::Foreign(_)) = vendor_namespace(name) {
+            return CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+                UnsupportedFeatureKind::VendorProperty,
+                name,
+                decl.span,
+            ));
         }
         let Some(property) = property_id_from_name(name) else {
             return CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
@@ -233,6 +249,9 @@ pub(super) fn lower_for_property(
             return Some(PropertyValue::String(text.clone()));
         }
         return None;
+    }
+    if property == PropertyId::Painter {
+        return lower_painter(values, interner);
     }
     if property == PropertyId::FontFamily {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -421,6 +440,33 @@ pub(super) fn lower_for_property(
     lower_value(values, interner)
 }
 
+#[doc = include_str!("property_compiler.doc/lower_painter.md")]
+fn lower_painter(
+    values: &[ParsedValue],
+    interner: &mut CssSymbolInterner,
+) -> Option<PropertyValue> {
+    match values {
+        // A quoted name, for a painter registered under something that is not a
+        // CSS identifier — `"chart.sparkline"`, say.
+        [ParsedValue::String(text)] => Some(PropertyValue::Name(text.clone())),
+        [ParsedValue::Keyword(keyword)] => {
+            if let Some(wide) = css_wide_keyword(keyword) {
+                return Some(wide);
+            }
+            // `none` is the absence of a painter, and it is a keyword rather
+            // than a name so that a rule can UNBIND what a lower origin bound.
+            // A painter registered under the name "none" would be unreachable,
+            // which is the same trade every CSS property with a `none` value
+            // makes.
+            if keyword.eq_ignore_ascii_case("none") {
+                return Some(PropertyValue::Keyword(interner.intern("none")));
+            }
+            Some(PropertyValue::Name(keyword.as_ref().into()))
+        }
+        _ => None,
+    }
+}
+
 #[doc = include_str!("property_compiler.doc/lower_z_index.md")]
 fn lower_z_index(values: &[ParsedValue]) -> Option<PropertyValue> {
     match values.first()? {
@@ -520,6 +566,86 @@ pub(crate) mod tests {
         };
         assert_eq!(feature.kind(), UnsupportedFeatureKind::Property);
         assert_eq!(feature.name(), "float");
+    }
+
+    #[test]
+    fn another_vendors_property_is_ignored_rather_than_faulted() {
+        // The contract of a prefix, and the reason one stylesheet can serve
+        // renderers that do not know each other: a renderer that does not know
+        // a vendor's property ignores it. Reporting it would make a portable
+        // sheet look broken.
+        for text in [
+            "-webkit-box-reflect: below",
+            "-moz-osx-font-smoothing: grayscale",
+            "-someothertoolkit-glow: 4px",
+        ] {
+            let (result, _) = compile(text);
+            let CompiledDeclaration::Unsupported(feature) = result else {
+                panic!("expected {text} to be passed over");
+            };
+            assert_eq!(
+                feature.kind(),
+                UnsupportedFeatureKind::VendorProperty,
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn another_vendors_prefix_is_not_an_alias_for_one_of_ours() {
+        // Spec §4.13 excludes vendor hacks, and this is the one that matters:
+        // `-webkit-filter` does NOT become `filter`. Accepting foreign prefixes
+        // as aliases is how a renderer ends up implementing another vendor's
+        // history.
+        let (result, _) = compile("-webkit-filter: blur(2px)");
+        let CompiledDeclaration::Unsupported(feature) = result else {
+            panic!("expected it to be passed over");
+        };
+        assert_eq!(feature.kind(), UnsupportedFeatureKind::VendorProperty);
+    }
+
+    #[test]
+    fn a_typo_in_our_own_namespace_is_reported() {
+        // Our own namespace gets no indulgence: `-obscur-paintr` is a typo in a
+        // name this compiler is supposed to know, and silence there would let a
+        // misspelled rule sit in a stylesheet doing nothing.
+        let (result, _) = compile("-obscur-paintr: clock");
+        let CompiledDeclaration::Unsupported(feature) = result else {
+            panic!("expected unsupported");
+        };
+        assert_eq!(feature.kind(), UnsupportedFeatureKind::Property);
+        assert_eq!(feature.name(), "-obscur-paintr");
+    }
+
+    #[test]
+    fn lowers_a_painter_name_as_text_not_as_a_symbol() {
+        // As TEXT, deliberately: an interned keyword's symbol is minted per
+        // stylesheet, so the same word compiled in two sheets would be two
+        // different symbols and neither would match the painter registry.
+        let (result, _) = compile("-obscur-painter: sparkline");
+        let CompiledDeclaration::Standard(decl) = result else {
+            panic!("expected a standard declaration");
+        };
+        assert_eq!(decl.property(), PropertyId::Painter);
+        assert_eq!(decl.value(), &PropertyValue::Name("sparkline".into()));
+
+        let (quoted, _) = compile("-obscur-painter: \"chart.sparkline\"");
+        let CompiledDeclaration::Standard(decl) = quoted else {
+            panic!("expected a standard declaration");
+        };
+        assert_eq!(decl.value(), &PropertyValue::Name("chart.sparkline".into()));
+    }
+
+    #[test]
+    fn a_painter_of_none_unbinds_rather_than_naming_a_painter_called_none() {
+        let (result, interner) = compile("-obscur-painter: none");
+        let CompiledDeclaration::Standard(decl) = result else {
+            panic!("expected a standard declaration");
+        };
+        let PropertyValue::Keyword(symbol) = decl.value() else {
+            panic!("expected a keyword, got {:?}", decl.value());
+        };
+        assert_eq!(interner.resolve(*symbol), Some("none"));
     }
 
     #[test]

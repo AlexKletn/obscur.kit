@@ -37,6 +37,12 @@ impl ComputedValue {
             | PropertyValue::GridLine(_)
             | PropertyValue::GridAreas(_)
             | PropertyValue::GridAreaName(_)
+            // A name identifies something registered with the runtime, and it
+            // survives to computed value as the TEXT it was written as. A
+            // `Keyword` could not: its symbol is minted by the interner of the
+            // stylesheet that happened to be compiling, so the same word in two
+            // sheets is two different symbols and neither matches a registry.
+            | PropertyValue::Name(_)
             | PropertyValue::Transform(_)
             | PropertyValue::TransformOrigin(_) => Some(Self(value)),
             // `content` is a generated-content decoration, never a computed value

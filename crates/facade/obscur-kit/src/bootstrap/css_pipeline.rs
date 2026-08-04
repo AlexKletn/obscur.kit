@@ -114,9 +114,18 @@ fn diagnostic_for_error(error: &CssParseError) -> Diagnostic {
 
 #[doc = include_str!("css_pipeline.doc/diagnostic_for_unsupported.md")]
 fn diagnostic_for_unsupported(feature: &UnsupportedCssFeature) -> Diagnostic {
+    // Another vendor's property is INFO, not a warning. A stylesheet shared
+    // with a browser build carries `-webkit-` declarations by design, and a
+    // console full of warnings about them trains the reader to ignore the
+    // warnings that matter.
+    let severity = if feature.kind() == UnsupportedFeatureKind::VendorProperty {
+        DiagnosticSeverity::Info
+    } else {
+        DiagnosticSeverity::Warning
+    };
     Diagnostic::new(
         DiagnosticCode::new(code_for_unsupported(feature.kind())),
-        DiagnosticSeverity::Warning,
+        severity,
         DiagnosticSubsystem::Style,
         feature.to_string(),
     )
@@ -147,6 +156,7 @@ const fn code_for_unsupported(kind: UnsupportedFeatureKind) -> &'static str {
         UnsupportedFeatureKind::Function => "css.unsupported_function",
         UnsupportedFeatureKind::Unit => "css.unsupported_unit",
         UnsupportedFeatureKind::PseudoElement => "css.unsupported_pseudo_element",
+        UnsupportedFeatureKind::VendorProperty => "css.ignored_vendor_property",
     }
 }
 

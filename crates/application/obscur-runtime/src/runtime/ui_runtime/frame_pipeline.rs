@@ -262,7 +262,7 @@ impl UiRuntime {
             // needs `&mut self`.
             let (canvases, canvas_animating) =
                 self.canvas_painters
-                    .paint(&self.tree, &self.boxes, self.canvas_clock);
+                    .paint(&self.tree, &self.boxes, &computed, self.canvas_clock);
             // §4.13: what each painter declared as its own hit region, handed to
             // the tester that will be asked about it on every pointer report.
             self.hits

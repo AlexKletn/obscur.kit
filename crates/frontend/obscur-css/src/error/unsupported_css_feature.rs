@@ -17,6 +17,8 @@ pub enum UnsupportedFeatureKind {
     Unit,
     #[doc = include_str!("unsupported_css_feature.doc/PseudoElement.md")]
     PseudoElement,
+    #[doc = include_str!("unsupported_css_feature.doc/VendorProperty.md")]
+    VendorProperty,
 }
 
 impl UnsupportedFeatureKind {
@@ -30,6 +32,10 @@ impl UnsupportedFeatureKind {
             Self::Function => "unsupported function",
             Self::Unit => "unsupported unit",
             Self::PseudoElement => "unsupported pseudo-element",
+            // Not "unsupported": ignoring another vendor's property is the
+            // correct and complete handling of it, and calling that a fault
+            // would make a portable stylesheet look broken.
+            Self::VendorProperty => "ignored vendor property",
         }
     }
 }

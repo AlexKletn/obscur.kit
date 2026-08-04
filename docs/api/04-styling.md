@@ -61,7 +61,8 @@ equal or higher specificity beats it — the browser contract.
 
 ## Properties
 
-119 longhands are modelled. Shorthands (`margin`, `padding`, `border`,
+120 longhands are modelled, one of which is this kit's own (see
+[Vendor properties](#vendor-properties)). Shorthands (`margin`, `padding`, `border`,
 `background`, `flex`, `gap`, `inset`, `border-radius`, `outline`, `font`, …)
 expand to them.
 
@@ -86,6 +87,46 @@ visibility white-space width word-break word-spacing writing-mode z-index
 Logical properties (`*-inline-start`, `*-block-end`, …) resolve onto their
 physical counterparts at computed-value time against `direction` and
 `writing-mode`.
+
+## Vendor properties
+
+The convention every browser has followed since the beginning: a property named
+`-vendor-something` belongs to one implementation, and every other
+implementation ignores it. It is what lets one stylesheet serve renderers that
+do not know each other.
+
+**`-obscur-` is this kit's namespace.** A name in it that the compiler does not
+know is a *fault* — a typo in your own house is worth reporting, and silence
+there would let a misspelled rule sit in a sheet doing nothing.
+
+| Property | Value | Meaning |
+| --- | --- | --- |
+| `-obscur-painter` | `<ident>` \| `<string>` \| `none` | Draw this element's box with the named painter |
+
+```css
+.sparkline { -obscur-painter: sparkline; width: 120px; height: 32px }
+```
+
+```rust
+runtime.register_named_canvas("sparkline", Box::new(|region, paint| {
+    // region.painter() is a display list; region.size() is the box.
+    false // "not animating"
+}));
+```
+
+A painter a node binds *itself* (a widget's own, carried as a prop) wins over
+one a stylesheet names: a rule matching a `<progress>` must not be able to
+replace the routine that draws it. CSS supplies a painter for elements that
+declare none.
+
+**Every other vendor's prefix is passed over in silence.** `-webkit-*`,
+`-moz-*`, `-ms-*` and any `-whatever-*` compile to nothing and are recorded at
+`Info`, not `Warning` — a stylesheet shared with a browser build carries them by
+design, and a console full of warnings about them trains you to ignore the
+warnings that matter.
+
+A foreign prefix is **not** an alias. `-webkit-filter` does not become `filter`;
+spec §4.13 excludes vendor hacks, and this is the exclusion that matters.
 
 ## Units and math
 

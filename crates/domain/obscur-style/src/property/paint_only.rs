@@ -46,6 +46,10 @@ impl PropertyId {
                 // Compositing only: the blend mode changes how the group paints,
                 // never its box.
                 | Self::MixBlendMode
+                // A painter fills a box it does not size. Which routine draws
+                // into it can change every frame of an animation, and making
+                // that relayout would put a full layout pass behind a repaint.
+                | Self::Painter
         )
     }
 
@@ -78,6 +82,7 @@ mod tests {
             PropertyId::OutlineColor,
             PropertyId::ZIndex,
             PropertyId::Visibility,
+            PropertyId::Painter,
         ] {
             assert!(id.is_paint_only(), "{id:?} should be paint-only");
             assert!(!id.affects_layout(), "{id:?} must not force a relayout");

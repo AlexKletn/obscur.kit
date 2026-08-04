@@ -31,3 +31,4 @@ mod transform_lowering;
 mod transition_compiler;
 pub use transition_compiler::{CompiledTransition, TransitionCompiler};
 mod value_lowering;
+mod vendor_prefix;
