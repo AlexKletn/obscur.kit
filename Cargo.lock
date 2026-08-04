@@ -2047,6 +2047,7 @@ dependencies = [
  "obscur-interaction",
  "obscur-layout",
  "obscur-primitives",
+ "obscur-scene",
  "obscur-text",
  "obscur-view",
 ]

@@ -19,3 +19,4 @@ obscur-interaction = { workspace = true }
 obscur-layout = { workspace = true }
 obscur-accessibility = { workspace = true }
 obscur-text = { workspace = true }
+obscur-scene = { workspace = true }

@@ -58,7 +58,7 @@ fn a_registered_painter_reaches_the_display_list() {
 
     rt.register_canvas(
         CHART,
-        Box::new(|region| {
+        Box::new(|region, _props| {
             let size = region.size();
             region
                 .painter()
@@ -97,7 +97,7 @@ fn the_painter_is_told_its_laid_out_size() {
     let mut rt = staged();
     rt.register_canvas(
         CHART,
-        Box::new(move |region| {
+        Box::new(move |region, _props| {
             sink.set(region.size());
             region
                 .painter()
@@ -132,7 +132,7 @@ fn an_unbalanced_painter_is_contained_and_named() {
     let mut rt = staged();
     rt.register_canvas(
         CHART,
-        Box::new(|region| {
+        Box::new(|region, _props| {
             region
                 .painter()
                 .push_clip(obscur_kit::scene::clip::Clip::rect(Rect::new(

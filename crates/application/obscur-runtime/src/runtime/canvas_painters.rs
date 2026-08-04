@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_scene::command::{CanvasRegion, DisplayListBuilder, PaintCommand};
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::canvas_painter;
+use obscur_view::view::{ViewProperty, canvas_painter};
 
 use crate::orchestration::LayoutBoxes;
 
 #[doc = include_str!("canvas_painters.doc/CanvasPainter.md")]
-pub type CanvasPainter = Box<dyn FnMut(&mut CanvasRegion<'_>)>;
+pub type CanvasPainter = Box<dyn FnMut(&mut CanvasRegion<'_>, &[ViewProperty])>;
 
 #[doc = include_str!("canvas_painters.doc/CanvasPainters.md")]
 #[derive(Default)]
@@ -70,7 +70,7 @@ impl CanvasPainters {
                 &mut builder,
                 obscur_geometry::Rect::new(bounds.origin(), bounds.size()),
             );
-            painter(&mut region);
+            painter(&mut region, retained.props());
             if !region.close() {
                 self.unbalanced.push(id);
             }
@@ -159,7 +159,7 @@ mod tests {
         let mut painters = CanvasPainters::new();
         painters.register(
             CHART,
-            Box::new(|region| {
+            Box::new(|region, _props| {
                 let size = region.size();
                 region
                     .painter()
@@ -188,7 +188,7 @@ mod tests {
     fn a_canvas_naming_an_unregistered_painter_draws_nothing_and_does_not_panic() {
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        painters.register(InternedSymbol::from_raw(0x0F99), Box::new(|_| {}));
+        painters.register(InternedSymbol::from_raw(0x0F99), Box::new(|_, _| {}));
         assert!(painters.paint(&tree, &boxes).is_empty());
     }
 
@@ -200,7 +200,7 @@ mod tests {
         // every frame.
         let (tree, boxes, _node) = one_canvas();
         let mut painters = CanvasPainters::new();
-        painters.register(CHART, Box::new(|_| {}));
+        painters.register(CHART, Box::new(|_, _| {}));
         assert!(painters.paint(&tree, &boxes).is_empty());
     }
 
@@ -210,7 +210,7 @@ mod tests {
         let mut painters = CanvasPainters::new();
         painters.register(
             CHART,
-            Box::new(|region| {
+            Box::new(|region, _props| {
                 region
                     .painter()
                     .push_clip(obscur_scene::clip::Clip::rect(Rect::new(
@@ -238,7 +238,7 @@ mod tests {
         let mut painters = CanvasPainters::new();
         painters.register(
             CHART,
-            Box::new(|region| {
+            Box::new(|region, _props| {
                 region
                     .painter()
                     .fill_rect(Rect::new(Point::new(0.0, 0.0), Size::new(1.0, 1.0)), red());
