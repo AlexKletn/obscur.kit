@@ -159,6 +159,13 @@ impl Builder<'_> {
         let mut rules = Vec::new();
         loop {
             self.skip_ws();
+            // Every turn of this loop must consume something. A recovery path
+            // that stops without stepping over the token it choked on turns a
+            // one-character typo into an unbounded loop that allocates a fresh
+            // error each time round — which is a stylesheet taking the process
+            // down, not a diagnostic. The arms below all advance; this is the
+            // net under them, so that no future one has to be trusted to.
+            let entry = self.pos;
             match self.cur_kind() {
                 None => {
                     if nested {
@@ -174,6 +181,19 @@ impl Builder<'_> {
                     self.pos += 1;
                     break;
                 }
+                // A stray `}` at the top level closes nothing. It is CONSUMED
+                // here, because the recovery path below stops in front of a
+                // closing brace without stepping over it — leaving this to that
+                // path spun forever, pushing one error per turn until the
+                // process ran out of memory. One `}` is one fault.
+                Some(CssTokenKind::RBrace) => {
+                    self.errors.push(CssParseError::new(
+                        CssParseErrorKind::UnexpectedToken,
+                        "stray '}' closes no block",
+                        self.cur_span(),
+                    ));
+                    self.pos += 1;
+                }
                 Some(CssTokenKind::AtKeyword(_)) => {
                     if let Some(rule) = self.parse_at_rule() {
                         rules.push(rule);
@@ -184,6 +204,9 @@ impl Builder<'_> {
                         rules.push(rule);
                     }
                 }
+            }
+            if self.pos == entry {
+                self.pos += 1;
             }
         }
         rules
@@ -575,6 +598,39 @@ fn trim_semicolon(tokens: &[CssToken]) -> &[CssToken] {
 
 #[cfg(test)]
 mod tests {
+    use crate::source::CssSource;
+
+    /// The parsed sheet for a snippet of CSS.
+    fn sheet_of(css: &str) -> ParsedStylesheet {
+        StylesheetParser::new(&CssSource::anonymous(css)).parse()
+    }
+
+    #[test]
+    fn a_stray_closing_brace_is_one_fault_and_not_an_endless_loop() {
+        // The defect this caught, and it was not a hang alone: the recovery
+        // path stopped in front of the `}` without stepping over it, so the
+        // rule loop retried the same token forever and pushed a fresh error
+        // every turn. A one-character typo in a stylesheet exhausted the
+        // machine's memory.
+        let sheet = sheet_of("a{color:red} } b{color:blue}");
+        assert_eq!(sheet.errors.len(), 1, "one stray brace, one fault");
+        assert_eq!(sheet.rules.len(), 2, "and the rules on both sides survived");
+    }
+
+    #[test]
+    fn a_run_of_stray_braces_terminates() {
+        let sheet = sheet_of("}}}}");
+        assert_eq!(sheet.errors.len(), 4);
+        assert!(sheet.rules.is_empty());
+    }
+
+    #[test]
+    fn a_prelude_that_never_opens_a_block_terminates() {
+        // The other way into the same loop: a selector with no `{` at all.
+        let sheet = sheet_of("a b c");
+        assert!(!sheet.errors.is_empty());
+        assert!(sheet.rules.is_empty());
+    }
     use super::*;
 
     #[test]
