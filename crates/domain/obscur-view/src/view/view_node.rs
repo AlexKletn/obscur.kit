@@ -2,7 +2,7 @@
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
-use super::{CLASS, ViewEventBinding, ViewFragment, ViewKey, ViewProperty, ViewValue};
+use super::{CLASS, STYLE, ViewEventBinding, ViewFragment, ViewKey, ViewProperty, ViewValue};
 
 #[doc = include_str!("view_node.doc/ViewNode.md")]
 #[derive(Debug, Clone, PartialEq)]
@@ -150,6 +150,15 @@ impl ViewNode {
     pub fn class(self, class: impl Into<Box<str>>) -> Self {
         self.with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
     }
+
+    #[doc = include_str!("view_node.doc/style.md")]
+    #[must_use]
+    pub fn style(self, declarations: impl Into<Box<str>>) -> Self {
+        self.with_prop(ViewProperty::new(
+            STYLE,
+            ViewValue::Text(declarations.into()),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -222,6 +231,30 @@ mod tests {
     #[test]
     fn class_is_a_noop_on_text() {
         let tx = ViewNode::text("x").class("row");
+        assert!(matches!(tx, ViewNode::Text { .. }));
+    }
+
+    #[test]
+    fn style_sets_the_reserved_style_symbol_not_a_hashed_one() {
+        // The symbol is what decides whether the block is ever compiled:
+        // `StyleAttributes::extract` reads `STYLE` and nothing else, so a prop
+        // under any other symbol is carried and silently ignored.
+        let el = ViewNode::element(ComponentId::from_raw(1)).style("width: 50%");
+        match el {
+            ViewNode::Element { props, .. } => assert_eq!(
+                props,
+                vec![ViewProperty::new(
+                    STYLE,
+                    ViewValue::Text("width: 50%".into())
+                )]
+            ),
+            ViewNode::Text { .. } => panic!("expected element"),
+        }
+    }
+
+    #[test]
+    fn style_is_a_noop_on_text() {
+        let tx = ViewNode::text("x").style("width: 50%");
         assert!(matches!(tx, ViewNode::Text { .. }));
     }
 }

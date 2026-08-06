@@ -28,6 +28,9 @@ fn reserved_attribute_symbols_match_obscur_view() {
     // vocabulary on one front end and not the other.
     assert_eq!(name_binding::LOCAL_NAME, view::LOCAL_NAME);
     assert_ne!(name_binding::LOCAL_NAME, name_binding::TYPE);
+    // §4.14 origin 5. Drift here means an authored `style="…"` lowers under a
+    // symbol the style tier never reads: carried, and silently never applied.
+    assert_eq!(name_binding::STYLE, view::STYLE);
     assert_eq!(name_binding::SRC, view::SRC);
     assert_eq!(name_binding::DISABLED, view::DISABLED);
     assert_eq!(name_binding::CHECKED, view::CHECKED);

@@ -35,6 +35,9 @@ pub const PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_0009);
 #[doc = include_str!("style_attribute.doc/LOCAL_NAME.md")]
 pub const LOCAL_NAME: InternedSymbol = InternedSymbol::from_raw(0x0000_000A);
 
+#[doc = include_str!("style_attribute.doc/STYLE.md")]
+pub const STYLE: InternedSymbol = InternedSymbol::from_raw(0x0000_000B);
+
 #[doc = include_str!("style_attribute.doc/StyleAttributes.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleAttributes {
@@ -59,6 +62,8 @@ pub struct StyleAttributes {
     placeholder: Option<Box<str>>,
     #[doc = include_str!("style_attribute.doc/control_type.md")]
     control_type: Option<Box<str>>,
+    #[doc = include_str!("style_attribute.doc/inline_style.md")]
+    inline_style: Option<Box<str>>,
 }
 
 #[doc = include_str!("style_attribute.doc/is_truthy.md")]
@@ -128,10 +133,17 @@ impl StyleAttributes {
                 SRC => attributes.image_source = Some(text.clone()),
                 VALUE => attributes.control_value = Some(text.clone()),
                 PLACEHOLDER => attributes.placeholder = Some(text.clone()),
+                STYLE => attributes.inline_style = Some(text.clone()),
                 _ => {}
             }
         }
         attributes
+    }
+
+    #[doc = include_str!("style_attribute.doc/inline_style_2.md")]
+    #[must_use]
+    pub fn inline_style(&self) -> Option<&str> {
+        self.inline_style.as_deref()
     }
 
     #[doc = include_str!("style_attribute.doc/local_name.md")]
@@ -227,6 +239,7 @@ impl StyleAttributes {
             && self.placeholder.is_none()
             && self.virtual_extent.is_none()
             && self.virtual_list.is_none()
+            && self.inline_style.is_none()
     }
 }
 
@@ -256,6 +269,7 @@ mod tests {
             ("VALUE", VALUE),
             ("PLACEHOLDER", PLACEHOLDER),
             ("LOCAL_NAME", LOCAL_NAME),
+            ("STYLE", STYLE),
             ("VIRTUAL_ROW_EXTENT", VIRTUAL_ROW_EXTENT),
             ("VIRTUAL_LIST_ID", VIRTUAL_LIST_ID),
         ];
@@ -273,6 +287,17 @@ mod tests {
         assert_eq!(attrs.local_name(), None);
         assert_eq!(attrs.id(), None);
         assert!(attrs.classes().is_empty());
+    }
+
+    #[test]
+    fn a_node_carrying_only_a_style_attribute_is_not_empty() {
+        // `is_empty` is what the tree uses to decide a node has nothing the style
+        // tier needs to look at. Omitting `inline_style` from it would make an
+        // element whose only attribute is `style="…"` indistinguishable from a
+        // bare one — the declarations would be extracted and then never asked for.
+        let attrs = StyleAttributes::extract(&[text_prop(STYLE, "opacity:0.5")]);
+        assert!(!attrs.is_empty());
+        assert_eq!(attrs.inline_style(), Some("opacity:0.5"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 #![doc = include_str!("css_pipeline.doc/_module.md")]
 
 use obscur_css::cache::StylesheetCache;
-use obscur_css::compiler::{CompiledStylesheet, StylesheetCompiler};
+use obscur_css::compiler::{CompiledStylesheet, StylesheetCompiler, compile_inline_style};
 use obscur_css::error::{
     CssParseError, CssParseErrorKind, UnsupportedCssFeature, UnsupportedFeatureKind,
 };
@@ -10,7 +10,9 @@ use obscur_diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem, RecoveryAction,
 };
 use obscur_runtime::UiRuntime;
-use obscur_runtime::orchestration::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
+use obscur_runtime::orchestration::{
+    CssKeyframeRule, CssMotionRules, CssTransitionRule, InlineStyleOutcome,
+};
 use obscur_style::matching::Stylesheet;
 
 #[doc = include_str!("css_pipeline.doc/CssPipeline.md")]
@@ -61,6 +63,7 @@ impl CssPipeline {
         self.motion = CssMotionRules::from_parts(transitions, keyframes);
         runtime.set_stylesheets(self.sheets.clone());
         runtime.set_css_motion(self.motion.clone());
+        install_inline_style_compiler(runtime);
     }
 
     #[doc = include_str!("css_pipeline.doc/sheets_2.md")]
@@ -97,6 +100,34 @@ impl CssPipeline {
     pub fn invalidate_cache(&mut self) {
         self.cache.clear();
     }
+}
+
+#[doc = include_str!("css_pipeline.doc/install_inline_style_compiler.md")]
+fn install_inline_style_compiler(runtime: &mut UiRuntime) {
+    // Guarded, not unconditional: this runs again on every live stylesheet
+    // replacement, and re-installing would throw away every block compiled so
+    // far. Nothing about an inline block depends on the sheets it competes with,
+    // so the old answers are still this compiler's answers.
+    if runtime.has_inline_style_compiler() {
+        return;
+    }
+    // The application tier cannot depend on a frontend crate (§1.11), so the
+    // grammar reaches the runtime as a function. This is the one place that owns
+    // both sides, which is why the `style` attribute works exactly where the CSS
+    // pipeline does and is inert where it is not.
+    runtime.set_inline_style_compiler(Box::new(|text| {
+        let compiled = compile_inline_style(text);
+        // Through the same two constructors an authored sheet's faults go
+        // through: a misspelled property must not be reported one way in a
+        // stylesheet and another way in an attribute.
+        let faults = compiled
+            .errors
+            .iter()
+            .map(diagnostic_for_error)
+            .chain(compiled.unsupported.iter().map(diagnostic_for_unsupported))
+            .collect();
+        InlineStyleOutcome::new(compiled.style).with_faults(faults)
+    }));
 }
 
 #[doc = include_str!("css_pipeline.doc/diagnostic_for_error.md")]

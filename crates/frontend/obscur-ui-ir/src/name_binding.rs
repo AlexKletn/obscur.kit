@@ -20,6 +20,8 @@ pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
 pub const PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_0009);
 #[doc = include_str!("name_binding.doc/LOCAL_NAME.md")]
 pub const LOCAL_NAME: InternedSymbol = InternedSymbol::from_raw(0x0000_000A);
+#[doc = include_str!("name_binding.doc/STYLE.md")]
+pub const STYLE: InternedSymbol = InternedSymbol::from_raw(0x0000_000B);
 
 #[doc = include_str!("name_binding.doc/TEST_ID.md")]
 pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
@@ -244,6 +246,12 @@ pub fn attr_symbol(name: &str) -> InternedSymbol {
     match name {
         "class" => CLASS,
         "id" => ID,
+        // A declaration block written on the element, admitted at cascade origin
+        // `Inline` (§4.14). It has to be a reserved symbol rather than a hashed
+        // one for the same reason `placeholder` did: `StyleAttributes::extract`
+        // reads this symbol and no other, so a hashed `style` prop is carried
+        // through the whole tree and then never compiled.
+        "style" => STYLE,
         "type" => TYPE,
         "src" => SRC,
         "disabled" => DISABLED,

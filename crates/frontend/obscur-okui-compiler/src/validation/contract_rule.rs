@@ -240,7 +240,7 @@ impl ContractViolation {
 }
 
 #[doc = include_str!("contract_rule.doc/RESERVED_ATTRIBUTES.md")]
-const RESERVED_ATTRIBUTES: [&str; 5] = ["key", "class", "id", "requires", "slot"];
+const RESERVED_ATTRIBUTES: [&str; 6] = ["key", "class", "id", "requires", "slot", "style"];
 
 #[doc = include_str!("contract_rule.doc/is_reserved_attribute.md")]
 #[must_use]

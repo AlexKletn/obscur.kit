@@ -150,6 +150,7 @@ impl UiRuntime {
             &mut self.style,
             &mut self.inputs,
             &mut self.overlaid,
+            &mut self.inline_styles,
             &mut self.computed,
             &mut self.last_style,
             &mut self.generated_content,

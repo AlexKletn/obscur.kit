@@ -16,8 +16,9 @@ use obscur_tree::tree::RetainedTree;
 use crate::component::ComponentStore;
 use crate::frame::FrameId;
 use crate::orchestration::{
-    ArrangeCache, ComputedStyles, DragCoordinator, LayoutBoxes, LayoutCoordinator, MeasureCache,
-    PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs, StyleMatchingCoordinator,
+    ArrangeCache, ComputedStyles, DragCoordinator, InlineStyles, LayoutBoxes, LayoutCoordinator,
+    MeasureCache, PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs,
+    StyleMatchingCoordinator,
 };
 use crate::runtime::{
     AccessibilityPublisher, BackgroundWork, CanvasPainters, CascadeSheets, FrameTelemetry,
@@ -61,6 +62,7 @@ impl UiRuntime {
             last_layout_inputs: None,
             inspector: TreeInspector::new(),
             canvas_painters: CanvasPainters::new(),
+            inline_styles: InlineStyles::new(),
             canvas_clock: 0.0,
             slider_drags: HashMap::new(),
             focused: None,

@@ -24,9 +24,9 @@ use crate::frame::FrameId;
 
 use crate::component::ComponentStore;
 use crate::orchestration::{
-    ArrangeCache, ComputedStyles, DragCoordinator, DragOutcome, GeneratedContent, LayoutBoxes,
-    LayoutCoordinator, MeasureCache, PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs,
-    StyleMatchingCoordinator,
+    ArrangeCache, ComputedStyles, DragCoordinator, DragOutcome, GeneratedContent, InlineStyles,
+    LayoutBoxes, LayoutCoordinator, MeasureCache, PseudoStates, SceneCoordinator, StyleCoordinator,
+    StyleInputs, StyleMatchingCoordinator,
 };
 use crate::scheduler::FrameScheduler;
 
@@ -47,6 +47,7 @@ mod frame_output;
 mod frame_pipeline;
 mod frame_requests;
 mod gestures;
+mod inline_style;
 mod interaction_state;
 mod keyboard;
 mod motion;
@@ -125,6 +126,8 @@ pub struct UiRuntime {
     pointers: PointerSessions,
     #[doc = include_str!("ui_runtime.doc/canvas_painters.md")]
     canvas_painters: CanvasPainters,
+    #[doc = include_str!("ui_runtime.doc/inline_styles.md")]
+    inline_styles: InlineStyles,
     #[doc = include_str!("ui_runtime.doc/canvas_clock.md")]
     canvas_clock: f32,
     #[doc = include_str!("ui_runtime.doc/slider_drags.md")]

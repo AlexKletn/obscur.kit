@@ -1,4 +1,6 @@
 #![doc = include_str!("mod.doc/_module.md")]
+mod inline_style;
+pub use inline_style::InlineStyle;
 mod block_declaration;
 pub use block_declaration::BlockDeclaration;
 mod media_environment;

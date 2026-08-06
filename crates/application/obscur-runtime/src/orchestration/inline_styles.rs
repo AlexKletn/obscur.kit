@@ -1,0 +1,394 @@
+#![doc = include_str!("inline_styles.doc/_module.md")]
+
+use std::collections::{HashMap, HashSet};
+
+use obscur_diagnostics::DiagnosticSink;
+use obscur_style::cascade::{CascadeOrigin, CascadePriority, ResolvedDeclarations};
+use obscur_style::matching::InlineStyle;
+use obscur_style::selector::SelectorSpecificity;
+use obscur_tree::tree::RetainedTree;
+
+use super::{InlineStyleOutcome, StyleInputs};
+
+#[doc = include_str!("inline_styles.doc/InlineStyleCompiler.md")]
+pub type InlineStyleCompiler = Box<dyn Fn(&str) -> InlineStyleOutcome>;
+
+#[doc = include_str!("inline_styles.doc/InlineStyles.md")]
+#[derive(Default)]
+pub(crate) struct InlineStyles {
+    #[doc = include_str!("inline_styles.doc/compiler.md")]
+    compiler: Option<InlineStyleCompiler>,
+    #[doc = include_str!("inline_styles.doc/compiled.md")]
+    compiled: HashMap<Box<str>, InlineStyle>,
+}
+
+impl std::fmt::Debug for InlineStyles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InlineStyles")
+            .field("installed", &self.compiler.is_some())
+            .field("compiled", &self.compiled.len())
+            .finish()
+    }
+}
+
+impl InlineStyles {
+    #[doc = include_str!("inline_styles.doc/new.md")]
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    #[doc = include_str!("inline_styles.doc/install.md")]
+    pub(crate) fn install(&mut self, compiler: InlineStyleCompiler) {
+        // Whatever was compiled by the old one is not this one's answer.
+        self.compiled.clear();
+        self.compiler = Some(compiler);
+    }
+
+    #[doc = include_str!("inline_styles.doc/is_installed.md")]
+    pub(crate) fn is_installed(&self) -> bool {
+        self.compiler.is_some()
+    }
+
+    #[doc = include_str!("inline_styles.doc/block_for.md")]
+    pub(crate) fn block_for(
+        &mut self,
+        text: &str,
+        diagnostics: &dyn DiagnosticSink,
+    ) -> Option<InlineStyle> {
+        let compiler = self.compiler.as_ref()?;
+        if let Some(block) = self.compiled.get(text) {
+            return Some(block.clone());
+        }
+        // Compiled once per distinct string, not once per node: a virtualized
+        // list of a thousand rows carrying the same `style` pays for one parse,
+        // and every row after the first shares the refcounted result.
+        let (block, faults) = compiler(text).into_parts();
+        // Reported on the same edge that compiles, so a fault is raised once per
+        // distinct attribute rather than once per node per frame — the reason a
+        // misspelled property in a list row does not become a thousand
+        // diagnostics a frame.
+        for fault in &faults {
+            diagnostics.emit(fault);
+        }
+        self.compiled.insert(text.into(), block.clone());
+        Some(block)
+    }
+
+    #[doc = include_str!("inline_styles.doc/apply_all.md")]
+    pub(crate) fn apply_all(
+        &mut self,
+        tree: &RetainedTree,
+        inputs: &mut StyleInputs,
+        diagnostics: &dyn DiagnosticSink,
+    ) {
+        if !self.is_installed() {
+            return;
+        }
+        let mut live: HashSet<&str> = HashSet::new();
+        for (node, retained) in tree.iter() {
+            let Some(text) = retained.attributes().inline_style() else {
+                continue;
+            };
+            live.insert(text);
+            let Some(block) = self.block_for(text, diagnostics) else {
+                continue;
+            };
+            if block.is_empty() {
+                continue;
+            }
+            // Folded into the node's own resolved map. Applying it twice is
+            // harmless — same origin, same order, same value — which is what
+            // lets the incremental restyle path re-apply to every styled node
+            // rather than having to work out which ones it rematched.
+            let mut resolved = inputs.cascaded_for(node).clone();
+            apply(&mut resolved, &block);
+            inputs.set_cascaded(node, resolved);
+        }
+        // Swept against the tree that was just walked, so the cache cannot
+        // outgrow the markup. An application that computes its attribute — a
+        // dragged panel writing `style="width: 412px"` every frame — would
+        // otherwise leave one dead entry per pixel it passed through, and the
+        // cache would be a leak wearing a cache's name.
+        self.compiled.retain(|text, _| live.contains(text.as_ref()));
+    }
+
+    #[doc = include_str!("inline_styles.doc/cached.md")]
+    #[cfg(test)]
+    pub(crate) fn cached(&self) -> usize {
+        self.compiled.len()
+    }
+}
+
+#[doc = include_str!("inline_styles.doc/apply.md")]
+pub(crate) fn apply(resolved: &mut ResolvedDeclarations, block: &InlineStyle) {
+    for (order, declaration) in block.declarations().iter().enumerate() {
+        let priority = CascadePriority::new(
+            CascadeOrigin::Inline,
+            declaration.important_flag(),
+            // No selector matched, so there is no specificity to speak of. An
+            // inline declaration outranks a stylesheet by ORIGIN, not by
+            // pretending to a specificity no author could out-write — which is
+            // exactly what §4.14 means by an origin that does not artificially
+            // inflate specificity.
+            SelectorSpecificity::new(0, 0, 0),
+            u32::try_from(order).unwrap_or(u32::MAX),
+        );
+        // Only when it actually wins. An inline NORMAL declaration must not
+        // displace an authored `!important` one: §4.14 puts every important
+        // declaration above every normal one, whatever origin either came from.
+        if resolved
+            .priority_of(declaration.property())
+            .is_some_and(|winner| priority < winner)
+        {
+            continue;
+        }
+        resolved.insert_with_priority(
+            declaration.property(),
+            declaration.value().clone(),
+            priority,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InlineStyles, apply};
+    use crate::orchestration::InlineStyleOutcome;
+    use obscur_diagnostics::{
+        Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSink, DiagnosticSubsystem,
+        NullDiagnosticSink,
+    };
+    use obscur_style::cascade::{
+        CascadeOrigin, CascadePriority, ImportantFlag, ResolvedDeclarations,
+    };
+    use obscur_style::matching::{BlockDeclaration, InlineStyle};
+    use obscur_style::property::{PropertyId, PropertyValue};
+    use obscur_style::selector::SelectorSpecificity;
+
+    #[derive(Default)]
+    struct CountingSink(std::cell::Cell<usize>);
+
+    impl DiagnosticSink for CountingSink {
+        fn emit(&self, _diagnostic: &Diagnostic) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    fn value(n: f32) -> PropertyValue {
+        PropertyValue::Number(n)
+    }
+
+    fn from_sheet(
+        origin: CascadeOrigin,
+        important: ImportantFlag,
+        specificity: (u16, u16, u16),
+    ) -> ResolvedDeclarations {
+        let mut resolved = ResolvedDeclarations::new();
+        resolved.insert_with_priority(
+            PropertyId::Opacity,
+            value(1.0),
+            CascadePriority::new(
+                origin,
+                important,
+                SelectorSpecificity::new(specificity.0, specificity.1, specificity.2),
+                0,
+            ),
+        );
+        resolved
+    }
+
+    fn inline(important: ImportantFlag) -> InlineStyle {
+        InlineStyle::new(vec![BlockDeclaration::new(
+            PropertyId::Opacity,
+            value(2.0),
+            important,
+        )])
+    }
+
+    fn opacity(resolved: &ResolvedDeclarations) -> f32 {
+        match resolved.get(PropertyId::Opacity) {
+            Some(PropertyValue::Number(n)) => *n,
+            other => panic!("expected a number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inline_beats_a_stylesheet_however_specific_its_selector() {
+        // The whole point of an origin: no selector an author can write reaches
+        // it. A thousand ids would not.
+        let mut resolved = from_sheet(
+            CascadeOrigin::ComponentModule,
+            ImportantFlag::Normal,
+            (99, 99, 99),
+        );
+        apply(&mut resolved, &inline(ImportantFlag::Normal));
+        assert_eq!(opacity(&resolved), 2.0);
+    }
+
+    #[test]
+    fn an_authored_important_declaration_outranks_a_normal_inline_one() {
+        // §4.14: every important declaration is above every normal one, whatever
+        // origin either came from. Getting this backwards would make `!important`
+        // unusable — the one escape hatch an author has would lose to the markup
+        // it was written to overrule.
+        let mut resolved = from_sheet(
+            CascadeOrigin::GlobalApp,
+            ImportantFlag::Important,
+            (0, 0, 1),
+        );
+        apply(&mut resolved, &inline(ImportantFlag::Normal));
+        assert_eq!(opacity(&resolved), 1.0, "the sheet's !important held");
+    }
+
+    #[test]
+    fn an_important_inline_declaration_outranks_an_important_authored_one() {
+        let mut resolved = from_sheet(
+            CascadeOrigin::ComponentModule,
+            ImportantFlag::Important,
+            (99, 99, 99),
+        );
+        apply(&mut resolved, &inline(ImportantFlag::Important));
+        assert_eq!(opacity(&resolved), 2.0);
+    }
+
+    #[test]
+    fn a_runtime_override_still_wins() {
+        // Origin 6 is above inline, and it is the layer an inspector and an
+        // animation write through. Losing to markup would make both useless.
+        let mut resolved = from_sheet(
+            CascadeOrigin::RuntimeOverride,
+            ImportantFlag::Normal,
+            (0, 0, 0),
+        );
+        apply(&mut resolved, &inline(ImportantFlag::Normal));
+        assert_eq!(opacity(&resolved), 1.0);
+    }
+
+    #[test]
+    fn a_property_no_sheet_set_is_simply_taken() {
+        let mut resolved = ResolvedDeclarations::new();
+        apply(&mut resolved, &inline(ImportantFlag::Normal));
+        assert_eq!(opacity(&resolved), 2.0);
+    }
+
+    #[test]
+    fn the_later_of_two_declarations_in_one_block_wins() {
+        // Source order inside the block, which is the only thing left to decide
+        // a tie when neither origin nor specificity differ.
+        let mut resolved = ResolvedDeclarations::new();
+        apply(
+            &mut resolved,
+            &InlineStyle::new(vec![
+                BlockDeclaration::normal(PropertyId::Opacity, value(1.0)),
+                BlockDeclaration::normal(PropertyId::Opacity, value(2.0)),
+            ]),
+        );
+        assert_eq!(opacity(&resolved), 2.0);
+    }
+
+    #[test]
+    fn nothing_is_compiled_until_a_compiler_is_installed() {
+        // A `UiRuntime` driven directly, with no CSS front end wired to it, must
+        // not silently invent declarations.
+        let mut styles = InlineStyles::new();
+        assert!(!styles.is_installed());
+        assert!(styles.block_for("color:red", &NullDiagnosticSink).is_none());
+    }
+
+    #[test]
+    fn one_string_is_compiled_once_however_many_nodes_carry_it() {
+        // A virtualized list of a thousand rows sharing one `style` pays for one
+        // parse, which is the difference between a cache and a parser in the
+        // frame loop.
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counter = std::rc::Rc::clone(&calls);
+        let mut styles = InlineStyles::new();
+        styles.install(Box::new(move |_| {
+            counter.set(counter.get() + 1);
+            InlineStyleOutcome::new(InlineStyle::empty())
+        }));
+
+        for _ in 0..1000 {
+            assert!(
+                styles
+                    .block_for("height:32px", &NullDiagnosticSink)
+                    .is_some()
+            );
+        }
+        assert_eq!(calls.get(), 1);
+        assert_eq!(styles.cached(), 1);
+    }
+
+    #[test]
+    fn a_fault_is_reported_once_per_distinct_attribute_not_once_per_node() {
+        // The cost of getting this wrong is a console that scrolls a thousand
+        // copies of one message every frame, which is the same as no console.
+        let sink = CountingSink::default();
+        let mut styles = InlineStyles::new();
+        styles.install(Box::new(|_| {
+            InlineStyleOutcome::new(InlineStyle::empty()).with_faults(vec![Diagnostic::new(
+                DiagnosticCode::new("css.invalid_value"),
+                DiagnosticSeverity::Warning,
+                DiagnosticSubsystem::Style,
+                "width: nope",
+            )])
+        }));
+
+        for _ in 0..100 {
+            let _ = styles.block_for("width: nope", &sink);
+        }
+        assert_eq!(sink.0.get(), 1);
+    }
+
+    #[test]
+    fn a_string_no_node_carries_any_more_leaves_the_cache() {
+        // An application that computes its attribute — a dragged panel writing
+        // `style="width: 412px"` every frame — must not leave one live entry per
+        // pixel it passed through. The sweep is what makes this a cache and not
+        // a leak, and only a walk of the real tree can see it.
+        use crate::orchestration::StyleInputs;
+        use obscur_identity::ComponentId;
+        use obscur_tree::node::NodeKind;
+        use obscur_tree::tree::RetainedTree;
+        use obscur_view::view::{STYLE, StyleAttributes, ViewProperty, ViewValue};
+
+        let mut tree = RetainedTree::new();
+        let node = tree.alloc(NodeKind::Element {
+            component: ComponentId::from_raw(1),
+        });
+        tree.set_root(node);
+
+        let mut styles = InlineStyles::new();
+        styles.install(Box::new(|_| {
+            InlineStyleOutcome::new(inline(ImportantFlag::Normal))
+        }));
+        let mut inputs = StyleInputs::new();
+
+        for width in 0..50 {
+            let text = format!("width: {width}px");
+            let prop = ViewProperty::new(STYLE, ViewValue::Text(text.into()));
+            tree.get_mut(node)
+                .expect("just allocated")
+                .set_attributes(StyleAttributes::extract(&[prop]));
+            styles.apply_all(&tree, &mut inputs, &NullDiagnosticSink);
+            assert_eq!(styles.cached(), 1, "one live string, one entry");
+        }
+    }
+
+    #[test]
+    fn installing_a_new_compiler_forgets_the_old_ones_answers() {
+        let mut styles = InlineStyles::new();
+        styles.install(Box::new(|_| InlineStyleOutcome::new(InlineStyle::empty())));
+        let _ = styles.block_for("color:red", &NullDiagnosticSink);
+        assert_eq!(styles.cached(), 1);
+
+        styles.install(Box::new(|_| {
+            InlineStyleOutcome::new(inline(ImportantFlag::Normal))
+        }));
+        assert_eq!(styles.cached(), 0, "a stale answer is worse than none");
+        let block = styles
+            .block_for("color:red", &NullDiagnosticSink)
+            .expect("installed");
+        assert!(!block.is_empty(), "the new compiler answered");
+    }
+}

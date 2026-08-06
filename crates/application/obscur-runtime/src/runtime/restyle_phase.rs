@@ -16,7 +16,7 @@ use obscur_tree::tree::RetainedTree;
 use super::{StyleDelta, StyleKey};
 use crate::invalidation::RestyleScope;
 use crate::orchestration::{
-    ComputedStyles, PseudoStates, ShapedChMetrics, StyleCoordinator, StyleInputs,
+    ComputedStyles, InlineStyles, PseudoStates, ShapedChMetrics, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator,
 };
 
@@ -38,6 +38,8 @@ pub(crate) struct RestylePhase<'a> {
     inputs: &'a mut StyleInputs,
     #[doc = include_str!("restyle_phase.doc/overlaid.md")]
     overlaid: &'a mut ComputedStyles,
+    #[doc = include_str!("restyle_phase.doc/inline.md")]
+    inline: &'a mut InlineStyles,
 }
 
 impl<'a> RestylePhase<'a> {
@@ -52,6 +54,7 @@ impl<'a> RestylePhase<'a> {
         style: &'a mut StyleCoordinator,
         inputs: &'a mut StyleInputs,
         overlaid: &'a mut ComputedStyles,
+        inline: &'a mut InlineStyles,
     ) -> Self {
         Self {
             tree,
@@ -62,6 +65,7 @@ impl<'a> RestylePhase<'a> {
             style,
             inputs,
             overlaid,
+            inline,
         }
     }
 
@@ -142,9 +146,13 @@ impl<'a> RestylePhase<'a> {
         viewport: Size,
         diagnostics: &dyn DiagnosticSink,
     ) -> (ComputedStyles, usize, StyleDelta) {
-        let inputs =
+        let mut inputs =
             self.matcher
                 .build_inputs_with_pseudo_env(self.tree, sheets, self.pseudo, environment);
+        // §4.14 origin 5, folded in after matching and before resolution: what
+        // an author wrote ON the element outranks every selector that reached
+        // it, and loses only to a runtime override.
+        self.inline.apply_all(self.tree, &mut inputs, diagnostics);
         // Per-node style faults: a matched rule that authored an unparseable
         // declaration value (`width: not-a-length`) dropped it and kept the rest
         // (§4.13). The runtime is the only place that knows *which* element
@@ -180,6 +188,7 @@ impl<'a> RestylePhase<'a> {
         environment: &MediaEnvironment,
         viewport: Size,
         dirty: &StyleInvalidation,
+        diagnostics: &dyn DiagnosticSink,
     ) -> (ComputedStyles, usize, StyleDelta) {
         // Undo the motion overlay first: the retained map is about to be treated as
         // the resolver's own output — by the incremental walk, whose non-dirty
@@ -203,6 +212,7 @@ impl<'a> RestylePhase<'a> {
             environment,
             dirty,
         );
+        self.inline.apply_all(self.tree, self.inputs, diagnostics);
         // Same port as the full resolve above: an incrementally restyled node must
         // land on the identical `ch`, or a node's border would change width purely
         // because it was re-resolved by a different path.

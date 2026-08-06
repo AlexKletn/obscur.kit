@@ -15,7 +15,7 @@ use super::{
 };
 use crate::frame::FrameContext;
 use crate::orchestration::{
-    ComputedStyles, GeneratedContent, PseudoStates, StyleCoordinator, StyleInputs,
+    ComputedStyles, GeneratedContent, InlineStyles, PseudoStates, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator, resolve_generated_content,
 };
 
@@ -37,6 +37,8 @@ pub(crate) struct StylePhase<'a> {
     inputs: &'a mut StyleInputs,
     #[doc = include_str!("style_phase.doc/overlaid.md")]
     overlaid: &'a mut ComputedStyles,
+    #[doc = include_str!("style_phase.doc/inline.md")]
+    inline: &'a mut InlineStyles,
     #[doc = include_str!("style_phase.doc/retained.md")]
     retained: &'a mut ComputedStyles,
     #[doc = include_str!("style_phase.doc/last_style.md")]
@@ -69,6 +71,7 @@ impl<'a> StylePhase<'a> {
         style: &'a mut StyleCoordinator,
         inputs: &'a mut StyleInputs,
         overlaid: &'a mut ComputedStyles,
+        inline: &'a mut InlineStyles,
         retained: &'a mut ComputedStyles,
         last_style: &'a mut Option<StyleKey>,
         generated_content: &'a mut HashMap<NodeId, GeneratedContent>,
@@ -86,6 +89,7 @@ impl<'a> StylePhase<'a> {
             style,
             inputs,
             overlaid,
+            inline,
             retained,
             last_style,
             generated_content,
@@ -140,6 +144,7 @@ impl<'a> StylePhase<'a> {
                 self.style,
                 self.inputs,
                 self.overlaid,
+                self.inline,
             );
             let scope = match reconcile_roots {
                 Some(roots) => phase.scope(
@@ -162,6 +167,7 @@ impl<'a> StylePhase<'a> {
                     &environment,
                     ctx.viewport(),
                     &dirty,
+                    self.diagnostics,
                 ),
                 None => phase.everything(&sheets, &environment, ctx.viewport(), self.diagnostics),
             }

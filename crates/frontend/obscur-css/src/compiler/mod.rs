@@ -11,6 +11,8 @@ mod font_lowering;
 mod gradient_lowering;
 mod grid_placement;
 mod grid_track_lowering;
+mod inline_style_compiler;
+pub use inline_style_compiler::{CompiledInlineStyle, compile_inline_style};
 mod keyframe_compiler;
 pub use keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
 mod longhand_catalog;
