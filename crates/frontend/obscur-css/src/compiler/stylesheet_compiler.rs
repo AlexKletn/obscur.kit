@@ -290,6 +290,12 @@ impl StylesheetCompiler {
         // declaration (§4.13). Recorded on the rule so the runtime can raise a
         // per-node diagnostic attributed to the element that matched it.
         let mut invalid_values = Vec::new();
+        // The `--name: value` declarations this rule authored. They ride ON the
+        // rule, not on the sheet, because they cascade per element like every
+        // other declaration: `:root { --brand: red }` and `.dark { --brand: blue }`
+        // are two answers for two elements, and a sheet-level list could only
+        // hold one of them.
+        let mut custom_properties = Vec::new();
         for decl in &style.declarations {
             if is_motion_decl(&decl.name) {
                 continue;
@@ -306,12 +312,16 @@ impl StylesheetCompiler {
                 None,
                 &mut self.interner,
             ) {
-                if let CompiledDeclaration::Standard(declaration) = compiled {
-                    block.push(BlockDeclaration::new(
-                        declaration.property(),
-                        declaration.value().clone(),
-                        declaration.important(),
-                    ));
+                match compiled {
+                    CompiledDeclaration::Standard(declaration) => {
+                        block.push(BlockDeclaration::new(
+                            declaration.property(),
+                            declaration.value().clone(),
+                            declaration.important(),
+                        ));
+                    }
+                    CompiledDeclaration::Custom(custom) => custom_properties.push(custom),
+                    CompiledDeclaration::Unsupported(_) => {}
                 }
             }
             // A recognised longhand handed a bare keyword it cannot use had an
@@ -328,6 +338,7 @@ impl StylesheetCompiler {
         }
         StyleRule::new(SelectorCompiler::lower_list(&style.selectors), block)
             .with_invalid_values(invalid_values)
+            .with_custom_properties(custom_properties)
     }
 }
 
@@ -347,7 +358,7 @@ fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Ac
     // `@media`/`@container` currently drives regardless of the environment.
     acc.motion_rules.append(&mut inner.motion_rules);
     acc.unsupported.append(&mut inner.unsupported);
-    let lowered = lower_condition(&condition);
+    let lowered = lower_condition(&condition, &mut acc.unsupported);
     for rule in inner.matchable_rules {
         let combined = match rule.condition() {
             Some(existing) => RuleCondition::All(vec![lowered.clone(), existing.clone()]),
@@ -690,6 +701,39 @@ mod tests {
     }
 
     #[test]
+    fn a_rules_custom_properties_ride_on_the_matchable_rule() {
+        // The sheet-level list cannot say WHICH elements got `--brand`, and that
+        // is the whole question: a custom property cascades per element like any
+        // other declaration. A rule that dropped it is a `var()` that resolves
+        // to nothing.
+        let sheet = compile(":root { --brand: #ff0000 } a { color: var(--brand) }");
+        let root = &sheet.matchable.rules()[0];
+        assert_eq!(root.custom_properties().len(), 1);
+        assert_eq!(
+            root.custom_properties()[0].name(),
+            InternedSymbol::named("--brand")
+        );
+        assert_eq!(
+            root.custom_properties()[0].value(),
+            &PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+        );
+        // The rule that only READS it declares none.
+        assert!(sheet.matchable.rules()[1].custom_properties().is_empty());
+        assert_eq!(
+            sheet.matchable.rules()[1].block()[0].value(),
+            &PropertyValue::CustomRef(InternedSymbol::named("--brand"))
+        );
+    }
+
+    #[test]
+    fn a_custom_property_declared_inside_a_media_group_rides_on_its_gated_rule() {
+        let sheet = compile("@media screen { :root { --brand: #ff0000 } }");
+        let rule = &sheet.matchable.rules()[0];
+        assert!(rule.condition().is_some(), "still gated");
+        assert_eq!(rule.custom_properties().len(), 1);
+    }
+
+    #[test]
     fn matchable_includes_conditional_group_rules_gated() {
         let sheet = compile("a { color: black } @media screen { p { width: 10px } }");
         // Both the top-level `a` rule and the nested `p` rule are matchable.
@@ -711,6 +755,25 @@ mod tests {
         // Fails at a wide viewport, holds at a ≤1px one.
         assert!(!condition.holds(&MediaEnvironment::viewport(1000.0, 1000.0)));
         assert!(condition.holds(&MediaEnvironment::viewport(1.0, 1000.0)));
+    }
+
+    #[test]
+    fn a_media_feature_we_cannot_evaluate_reaches_the_sheets_reports() {
+        use obscur_style::matching::MediaEnvironment;
+        let sheet = compile("@media (prefers-color-scheme: dark) { a { color: black } }");
+        // The rule survives compilation but is gated off, so a dark theme does
+        // not paint over a light app…
+        let condition = sheet.matchable.rules()[0]
+            .condition()
+            .expect("nested rule is gated");
+        assert!(!condition.holds(&MediaEnvironment::viewport(1000.0, 1000.0)));
+        // …and the author is told, instead of losing the block in silence.
+        let reported: Vec<&str> = sheet
+            .unsupported
+            .iter()
+            .map(UnsupportedCssFeature::name)
+            .collect();
+        assert_eq!(reported, ["@media (prefers-color-scheme)"]);
     }
 
     #[test]

@@ -1,53 +1,93 @@
 #![doc = include_str!("condition_lowering.doc/_module.md")]
 
+use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{
     ContainerCondition, MediaComparator, MediaCondition, MediaQualifier, ParsedContainerQuery,
     ParsedMediaQuery, ParsedMediaQueryList, ParsedValue,
 };
+use crate::source::SourceSpan;
 
 use obscur_style::matching::{ConditionAxis, ConditionComparator, FeatureQuery, RuleCondition};
 
 use super::stylesheet_compiler::CompiledCondition;
 
 #[doc = include_str!("condition_lowering.doc/lower_condition.md")]
-pub(crate) fn lower_condition(condition: &CompiledCondition) -> RuleCondition {
+pub(crate) fn lower_condition(
+    condition: &CompiledCondition,
+    unsupported: &mut Vec<UnsupportedCssFeature>,
+) -> RuleCondition {
     match condition {
-        CompiledCondition::Media(list) => lower_media_list(list),
+        CompiledCondition::Media(list) => lower_media_list(list, unsupported),
         CompiledCondition::Container(query) => lower_container_query(query),
     }
 }
 
 #[doc = include_str!("condition_lowering.doc/lower_media_list.md")]
-fn lower_media_list(list: &ParsedMediaQueryList) -> RuleCondition {
+fn lower_media_list(
+    list: &ParsedMediaQueryList,
+    unsupported: &mut Vec<UnsupportedCssFeature>,
+) -> RuleCondition {
     match list.0.as_slice() {
         [] => RuleCondition::Always,
-        [single] => lower_media_query(single),
-        many => RuleCondition::Any(many.iter().map(lower_media_query).collect()),
+        [single] => lower_media_query(single, unsupported),
+        many => RuleCondition::Any(
+            many.iter()
+                .map(|query| lower_media_query(query, unsupported))
+                .collect(),
+        ),
     }
 }
 
 #[doc = include_str!("condition_lowering.doc/lower_media_query.md")]
-fn lower_media_query(query: &ParsedMediaQuery) -> RuleCondition {
-    let base = if query
+fn lower_media_query(
+    query: &ParsedMediaQuery,
+    unsupported: &mut Vec<UnsupportedCssFeature>,
+) -> RuleCondition {
+    if query
         .media_type
         .as_deref()
         .is_some_and(|ty| ty.eq_ignore_ascii_case("print"))
     {
-        // `print` rules never apply in the (screen) runtime environment.
-        RuleCondition::Never
-    } else {
-        conjoin(
-            query
-                .conditions
-                .iter()
-                .map(|cond| lower_media_condition(cond)),
-        )
-    };
-    match query.qualifier {
+        // `print` rules never apply in the (screen) runtime environment, and
+        // that is knowledge, not ignorance: `not print` may negate it.
+        return qualify(query.qualifier, RuleCondition::Never);
+    }
+    let mut parts = Vec::with_capacity(query.conditions.len());
+    let mut representable = true;
+    for condition in &query.conditions {
+        let Some(part) = lower_media_condition(condition) else {
+            representable = false;
+            unsupported.push(unrepresentable_media_feature(&condition.feature));
+            continue;
+        };
+        parts.push(part);
+    }
+    if !representable {
+        // Negating an unanswerable question turns ignorance into a claim, so
+        // the `not` qualifier is deliberately not applied here.
+        return RuleCondition::Never;
+    }
+    qualify(query.qualifier, conjoin(parts.into_iter()))
+}
+
+#[doc = include_str!("condition_lowering.doc/qualify.md")]
+fn qualify(qualifier: Option<MediaQualifier>, base: RuleCondition) -> RuleCondition {
+    match qualifier {
         Some(MediaQualifier::Not) => RuleCondition::Not(Box::new(base)),
         // `only` is a legacy no-op; absence means the query applies as-is.
         Some(MediaQualifier::Only) | None => base,
     }
+}
+
+#[doc = include_str!("condition_lowering.doc/unrepresentable_media_feature.md")]
+fn unrepresentable_media_feature(feature: &str) -> UnsupportedCssFeature {
+    // The parsed condition carries no offsets, so the report can only name the
+    // feature; an empty span at the sheet start is the honest placeholder.
+    UnsupportedCssFeature::new(
+        UnsupportedFeatureKind::AtRule,
+        format!("@media ({feature})"),
+        SourceSpan::empty(0),
+    )
 }
 
 #[doc = include_str!("condition_lowering.doc/lower_container_query.md")]
@@ -75,14 +115,13 @@ fn conjoin(parts: impl Iterator<Item = RuleCondition>) -> RuleCondition {
 }
 
 #[doc = include_str!("condition_lowering.doc/lower_media_condition.md")]
-fn lower_media_condition(condition: &MediaCondition) -> RuleCondition {
+fn lower_media_condition(condition: &MediaCondition) -> Option<RuleCondition> {
     lower_feature(
         &condition.feature,
         condition.comparator,
         condition.value.as_deref(),
         ConditionAxis::ViewportWidth,
         ConditionAxis::ViewportHeight,
-        RuleCondition::Always,
     )
 }
 
@@ -94,8 +133,8 @@ fn lower_container_condition(condition: &ContainerCondition) -> RuleCondition {
         condition.value.as_deref(),
         ConditionAxis::ContainerWidth,
         ConditionAxis::ContainerHeight,
-        RuleCondition::Never,
     )
+    .unwrap_or(RuleCondition::Never)
 }
 
 #[doc = include_str!("condition_lowering.doc/lower_feature.md")]
@@ -105,8 +144,7 @@ fn lower_feature(
     value: Option<&[ParsedValue]>,
     width_axis: ConditionAxis,
     height_axis: ConditionAxis,
-    unrepresentable: RuleCondition,
-) -> RuleCondition {
+) -> Option<RuleCondition> {
     let name = feature.to_ascii_lowercase();
     let (axis, synthesized) = match name.as_str() {
         "min-width" | "min-inline-size" => (width_axis, Some(ConditionComparator::Ge)),
@@ -116,17 +154,19 @@ fn lower_feature(
         "max-height" | "max-block-size" => (height_axis, Some(ConditionComparator::Le)),
         "height" | "block-size" => (height_axis, None),
         // Boolean features, orientation, prefers-*, unknown names.
-        _ => return unrepresentable,
+        _ => return None,
     };
-    let Some(reference_px) = value.and_then(reference_px) else {
-        return unrepresentable;
-    };
+    let reference_px = value.and_then(reference_px)?;
     // `min-`/`max-` forms carry their own comparator; plain `width`/`height` use
     // the range comparator, defaulting a bare `(width: 600px)` colon form to `=`.
     let comparator = synthesized
         .or_else(|| comparator.map(map_comparator))
         .unwrap_or(ConditionComparator::Eq);
-    RuleCondition::Feature(FeatureQuery::new(axis, comparator, reference_px))
+    Some(RuleCondition::Feature(FeatureQuery::new(
+        axis,
+        comparator,
+        reference_px,
+    )))
 }
 
 #[doc = include_str!("condition_lowering.doc/reference_px.md")]
@@ -159,15 +199,21 @@ mod tests {
     use obscur_style::matching::MediaEnvironment;
 
     fn media_condition(text: &str) -> RuleCondition {
+        lower_media(text).0
+    }
+
+    fn lower_media(text: &str) -> (RuleCondition, Vec<UnsupportedCssFeature>) {
         let src = CssSource::anonymous(text);
         let list = MediaQueryParser::new().parse(&src).unwrap();
-        lower_condition(&CompiledCondition::Media(list))
+        let mut unsupported = Vec::new();
+        let cond = lower_condition(&CompiledCondition::Media(list), &mut unsupported);
+        (cond, unsupported)
     }
 
     fn container_condition(text: &str) -> RuleCondition {
         let src = CssSource::anonymous(text);
         let query = ContainerQueryParser::new().parse(&src).unwrap();
-        lower_condition(&CompiledCondition::Container(query))
+        lower_condition(&CompiledCondition::Container(query), &mut Vec::new())
     }
 
     #[test]
@@ -220,17 +266,69 @@ mod tests {
     }
 
     #[test]
-    fn boolean_feature_is_non_restrictive() {
-        // `(hover)` cannot be resolved to a length; it must not drop the rule.
-        let cond = media_condition("(hover)");
-        assert!(cond.holds(&MediaEnvironment::viewport(500.0, 500.0)));
-        assert!(cond.holds(&MediaEnvironment::unbounded()));
+    fn unrepresentable_media_feature_fails_closed() {
+        // A feature we cannot evaluate must not be answered "yes". Applying a
+        // dark theme or a phone layout unconditionally is the loudest possible
+        // way to be wrong, and it is silent to the author.
+        let env = MediaEnvironment::viewport(10000.0, 500.0);
+        assert!(!media_condition("(prefers-color-scheme: dark)").holds(&env));
+        assert!(!media_condition("(prefers-reduced-motion: reduce)").holds(&env));
+        assert!(!media_condition("(orientation: landscape)").holds(&env));
+        assert!(!media_condition("(hover)").holds(&env));
+        assert!(!media_condition("(hover)").holds(&MediaEnvironment::unbounded()));
     }
 
     #[test]
-    fn non_px_length_is_non_restrictive() {
+    fn non_px_length_fails_closed() {
+        // `reference_px` resolves only `px` (and a unitless zero), so `40em` is
+        // as unevaluable as a boolean feature.
         let cond = media_condition("(max-width: 40em)");
-        assert!(cond.holds(&MediaEnvironment::viewport(10000.0, 500.0)));
+        assert!(!cond.holds(&MediaEnvironment::viewport(10000.0, 500.0)));
+        assert!(!cond.holds(&MediaEnvironment::viewport(100.0, 500.0)));
+    }
+
+    #[test]
+    fn an_unrepresentable_feature_is_reported_as_unsupported() {
+        let (_, unsupported) = lower_media("(prefers-color-scheme: dark)");
+        assert_eq!(unsupported.len(), 1);
+        assert_eq!(unsupported[0].kind(), UnsupportedFeatureKind::AtRule);
+        assert_eq!(unsupported[0].name(), "@media (prefers-color-scheme)");
+    }
+
+    #[test]
+    fn every_unrepresentable_feature_in_a_query_is_reported() {
+        let (cond, unsupported) = lower_media("(orientation: landscape) and (hover)");
+        assert_eq!(cond, RuleCondition::Never);
+        let names: Vec<&str> = unsupported
+            .iter()
+            .map(UnsupportedCssFeature::name)
+            .collect();
+        assert_eq!(names, ["@media (orientation)", "@media (hover)"]);
+    }
+
+    #[test]
+    fn a_representable_query_reports_nothing() {
+        let (_, unsupported) = lower_media("screen and (min-width: 600px)");
+        assert!(unsupported.is_empty());
+        assert!(lower_media("print").1.is_empty());
+    }
+
+    #[test]
+    fn not_does_not_rescue_an_unrepresentable_feature() {
+        // `Not(Never)` is `Always`: negating what we could not evaluate would
+        // reintroduce the always-applies bug in the opposite polarity.
+        let (cond, unsupported) = lower_media("not all and (prefers-color-scheme: dark)");
+        assert_eq!(cond, RuleCondition::Never);
+        assert!(!cond.holds(&MediaEnvironment::viewport(500.0, 500.0)));
+        assert_eq!(unsupported.len(), 1);
+    }
+
+    #[test]
+    fn one_unrepresentable_query_does_not_sink_the_list() {
+        // A list is a disjunction: the queries we can evaluate still apply.
+        let cond = media_condition("(max-width: 100px), (orientation: portrait)");
+        assert!(cond.holds(&MediaEnvironment::viewport(50.0, 100.0)));
+        assert!(!cond.holds(&MediaEnvironment::viewport(500.0, 100.0)));
     }
 
     #[test]
