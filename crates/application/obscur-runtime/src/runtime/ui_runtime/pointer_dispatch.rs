@@ -256,13 +256,22 @@ impl UiRuntime {
         // blurs, exactly as before.
         let disabled_press =
             target.is_some_and(|t| StructuralStates::of(&self.tree).is_within_disabled(t));
+        // A press outside an open focus trap is inert for exactly the same
+        // reasons, and by the same rule: while a modal is up, the page behind it
+        // is not a place a press can put focus, a caret, or `:active`. Empty
+        // space counts as outside — "focus nothing" is how a press beside the
+        // dialog would otherwise blur the field inside it, which is the escape a
+        // trap exists to close. The gesture arming below is left alone: a trap
+        // owns focus, not the scroll wheel of the list behind it.
+        let outside_trap = !self.focus_trap_admits(target);
+        let inert_press = disabled_press || outside_trap;
         // Which of the two halves below this press earns. A secondary or middle
         // press moves focus and stops there: a right click focuses the field its
         // context menu is about, the way every platform's does, but it presses
         // nothing — no `:active`, no caret, no drag-selection, no armed pan, and
         // no click on release. See [`engages_controls`].
         let engages = engages_controls(event);
-        if !disabled_press {
+        if !inert_press {
             let interactive_target = target;
             // The one door focus moves through, wherever the move came from —
             // the assignment, the editing session it re-seats, §6.15's

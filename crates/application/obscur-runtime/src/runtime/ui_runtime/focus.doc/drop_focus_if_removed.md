@@ -10,3 +10,8 @@ platform was told focus sat on a node that had ceased to exist.
 Run once per reconciled frame, beside the pointer-binding rescan and for the
 same reason: a commit that carried an operation is the only moment the answer
 can change.
+
+It is also where the frame's focus traps are reconciled, and that runs **first**:
+a trap that closed this frame took the focused node with it, and the restore is
+the answer to where focus goes. Reversing the two would clear focus and then
+restore it, announcing a `blur` to nobody and a `focus` the user never lost.

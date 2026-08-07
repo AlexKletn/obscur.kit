@@ -12,12 +12,32 @@ the field, and every consequence of moving it hangs off that one call:
 3. §6.15's scroll-into-view for a focused field;
 4. `blur` on the node that lost it, then `focus` on the node that gained it.
 
-Today the only caller is the pointer press. That is the honest state of the
-subsystem rather than a design: §2.5 names a focus tree, tab order and
-programmatic focus, and none of the three has a runtime path yet — `TabOrder`,
-`FocusTree` and `SpatialNavigation` live in the domain tier with no caller here.
-When one of them arrives it moves focus through this function, and the pair
-fires without that change having to remember to fire it.
+Four things move focus now, and all four go through that one door: the pointer
+press, Tab, a programmatic [`focus_node`](UiRuntime::focus_node), and the modal
+trap — which both takes focus as it opens and gives it back as it closes.
+
+# The trap, and why it is declared rather than called
+
+§2.5's *modal focus traps* and *restore focus* are one mechanism here, and its
+lifetime is the dialog element's rather than a pair of calls. An element carrying
+[`FOCUS_TRAP`](obscur_interaction::focus::FOCUS_TRAP) traps focus for as long as
+it is committed; `reconcile_focus_traps` opens and closes the scope from the
+difference between the traps this frame declares and the ones the last one did.
+That is what makes the trap impossible to leak: a dialog removed by a re-render
+rather than by its own close button closes its trap all the same, because there
+was never a close call to skip.
+
+While a trap is open it is the boundary for all three movers, stated two ways
+because they ask two different questions. The press and the programmatic move ask
+whether a target is admitted — [`focus_trap_admits`](UiRuntime::focus_trap_admits),
+which refuses anything outside the trap and refuses `None` with it, since "focus
+nothing" is how a press beside the dialog would otherwise blur the field inside
+it. Tab does not ask: its ring is *built* from the trap, so there is no outside
+for it to be refused from. What is *not* here:
+`FocusTree`'s registration model answers a question nothing asks (the ring is
+computed from the retained tree on demand), `tabindex` has no authorable
+spelling, and spatial navigation has no runtime path — see the focus row of
+`docs/api/12-reality.md`.
 
 # Order, and why it is this one
 

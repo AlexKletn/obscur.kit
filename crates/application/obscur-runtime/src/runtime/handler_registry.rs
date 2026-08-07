@@ -7,7 +7,7 @@ use obscur_interaction::command::{
     Command, CommandRegistry, CommandRouter, CommandState, Shortcut,
 };
 use obscur_interaction::event::{EventPhase, ListenerPhase, UiEvent};
-use obscur_interaction::focus::{FocusScope, FocusScopeId};
+use obscur_interaction::focus::{FocusRestore, FocusScope, FocusScopeId};
 
 use super::{AppCommands, CommandHandler, CommandTarget, EventListener, IntoCommandHandler};
 
@@ -24,6 +24,10 @@ pub(crate) struct HandlerRegistry {
     listeners: HashMap<(NodeId, InternedSymbol), Vec<EventListener>>,
     #[doc = include_str!("handler_registry.doc/scopes.md")]
     scopes: Vec<FocusScope>,
+    #[doc = include_str!("handler_registry.doc/focus_restore.md")]
+    focus_restore: FocusRestore,
+    #[doc = include_str!("handler_registry.doc/declared_traps.md")]
+    declared_traps: Vec<FocusScopeId>,
     #[doc = include_str!("handler_registry.doc/scope_handlers.md")]
     scope_handlers: HashMap<(FocusScopeId, InternedSymbol), CommandHandler>,
     #[doc = include_str!("handler_registry.doc/app_commands.md")]
@@ -48,6 +52,8 @@ impl HandlerRegistry {
             node_handlers: HashMap::new(),
             listeners: HashMap::new(),
             scopes: Vec::new(),
+            focus_restore: FocusRestore::new(),
+            declared_traps: Vec::new(),
             scope_handlers: HashMap::new(),
             app_commands: AppCommands::new(),
             text_input_handlers: TextHandlers::new(),
@@ -191,6 +197,31 @@ impl HandlerRegistry {
     #[doc = include_str!("handler_registry.doc/scopes_2.md")]
     pub(crate) fn scopes(&self) -> &[FocusScope] {
         &self.scopes
+    }
+
+    #[doc = include_str!("handler_registry.doc/scope.md")]
+    pub(crate) fn scope(&self, id: FocusScopeId) -> Option<&FocusScope> {
+        self.scopes.iter().find(|scope| scope.id() == id)
+    }
+
+    #[doc = include_str!("handler_registry.doc/save_focus_for_scope.md")]
+    pub(crate) fn save_focus_for_scope(&mut self, previously_focused: Option<NodeId>) {
+        self.focus_restore.save(previously_focused);
+    }
+
+    #[doc = include_str!("handler_registry.doc/restore_focus_for_scope.md")]
+    pub(crate) fn restore_focus_for_scope(&mut self) -> Option<NodeId> {
+        self.focus_restore.restore()
+    }
+
+    #[doc = include_str!("handler_registry.doc/declared_traps_2.md")]
+    pub(crate) fn declared_traps(&self) -> &[FocusScopeId] {
+        &self.declared_traps
+    }
+
+    #[doc = include_str!("handler_registry.doc/set_declared_traps.md")]
+    pub(crate) fn set_declared_traps(&mut self, traps: Vec<FocusScopeId>) {
+        self.declared_traps = traps;
     }
 
     #[doc = include_str!("handler_registry.doc/set_scope_command.md")]

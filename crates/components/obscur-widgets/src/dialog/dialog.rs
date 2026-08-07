@@ -2,6 +2,7 @@
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
+use obscur_interaction::focus::FOCUS_TRAP;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 #[doc = include_str!("dialog.doc/Dialog.md")]
@@ -20,7 +21,7 @@ impl Dialog {
     #[doc = include_str!("dialog.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0600);
     #[doc = include_str!("dialog.doc/PROP_MODAL.md")]
-    const PROP_MODAL: InternedSymbol = InternedSymbol::from_raw(0x00D1_0601);
+    const PROP_MODAL: InternedSymbol = FOCUS_TRAP;
     #[doc = include_str!("dialog.doc/PROP_TITLE.md")]
     const PROP_TITLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0602);
 
@@ -186,6 +187,27 @@ mod tests {
             }
             ViewNode::Text { .. } => panic!("expected the dialog element at the root"),
         }
+    }
+
+    /// The regression guard for the defect this widget used to carry: a modal
+    /// dialog announced its modality under a symbol private to this file, which
+    /// the runtime could not read and therefore did not act on — Tab walked
+    /// straight out of an open modal into the page behind it. The property has
+    /// to be the *reserved* one the runtime reconciles focus traps from, so this
+    /// asserts the symbol rather than the presence of some property.
+    #[test]
+    fn a_modal_dialog_declares_the_reserved_focus_trap() {
+        let mut d = Dialog::new("Confirm").child(ViewNode::text("Are you sure?"));
+        d.open();
+        let view = d.view();
+        let ViewNode::Element { props, .. } = &view.root().nodes()[0] else {
+            panic!("expected the dialog element at the root");
+        };
+        let trap = props
+            .iter()
+            .find(|p| p.name() == FOCUS_TRAP)
+            .expect("an open modal dialog declares the reserved focus trap");
+        assert_eq!(*trap.value(), ViewValue::Bool(true));
     }
 
     /// The regression guard for the defect this widget used to carry: an open
