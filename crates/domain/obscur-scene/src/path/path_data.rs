@@ -24,6 +24,8 @@ pub enum PathDataFault {
     MissingNumber,
     #[doc = include_str!("path_data.doc/LeadingCommand.md")]
     LeadingCommand,
+    #[doc = include_str!("path_data.doc/StrayNumber.md")]
+    StrayNumber,
 }
 
 #[doc = include_str!("path_data.doc/parse_path_data.md")]
@@ -31,8 +33,8 @@ pub enum PathDataFault {
 /// # Errors
 ///
 /// Returns the byte offset and the kind of the first fault: a number where a
-/// command was expected, a letter naming no command, or a command whose numbers
-/// ran out.
+/// command was expected, a letter naming no command, a command whose numbers ran
+/// out, or a number trailing a `Z`, which takes none.
 pub fn parse_path_data(data: &str) -> Result<Path, PathDataError> {
     Scanner::new(data).run()
 }
@@ -71,6 +73,7 @@ impl<'a> Scanner<'a> {
             if self.at >= self.bytes.len() {
                 return Ok(self.path);
             }
+            let entry = self.at;
             let byte = self.bytes[self.at];
             if byte.is_ascii_alphabetic() {
                 command = byte;
@@ -79,6 +82,14 @@ impl<'a> Scanner<'a> {
                 // A number before any command: SVG has no implicit opening verb,
                 // and guessing one would turn a typo into a drawing.
                 return Err(self.fault(PathDataFault::LeadingCommand));
+            } else if matches!(command, b'Z' | b'z') {
+                // A standing command repeats by consuming another argument list.
+                // `Z` has none to consume, and SVG's grammar allows nothing but
+                // a command letter after a closepath — so this byte belongs to
+                // no verb. Left to repeat, `Z` read nothing and closed the
+                // subpath again, forever, growing the path until the machine
+                // ran out of memory.
+                return Err(self.fault(PathDataFault::StrayNumber));
             } else if matches!(command, b'M') {
                 // "If a moveto is followed by multiple pairs of coordinates,
                 // the subsequent pairs are treated as implicit lineto commands."
@@ -87,6 +98,16 @@ impl<'a> Scanner<'a> {
                 command = b'l';
             }
             self.step(command)?;
+            if self.at == entry {
+                // Every turn of this loop must consume a byte. As the arms of
+                // `step` stand each one either reads a number — which cannot
+                // succeed on nothing — or returns, so this is unreachable; it
+                // is the net under them, so that no future arm has to be
+                // trusted to advance. A parser that spins here does not merely
+                // hang: a canvas re-parses its path data on every paint, so it
+                // takes the frame thread and then the machine's memory with it.
+                self.at += 1;
+            }
         }
     }
 
@@ -555,6 +576,42 @@ mod tests {
                 .what,
             PathDataFault::MissingNumber
         );
+    }
+
+    #[test]
+    fn a_number_after_a_close_is_refused_rather_than_repeated_forever() {
+        // `Z` takes no arguments, so it consumes no bytes; the standing command
+        // stayed `Z` until a letter replaced it, and no letter follows. This
+        // input closed the subpath again every turn and never returned — a
+        // canvas re-parsing its path data hung the frame thread on the first
+        // paint and then ate the machine's memory.
+        let error = parse_path_data("M0 0 L10 0 Z 1").expect_err("closepath takes no arguments");
+        assert_eq!(error.what, PathDataFault::StrayNumber);
+        assert_eq!(error.at, 13, "the position points at the stray number");
+    }
+
+    #[test]
+    fn a_relative_close_is_no_more_repeatable_than_an_absolute_one() {
+        assert_eq!(
+            parse_path_data("M0 0 z 5")
+                .expect_err("z takes none either")
+                .what,
+            PathDataFault::StrayNumber
+        );
+    }
+
+    #[test]
+    fn no_command_can_spin_the_loop_on_a_byte_it_cannot_use() {
+        // The property the net under `run`'s loop exists for, asserted of every
+        // verb: put a byte in front of one that is neither a letter nor a
+        // separator and it must decide something, in finite time.
+        for command in "MmLlHhVvCcSsQqTtAaZz".chars() {
+            let data = format!("M0 0 {command} !");
+            assert!(
+                parse_path_data(&data).is_err(),
+                "`{data}` names no drawing and has to say so rather than loop"
+            );
+        }
     }
 
     #[test]

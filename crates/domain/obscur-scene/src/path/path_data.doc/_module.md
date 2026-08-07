@@ -10,6 +10,7 @@ four cubics, and a parser that stops at the interesting command has not made
 arbitrary shapes possible. They are converted by SVG 1.1 F.6's endpoint-to-
 centre parameterisation and emitted as one cubic per quarter turn.
 
-It fails closed and says where: a number before any command, an unknown verb
-and a command missing its arguments are all refused with a byte offset, rather
-than guessed into a drawing the author did not write.
+It fails closed and says where: a number before any command, an unknown verb, a
+command missing its arguments and a number trailing a `Z` — which takes none —
+are all refused with a byte offset, rather than guessed into a drawing the
+author did not write.
