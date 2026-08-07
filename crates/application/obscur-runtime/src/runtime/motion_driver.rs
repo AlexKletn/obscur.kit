@@ -85,6 +85,52 @@ impl MotionDriver {
         self.animations.len()
     }
 
+    #[doc = include_str!("motion_driver.doc/bookkeeping_counts.md")]
+    #[cfg(test)]
+    pub(crate) fn bookkeeping_counts(&self) -> (usize, usize, usize, usize) {
+        (
+            self.settled_progress.len(),
+            self.transition_targets.len(),
+            self.transition_runs.len(),
+            self.css_animations_started.len(),
+        )
+    }
+
+    #[doc = include_str!("motion_driver.doc/retain_live.md")]
+    fn retain_live(&mut self, tree: &RetainedTree) {
+        // Borrowed out of `self` first so the retain closure below touches only
+        // the scheduler field: `animations` and `motion` are disjoint, which is
+        // what lets a binding pull its own timeline out as it goes.
+        let motion = &mut self.motion;
+        self.animations.retain(|binding| {
+            // A `NodeId` is generational, so a remounted node never matches the
+            // dead entry — nothing here can ever be reclaimed by coincidence, and
+            // an unmatched binding is dead for good.
+            if tree.contains(binding.node()) {
+                return true;
+            }
+            // The timeline goes with the binding it belonged to. Left behind, it
+            // would keep `needs_frame` true forever and the runtime would render
+            // frames to advance an animation no node can show.
+            motion.remove(binding.timeline());
+            false
+        });
+        // Reachable only through a surviving binding's `timeline()`, so the
+        // bindings that just survived are the whole of what can still be read.
+        let live: HashSet<TimelineId> = self
+            .animations
+            .iter()
+            .map(AnimationBinding::timeline)
+            .collect();
+        self.settled_progress.retain(|id, _| live.contains(id));
+        self.transition_targets
+            .retain(|(node, _), _| tree.contains(*node));
+        self.transition_runs
+            .retain(|(node, _), _| tree.contains(*node));
+        self.css_animations_started
+            .retain(|(node, _)| tree.contains(*node));
+    }
+
     #[doc = include_str!("motion_driver.doc/animate_with.md")]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn animate_with(
@@ -273,6 +319,15 @@ impl MotionDriver {
         tree: &RetainedTree,
         pseudo: &PseudoStates,
     ) -> bool {
+        // Swept against the tree this frame's cascade was resolved from, in the
+        // pass that already holds it — this costs one hash lookup per live
+        // binding, not a second walk. It runs BEFORE the `is_empty` return
+        // because an imperatively started animation (`UiRuntime::animate`) has no
+        // CSS rule behind it and would otherwise never be swept at all. Without
+        // it every list row, dialog and toast that ever animated leaves its
+        // binding behind, and `apply_overlay` walks all of them every frame: a
+        // leak that shows up as frame time before it shows up as memory.
+        self.retain_live(tree);
         if self.css_motion.is_empty() {
             return false;
         }
@@ -602,12 +657,19 @@ fn motion_value_of(
 #[cfg(test)]
 mod tests {
     use super::MotionDriver;
-    use crate::orchestration::{AnimatedKind, ComputedStyles, MotionPlayback};
-    use obscur_identity::NodeId;
-    use obscur_motion::track::{Keyframe, KeyframeTrack};
+    use crate::orchestration::{
+        AnimatedKind, ComputedStyles, CssKeyframeRule, CssMotionRules, CssTransitionRule,
+        MotionPlayback, PseudoStates,
+    };
+    use obscur_identity::{ComponentId, NodeId};
+    use obscur_motion::track::{Easing, Keyframe, KeyframeTrack};
     use obscur_motion::transition::TransitionInterruption;
     use obscur_motion::value::MotionValue;
-    use obscur_style::property::PropertyId;
+    use obscur_style::computed::{ComputedStyle, ComputedValue};
+    use obscur_style::property::{PropertyId, PropertyValue};
+    use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
+    use obscur_tree::node::NodeKind;
+    use obscur_tree::tree::RetainedTree;
 
     fn track(from: f32, to: f32) -> KeyframeTrack {
         KeyframeTrack::from_keyframes(vec![
@@ -692,6 +754,113 @@ mod tests {
             overlaid.contains_key(&node),
             "the settled cascade value is stashed exactly once"
         );
+    }
+
+    /// `*` — every element matches, so the rules below apply to whatever the
+    /// tree happens to hold and the test is about lifetime, not selection.
+    fn universal() -> SelectorList {
+        SelectorList::new(vec![ComplexSelector::new(
+            CompoundSelector::new(vec![SimpleSelector::Universal]),
+            Vec::new(),
+        )])
+    }
+
+    fn number(style: &mut ComputedStyle, property: PropertyId, n: f32) {
+        style.set(
+            property,
+            ComputedValue::from_concrete(PropertyValue::Number(n)).expect("a concrete number"),
+        );
+    }
+
+    #[test]
+    fn an_unmounted_node_takes_its_animation_binding_with_it() {
+        // A list row, a dialog, a toast: mounted, animated, unmounted. Without the
+        // sweep its binding lives for the life of the process — and `apply_overlay`
+        // walks the whole vector every style phase, so this is frame time before it
+        // is memory. The assertion is the vector's LENGTH for exactly that reason.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let mut driver = MotionDriver::new();
+        let empty = ComputedStyles::new();
+        let pseudo = PseudoStates::new();
+
+        for _ in 0..50 {
+            let row = tree.alloc(NodeKind::Element {
+                component: ComponentId::from_raw(1),
+            });
+            start(&mut driver, row);
+            assert_eq!(driver.binding_count(), 1, "one row, one binding");
+            tree.remove(row);
+            driver.drive_css(&empty, &tree, &pseudo);
+            assert_eq!(
+                driver.binding_count(),
+                0,
+                "the unmounted row left its binding behind"
+            );
+        }
+        // The scheduler got its timelines back too: left in it, they would keep
+        // asking for frames forever.
+        assert_eq!(driver.active_animations(), 0);
+        assert_eq!(driver.bookkeeping_counts().0, 0, "settled_progress");
+    }
+
+    #[test]
+    fn an_unmounted_node_takes_its_transition_bookkeeping_with_it() {
+        // The three `(NodeId, PropertyId)` maps CSS motion keeps. They are cleared
+        // only when the stylesheet set is replaced, which for a running program is
+        // never — so each is one entry per (node, property) ever animated.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let node = tree.alloc(NodeKind::Element {
+            component: ComponentId::from_raw(1),
+        });
+
+        let mut driver = MotionDriver::new();
+        driver.set_css_rules(CssMotionRules::from_parts(
+            vec![CssTransitionRule::new(
+                universal(),
+                PropertyId::FlexGrow,
+                1.0,
+                Easing::Linear,
+            )],
+            vec![CssKeyframeRule::new(
+                universal(),
+                vec![(PropertyId::FlexShrink, track(0.0, 1.0))],
+                1.0,
+            )],
+        ));
+        let pseudo = PseudoStates::new();
+
+        let mut style = ComputedStyle::default();
+        number(&mut style, PropertyId::FlexGrow, 0.0);
+        let mut computed = ComputedStyles::new();
+        computed.insert(node, style.clone());
+        // First observation records the baseline and starts the keyframe animation.
+        driver.drive_css(&computed, &tree, &pseudo);
+        // A real change of the watched property starts the transition and records
+        // its reversing run.
+        number(&mut style, PropertyId::FlexGrow, 1.0);
+        computed.insert(node, style);
+        driver.drive_css(&computed, &tree, &pseudo);
+
+        let (_, targets, runs, started) = driver.bookkeeping_counts();
+        assert_eq!((targets, runs, started), (1, 1, 1), "all three recorded");
+        assert_eq!(
+            driver.binding_count(),
+            2,
+            "the transition and the animation"
+        );
+
+        tree.remove(node);
+        driver.drive_css(&computed, &tree, &pseudo);
+        assert_eq!(
+            driver.bookkeeping_counts(),
+            (0, 0, 0, 0),
+            "the unmounted node left nothing behind"
+        );
+        assert_eq!(driver.binding_count(), 0);
     }
 
     #[test]

@@ -284,6 +284,12 @@ impl ResourceBridge {
         (self.image_cache.len(), self.vector_cache.len())
     }
 
+    #[doc = include_str!("resource_bridge.doc/bookkeeping_counts.md")]
+    #[cfg(test)]
+    pub(crate) fn bookkeeping_counts(&self) -> (usize, usize) {
+        (self.image_handles.len(), self.image_referrers.len())
+    }
+
     #[doc = include_str!("resource_bridge.doc/invalidate_dpi_variants.md")]
     pub(crate) fn invalidate_dpi_variants(&mut self) {
         let resident: Vec<Box<str>> = self.image_cache.images().keys().cloned().collect();
@@ -324,6 +330,47 @@ impl ResourceBridge {
                 .or_insert(priority);
         }
         self.image_cache.mark_visibility(&referenced);
+        self.retain_referenced(&referenced);
+    }
+
+    #[doc = include_str!("resource_bridge.doc/retain_referenced.md")]
+    fn retain_referenced(&mut self, referenced: &HashMap<Box<str>, VisibilityPriority>) {
+        // A parsed document is small and re-parsing one costs what its first parse
+        // cost, so liveness alone decides it. Decoded pixels are megabytes and the
+        // whole point of `VisibilityPriority::Hidden` is that they SURVIVE going
+        // off screen — which is why the image cache is not swept here and its
+        // §5.19 budget owns that call instead.
+        self.vector_cache
+            .retain(|url, _| referenced.contains_key(url));
+        // Resident pixels hold their own bookkeeping open: a handle is what names
+        // a cached image to the hub, and dropping it while the pixels are still
+        // there would leave the cache unable to say what it holds. The budget's
+        // entry cap is what bounds this arm — without one, "resident" is as
+        // unbounded as the leak being closed.
+        let live: HashSet<&str> = referenced
+            .keys()
+            .map(Box::as_ref)
+            .chain(self.image_cache.images().keys().map(Box::as_ref))
+            .chain(self.vector_cache.keys().map(Box::as_ref))
+            .collect();
+        let dropped: Vec<Box<str>> = self
+            .image_handles
+            .keys()
+            .filter(|url| !live.contains(url.as_ref()))
+            .cloned()
+            .collect();
+        for url in dropped {
+            if let Some(handle) = self.image_handles.remove(&url) {
+                // Released, not merely forgotten: the hub is refcounted, and an
+                // entry nothing refers to is what `release` exists to reclaim. A
+                // load still in flight for this URL then finds its handle gone and
+                // `complete` refuses its pixels, which is the right answer — the
+                // frame that asked for them is over and nothing shows them.
+                self.hub.release(handle);
+            }
+        }
+        self.image_referrers
+            .retain(|url, _| live.contains(url.as_ref()));
     }
 
     #[doc = include_str!("resource_bridge.doc/resolve_background_images.md")]
@@ -723,10 +770,121 @@ fn is_vector_source(src: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ResourceBridge, is_vector_source, localized_diagnostic_message, rects_intersect};
+    use super::{
+        ResourceBridge, ResourceReporting, is_vector_source, localized_diagnostic_message,
+        rects_intersect,
+    };
+    use obscur_diagnostics::NullDiagnosticSink;
     use obscur_geometry::Point;
     use obscur_geometry::{Rect, Size};
-    use obscur_resources::state::ResourceError;
+    use obscur_identity::{ComponentId, NodeId, RuntimeId};
+    use obscur_localization::locale::LanguageTag;
+    use obscur_resources::cache::CacheBudget;
+    use obscur_resources::handle::ResourceKind;
+    use obscur_resources::port::{
+        DecodedResource, LoadedBytes, ResourceDecoder, ResourceLoader, VectorDecoder,
+    };
+    use obscur_resources::source::ResourceSource;
+    use obscur_resources::state::{ResourceError, ResourceMetadata};
+    use obscur_scene::paint::SceneVector;
+    use obscur_tree::node::NodeKind;
+    use obscur_tree::tree::RetainedTree;
+    use obscur_view::view::{SRC, StyleAttributes, ViewProperty, ViewValue};
+    use std::sync::Arc;
+
+    use crate::orchestration::{ComputedStyles, LayoutBoxes};
+
+    /// A loader that answers every source with the same seven bytes, or refuses
+    /// every one of them — the two states a URL's bookkeeping has to survive.
+    struct Loader {
+        succeeds: bool,
+    }
+
+    impl ResourceLoader for Loader {
+        fn can_load(&self, _source: &ResourceSource) -> bool {
+            self.succeeds
+        }
+
+        fn load(&self, _source: &ResourceSource) -> Result<LoadedBytes, ResourceError> {
+            if self.succeeds {
+                Ok(LoadedBytes::new(
+                    Arc::from(&b"encoded"[..]),
+                    ResourceMetadata::new(),
+                ))
+            } else {
+                Err(ResourceError::NotFound)
+            }
+        }
+    }
+
+    /// One opaque pixel, whatever it was handed.
+    struct OnePixel;
+
+    impl ResourceDecoder for OnePixel {
+        fn supports(&self, kind: ResourceKind) -> bool {
+            kind == ResourceKind::Image
+        }
+
+        fn decode(
+            &self,
+            _kind: ResourceKind,
+            _bytes: &[u8],
+        ) -> Result<DecodedResource, ResourceError> {
+            Ok(DecodedResource::new(
+                Arc::from(&[0xFF, 0x00, 0x00, 0xFF][..]),
+                ResourceMetadata::new().with_intrinsic_size(Size::new(1.0, 1.0)),
+            ))
+        }
+    }
+
+    /// An empty 1x1 document, whatever it was handed.
+    struct EmptyVector;
+
+    impl VectorDecoder for EmptyVector {
+        fn decode_vector(&self, _bytes: &[u8]) -> Result<SceneVector, ResourceError> {
+            Ok(SceneVector::new(Size::new(1.0, 1.0), Vec::new()))
+        }
+    }
+
+    const LOCALE: &str = "en";
+
+    fn reporting<'a>(
+        sink: &'a NullDiagnosticSink,
+        locale: &'a LanguageTag,
+    ) -> ResourceReporting<'a> {
+        ResourceReporting {
+            sink,
+            runtime: RuntimeId::from_raw(1),
+            locale,
+        }
+    }
+
+    fn rooted() -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        tree
+    }
+
+    fn mount(tree: &mut RetainedTree, src: &str) -> NodeId {
+        let node = tree.alloc(NodeKind::Element {
+            component: ComponentId::from_raw(1),
+        });
+        let prop = ViewProperty::new(SRC, ViewValue::Text(src.into()));
+        tree.get_mut(node)
+            .expect("just allocated")
+            .set_attributes(StyleAttributes::extract(&[prop]));
+        node
+    }
+
+    fn sweep(bridge: &mut ResourceBridge, tree: &RetainedTree) {
+        bridge.mark_image_visibility(
+            &ComputedStyles::new(),
+            tree,
+            &LayoutBoxes::new(),
+            Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0)),
+        );
+    }
 
     #[test]
     fn a_fresh_bridge_has_no_ports_and_nothing_resident() {
@@ -771,5 +929,98 @@ mod tests {
         // than producing an empty or code-shaped message.
         let unknown = localized_diagnostic_message("resource.unknown", "ru", "logo.png", &error);
         assert_eq!(unknown, en);
+    }
+
+    #[test]
+    fn an_unreferenced_url_gives_up_its_handle_and_its_referrer() {
+        // Nothing resident to justify keeping them: the load fails, so the two
+        // maps hold the URL and nothing else does. Unmount the element and they
+        // must be back to the size they were before it was ever mounted — the
+        // exact shape of the leak, one entry per URL ever seen.
+        let sink = NullDiagnosticSink;
+        let locale = LanguageTag::parse(LOCALE).expect("a real tag");
+        let report = reporting(&sink, &locale);
+
+        let mut bridge = ResourceBridge::new();
+        bridge.set_providers(Arc::new(Loader { succeeds: false }), Arc::new(OnePixel));
+        let mut tree = rooted();
+        assert_eq!(bridge.bookkeeping_counts(), (0, 0), "prior size");
+
+        let node = mount(&mut tree, "thumb.png");
+        bridge.resolve_element_images(&tree, 1.0, &report);
+        bridge.run_deferred_loads(&report);
+        assert_eq!(
+            bridge.bookkeeping_counts(),
+            (1, 1),
+            "requested and attributed"
+        );
+        assert_eq!(
+            bridge.cached_counts().0,
+            0,
+            "the load failed, so nothing is resident"
+        );
+
+        tree.remove(node);
+        sweep(&mut bridge, &tree);
+        assert_eq!(
+            bridge.bookkeeping_counts(),
+            (0, 0),
+            "back to the prior size"
+        );
+    }
+
+    #[test]
+    fn an_unreferenced_vector_leaves_the_cache_with_its_handle() {
+        // The vector cache had no budget at all and was emptied only when the
+        // decoder was replaced — which for a running program is never.
+        let sink = NullDiagnosticSink;
+        let locale = LanguageTag::parse(LOCALE).expect("a real tag");
+        let report = reporting(&sink, &locale);
+
+        let mut bridge = ResourceBridge::new();
+        bridge.set_providers(Arc::new(Loader { succeeds: true }), Arc::new(OnePixel));
+        bridge.set_vector_decoder(Arc::new(EmptyVector));
+        let mut tree = rooted();
+
+        let node = mount(&mut tree, "icon.svg");
+        bridge.resolve_element_vectors(&tree);
+        bridge.run_deferred_loads(&report);
+        assert_eq!(bridge.cached_counts().1, 1, "parsed once and cached");
+        assert_eq!(bridge.bookkeeping_counts().0, 1);
+
+        tree.remove(node);
+        sweep(&mut bridge, &tree);
+        assert_eq!(bridge.cached_counts().1, 0, "back to the prior size");
+        assert_eq!(bridge.bookkeeping_counts(), (0, 0));
+    }
+
+    #[test]
+    fn bookkeeping_cannot_outgrow_the_cache_that_justifies_it() {
+        // A file manager walking a directory: a new thumbnail URL per file, each
+        // shown once and then scrolled past. The decoded pixels are deliberately
+        // kept — that is what the cache is for — so the bookkeeping is allowed to
+        // be as large as the cache and no larger. Without the sweep it is one
+        // entry per file EVER SEEN, and the cap below is the whole difference.
+        let sink = NullDiagnosticSink;
+        let locale = LanguageTag::parse(LOCALE).expect("a real tag");
+        let report = reporting(&sink, &locale);
+
+        let mut bridge = ResourceBridge::new();
+        bridge.set_providers(Arc::new(Loader { succeeds: true }), Arc::new(OnePixel));
+        bridge.set_image_cache_budget(CacheBudget::entries(2));
+        let mut tree = rooted();
+
+        for i in 0..40 {
+            let node = mount(&mut tree, &format!("file-{i}.png"));
+            bridge.resolve_element_images(&tree, 1.0, &report);
+            bridge.run_deferred_loads(&report);
+            sweep(&mut bridge, &tree);
+            tree.remove(node);
+            sweep(&mut bridge, &tree);
+        }
+        let (handles, referrers) = bridge.bookkeeping_counts();
+        assert!(handles <= 2, "{handles} handles for a 2-entry cache");
+        assert!(referrers <= 2, "{referrers} referrers for a 2-entry cache");
+        assert_eq!(bridge.cached_counts().0, 2, "the budget held");
     }
 }

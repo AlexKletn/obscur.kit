@@ -8,6 +8,12 @@ use obscur_resources::cache::{
 use obscur_resources::state::ResourceVersion;
 use obscur_scene::paint::SceneImage;
 
+#[doc = include_str!("image_cache.doc/DEFAULT_MAX_BYTES.md")]
+const DEFAULT_MAX_BYTES: u64 = 128 * 1024 * 1024;
+
+#[doc = include_str!("image_cache.doc/DEFAULT_MAX_ENTRIES.md")]
+const DEFAULT_MAX_ENTRIES: usize = 512;
+
 #[doc = include_str!("image_cache.doc/ImageCache.md")]
 pub struct ImageCache {
     #[doc = include_str!("image_cache.doc/images.md")]
@@ -31,7 +37,8 @@ impl ImageCache {
         Self {
             images: HashMap::new(),
             entries: HashMap::new(),
-            budget: CacheBudget::unlimited(),
+            budget: CacheBudget::bytes(DEFAULT_MAX_BYTES)
+                .with_max_entries(Some(DEFAULT_MAX_ENTRIES)),
             policy: EvictionPolicy::default(),
             stats: CacheStatistics::new(),
             tick: 0,
@@ -215,8 +222,28 @@ mod tests {
     }
 
     #[test]
+    fn the_default_budget_is_bounded_and_still_seats_a_screenful() {
+        // Unlimited is not a defensible default: nothing ever leaves, so a
+        // long-running program holds every image it has ever shown. Nor is a cap
+        // so tight that an ordinary screen thrashes — so the floor is stated in
+        // the units that matter, full-screen 4K images and thumbnails.
+        let budget = ImageCache::new().budget();
+        let bytes = budget.max_bytes().expect("the default is bounded");
+        let entries = budget.max_entries().expect("the default bounds the count");
+        let screen_4k = 3840u64 * 2160 * 4;
+        assert!(
+            bytes >= 4 * screen_4k,
+            "{bytes} bytes is under four full-screen 4K images"
+        );
+        // The two caps meet at a 256x256 RGBA thumbnail, so neither is decorative.
+        let entries = u64::try_from(entries).expect("a plausible entry cap");
+        assert_eq!(bytes / entries, 256 * 256 * 4);
+    }
+
+    #[test]
     fn unlimited_never_evicts() {
         let mut cache = ImageCache::new();
+        cache.set_budget(CacheBudget::unlimited());
         for i in 0..64u64 {
             let evicted = insert(&mut cache, &format!("u{i}"), i, 16);
             assert!(evicted.is_empty());

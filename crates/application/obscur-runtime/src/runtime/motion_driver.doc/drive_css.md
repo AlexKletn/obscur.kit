@@ -11,3 +11,8 @@ two stages to keep the borrow of `self.css_motion` disjoint from the
 actions to take (matching each rule's selector against every element node
 via [`SelectorMatcher`], honouring recorded pseudo-state), then *applies*
 them — updating the baselines and starting the timelines.
+
+It is also where the driver's own state is swept: the pass already holds the
+tree, so it opens by handing it to [`retain_live`](Self::retain_live), before
+the "no rules installed" return — an animation started imperatively has no CSS
+rule behind it and must be swept all the same.

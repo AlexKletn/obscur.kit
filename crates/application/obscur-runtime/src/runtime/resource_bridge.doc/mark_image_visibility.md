@@ -15,3 +15,7 @@ would need a prefetch margin, and the runtime has no notion of one.
 
 `viewport` is the visible rect in **document** coordinates, which is what
 the absolute layout `boxes` are expressed in.
+
+The referenced set it collects is also what bounds the bridge's per-URL
+bookkeeping, so this pass ends by handing it to
+[`retain_referenced`](Self::retain_referenced) — the same set, one walk.
