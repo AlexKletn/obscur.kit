@@ -530,6 +530,25 @@ pub fn mix_blend_mode_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+// ---- `pointer-events` keyword values ----
+//
+// Only the two values that mean something without SVG fill/stroke geometry.
+
+#[doc = include_str!("layout_keyword.doc/POINTER_EVENTS_AUTO.md")]
+pub const POINTER_EVENTS_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_2701);
+#[doc = include_str!("layout_keyword.doc/POINTER_EVENTS_NONE.md")]
+pub const POINTER_EVENTS_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_2702);
+
+#[doc = include_str!("layout_keyword.doc/pointer_events_from_name.md")]
+#[must_use]
+pub fn pointer_events_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "auto" => Some(POINTER_EVENTS_AUTO),
+        "none" => Some(POINTER_EVENTS_NONE),
+        _ => None,
+    }
+}
+
 #[doc = include_str!("layout_keyword.doc/font_weight_relative_from_name.md")]
 #[must_use]
 pub fn font_weight_relative_from_name(name: &str) -> Option<InternedSymbol> {
@@ -629,6 +648,8 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         GRID_AUTO_FLOW_COLUMN => Some("column"),
         GRID_AUTO_FLOW_ROW_DENSE => Some("row dense"),
         GRID_AUTO_FLOW_COLUMN_DENSE => Some("column dense"),
+        POINTER_EVENTS_AUTO => Some("auto"),
+        POINTER_EVENTS_NONE => Some("none"),
         _ => None,
     }
 }
@@ -705,7 +726,22 @@ mod tests {
         GRID_AUTO_FLOW_COLUMN,
         GRID_AUTO_FLOW_ROW_DENSE,
         GRID_AUTO_FLOW_COLUMN_DENSE,
+        POINTER_EVENTS_AUTO,
+        POINTER_EVENTS_NONE,
     ];
+
+    #[test]
+    fn pointer_events_maps_the_two_values_it_can_honour() {
+        assert_eq!(pointer_events_from_name("auto"), Some(POINTER_EVENTS_AUTO));
+        assert_eq!(pointer_events_from_name("none"), Some(POINTER_EVENTS_NONE));
+        assert_eq!(pointer_events_from_name("NONE"), Some(POINTER_EVENTS_NONE));
+        // The SVG-only values are not modelled, so they are not this keyword
+        // set's business: they fall through as unknown.
+        assert_eq!(pointer_events_from_name("visiblePainted"), None);
+        assert_eq!(pointer_events_from_name("all"), None);
+        assert_eq!(name_of(POINTER_EVENTS_NONE), Some("none"));
+        assert_eq!(name_of(POINTER_EVENTS_AUTO), Some("auto"));
+    }
 
     #[test]
     fn display_maps_known_keywords() {

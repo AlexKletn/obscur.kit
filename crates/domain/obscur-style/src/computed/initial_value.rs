@@ -305,6 +305,11 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         // likewise needs the interner, so an absent value falls back to the
         // coordinator's default (no added clip) — byte-for-byte identical.
         | PropertyId::Overflow
+        // `pointer-events` initial is `auto`. Its handle needs no interner, but
+        // storing it would put one entry in every node's computed style for a
+        // property almost no node declares — and hit testing already reads an
+        // absent value as `auto`, so the two are the same answer.
+        | PropertyId::PointerEvents
         // `content` is never a real element's computed value (it decorates a
         // generated pseudo-element box only), so it has no element initial.
         | PropertyId::Content

@@ -162,7 +162,7 @@ impl<'a> ArrangePhase<'a> {
         *self.last_layout_inputs = Some(inputs);
         // Rebuild the hit-test index from the freshly laid-out boxes so the
         // next pointer event tests against this frame's geometry.
-        self.hits.rebuild(self.tree, self.boxes);
+        self.hits.rebuild(self.tree, computed, self.boxes);
         // Telemetry: mark the layout phase and count arranged boxes (§7.9).
         let count = self.boxes.len() as u64;
         self.telemetry

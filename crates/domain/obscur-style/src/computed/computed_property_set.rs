@@ -121,6 +121,9 @@ pub(super) const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::TabSize,
     // Overflow (pure paint/clip; no layout effect).
     PropertyId::Overflow,
+    // Hit testing. It inherits, so it must be computed on every node: that is
+    // how a `pointer-events: none` subtree learns it is transparent.
+    PropertyId::PointerEvents,
     // The kit's own namespace.
     PropertyId::Painter,
 ];
@@ -245,6 +248,7 @@ mod tests {
                 | PropertyId::WordBreak
                 | PropertyId::TabSize
                 | PropertyId::Overflow
+                | PropertyId::PointerEvents
                 // Logical properties are classified but deliberately NOT computed:
                 // each resolves into its physical counterpart via
                 // `cascaded_for`, so the computed style holds `margin-left` and
@@ -377,6 +381,7 @@ mod tests {
             PropertyId::WordBreak,
             PropertyId::TabSize,
             PropertyId::Overflow,
+            PropertyId::PointerEvents,
             PropertyId::Painter,
         ];
         for id in all {

@@ -287,6 +287,10 @@ pub enum PropertyId {
     #[doc = include_str!("property_id.doc/Content.md")]
     Content,
 
+    // ---- Hit testing (Keyword-valued; INHERITED; neither layout nor paint) ----
+    #[doc = include_str!("property_id.doc/PointerEvents.md")]
+    PointerEvents,
+
     // ---- The kit's own vendor namespace, `-obscur-` (spec §4.13) ----
     #[doc = include_str!("property_id.doc/Painter.md")]
     Painter,
@@ -420,6 +424,7 @@ impl PropertyId {
             Self::TabSize => "tab-size",
             Self::Overflow => "overflow",
             Self::Content => "content",
+            Self::PointerEvents => "pointer-events",
         }
     }
 
@@ -449,7 +454,13 @@ impl PropertyId {
             // `overflow-wrap` and `word-break` inherit (CSS Text 3 §5.2).
             | Self::OverflowWrap
             | Self::WordBreak
-            | Self::TabSize => Inheritance::Inherited,
+            | Self::TabSize
+            // `pointer-events` inherits (SVG 1.1 §16.6 / css-ui). That is not a
+            // typography accident: inheritance IS the "and its descendants"
+            // half of `pointer-events: none`, and it is what lets a descendant
+            // opt back in with `auto` — a rule an ancestor walk at hit-test
+            // time would have to special-case.
+            | Self::PointerEvents => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
             | Self::BackgroundImage
@@ -614,6 +625,18 @@ mod tests {
         assert_eq!(PropertyId::ObjectFit.name(), "object-fit");
         // Like the other paint / box properties, `object-fit` resets per element.
         assert!(!PropertyId::ObjectFit.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn pointer_events_is_named_and_inherits() {
+        assert_eq!(PropertyId::PointerEvents.name(), "pointer-events");
+        // Inherited: yes (SVG 1.1 §16.6). The subtree half of
+        // `pointer-events: none` is exactly this inheritance.
+        assert!(
+            PropertyId::PointerEvents
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]

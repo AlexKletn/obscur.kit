@@ -55,6 +55,39 @@ fn inspect_picking_uses_the_runtime_hit_test_not_the_layout_rect() {
         inspect_pick, runtime_pick,
         "P: inspect returns the same underlying node the runtime hit-test does"
     );
+
+    // P is outside the UNTRANSFORMED 100x40 rect as well, so it does not
+    // distinguish a hit test that honours the transform from one that ignores it.
+    // R does: it is inside the layout rect, and only inverse-rotating it (to
+    // local (3.3, 41.2), past the 40px bottom edge) shows it is off the shape.
+    hover(&mut rt, 2.0, 2.0);
+    let runtime_pick = rt.hovered();
+    assert_ne!(
+        runtime_pick,
+        Some(box_node),
+        "R is inside the box's LAYOUT rect but the rotation vacated it: the \
+         runtime hit-test must miss the box"
+    );
+    assert_eq!(
+        rt.hovered_inspect().map(|i| i.node),
+        runtime_pick,
+        "R: inspect returns the same underlying node the runtime hit-test does"
+    );
+
+    // S: the other side of the same claim — local (95, 5) is drawn at
+    // (92.4, 41.2), BELOW the layout rect, and must be pickable there.
+    hover(&mut rt, 92.43, 41.21);
+    assert_eq!(
+        rt.hovered(),
+        Some(box_node),
+        "S is inside the rotated shape though outside the layout rect: the \
+         runtime hit-test must find the box"
+    );
+    assert_eq!(
+        rt.hovered_inspect().map(|i| i.node),
+        Some(box_node),
+        "S: inspect picks the same node the runtime hit-test did"
+    );
 }
 
 #[doc = include_str!("spec_ch7_devtools.doc/inspect_picking_honours_stacking_order.md")]

@@ -50,6 +50,10 @@ impl PropertyId {
                 // into it can change every frame of an animation, and making
                 // that relayout would put a full layout pass behind a repaint.
                 | Self::Painter
+                // `pointer-events` moves no box and paints no pixel; it decides
+                // only which node a pointer lands on, and hit testing reads the
+                // computed style directly rather than through a box.
+                | Self::PointerEvents
         )
     }
 
@@ -83,6 +87,7 @@ mod tests {
             PropertyId::ZIndex,
             PropertyId::Visibility,
             PropertyId::Painter,
+            PropertyId::PointerEvents,
         ] {
             assert!(id.is_paint_only(), "{id:?} should be paint-only");
             assert!(!id.affects_layout(), "{id:?} must not force a relayout");

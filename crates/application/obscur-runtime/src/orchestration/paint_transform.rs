@@ -8,7 +8,7 @@ use obscur_style::property::{Length, PropertyId, Transform, TransformOrigin};
 use super::ComputedStyles;
 
 #[doc = include_str!("paint_transform.doc/resolved_transform.md")]
-pub(super) fn resolved_transform(
+pub(crate) fn resolved_transform(
     computed: &ComputedStyles,
     node: NodeId,
     bounds: Rect,

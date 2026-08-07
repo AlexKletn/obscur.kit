@@ -9,7 +9,7 @@ use obscur_style::property::{PropertyId, layout_keyword};
 #[doc = include_str!("longhand_catalog.doc/property_id_from_name.md")]
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 119] = [
+    const ALL: [PropertyId; 120] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -131,6 +131,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::TabSize,
         PropertyId::Overflow,
         PropertyId::Content,
+        PropertyId::PointerEvents,
         // The kit's own namespace. Its `name()` carries the `-obscur-` prefix,
         // so it is found by the same lookup as everything else — a vendor
         // property is a property, not a separate kind of thing.
@@ -249,6 +250,7 @@ pub(super) fn layout_keyword_mapper(
         PropertyId::OverflowWrap => Some(layout_keyword::overflow_wrap_from_name),
         PropertyId::WordBreak => Some(layout_keyword::word_break_from_name),
         PropertyId::Overflow => Some(layout_keyword::overflow_from_name),
+        PropertyId::PointerEvents => Some(layout_keyword::pointer_events_from_name),
         PropertyId::MixBlendMode => Some(layout_keyword::mix_blend_mode_from_name),
         _ => None,
     }
@@ -798,6 +800,37 @@ mod tests {
         );
         // CSS-wide keywords still take priority.
         assert_eq!(value_of("overflow: inherit"), PropertyValue::Inherit);
+    }
+
+    #[test]
+    fn pointer_events_maps_to_reserved_symbols() {
+        // Before this property was catalogued the declaration compiled to
+        // `Unsupported` and was dropped, so §4.7's pointer-event policy had
+        // nothing to consult.
+        assert_eq!(
+            property_id_from_name("pointer-events"),
+            Some(PropertyId::PointerEvents)
+        );
+        assert_eq!(
+            value_of("pointer-events: none"),
+            PropertyValue::Keyword(layout_keyword::POINTER_EVENTS_NONE)
+        );
+        assert_eq!(
+            value_of("pointer-events: auto"),
+            PropertyValue::Keyword(layout_keyword::POINTER_EVENTS_AUTO)
+        );
+        assert_eq!(
+            standard("pointer-events: none").0.property(),
+            PropertyId::PointerEvents
+        );
+        // CSS-wide keywords still take priority.
+        assert_eq!(value_of("pointer-events: inherit"), PropertyValue::Inherit);
+        // Inherited: yes — the subtree half of `none` is the cascade's doing.
+        assert!(
+            PropertyId::PointerEvents
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]
