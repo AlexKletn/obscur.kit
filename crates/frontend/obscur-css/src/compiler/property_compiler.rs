@@ -27,6 +27,7 @@ use super::value_lowering::{css_wide_keyword, lower_value};
 use super::vendor_prefix::{VendorNamespace, vendor_namespace};
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{ParsedDeclaration, ParsedValue};
+use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{CustomProperty, Length, PropertyId, PropertyValue, layout_keyword};
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
@@ -69,8 +70,17 @@ impl PropertyCompiler {
             // A custom property keeps its value verbatim (best-effort); an
             // unlowerable value degrades to `initial` rather than being dropped.
             let value = lower_value(&decl.value, interner).unwrap_or(PropertyValue::Initial);
-            let symbol = interner.intern(name);
-            return CompiledDeclaration::Custom(CustomProperty::new(symbol, value));
+            // Minted from the NAME, not from this sheet's interner. A compiler
+            // is built per source, so its interner numbers from zero, and two
+            // sheets that each declare a custom property would otherwise mint
+            // the same symbol for two different names — the theme sheet's
+            // `--brand` and the widget sheet's `--radius` colliding at symbol 0.
+            // `var()` mints its reference the same way (`value_lowering`), which
+            // is what lets one sheet declare what another one reads.
+            return CompiledDeclaration::Custom(CustomProperty::new(
+                InternedSymbol::named(name),
+                value,
+            ));
         }
         // Another vendor's property is passed over in SILENCE — recorded, but
         // as a note rather than a fault. That is the entire contract of a
@@ -592,6 +602,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_property_name_outside_ascii_is_compiled_rather_than_crashed_on() {
+        // Authored CSS reaches this compiler unfiltered, from a stylesheet and
+        // from a `style="…"` attribute alike, and css-syntax-3 §4.2 admits
+        // every code point at or above U+0080 in an identifier. `-a-bcdeé`
+        // holds a character across the byte where `-obscur-` ends.
+        let (result, _) = compile("-a-bcdeé: red");
+        let CompiledDeclaration::Unsupported(feature) = result else {
+            panic!("expected it to be passed over");
+        };
+        assert_eq!(feature.kind(), UnsupportedFeatureKind::VendorProperty);
+
+        // And one in no namespace at all is an unknown property, not a fault
+        // in the compiler.
+        let (result, _) = compile("cölor: red");
+        let CompiledDeclaration::Unsupported(feature) = result else {
+            panic!("expected unsupported");
+        };
+        assert_eq!(feature.kind(), UnsupportedFeatureKind::Property);
+    }
+
+    #[test]
     fn another_vendors_prefix_is_not_an_alias_for_one_of_ours() {
         // Spec §4.13 excludes vendor hacks, and this is the one that matters:
         // `-webkit-filter` does NOT become `filter`. Accepting foreign prefixes
@@ -650,14 +681,54 @@ pub(crate) mod tests {
 
     #[test]
     fn lowers_custom_property() {
-        let (result, interner) = compile("--brand: #fff");
+        let (result, _) = compile("--brand: #fff");
         let CompiledDeclaration::Custom(custom) = result else {
             panic!("expected custom property");
         };
-        assert_eq!(interner.resolve(custom.name()), Some("--brand"));
+        // Named, not interned: the sheet's interner numbers from zero and every
+        // sheet has its own, so a sequential symbol would name a different
+        // property in the next sheet compiled.
+        assert_eq!(custom.name(), InternedSymbol::named("--brand"));
         assert_eq!(
             custom.value(),
             &PropertyValue::Color(StyleColor::rgba(1.0, 1.0, 1.0, 1.0))
+        );
+    }
+
+    #[test]
+    fn two_compilers_name_the_same_custom_property_the_same_way() {
+        // The trap this guards: one `StylesheetCompiler` per source. If the name
+        // came from the interner, the FIRST custom property of every sheet would
+        // be symbol 0 — the theme's `--brand` and the widget sheet's `--radius`
+        // would be the same property, and each would answer the other's `var()`.
+        let (first, _) = compile("--brand: #fff");
+        let (second, _) = compile("--radius: 4px");
+        let (CompiledDeclaration::Custom(brand), CompiledDeclaration::Custom(radius)) =
+            (first, second)
+        else {
+            panic!("expected custom properties");
+        };
+        assert_ne!(brand.name(), radius.name());
+        let (again, _) = compile("--brand: #000");
+        let CompiledDeclaration::Custom(again) = again else {
+            panic!("expected a custom property");
+        };
+        assert_eq!(brand.name(), again.name(), "one name, one symbol");
+    }
+
+    #[test]
+    fn a_var_reference_names_the_property_the_declaration_named() {
+        // The two halves are compiled by different code paths (and, for a
+        // `style` attribute, by different compiler instances); if they disagreed
+        // on the symbol, every `var()` would resolve to nothing.
+        let (declaration, _) = compile("--brand: #fff");
+        let (reference, _) = standard("color: var(--brand)");
+        let CompiledDeclaration::Custom(declaration) = declaration else {
+            panic!("expected a custom property");
+        };
+        assert_eq!(
+            reference.value(),
+            &PropertyValue::CustomRef(declaration.name())
         );
     }
 

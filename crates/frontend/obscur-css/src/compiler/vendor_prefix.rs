@@ -29,7 +29,13 @@ pub(crate) fn vendor_namespace(name: &str) -> Option<VendorNamespace<'_>> {
     if vendor.is_empty() || tail.is_empty() {
         return None;
     }
-    if name.len() >= OWN_PREFIX.len() && name[..OWN_PREFIX.len()].eq_ignore_ascii_case(OWN_PREFIX) {
+    // Our prefix ends at the very dash that ends the vendor segment, so the
+    // segment already in hand answers the question — and answers it without
+    // counting bytes off the front of `name`. An identifier admits every code
+    // point at or above U+0080 (css-syntax-3 §4.2), so a byte offset into a
+    // property name is not a character offset, and a fixed one lands inside a
+    // character as readily as between two.
+    if vendor.eq_ignore_ascii_case(OWN_PREFIX.trim_matches('-')) {
         return Some(VendorNamespace::Own);
     }
     Some(VendorNamespace::Foreign(vendor))
@@ -81,6 +87,25 @@ mod tests {
         assert_eq!(
             vendor_namespace("-someothertoolkit-glow"),
             Some(VendorNamespace::Foreign("someothertoolkit"))
+        );
+    }
+
+    #[test]
+    fn a_vendor_name_whose_bytes_outnumber_its_characters_is_still_read() {
+        // css-syntax-3 §4.2 admits every code point at or above U+0080 in an
+        // identifier, so a property name's byte offsets are not its character
+        // offsets. In `-a-bcdeé` the `é` straddles the eighth byte — exactly
+        // where `-obscur-` ends — and reading that many bytes off the front
+        // cuts the character in half.
+        assert_eq!(
+            vendor_namespace("-a-bcdeé"),
+            Some(VendorNamespace::Foreign("a"))
+        );
+        // A near miss on our own prefix: same length in characters, one byte
+        // longer, and not ours.
+        assert_eq!(
+            vendor_namespace("-obscür-glow"),
+            Some(VendorNamespace::Foreign("obscür"))
         );
     }
 

@@ -293,11 +293,17 @@ fn parse_lch(args: &[ParsedValue]) -> Option<StyleColor> {
 
 #[doc = include_str!("color_lowering.doc/parse_hex_color.md")]
 pub(super) fn parse_hex_color(hex: &str) -> Option<StyleColor> {
+    // A `#` token carries an identifier, which admits every code point at or
+    // above U+0080 (css-syntax-3 §4.2), so its bytes need not be its
+    // characters. Refusing anything but hex digits is what makes the byte
+    // count below a digit count, and every byte an ASCII one.
     if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    let pair = |slice: &str| {
-        u8::from_str_radix(slice, 16)
+    let pair = |high: u8, low: u8| {
+        let digits = [high, low];
+        let text = std::str::from_utf8(&digits).ok()?;
+        u8::from_str_radix(text, 16)
             .ok()
             .map(|v| f32::from(v) / 255.0)
     };
@@ -323,16 +329,16 @@ pub(super) fn parse_hex_color(hex: &str) -> Option<StyleColor> {
             single(bytes[3])?,
         )),
         6 => Some(StyleColor::rgba(
-            pair(&hex[0..2])?,
-            pair(&hex[2..4])?,
-            pair(&hex[4..6])?,
+            pair(bytes[0], bytes[1])?,
+            pair(bytes[2], bytes[3])?,
+            pair(bytes[4], bytes[5])?,
             1.0,
         )),
         8 => Some(StyleColor::rgba(
-            pair(&hex[0..2])?,
-            pair(&hex[2..4])?,
-            pair(&hex[4..6])?,
-            pair(&hex[6..8])?,
+            pair(bytes[0], bytes[1])?,
+            pair(bytes[2], bytes[3])?,
+            pair(bytes[4], bytes[5])?,
+            pair(bytes[6], bytes[7])?,
         )),
         _ => None,
     }
@@ -493,6 +499,19 @@ pub(crate) mod tests {
             color_of("color: lab(50% 50 0)"),
             1e-4,
         );
+    }
+
+    #[test]
+    fn a_hex_color_carrying_a_non_ascii_character_is_not_a_color() {
+        // A `#` token's payload is an identifier, and css-syntax-3 §4.2 lets an
+        // identifier hold any code point at or above U+0080. `#aébcd` is six
+        // BYTES and five characters, so counting bytes would take it for a
+        // six-digit colour and then cut the `é` in half reading the first pair.
+        let (result, _) = compile("color: #aébcd");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
+        // Eight bytes, likewise not eight digits.
+        let (result, _) = compile("color: #aébcdef");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
     }
 
     #[test]
