@@ -45,5 +45,22 @@ tests.
 
 Its one escape hatch is `MARKUP_ONLY_ELEMENTS`, and that is deliberate: in this
 engine every authored tag becomes its own local name, so "reachable from
-markup" is true of any string and would make the guard vacuous. The two names
-that need it are declared, argued and separately proved to render.
+markup" is true of any string and would make the guard vacuous. The three names
+that need it are declared, argued and separately proved to render — and one of
+them, `canvas`, is there because defect 2 above is still open for the canvas
+primitive.
+
+# The drawn controls
+
+The tests at the foot of this file are about a different way a UA sheet can
+fail to say anything: not a rule for a name nothing builds, but no rule at all.
+`progress`, `slider` and `canvas` are the elements whose interior is *painted*
+rather than built out of boxes — each is a box with a `<canvas>` child naming a
+painter, and the runtime hands that painter exactly the child's layout box to
+draw into. The sheet named none of them, so with no author CSS the child had an
+`auto` height, the region had no area, `paint_progress` and `paint_slider`
+returned before their first stroke, and the control was invisible with its
+painter registered and running. Each of the three now has a documented
+intrinsic size, an author override that beats it, and — for the slider — a test
+that the box the pointer measures and the box the painter draws into are one
+rectangle.

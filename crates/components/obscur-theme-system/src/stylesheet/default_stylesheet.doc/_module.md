@@ -14,7 +14,11 @@ specification-sheet aesthetic (ink `#2b2a27` on paper `#faf9f6`, hairline
 `1.5px` borders, `2px` radii) with the full interaction-state set — a hover
 fill shift, a `2px dashed` focus ring with offset, an inverted `:active`, a
 dashed muted `:disabled`, and a filled `:checked` — plus `a`, `fieldset`,
-`img` and `table` rules. It leans only on properties and interaction
+`img` and `table` rules, and an **intrinsic size** for each of the three
+*drawn* elements (`canvas` 300 × 150 from HTML's own default, `progress`
+160 × 16, `slider` 160 × 20) — without one, a control whose interior is
+painted rather than built out of boxes lays out at nothing and is invisible
+with its painter running. It leans only on properties and interaction
 pseudo-classes the engine actually restyles (`:hover`, `:focus`, `:active`,
 `:disabled`, `:checked`). Because it sits at `SystemDefault`, any author/theme
 sheet overrides it, so themed demos keep their own look untouched.

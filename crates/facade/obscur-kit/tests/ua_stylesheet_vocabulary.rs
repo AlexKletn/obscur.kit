@@ -25,8 +25,10 @@ use obscur_kit::view::view::View;
 use obscur_kit::widgets::button::Button;
 use obscur_kit::widgets::checkbox::Checkbox;
 use obscur_kit::widgets::input::Input;
+use obscur_kit::widgets::progress::Progress;
 use obscur_kit::widgets::radio::Radio;
 use obscur_kit::widgets::select::Select;
+use obscur_kit::widgets::slider::Slider;
 use obscur_kit::widgets::table::{Column, Table};
 
 #[doc = include_str!("ua_stylesheet_vocabulary.doc/CMD.md")]
@@ -61,7 +63,7 @@ const PAPER: (f32, f32, f32) = (
 );
 
 #[doc = include_str!("ua_stylesheet_vocabulary.doc/MARKUP_ONLY_ELEMENTS.md")]
-const MARKUP_ONLY_ELEMENTS: &[&str] = &["a", "fieldset"];
+const MARKUP_ONLY_ELEMENTS: &[&str] = &["a", "canvas", "fieldset"];
 
 #[doc = include_str!("ua_stylesheet_vocabulary.doc/Vocabulary.md")]
 #[derive(Debug, Default)]
@@ -133,6 +135,15 @@ fn every_state_the_widgets_can_reach() -> Vec<View> {
             .row(["Bob", "b"])
             .view(),
         Image::new("logo.png").view(),
+        // The two DRAWN controls, whose interior is painted rather than built out
+        // of boxes. The Rust spelling builds the whole thing — the element plus
+        // the `<canvas>` child a painter is handed — so it is what puts the names
+        // `progress` and `slider` into the harvest, and what the layout tests at
+        // the foot of this file measure.
+        Progress::new(0.4).view(),
+        Progress::indeterminate().view(),
+        Slider::new(0.5).view(),
+        Slider::ranging(0.2, 0.8).view(),
     ]
 }
 
@@ -170,6 +181,44 @@ fn compile(css: &str) -> Stylesheet {
         .compile(&parsed);
     assert!(compiled.errors.is_empty(), "{:?}", compiled.errors);
     compiled.matchable
+}
+
+#[doc = include_str!("ua_stylesheet_vocabulary.doc/authored.md")]
+fn authored(css: &str) -> Stylesheet {
+    let source = CssSource::anonymous(css);
+    let parsed = StylesheetParser::new(&source).parse();
+    let compiled = StylesheetCompiler::new().compile(&parsed);
+    assert!(compiled.errors.is_empty(), "{:?}", compiled.errors);
+    compiled.matchable
+}
+
+#[doc = include_str!("ua_stylesheet_vocabulary.doc/rendered_over.md")]
+fn rendered_over(view: &View, css: &str) -> UiRuntime {
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 400.0));
+    runtime.set_default_stylesheet(ua_stylesheet());
+    runtime.render_now(view, &[authored(css)]);
+    runtime
+}
+
+#[doc = include_str!("ua_stylesheet_vocabulary.doc/laid_out.md")]
+fn laid_out(runtime: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
+    let laid = runtime
+        .layout_boxes()
+        .get(&node)
+        .copied()
+        .expect("a laid-out box");
+    (
+        laid.origin().x,
+        laid.origin().y,
+        laid.size().width,
+        laid.size().height,
+    )
+}
+
+#[doc = include_str!("ua_stylesheet_vocabulary.doc/same_box.md")]
+fn same_box(left: (f32, f32, f32, f32), right: (f32, f32, f32, f32)) -> bool {
+    let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+    near(left.0, right.0) && near(left.1, right.1) && near(left.2, right.2) && near(left.3, right.3)
 }
 
 #[doc = include_str!("ua_stylesheet_vocabulary.doc/compounds.md")]
@@ -465,4 +514,157 @@ fn a_disabled_selects_options_read_muted() {
         colour(&runtime, at(&runtime, &[0, 0, 1, 0]), PropertyId::Color),
         Some(DISABLED_INK)
     );
+}
+
+// --- the drawn controls: a box to draw into --------------------------------
+
+#[test]
+fn the_drawn_controls_lay_out_at_their_documented_default_with_no_author_css() {
+    // The defect this pins. `progress`, `slider` and `canvas` are elements whose
+    // interior is PAINTED — each is a box with a `<canvas>` child naming a
+    // painter, and the runtime hands that painter exactly the child's layout box
+    // — and the UA sheet said nothing about any of the three. An element with no
+    // intrinsic size is not merely small here: `paint_progress` and
+    // `paint_slider` open with `if size.width <= 0.0 || size.height <= 0.0 {
+    // return false }`, so a control with no author CSS laid out at zero height
+    // and drew NOTHING, with its painter registered, called, and returning early
+    // every frame. The numbers are the ones the sheet documents: HTML's own
+    // 300 × 150 for a canvas, the native controls' ~160 × 16 for a progress bar,
+    // and 160 × 20 for a slider (the thumb is a circle of radius 8, so a native
+    // range's 14px height would flatten it).
+    for (label, view, width, height) in [
+        ("progress", Progress::new(0.5).view(), 160.0, 16.0),
+        ("slider", Slider::new(0.5).view(), 160.0, 20.0),
+        ("canvas", markup("<canvas/>"), 300.0, 150.0),
+    ] {
+        let runtime = rendered(&view);
+        let (_, _, w, h) = laid_out(&runtime, at(&runtime, &[0]));
+        assert!(
+            (w - width).abs() < 0.01 && (h - height).abs() < 0.01,
+            "an unstyled <{label}> must lay out at {width}×{height}, not {w}×{h}"
+        );
+    }
+}
+
+#[test]
+fn a_drawn_controls_painter_is_given_the_controls_whole_box() {
+    // Half the size is not enough: the element's box is not what any painter
+    // measures. `Progress::contents` and `Slider::contents` build a `<canvas>`
+    // child, and THAT child's layout box is what `CanvasPainters::paint` opens
+    // the region with. The child carries no local name and no class, so the
+    // sheet reaches it as `progress > *, slider > *` and hands it the control's
+    // whole box as a percentage. Without that rule the child is a childless
+    // block with an `auto` height — zero — and the control is exactly as
+    // invisible as it was before the size above was given to it.
+    for (label, view) in [
+        ("progress", Progress::new(0.5).view()),
+        ("slider", Slider::new(0.5).view()),
+    ] {
+        let runtime = rendered(&view);
+        let control = laid_out(&runtime, at(&runtime, &[0]));
+        let canvas = laid_out(&runtime, at(&runtime, &[0, 0]));
+        assert!(
+            canvas.2 > 0.0 && canvas.3 > 0.0,
+            "a <{label}>'s painter must be given a region with area, not {canvas:?}"
+        );
+        assert!(
+            same_box(control, canvas),
+            "a <{label}>'s canvas child must be the control's own box: \
+             control {control:?}, canvas {canvas:?}"
+        );
+    }
+}
+
+#[test]
+fn the_pointer_track_and_the_painters_track_are_one_box() {
+    // The latent bug this sheet's `slider` rule is shaped around, pinned so that
+    // the next person to reach for `padding` finds out from a test rather than
+    // from a thumb that does not land under the finger.
+    //
+    // `SliderControl::fraction_at` turns a pointer x into a value by insetting
+    // `THUMB_INSET` (8px) from the SLIDER ELEMENT's layout box. `paint_slider`
+    // draws the thumb by insetting `THUMB_RADIUS` (the same 8px) from the CANVAS
+    // CHILD's box. Two insets, two different rectangles, and they agree only
+    // while those rectangles are one rectangle. Padding or a border on `slider`
+    // insets the child and leaves the element where it was, so every value would
+    // be read that far off — worst at the two ends, where a user aims most
+    // carefully, and with no other symptom anywhere.
+    //
+    // So the rule is bare BY CONSTRUCTION, and this is the construction:
+    let runtime = rendered(&Slider::new(0.5).view());
+    let control = laid_out(&runtime, at(&runtime, &[0]));
+    let canvas = laid_out(&runtime, at(&runtime, &[0, 0]));
+    assert!(
+        control.2 > 16.0 && control.3 > 0.0,
+        "a slider needs a track longer than its two 8px insets: {control:?}"
+    );
+    assert!(
+        same_box(control, canvas),
+        "the box the pointer measures ({control:?}) and the box the painter \
+         draws into ({canvas:?}) must be the same rectangle — if this fails, the \
+         UA sheet has grown padding or a border on `slider`, and the thumb has \
+         stopped landing under the finger by exactly that much"
+    );
+
+    // And it must hold at a size the author chose, not only at the sheet's own:
+    // the `100%` on the canvas child is what carries the agreement across, where
+    // a repeated `20px` would quietly break it.
+    let runtime = rendered_over(&Slider::new(0.5).view(), "slider{width:240px;height:40px}");
+    assert!(
+        same_box(
+            laid_out(&runtime, at(&runtime, &[0])),
+            laid_out(&runtime, at(&runtime, &[0, 0])),
+        ),
+        "a resized slider's two boxes must move together"
+    );
+}
+
+#[test]
+fn an_author_width_and_height_override_every_one_of_the_defaults() {
+    // The other half of a UA rule's contract: it is a DEFAULT. The sheet is
+    // compiled at `SystemDefault`, so an author's plain type rule outranks it by
+    // origin alone — and a UA sheet that could not be overridden would be worse
+    // than the invisible controls it replaced, because a size is exactly the
+    // thing an application always wants to state for itself.
+    // The `drawn` flag says whether the element has a painter's canvas under it.
+    // For those two the override has to reach the CHILD as well, and that is not
+    // a nicety: an author cannot select that child — it has no name and no class
+    // — so before the sheet handed it `100%`, `slider { height: 40px }` produced
+    // a 240 × 40 control containing a 240 × 0 canvas. The control obeyed and drew
+    // nothing, and there was no author CSS anywhere that could have fixed it.
+    for (label, view, css, drawn) in [
+        (
+            "progress",
+            Progress::new(0.5).view(),
+            "progress{width:240px;height:40px}",
+            true,
+        ),
+        (
+            "slider",
+            Slider::new(0.5).view(),
+            "slider{width:240px;height:40px}",
+            true,
+        ),
+        (
+            "canvas",
+            markup("<canvas/>"),
+            "canvas{width:240px;height:40px}",
+            false,
+        ),
+    ] {
+        let runtime = rendered_over(&view, css);
+        let control = laid_out(&runtime, at(&runtime, &[0]));
+        assert!(
+            (control.2 - 240.0).abs() < 0.01 && (control.3 - 40.0).abs() < 0.01,
+            "`{css}` must beat the UA default on <{label}>, but it laid out {control:?}"
+        );
+        if drawn {
+            let canvas = laid_out(&runtime, at(&runtime, &[0, 0]));
+            assert!(
+                same_box(control, canvas),
+                "an author's size for <{label}> must carry to the box its painter \
+                 draws into: control {control:?}, canvas {canvas:?}"
+            );
+        }
+    }
 }

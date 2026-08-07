@@ -307,6 +307,88 @@ tr:hover {\
 img {\
   display: block;\
 }\
+/* The DRAWN controls — `progress`, `slider`, `canvas`. The three elements whose\
+   interior is painted rather than built out of boxes: each is a box with a\
+   `<canvas>` child naming a painter (`Progress::PAINTER`, `Slider::PAINTER`, or\
+   an author's own on a bare canvas), and the runtime hands that painter exactly\
+   the canvas child's layout box to draw into. A control with no intrinsic size\
+   is therefore not merely small — the region is zero, `paint_progress` and\
+   `paint_slider` return before their first stroke, and the control is INVISIBLE\
+   while its painter runs. This sheet named none of the three until this block. */\
+/* The sizes, and where each comes from. `canvas` is the one with a SPECIFIED\
+   default: HTML gives a canvas intrinsic dimensions of 300 × 150 CSS pixels, so\
+   that is used verbatim rather than reinvented. The other two are the native\
+   controls' measured defaults, adapted only where this toolkit's painter differs\
+   from a native one. A `<progress>` is ~160 × 16 and is taken as it stands — the\
+   bar is a 6px stroke (`THICKNESS`) down the middle of the box, so 16 leaves 5px\
+   of paper either side of it. An `<input type=range>` is ~129 × 14, and only the\
+   shape of that transfers: this slider's thumb is a circle of radius 8\
+   (`THUMB_RADIUS`), so a 14px-tall box would flatten it into a lens, and 20 is\
+   the thumb plus 2px of air. Its width is the progress bar's 160 rather than 129\
+   so the two bar-shaped controls share one rhythm.\
+   Display is an APPROXIMATION: HTML makes both `canvas` and `progress`\
+   inline-block, and this engine maps no inline-block (an unmapped display falls\
+   to `block`), so all three are blocks and none of them shares a line with text.\
+   That is the one thing here the engine's limits cost. */\
+/* A canvas gets a box and nothing else — no border, no fill, no ink. Its inside\
+   is drawn by a painter that is handed the WHOLE box and knows nothing about\
+   padding or border: chrome from this sheet would be painted over by the first\
+   thing the painter strokes, and any inset would move the pixels away from the\
+   coordinates the painter measures against. `img` above is bare for the same\
+   reason — replaced content decorates itself. */\
+canvas {\
+  display: block;\
+  width: 300px;\
+  height: 150px;\
+}\
+progress {\
+  width: 160px;\
+  height: 16px;\
+}\
+/* The slider rule is deliberately BARE — no padding, no border — and that is a\
+   constraint rather than a taste. `SliderControl::fraction_at` turns a pointer x\
+   into a value by insetting `THUMB_INSET` (8px) from the SLIDER ELEMENT's layout\
+   box; `paint_slider` draws the thumb by insetting the same 8px from the CANVAS\
+   CHILD's box. The two agree only while those are the same rectangle. Padding or\
+   a border here insets the child and nothing else, so the thumb would stop\
+   landing under the finger by exactly that much — worst at the two ends, where a\
+   user aims most carefully, and with no other symptom. If this control ever\
+   wants a frame, the frame and the fix ship together: both sides have to measure\
+   one box. `the_pointer_track_and_the_painters_track_are_one_box`, in the\
+   facade's `ua_stylesheet_vocabulary.rs`, fails the moment they part. */\
+slider {\
+  width: 160px;\
+  height: 20px;\
+}\
+/* A slider takes focus — its semantic role is interactive, so it is in the Tab\
+   ring — and moves under the arrow keys, so it wears the sheet's focus ring like\
+   every other control. 3px of offset rather than the fields' 2, because the thumb\
+   reaches the box edge and a closer ring would touch it. */\
+slider:focus {\
+  outline: 2px dashed #2b2a27;\
+  outline-offset: 3px;\
+}\
+/* The canvas child of a drawn control, addressed as `*` because there is nothing\
+   else to address it by: `Progress::contents` and `Slider::contents` build it\
+   with no local name and no class (`Canvas::into_view_node` contributes no name\
+   at all — the `img` defect this sheet's audit fixed, still open for the canvas\
+   primitive). It is given the control's whole box, as a PERCENTAGE rather than as\
+   the numbers above, and both reasons are about two boxes staying equal: a block\
+   child already stretches to its parent's content width, but an auto height on a\
+   childless box is 0, which is the zero-region case at the top of this block; and\
+   an author who writes `slider { height: 40px }` moves the painter's box with the\
+   control, where a repeated `20px` here would silently reintroduce the very\
+   divergence the bare `slider` rule exists to avoid. (On hand-written `<progress>`\
+   markup this reaches the author's own children too. That is the cost of the\
+   widget's part carrying no name.)\
+   LAST in the sheet on purpose: `canvas` above has the same specificity (0,0,1),\
+   so source order is what keeps a control's canvas at the control's size —\
+   including on the day someone gives the canvas primitive its missing local name\
+   and that rule starts reaching these children. */\
+progress > *, slider > * {\
+  width: 100%;\
+  height: 100%;\
+}\
 ";
 
 #[cfg(test)]
@@ -347,5 +429,48 @@ mod tests {
         ] {
             assert!(ua_css().contains(colour), "{colour} left the sheet");
         }
+    }
+
+    #[test]
+    fn a_drawn_controls_canvas_is_sized_after_the_bare_canvas_rule() {
+        // The one property of this sheet that is carried by ORDER rather than by
+        // any declaration in it. `canvas { width: 300px; height: 150px }` and
+        // `progress > *, slider > *` have the same specificity — (0,0,1), one type
+        // selector each, `*` counting for nothing — so whichever is written last
+        // wins on a control's canvas child. Today the first rule cannot reach it at
+        // all (`Canvas::into_view_node` contributes no local name), which is
+        // exactly why the ordering is easy to break and impossible to notice:
+        // reversing these two would do nothing whatsoever until someone fixes that
+        // naming, and would then stretch every slider's painter box to 300 × 150
+        // while the pointer kept measuring 160 × 20 — a thumb that no longer lands
+        // under the finger, caused by a change in an unrelated file.
+        let sheet = ua_css();
+        let bare = sheet.find("canvas {").expect("the bare canvas rule");
+        let child = sheet
+            .find("progress > *, slider > * {")
+            .expect("the drawn controls' canvas-child rule");
+        assert!(
+            bare < child,
+            "the control's canvas child must be sized AFTER the bare canvas rule"
+        );
+    }
+
+    #[test]
+    fn the_slider_rule_carries_no_padding_and_no_border() {
+        // The sheet's half of the slider's pointer/painter agreement, checked
+        // where it is written. `SliderControl::fraction_at` insets 8px from the
+        // slider ELEMENT's box and `paint_slider` insets 8px from the CANVAS
+        // CHILD's box; padding or a border on this rule insets the child and
+        // nothing else, and the thumb stops landing under the finger by that much.
+        // The facade's `ua_stylesheet_vocabulary.rs` measures the two rectangles
+        // against each other; this is the cheap version that names the cause.
+        let sheet = ua_css();
+        let start = sheet.find("slider {").expect("the slider rule");
+        let rule = &sheet[start..start + sheet[start..].find('}').expect("its end")];
+        assert!(
+            !rule.contains("padding"),
+            "no padding on the slider: {rule}"
+        );
+        assert!(!rule.contains("border"), "no border on the slider: {rule}");
     }
 }
