@@ -168,7 +168,7 @@ a symbol nobody registered, and the button does nothing.
 
 ## Attributes
 
-Nine attribute names are **reserved** — they bind to the `obscur-view` symbols
+Eleven attribute names are **reserved** — they bind to the `obscur-view` symbols
 the reconciler, the CSS matcher and the accessibility projection read
 (`name_binding::attr_symbol`). Every other name is hashed into an ordinary prop:
 unlisted is not rejected, it is just inert to those consumers.
@@ -177,13 +177,43 @@ unlisted is not rejected, it is just inert to those consumers.
 |---|---|---|
 | `class` | `CLASS` | `.class` selectors |
 | `id` | `ID` | `#id` selectors |
+| `style` | `STYLE` | the §4.14 **inline** cascade origin — see below |
 | `type` | `TYPE` | `[type=…]` attribute selectors — see below |
 | `src` | `SRC` | the image/vector resource path |
 | `disabled` | `DISABLED` | `:disabled` |
 | `checked` | `CHECKED` | `:checked` |
+| `placeholder` | `PLACEHOLDER` | the §4.16 synthetic part, `input::part(placeholder)` |
 | `test-id` | `TEST_ID` | §7.5 test targeting; `SelectorTarget::test_id` |
 | `automation-id` | `AUTOMATION_ID` | §7.5 external automation |
 | `slot` | `SLOT` | §2.12 projection — which outlet this child fills |
+
+The last two additions are recent, and both are here for the same mechanical
+reason: the consumer reads *that symbol and no other*. `StyleAttributes::extract`
+looks up `STYLE`, and the placeholder painter looks up `PLACEHOLDER`, so a hashed
+prop under either name is carried through the whole tree and then read by nobody
+— which is exactly what an authored `<input placeholder="…">` used to be.
+
+### The style attribute is a declaration block, not a prop
+
+```html
+<div class="card" style="opacity: .5; --accent: #c00">…</div>
+```
+
+The value is compiled as a CSS declaration block and applied at cascade origin
+`Inline` — above every stylesheet, below a `RuntimeOverride`, with `!important`
+still ordered across origins the way §4.14 says. Custom properties declared here
+inherit and outrank a stylesheet's.
+
+Two consequences worth knowing:
+
+- **A host must install the compiler.** `UiRuntime::set_inline_style_compiler`
+  takes it, and `CssPipeline::install` (so `App`, so `KitBootstrap`) installs one
+  by default. A bare `UiRuntime` with none installed leaves every `style`
+  attribute inert — the runtime tier may not depend on the CSS front end, so it
+  cannot compile the text itself.
+- **It is compiled once per distinct string, not once per node.** A thousand
+  virtualized rows carrying the same `style` pay for one parse and share the
+  result, and a fault in it is reported once rather than once per row per frame.
 
 One binding depends on the tag it sits on: `name` on a `<slot>` is the outlet's
 slot name and binds to the same `SLOT` symbol, because the outlet and the child's
@@ -200,7 +230,7 @@ contract.
 
 Both front ends accept a hyphenated name, and they accept it in the same shape:
 one or more identifier segments joined by `-`. This is not a detail — two of the
-nine reserved names above are hyphenated, and they are the two an application
+eleven reserved names above are hyphenated, and they are the two an application
 *must* be able to write, because `App::on_command_at` and
 `App::add_event_listener` name their target with `SelectorTarget::test_id` /
 `::automation_id`, an identifier that has to exist before the tree does.
@@ -346,6 +376,7 @@ with the widget's id, the matching CSS type, the UA sheet's `table`/`tr`/`th`/
 |---|---|
 | Widgets (twelve) | `Button`, `Input`, `Checkbox`, `Radio`, `Select`, `Dialog`, `List`, `Menu`, `Tabs`, `Tree`, `Table`, `Docking` |
 | Primitives (six) | `Image`, `Canvas`, `Scroll`, `Portal`, `Layer`, `ForeignSurface` |
+| **Not reachable from markup** | `Slider` and `Progress`. Both ship in `obscur-widgets` and both are real (each carries a CSS type and draws through a registered painter), but neither has an entry in `name_binding::builtin_component_id` and neither has a contract, so `<Slider/>` is an unregistered user-component tag: an anonymous box, no diagnostic. Build them from Rust — [05 — Components](05-components.md) |
 | Anything else | a **user component**: the id is `user_component_id(tag)`, the same id `#[derive(Contract)]` computes for that name, so a host's `register_component` and an author's `<Card/>` meet on the string |
 
 `Container` and `Text` are **not** in that list, although both have a contract

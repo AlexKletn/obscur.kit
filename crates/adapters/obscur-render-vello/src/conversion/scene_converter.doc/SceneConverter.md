@@ -9,7 +9,8 @@ It owns the leaf converters ([`PathConverter`], [`BrushConverter`],
   [`Paint::Fill`], using the path's own fill rule) or [`Scene::stroke`] (for a
   [`Paint::Stroke`]), each with the identity transform.
 - [`PaintCommand::DrawImage`] → [`Scene::draw_image`]: the decoded RGBA8 pixels
-  become a [`peniko::ImageData`] (zero-copy from the image's `Arc<[u8]>`, tagged
+  become a [`peniko::ImageData`] (zero-copy from the image's `SharedPixels`,
+  whichever shape the bytes arrived in, tagged
   with its own alpha encoding) drawn at its intrinsic size, with a transform
   that scales each copy to its tile rect. The tile is placed / sized
   (`background-position` / `-size`), clipped to the paint region (border box)

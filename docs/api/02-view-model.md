@@ -209,5 +209,7 @@ rendered only under some condition.
 
 You will rarely spell `ViewNode::element(ComponentId::from_raw(…))` by hand.
 [05 — Components](05-components.md) covers `Container`, `Text`, `Image`,
-`Scroll` and the widget tier, which are thin builders over exactly these calls
-and return `ViewNode` through `into_view_node()`.
+`Scroll` and the widget tier, which are thin builders over exactly these calls.
+The two tiers do not end the same way: a **primitive** returns a `ViewNode` from
+`into_view_node()`, while a **widget** returns a `View` from `view()` and has no
+`into_view_node()` at all — except `Button`, which has both.

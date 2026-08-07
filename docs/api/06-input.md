@@ -383,10 +383,17 @@ the text or the padding beside it. The consequence is stated rather than hidden:
 take focus, and `event.target()` names the node the binding resolved on. There
 is no separate `focusin` / `focusout`, because that is what these already are.
 
-> **Only a pointer press moves focus today.** §2.5's focus tree, tab order and
-> programmatic focus have no runtime path yet — see the note above. When one
-> arrives it moves focus through the same door, so the pair fires without that
-> path having to remember to fire it.
+> **Three things move focus, and all three come through this one door.** A
+> pointer press; a Tab or Shift+Tab, which walks `TabOrder::compute`'s ring (see
+> [Tab moves focus](#tab-moves-focus)); and `UiRuntime::focus_node(Some(node))`
+> programmatically, with `None` to clear. Because the move is one function, the
+> `blur`/`focus` pair fires for all three without any of them having to remember
+> to fire it — and a programmatic move deliberately does **not** set
+> `:focus-visible`, because it is not the user navigating.
+>
+> What is still absent is §2.5's `FocusTree` registration model: the Tab ring is
+> computed from the retained tree on demand rather than from a registered tree,
+> so `FocusTree` and `FocusRestore` remain domain types with no runtime caller.
 
 ## Scrolling
 
@@ -495,6 +502,19 @@ covers half the screen. `App` does this after every window event.
 [03 — The runtime](03-runtime.md#drag-and-drop). Data transfer types live in
 `obscur_kit::data_transfer`.
 
+## `pointer-events: none`
+
+An element whose computed `pointer-events` is `none` is transparent to the
+pointer: it never appears in a hit chain, and a pointer over its box reaches
+whatever is painted behind it.
+
+The property **inherits**, which is what makes the subtree rule free — every
+descendant of a `none` element has already computed `none`, so hit-testing reads
+one node's own value and walks nothing. A descendant that declares
+`pointer-events: auto` computes `auto` and stays hittable, which is the
+overlay-with-a-live-button pattern. See
+[04 — Styling](04-styling.md#pointer-events).
+
 ## Canvas hit regions
 
 A `<canvas>` is hit anywhere in its box, like every other element — unless its
@@ -532,10 +552,6 @@ inside, which is what a fill does and therefore what a hit region means.
   every other crossing, which is what keeps one boundary one event. There is no
   `scroll` event either — `wheel` fires before the scroll and can refuse it, and
   nothing reports that a scroll has happened.
-- **A trusted wheel.** The notch a `wheel` handler receives is untrusted and
-  unstamped, because `handle_scroll` takes two floats rather than a
-  self-describing event. Closing it means a `WheelEvent` at the door and a
-  converter to confer trust on it, the way `PointerConverter` does.
 - **Window activation.** `WindowEvent::Focused` is deliberately ignored, and the
   concept it would need is the reason: `UiRuntime` models *node* focus, and the
   only door into it moves focus, fires `blur`/`focus` and commits the outgoing

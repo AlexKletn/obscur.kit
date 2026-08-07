@@ -2,8 +2,10 @@ Draws a decoded [`SceneImage`] as one copy scaled to `tile`, clipped to
 `region`, and optionally tiled along the `repeat_x` / `repeat_y` axes to fill
 `region` (spec §5.16, CSS Backgrounds §3).
 
-The RGBA8 pixels are wrapped into a [`peniko::ImageData`] — zero-copy, since
-the [`SceneImage`]'s `Arc<[u8]>` becomes the image [`Blob`] directly — tagged
+The RGBA8 pixels are wrapped into a [`peniko::ImageData`] — zero-copy, since the
+[`SceneImage`]'s `SharedPixels` is `Sized + AsRef<[u8]>` and so coerces straight
+into the `Arc<dyn AsRef<[u8]>>` a [`Blob`] holds, whichever shape the bytes
+arrived in (`Arc<[u8]>` or an owned `Vec` moved whole) — tagged
 with the image's own alpha encoding ([`AlphaMode::Straight`] →
 [`ImageAlphaType::Alpha`], [`AlphaMode::Premultiplied`] →
 [`ImageAlphaType::AlphaPremultiplied`]), so Vello premultiplies honestly rather

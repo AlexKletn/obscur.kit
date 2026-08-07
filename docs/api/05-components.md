@@ -1,13 +1,25 @@
 # 05 — Components
 
-Two tiers, both thin builders that end in `into_view_node()`.
+Two tiers of thin builders. **They do not share a terminal method**, and that is
+the first thing to get right:
+
+| Tier | Ends with |
+|---|---|
+| Primitives | `into_view_node() -> ViewNode`, or `view() -> View` for a root |
+| Widgets | `view() -> View` — **only `Button` also has `into_view_node()`** |
+
+Reaching for `into_view_node()` on an `Input`, a `Slider` or a `Select` is
+`error[E0599]: no method named into_view_node`. A widget nests into a bigger tree
+through `View::into_single_node() -> Option<ViewNode>`, or by reading its
+`root() -> &ViewFragment`; `Button` is the exception because it is the one widget
+a caller most often nests directly.
 
 - **Primitives** (`obscur_kit::primitives`) — structure and content, no look and
   no behaviour of their own.
-- **Widgets** (`obscur_kit::widgets`) — controls, each binding a command, five of
-  them carrying a CSS *type* the UA stylesheet matches.
+- **Widgets** (`obscur_kit::widgets`) — controls, each binding a command, eight of
+  them carrying a CSS *type*.
 
-Both are headless: they produce `ViewNode`s and nothing else. There is no widget
+Both are headless: they produce view nodes and nothing else. There is no widget
 state hiding behind them — a checkbox is checked because you said `.checked(true)`.
 
 ---
@@ -19,13 +31,13 @@ is the root.
 
 | Type | Constructor | Builders |
 |---|---|---|
-| `Container` | *(Default)* | `child(ViewNode)`, `with_children(impl IntoIterator<Item = ViewNode>)`, `len()`, `is_empty()` |
+| `Container` | `Container::new()` (also `Default`) | `child(ViewNode)`, `with_children(impl IntoIterator<Item = ViewNode>)`, `len()`, `is_empty()` |
 | `Text` | `Text::new(impl Into<Box<str>>)` | `content()` |
 | `Image` | `Image::new(impl Into<Box<str>>)` | `with_alt(impl Into<Box<str>>)` |
 | `Scroll` | `Scroll::new()` | `child(ViewNode)` |
 | `Layer` | `Layer::new()` | `child(ViewNode)`, `with_opacity(f32)` |
 | `Portal` | `Portal::new(target: impl Into<Box<str>>)` | `child(ViewNode)` |
-| `Canvas` | *(Default)* | — |
+| `Canvas` | `Canvas::new(width: f32, height: f32)` | `named(InternedSymbol)` — the painter this canvas binds itself |
 | `ForeignSurface` | `ForeignSurface::new(impl Into<Box<str>>)` | `surface()` |
 
 `Container` is the workhorse — it is a bare element, and everything about how it
@@ -41,8 +53,10 @@ Container::new()
 
 ## Widgets
 
-Where a widget has a CSS type, that is what the [UA stylesheet](04-styling.md)
-matches — and what your own sheet must override if you restyle it.
+Every one of these ends in `view() -> View`. Where a widget has a CSS type, that
+is the name a type selector matches — and, for the six the
+[UA stylesheet](04-styling.md) has rules for, what your own sheet must override if
+you restyle it.
 
 | Widget | Constructor | Builders | CSS type |
 |---|---|---|---|
@@ -60,9 +74,30 @@ matches — and what your own sheet must override if you restyle it.
 | `Dialog` | `new(title)` | `child(ViewNode)`, `open()`, `title()` | — |
 | `Docking` | `new()` | `with_panels(iter)`; panels are `DockPanel::new(id, title, DockSide)` | — |
 | `Column` | `new(title)` | (a `Table` column) | — |
+| `Slider` | `new(value)`, `ranging(low, high)` | `over(min, max)`, `stepped_by(f32)`, `value()`, `range()`, `scale()` | `slider` |
+| `Progress` | `new(value)`, `indeterminate()` | `shaped(ProgressShape)`, `along(path_data)`, `value()`, `is_tracked()` | `progress` |
 
-**Only six widgets carry a CSS type**, and they are exactly the six the UA
-stylesheet has rules for. The rest set a private `role` property instead — that
+**Eight widgets carry a CSS type**, and the set is no longer the same as the set
+the UA stylesheet styles. Six of them — `button`, `input` / `textarea`,
+`checkbox`, `radio`, `select`, `table` (with `tr` / `th` / `td`) — have UA rules.
+The other two do **not**:
+
+> `Slider` and `Progress` each emit a `LOCAL_NAME` of `slider` / `progress`, so
+> `slider { … }` and `progress { … }` match them from your own sheet — but the UA
+> stylesheet has **no rule for either**, and it is not an oversight. Both draw
+> themselves through a registered canvas painter rather than through box
+> decoration, so a UA rule would have nothing to say that the painter does not
+> already decide. Change their look with `App::painter_id(Slider::PAINTER, …)` /
+> `(Progress::PAINTER, …)`, which is applied after the bootstrap's and therefore
+> wins. For the colour alone there is
+> `BuiltinPainters::new().with_accent(c).install(&mut runtime)` — but note that
+> `KitBootstrap::install_builtin_painters` always installs the *default* accent,
+> so reaching that constructor means a `control().with_runtime(…)` or a runtime
+> you own. `tests/ua_stylesheet_vocabulary.rs` checks that every rule in the sheet
+> reaches something buildable — it does not check the converse, which is why this
+> asymmetry is legal.
+
+The widgets with no CSS type at all set a private `role` property instead — that
 is not a class and not a local name, so a CSS type selector cannot match it. To
 style a `List` or a `Menu`, use classes.
 
@@ -199,7 +234,7 @@ follow from that binding rather than from the type name.
 ```rust
 Input::with_value(InternedSymbol::named("name"), current)
     .placeholder("Your name")
-    .into_view_node()
+    .view()                       // -> View. `Input` has no `into_view_node`.
 ```
 
 Register the handler on the runtime side with `on_text_input` (per keystroke) or

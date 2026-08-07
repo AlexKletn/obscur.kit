@@ -9,8 +9,11 @@ hands it input as data, hands it elapsed time as a number, and takes a scene
 snapshot back out to draw. That is what lets one runtime drive a winit window, a
 headless test and a PNG without knowing which it is in.
 
-Every public method is listed below, grouped by what you would be doing when you
-reach for it.
+What follows is the surface you would actually reach for, grouped by what you
+would be doing at the time. It is **not exhaustive** — `UiRuntime` has around a
+hundred and fifty public methods and a page that claimed to list all of them
+would be wrong within a week. `cargo doc -p obscur-kit --open` is the complete
+list; this is the map.
 
 ---
 
@@ -28,13 +31,22 @@ let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(800.0, 600.0));
 | `set_viewport(Size)` | change it |
 | `set_surface(physical: Size, scale: f32)` | the one call a window host wants: sets the device scale **and** derives the logical viewport from the physical surface |
 | `device_scale() -> f32` | HiDPI factor × user zoom |
-| `set_device_scale(f32)` | clamped to a minimum of `0.1`; a non-positive or non-finite value is ignored |
+| `set_device_scale(f32)` | **clamped**, not validated: anything below `0.1` — including `0.0`, a negative, and `NaN` — becomes `0.1`. See the warning below |
 | `content_offset() -> (f32, f32)` / `set_content_offset(x, y)` | the content point pinned to the viewport's top-left, in logical px |
 | `viewport_scroll() -> (f32, f32)` / `set_viewport_scroll(x, y)` | the document-coordinate point at the viewport's top-left |
 
 `set_surface` is what a resizable window calls; getting scale and viewport from
 one place is what keeps a HiDPI window's layout in CSS pixels while its texture
 stays physical. See [08 — Rendering](08-rendering.md).
+
+> **A bad scale is clamped, and clamping is not the same as ignoring.** This page
+> used to say a non-positive or non-finite value was ignored — it is not. `0.0`,
+> `-4.0` and `NaN` all set the scale to **`0.1`**, and `set_surface` then divides
+> the physical size by the *clamped* value, so a 1920×1080 surface reported with
+> a scale of `0` lays out at a **19200×10800** logical viewport. That is a
+> plausible way to hang a frame, and it is why a host must not forward a
+> platform's scale unchecked. `tests/surface_mapping.rs`'s
+> `set_device_scale_clamps_to_a_sane_minimum` pins each case.
 
 ## Running frames
 
@@ -71,9 +83,32 @@ time rather than when something changed.
 | `set_pseudo_state(NodeId, PseudoState)` | record an interaction state for subsequent frames |
 | `pseudo_state(NodeId) -> PseudoState` | |
 | `clear_pseudo_states()` | subsequent frames match as if nothing were hovered/focused/active |
+| `set_inline_style_compiler(InlineStyleCompiler)` | how a `style="…"` attribute becomes a declaration block at cascade origin `Inline`. **The runtime cannot do this itself** — an application-tier crate may not depend on the CSS front end — so with none installed every `style` attribute is inert |
+| `has_inline_style_compiler() -> bool` | |
+
+`CssPipeline::install` (so `KitBootstrap`, so `App`) installs the inline-style
+compiler for you; a host driving a bare `UiRuntime` must call
+`set_inline_style_compiler` or accept that `style="…"` does nothing.
 
 The pseudo-state methods exist for hosts that drive states themselves;
 `handle_pointer` maintains them for you.
+
+## Canvas painters
+
+Any element can be drawn by a registered painter, not only a `<canvas>`: the
+runtime's map is keyed by `PainterKey`, which is either a symbol a node named
+itself or a name a stylesheet's `-obscur-painter` gave it.
+
+| Method | |
+|---|---|
+| `register_canvas(InternedSymbol, CanvasPainter)` | under the **symbol** a node binds in its own `canvas_painter` property — what the shipped `Slider` and `Progress` do |
+| `register_named_canvas(&str, CanvasPainter)` | under the CSS-visible **name**, which is what `-obscur-painter: <ident>` reaches |
+| `take_unbalanced_canvases() -> Vec<PainterKey>` | painters that left a clip or layer bracket open, taken once so a host reports each one rather than every frame |
+
+The two keys are separate namespaces, and a node's own symbol is looked up first
+— a stylesheet cannot redirect the routine that draws a progress bar. Registering
+is by key and the last one wins. See
+[04 — Styling](04-styling.md#vendor-properties).
 
 ## Input
 
@@ -81,9 +116,12 @@ The pseudo-state methods exist for hosts that drive states themselves;
 |---|---|
 | `handle_pointer(PointerEvent) -> PointerDispatch` | hit-tests, updates hover and focus, recomputes pseudo-states, schedules a frame if anything changed |
 | `handle_key(KeyEvent) -> KeyDispatch` | routes to the focused node, resolves bound shortcuts, schedules a frame |
-| `handle_scroll(delta_y: f32, position: Point) -> Option<NodeId>` | routes a wheel notch to the **innermost** scroll container under the point; `None` means nothing took it |
+| `handle_wheel(WheelEvent) -> Option<NodeId>` | the self-describing wheel door: both axes, a unit, a timestamp and trust. Dispatches the raw `wheel` event before scrolling, so a handler can refuse the notch |
+| `handle_scroll(delta_y: f32, position: Point) -> Option<NodeId>` | the two-float form: pixels, no horizontal, untrusted, unstamped. Routes to the **innermost** scroll container under the point; `None` means nothing took it |
+| `UiRuntime::WHEEL_LINE_STEP` | `48.0` — how far one notched line scrolls. A constant of this toolkit's policy, deliberately not of the winit adapter |
 | `handle_ime(CompositionEvent) -> bool` | applies a composition against the focused editable |
 | `held_modifiers() -> Modifiers` | folded from the physical modifier transitions `handle_key` has seen |
+| `set_modifiers(Modifiers)` | a platform that knows better says so — winit's `ModifiersChanged`. Without it the fold goes stale when a modifier is released while unfocused |
 | `queue_input(InputEvent) -> BackpressureDecision` | queue for the frame pipeline's dispatch phase instead of dispatching now |
 | `pending_input() -> usize` | |
 | `take_input_dispatches() -> Vec<InputDispatch>` | what the last frame's dispatch phase produced, in queue order |
@@ -104,6 +142,8 @@ it and differ only in the `PointerDevice` they carry. See [06 — Input](06-inpu
 | Method | |
 |---|---|
 | `focused() -> Option<NodeId>` | |
+| `focus_node(Option<NodeId>) -> bool` | move focus programmatically; `None` clears. `false` when the node is not in the tree. Fires `blur`/`focus` like any other move, and deliberately does **not** set `:focus-visible` |
+| `is_focus_visible() -> bool` | whether `:focus-visible` currently matches — true only after a keyboard-origin move |
 | `focus_accepts_text() -> bool` | whether what holds focus takes typed text — what a host asks before offering an IME or raising an on-screen keyboard |
 | `open_focus_scope(FocusScope)` | pushes a containment scope as the innermost |
 | `close_focus_scope(FocusScopeId) -> bool` | |
@@ -125,6 +165,8 @@ focus scope → ancestors → window → application fallback.**
 | `has_command_handler(InternedSymbol) -> bool` | |
 | `set_app_commands(AppCommands)` / `app_commands() -> AppCommands` | 5 |
 | `add_event_listener(NodeId, InternedSymbol, ListenerPhase, listener)` | a §2.3 listener on a node, in `Capture` or `Bubble` |
+| `event_listener_count(NodeId, InternedSymbol) -> usize` | |
+| `dispatch_command(InternedSymbol) -> bool` | run a command through the chain from the focused node, as if something had raised it |
 | `command_route(Option<NodeId>) -> Vec<CommandTarget>` | the chain itself, for inspection |
 
 | Shortcuts and descriptors | |
@@ -173,9 +215,16 @@ the runtime, and only on the `.okui` build path (see
 | `editing_text() -> Option<&str>` | |
 | `editing_selection() -> Option<TextSelection>` | caret and selection |
 | `composition_preedit() -> Option<&str>` | live IME preedit, if a composition is in flight |
+| `on_value_input(InternedSymbol, impl FnMut(f32, f32))` | what a **numeric** control — a slider — reports its new value to. Both ends are passed; a single-thumb slider reports the same number twice. Controlled like a field: an application that does not re-render with the new value sees the thumb spring back |
 
-An element is a text field to the runtime exactly when its ancestor chain binds
-`EVENT_INPUT`. There is no second list of "editable types" to keep in step.
+An element is a text field to the runtime when its ancestor chain binds
+`EVENT_INPUT` **and** the node is not a control that holds its own value. The
+second half is not a second list of editable types — it is the semantic role,
+which the accessibility projection already computes: a `Slider`, `Progress`,
+`Checkbox`, `RadioButton`, `Button` or `Link` is skipped. `on:input` is how every
+value-bearing control reports itself, exactly as on the web, so the binding alone
+cannot mean "this is text": a slider carrying one used to seat a caret inside
+itself and swallow the arrow keys meant to move its thumb.
 
 ## Scrolling
 

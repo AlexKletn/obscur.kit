@@ -126,6 +126,13 @@ A canvas painter draws with the ordinary Paint model (spec §5.3), and one thing
 it can draw is a buffer of foreign pixels — a video frame, a camera image, a
 screen capture, the output of a software rasterizer.
 
+A painter is registered under a **symbol** the node names itself
+(`UiRuntime::register_canvas`, or `App::painter_id`) or under a **name** a
+stylesheet's `-obscur-painter` reaches (`register_named_canvas`, or
+`App::painter`). The example below takes the symbol route because a `<canvas>`
+built in Rust names its own painter; either is reachable from `App` without
+touching the runtime by hand.
+
 ```rust
 runtime.register_canvas(CAMERA, Box::new(move |region, _paint| {
     let frame = source.latest();           // whatever your producer hands over
@@ -164,8 +171,8 @@ animating" — a live source returns `true` and gets a frame per tick.
 | `ExternalBuffer::new` | **0** — it borrows, and only checks the description |
 | `to_scene_image()` | **1** — the repack and the channel swizzle |
 | publishing it as a `SceneImage` | **0** — the buffer is moved, not converted |
-| display list, snapshot, scene clones | **0** — a `SceneImage` holds an `Arc<[u8]>` |
-| Vello | **0** — the `Arc` is wrapped in a `Blob`, a refcount bump; then the GPU upload |
+| display list, snapshot, scene clones | **0** — a `SceneImage` holds a refcounted `SharedPixels` |
+| Vello | **0** — the `SharedPixels` is wrapped in a `Blob`, a refcount bump; then the GPU upload |
 | CPU, premultiplied | **0** — the bytes are borrowed as a `PixmapRef` |
 | CPU, straight alpha | **1** — premultiplying has to write somewhere |
 
@@ -200,7 +207,14 @@ Two things about those numbers are worth knowing, because both were surprises:
 
 ## Caches
 
-> **unwired** — the three Vello caches (`glyph_cache`, `path_cache`,
-> `texture_cache`) have no production caller; Vello's own atlases make them
-> redundant. They are scaffolding to delete, not a tier awaiting a consumer.
-> The decoded-image cache on the runtime *is* live and bounded.
+The three Vello caches this section used to describe as unwired scaffolding —
+`GlyphCache`, `PathCache`, `TextureCache` — **have been deleted**, all 40 files
+of them. They were unfillable by construction: `vello_encoding` keeps and prunes
+its own glyph cache, `vello` holds the image atlas, and `PathCache` had no key at
+all, because `obscur_scene::Path` holds floats and cannot derive `Hash`. There is
+no `cache/` module in `obscur-render-vello` to look for.
+
+The decoded-image cache on the runtime *is* live and bounded —
+`set_image_cache_budget`, `set_image_eviction_policy` (default
+`VisibilityAware`) and `image_cache_statistics` on
+[03 — The runtime](03-runtime.md#resources-and-caches).

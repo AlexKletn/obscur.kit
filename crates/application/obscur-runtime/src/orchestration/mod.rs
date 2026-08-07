@@ -54,6 +54,7 @@ mod motion_playback;
 pub use motion_playback::MotionPlayback;
 mod paint_color;
 mod paint_transform;
+pub(crate) use paint_transform::resolved_transform;
 mod paragraph_shaping;
 mod pseudo_states;
 pub use pseudo_states::PseudoStates;

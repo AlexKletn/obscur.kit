@@ -49,6 +49,8 @@ Every method is a consuming builder returning `Self`, except `run`.
 | `on_command_at(SelectorTarget, InternedSymbol, handler) -> Self` | the same, **at a node** named by `test-id` (§2.6 links 1 and 3). Claims the command and stops the chain |
 | `add_event_listener(SelectorTarget, InternedSymbol, ListenerPhase, listener) -> Self` | a §2.3 listener that observes and steers a command in `Capture` or `Bubble` |
 | `on_scroll(impl FnMut(f32) + 'static) -> Self` | wheel deltas **no `overflow: scroll` container consumed** |
+| `painter(impl Into<String>, painter) -> Self` | a canvas painter under the CSS-visible *name*, which is what `-obscur-painter: <ident>` reaches. See [04 — Styling](04-styling.md#vendor-properties) |
+| `painter_id(InternedSymbol, painter) -> Self` | the same, under the *symbol* a node names in its own property — including a shipped widget's (`Slider::PAINTER`, `Progress::PAINTER`), which this replaces for the whole application |
 | `virtual_list(InternedSymbol, impl FnMut(usize) -> ViewNode + 'static) -> Self` | the row builder for a list the runtime windows |
 | `on_row_click(InternedSymbol, impl FnMut(usize, u32) + 'static) -> Self` | `(model index, click count)` for a row of that list |
 | `on_row_long_press(InternedSymbol, impl FnMut(usize) + 'static) -> Self` | a held row of that list |
@@ -86,7 +88,9 @@ capture, whose requests the runner applies at the next frame boundary:
 ```rust
 let control = app.control();
 control.set_stylesheets(vec![theme_css()]);   // §4.12 explicit invalidation
-control.with_runtime(|rt| rt.scroll_into_view(node)); // no wrapper of its own
+// `with_runtime` takes `impl FnOnce(&mut UiRuntime) + 'static`, so the closure
+// must return `()` — brace-and-semicolon anything that answers, as this does.
+control.with_runtime(move |rt| { rt.scroll_into_view(node); });
 control.bound_node(&SelectorTarget::test_id("save")); // did that name resolve?
 ```
 

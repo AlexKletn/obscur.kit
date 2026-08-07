@@ -42,22 +42,39 @@ from both is the only evidence your sheet did what you meant.
 | Kind | |
 |---|---|
 | Simple | type, `*`, `.class`, `#id`, `[attr]`, pseudo-class, pseudo-element |
-| Combinators | descendant (` `), child (`>`), next sibling (`+`) |
+| Combinators | descendant (` `), child (`>`), next sibling (`+`), subsequent sibling (`~`) |
 | Pseudo-classes | `:hover` `:focus` `:focus-visible` `:focus-within` `:active` `:disabled` `:enabled` `:checked` `:first-child` `:last-child` `:only-child` `:root` `:empty` `:nth-child()` `:nth-last-child()` `:nth-of-type()` `:nth-last-of-type()` `:nth-child(… of …)` `:is()` `:where()` `:not()` `:has()` |
 
-No general sibling combinator (`~`).
+All four combinators are real end to end: the parser reads `~` as
+`Combinator::SubsequentSibling`, the compiler lowers it to the style tier's own
+`SubsequentSibling`, and the matcher walks preceding siblings for it. This page
+used to say the general sibling combinator did not exist; it did, and does.
 
 Pseudo-**elements** parse and are then reported unsupported: `::before` and
 `::after` generate nothing. This fails closed by design — a rule that would have
-produced content produces none, rather than producing something wrong.
+produced content produces none, rather than producing something wrong. `::part()`
+is a separate thing and is **not** affected — it is how §4.16's synthetic parts
+(`input::part(placeholder)`) are reached.
 
 ## Cascade origins
 
-Lowest to highest: `SystemDefault` → `Theme` → `GlobalApp` → `ComponentModule`
-→ `Inline`.
+Six of them, lowest to highest: `SystemDefault` → `Theme` → `GlobalApp` →
+`ComponentModule` → `Inline` → `RuntimeOverride`.
 
 The UA stylesheet is installed at `SystemDefault`, so **any** author rule of
 equal or higher specificity beats it — the browser contract.
+
+`Inline` is the `style="…"` attribute (see
+[09 — Authoring formats](09-authoring-formats.md#the-style-attribute-is-a-declaration-block-not-a-prop)).
+It needs a compiler installed on the runtime —
+`UiRuntime::set_inline_style_compiler`, which `CssPipeline::install` does for
+you. Without one, every `style` attribute is inert.
+
+`RuntimeOverride` is the maximum, and deliberately so: it sits above authored
+`!important` as well as above every origin below it, which is what makes it
+usable by an inspector and by a driven animation. Losing to markup would make
+both of those useless. `CascadeOrigin::is_runtime_override` is the predicate the
+cascade asks, and `cascade_origin.rs`'s own tests pin the whole ladder.
 
 ## Properties
 
@@ -79,14 +96,54 @@ inset-block-* inset-inline-* justify-content justify-items justify-self left
 letter-spacing line-height margin-* margin-block-* margin-inline-* max-height
 max-width min-height min-width mix-blend-mode object-fit object-position
 opacity outline-color outline-offset outline-style outline-width overflow
-overflow-wrap padding-* padding-block-* padding-inline-* position right
-tab-size text-align text-overflow text-transform top transform transform-origin
-visibility white-space width word-break word-spacing writing-mode z-index
+overflow-wrap padding-* padding-block-* padding-inline-* pointer-events position
+right tab-size text-align text-overflow text-transform top transform
+transform-origin visibility white-space width word-break word-spacing
+writing-mode z-index
 ```
 
 Logical properties (`*-inline-start`, `*-block-end`, …) resolve onto their
 physical counterparts at computed-value time against `direction` and
 `writing-mode`.
+
+### `pointer-events`
+
+`auto` (initial) or `none`, and it **inherits** — SVG 1.1 §16.6 and css-ui both
+say so, and here it is what makes the subtree half of the rule free: a descendant
+of a `none` element has already computed `none`, so hit-testing reads one node's
+own computed value and needs no walk. A descendant that declares `auto` computes
+`auto` and stays hittable, which is the overlay-with-a-live-button pattern.
+
+A `none` element is transparent to the pointer: it never appears in a hit chain,
+and a pointer over its box reaches whatever is painted behind it. §4.7's hit
+policy is what reads it (`HitTesting::is_pointer_transparent`).
+
+## Custom properties and `var()`
+
+```css
+:root { --accent: #c0392b }
+.badge { color: var(--accent) }
+```
+
+Custom properties are declared, cascaded and **inherited** like any other
+property, and `var()` substitutes against what the node inherited. A `style="…"`
+attribute may declare one too, and — being origin 5 — it outranks a stylesheet's
+declaration of the same name.
+
+This is newly *reached* rather than newly built. Both ends existed for some time:
+the parser read custom properties, the compiler collected them onto the compiled
+sheet, and `substitute` was written to consume them — but nothing carried the
+declarations from the sheet into the cascade, so `substitute` always read an
+empty map and **every `var(--x)` in every stylesheet resolved to `initial`**,
+silently and with no diagnostic. If you wrote a token layer against this page
+before now, re-check what it actually painted.
+
+One consequence of how they are carried, worth knowing if you write a front end:
+a custom property's name travels as **text**, not as an interned keyword.
+`CssPipeline` builds a compiler per source, so each sheet's interner numbers its
+symbols from zero — two sheets declaring different names would otherwise mint the
+same symbol for both. `-obscur-painter` carries its value as text for the
+identical reason.
 
 ## Vendor properties
 
@@ -108,25 +165,59 @@ there would let a misspelled rule sit in a sheet doing nothing.
 ```
 
 ```rust
-runtime.register_named_canvas("sparkline", Box::new(|region, paint| {
-    // region.painter() is a display list; region.size() is the box.
-    false // "not animating"
-}));
+App::new("charts")
+    .stylesheet(".sparkline { -obscur-painter: sparkline; width: 120px; height: 32px }")
+    .painter("sparkline", |region, _paint| {
+        // region.painter() is a display list; region.size() is the box
+        // *layout* gave the element, not a size any constructor hinted at.
+        false // "not animating"; `true` asks for the next frame
+    })
+    .run()
 ```
 
-A painter a node binds *itself* (a widget's own, carried as a prop) wins over
-one a stylesheet names: a rule matching a `<progress>` must not be able to
-replace the routine that draws it. CSS supplies a painter for elements that
-declare none.
+Without `App`, the runtime call underneath is
+`UiRuntime::register_named_canvas("sparkline", Box::new(painter))`.
 
-**Every other vendor's prefix is passed over in silence.** `-webkit-*`,
-`-moz-*`, `-ms-*` and any `-whatever-*` compile to nothing and are recorded at
-`Info`, not `Warning` — a stylesheet shared with a browser build carries them by
-design, and a console full of warnings about them trains you to ignore the
-warnings that matter.
+The two keys are **separate namespaces.** `App::painter` / `register_named_canvas`
+register under the CSS-visible *name*; `App::painter_id` / `register_canvas`
+register under the *symbol* a node names in its own `canvas_painter` property,
+which is what the shipped widgets do. A painter registered under one is not found
+by the other.
+
+A painter a node binds *itself* wins over one a stylesheet names: a rule matching
+a `<progress>` must not be able to replace the routine that draws it. CSS
+supplies a painter for elements that declare none.
+
+Registration is by key and the **last one wins**, and `App` applies an
+application's registrations *after* the bootstrap's — so
+`.painter_id(Progress::PAINTER, …)` replaces the built-in progress painter for
+the whole application.
+
+Any element can carry a painter this way — the property is not restricted to
+`<canvas>`, and the runtime's painter map is keyed by `PainterKey`, not by node
+kind.
+
+**Every other vendor's prefixed _property_ is passed over in silence.**
+`-webkit-*`, `-moz-*`, `-ms-*` and any `-whatever-*` **declaration** compiles to
+nothing and is recorded at `Info`, not `Warning` — a stylesheet shared with a
+browser build carries them by design, and a console full of warnings about them
+trains you to ignore the warnings that matter.
 
 A foreign prefix is **not** an alias. `-webkit-filter` does not become `filter`;
 spec §4.13 excludes vendor hacks, and this is the exclusion that matters.
+
+> **One at-rule breaks that rule, and it is worth knowing before you rely on
+> either half.** `@-webkit-keyframes` is parsed as `@keyframes` — the parser
+> matches `"keyframes" | "-webkit-keyframes"` on the at-rule name — so a
+> `@-webkit-keyframes spin { … }` block really does install a timeline named
+> `spin`. That is an alias, and it is the exact thing the paragraph above says
+> the kit does not do. The two are not in conflict about *mechanism* (one is a
+> declaration name, the other an at-rule name) but they are in conflict about
+> *policy*. The declaration policy is the one this page argues for and the one
+> the vendor-namespace commit was written to establish; the at-rule case is a
+> single hard-coded pair with no test and no stated reason, and it should
+> probably go. Until somebody decides, this note is the truth: **a foreign
+> prefix is not an alias, except `@-webkit-keyframes`, which is.**
 
 ## Units and math
 
@@ -169,14 +260,46 @@ layout; it is not memoized away.
 
 | | |
 |---|---|
-| `@media` | **wired** |
+| `@media` | **wired, for the features below and no others** — see the fail-closed rule |
 | `@keyframes` | **wired** — drives `UiRuntime::animate` through `set_css_motion` |
-| `@container` | **unwired** — parses, then lowers to `RuleCondition::Never`. It fails closed: the rule never matches |
+| `@container` | **unwired** — it lowers to a real condition, but nothing supplies a container size, so `FeatureQuery::holds` answers `false` on a container axis. The rule never matches |
 | `@import` | recognised and reported unsupported |
 | `@supports` | not recognised |
 
 > Container query *units* (`cqw`, `cqh`, …) resolve against the viewport rather
 > than a query container.
+
+### What `@media` can actually ask, and what happens to the rest
+
+Representable: `width` / `height` and their `min-`/`max-` and range forms, plus
+the logical spellings `inline-size` / `block-size`. The reference value must be
+a **`px` length** (or a unitless `0`). `@media print` is representable too, as
+knowledge rather than ignorance — it is `Never` in this (screen) environment, so
+`not print` correctly negates to `Always`.
+
+Everything else — `prefers-color-scheme`, `orientation`,
+`prefers-reduced-motion`, boolean features, unknown names, and any `min-`/`max-`
+width written in `em` or `rem` or `vw` — is **unrepresentable**, and a query
+containing one now lowers to `Never` **and is pushed onto
+`CssPipeline::unsupported()`** as `@media (feature)`, which the facade also turns
+into a `css.unsupported_at_rule` warning — reaching a host that installed a
+diagnostic sink, and readable from `unsupported()` by one that did not.
+
+That is a behaviour change, and it is the direction that matters. Until
+`53f00463` an unrepresentable feature lowered to `Always`: a
+`@media (prefers-color-scheme: dark)` block applied on **every** screen, always
+and silently. A dark theme painting over a light application; a phone layout on
+a 4K desktop. **If you have a stylesheet with such a block, its rules were
+live and are now dead** — which is what you asked for, but it will look like a
+regression until you read `unsupported()`.
+
+Two details the fix had to get right, and which you can rely on:
+
+- **`not` is not applied over an unrepresentable feature.** `Not(Never)` is
+  `Always`, which would have reopened the same hole in the opposite polarity.
+- **A query _list_ keeps whichever of its queries can be evaluated.** A list is a
+  disjunction, so `@media (min-width: 600px), (orientation: landscape)` still
+  honours the first half rather than being dropped whole.
 
 ## The UA stylesheet
 

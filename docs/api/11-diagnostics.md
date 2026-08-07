@@ -43,12 +43,22 @@ A socket endpoint (`obscur_kit::devtools`, `devtools_protocol`,
 `devtools_server`) that serves a *live* runtime rather than a placeholder.
 
 ```rust
-let source = obscur_kit::devtools::inspect_source_from(&rt);
+let source   = obscur_kit::devtools::inspect_source_from(&rt);
+let listener = SocketListener::bind_loopback()?;      // or bind_unix(path)
+let addr     = listener.local_addr()?;                // Some(addr) for TCP, None for a unix socket
+let stream   = listener.accept()?;
+SocketTransport::new(stream).serve(&mut endpoint)?;
 ```
+
+Binding is on the **listener**; the transport is what serves one accepted
+stream. `SocketTransport::bind_unix` does not exist and never did — it is
+`SocketListener::bind_unix`.
 
 | | |
 |---|---|
-| Transport | `SocketTransport::bind_unix(path)` / `bind_loopback()`; client side `connect_unix` / `connect_loopback` |
+| Listen | `SocketListener::bind_unix(path)` / `bind_loopback()`, then `accept() -> SocketStream` |
+| Serve | `SocketTransport::new(stream)`, then `serve` / `serve_one` / `serve_with_events` |
+| Connect | `SocketClient::connect_unix(path)` / `connect_loopback(addr)` |
 | Pull | `Inspectable` targets, `SnapshotPayload` |
 | Push | `EventQueue` + `serve_with_events`; `DiagnosticEventSink` and `RuntimeEventPublisher` turn real diagnostics, tree commits and focus changes into protocol events |
 | Security | token authentication, `ScopeSet` / `PermissionScope`, an `audit_log()` |

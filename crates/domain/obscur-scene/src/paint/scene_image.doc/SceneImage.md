@@ -9,9 +9,14 @@ texture (`peniko::Image`, `tiny_skia::Pixmap`, …). Pixels are laid out row by
 row, top-to-bottom, four bytes (`R`, `G`, `B`, `A`) per pixel; the
 [`AlphaMode`] states whether those channels are premultiplied by alpha.
 
-The pixel buffer is stored behind an [`Arc`] so cloning a `SceneImage` — which
+The pixel buffer is stored as a [`SharedPixels`](super::SharedPixels), which is
+refcounted either way it arrived — `Arc<[u8]>` for bytes already shared, or
+`Arc<Vec<u8>>` for a `Vec` moved in whole. So cloning a `SceneImage` — which
 happens every time a display list is cloned — only bumps a refcount rather than
-copying the (potentially large) pixel data.
+copying the (potentially large) pixel data, and **constructing** one from an
+owned `Vec` copies nothing either. The second shape exists because normalising
+every buffer to `Arc<[u8]>` meant re-allocating and copying a freshly produced
+frame: six milliseconds a frame at 1080p, for bytes nobody else held.
 
 # Pixels versus logical size
 
