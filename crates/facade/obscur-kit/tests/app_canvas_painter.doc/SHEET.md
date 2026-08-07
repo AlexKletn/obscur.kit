@@ -1,0 +1,1 @@
+The application's own sheet: a sized bar naming its painter.

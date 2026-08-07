@@ -1,0 +1,1 @@
+The same for `Slider`: track, filled span and thumb.

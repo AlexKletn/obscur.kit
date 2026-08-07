@@ -1,0 +1,1 @@
+Wraps `child` in the sized panel and returns it as a `View`.

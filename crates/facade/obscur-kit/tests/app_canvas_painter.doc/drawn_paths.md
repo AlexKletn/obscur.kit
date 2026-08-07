@@ -1,0 +1,1 @@
+How many paths the last frame put in the display list.

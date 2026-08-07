@@ -8,8 +8,9 @@ use crate::headless::input::SelectorTarget;
 use crate::identity::InternedSymbol;
 use crate::interaction::event::ListenerPhase;
 use crate::runtime::{CommandHandler, IntoCommandHandler};
+use crate::scene::command::CanvasRegion;
 use crate::screen::{OkuiScreen, ScreenData};
-use crate::view::view::{View, ViewNode};
+use crate::view::view::{CanvasPaint, View, ViewNode};
 
 #[doc = include_str!("app.doc/DEFAULT_SIZE.md")]
 const DEFAULT_SIZE: (f32, f32) = (800.0, 600.0);
@@ -137,6 +138,34 @@ impl App {
     #[doc = include_str!("app.doc/on_scroll.md")]
     pub fn on_scroll(mut self, handler: impl FnMut(f32) + 'static) -> Self {
         self.scroll = Some(Box::new(handler));
+        self
+    }
+
+    #[doc = include_str!("app.doc/painter.md")]
+    pub fn painter(
+        self,
+        name: impl Into<String>,
+        painter: impl FnMut(&mut CanvasRegion<'_>, &CanvasPaint<'_>) -> bool + 'static,
+    ) -> Self {
+        let name = name.into();
+        // Queued on the control handle rather than kept in a field of its own:
+        // the runner applies that queue after the built-ins are installed, so an
+        // application painter under a built-in's key wins — which is the order a
+        // host would expect and the reverse of what a field applied at
+        // construction would give.
+        self.control
+            .with_runtime(move |runtime| runtime.register_named_canvas(&name, Box::new(painter)));
+        self
+    }
+
+    #[doc = include_str!("app.doc/painter_id.md")]
+    pub fn painter_id(
+        self,
+        id: InternedSymbol,
+        painter: impl FnMut(&mut CanvasRegion<'_>, &CanvasPaint<'_>) -> bool + 'static,
+    ) -> Self {
+        self.control
+            .with_runtime(move |runtime| runtime.register_canvas(id, Box::new(painter)));
         self
     }
 

@@ -85,7 +85,20 @@ impl KitBootstrap {
         if self.without_builtin_components {
             return Ok(());
         }
+        // A control and what draws it are one delivery. `<progress>` and
+        // `<slider>` are canvases naming a painter, so a factory without the
+        // painter mounts a node that lays out, clips, reports itself to the
+        // accessibility tree — and paints nothing.
+        self.install_builtin_painters(runtime);
         super::BuiltinComponents::install(runtime)
+    }
+
+    #[doc = include_str!("kit_bootstrap.doc/install_builtin_painters.md")]
+    pub fn install_builtin_painters(&self, runtime: &mut crate::runtime::UiRuntime) {
+        if self.without_builtin_components {
+            return;
+        }
+        super::BuiltinPainters::new().install(runtime);
     }
 
     #[doc = include_str!("kit_bootstrap.doc/default_renderer.md")]

@@ -1,0 +1,1 @@
+A bare runtime with a viewport big enough for the staged tree.

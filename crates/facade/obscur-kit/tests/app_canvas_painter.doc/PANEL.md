@@ -1,0 +1,1 @@
+The wrapper element the sized canvas hangs under.
