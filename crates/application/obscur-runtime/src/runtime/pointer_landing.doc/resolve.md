@@ -16,16 +16,18 @@ existing hosts.
 
 The spatial index is keyed by each node's UNSCROLLED layout box, but a
 scroll container's descendants render translated by `−scroll_top`. Each
-crossed container's `scroll_top` is added back so a click while scrolled
-hit-tests the scrolled content (CSS Overflow 3 §scroll-container). With no
-scroll container this is the identity, so the hit test is byte-identical
-for existing hosts.
+container's clamped `scroll_top` is collected here and handed to the hit
+test, which adds back — per candidate — only the ones that candidate
+actually rides. Folding the point ONCE, globally, and matching the result
+against every node is what this replaced: a fixed toolbar or an absolutely
+positioned overlay that merely OVERLAPS a scrollport was tested at
+coordinates shifted by a scroll it does not participate in, and could not
+be clicked. With no scroll container the map is empty and the point is
+unchanged, so the hit test is byte-identical for existing hosts.
 
-The **screen** point (before this per-element scroll offset is added) is
-retained: a scroll container clips its content to the scrollport ON
-SCREEN, so the clip test in [`HitTesting`] is against the screen point
-while box containment / shape is against the scroll-mapped point (the
-space the unscrolled boxes live in).
+The **screen** point is retained as well: it is the space a fixed box and
+every scrollport clip are stated in, and the space the caret seat and drag
+re-select measure against.
 
 # 3. Capture, else hit test
 

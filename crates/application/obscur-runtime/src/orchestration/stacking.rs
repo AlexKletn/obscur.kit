@@ -72,7 +72,7 @@ impl PaintUnit {
 
 #[doc = include_str!("stacking.doc/PaintLayer.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(super) enum PaintLayer {
+pub(crate) enum PaintLayer {
     #[doc = include_str!("stacking.doc/NonPositioned.md")]
     NonPositioned,
     #[doc = include_str!("stacking.doc/PositionedZeroOrAuto.md")]
@@ -81,7 +81,7 @@ pub(super) enum PaintLayer {
 
 #[doc = include_str!("stacking.doc/effective_paint_layer.md")]
 #[must_use]
-pub(super) fn effective_paint_layer(
+pub(crate) fn effective_paint_layer(
     tree: &RetainedTree,
     computed: &ComputedStyles,
 ) -> HashMap<NodeId, PaintLayer> {
@@ -126,7 +126,7 @@ fn own_paint_layer(computed: &ComputedStyles, node: NodeId) -> Option<PaintLayer
 
 #[doc = include_str!("stacking.doc/effective_stacking_z.md")]
 #[must_use]
-pub(super) fn effective_stacking_z(
+pub(crate) fn effective_stacking_z(
     tree: &RetainedTree,
     computed: &ComputedStyles,
 ) -> HashMap<NodeId, i32> {

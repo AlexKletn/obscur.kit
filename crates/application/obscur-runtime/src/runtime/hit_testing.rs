@@ -1,6 +1,6 @@
 #![doc = include_str!("hit_testing.doc/_module.md")]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use obscur_geometry::{AffineTransform, Point, Rect};
 use obscur_identity::NodeId;
@@ -10,7 +10,10 @@ use obscur_style::computed::ComputedValue;
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_tree::tree::RetainedTree;
 
-use crate::orchestration::{ComputedStyles, LayoutBoxes, resolved_transform};
+use crate::orchestration::{
+    ComputedStyles, LayoutBoxes, PaintLayer, effective_paint_layer, effective_stacking_z,
+    resolved_transform,
+};
 
 #[doc = include_str!("hit_testing.doc/HitTesting.md")]
 pub(crate) struct HitTesting {
@@ -121,40 +124,113 @@ impl HitTesting {
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
-        mapped: Point,
         screen: Point,
+        scrolls: &HashMap<NodeId, f32>,
     ) -> Option<NodeId> {
         let preorder = Self::preorder_index(tree);
-        let mut best: Option<((i32, i32, usize), NodeId)> = None;
-        for hit in self.index.hits_at(mapped) {
-            let node = hit.node();
-            if !self.is_hittable(tree, computed, boxes, node, mapped, screen) {
-                continue;
-            }
-            // The canvas region, like the border box, is expressed in the node's
-            // own untransformed space, so a rotated canvas needs the point
-            // brought back to it too.
-            let local = self.local_point(node, mapped);
-            // §4.13's Canvas custom hit test. A canvas that declared a shape is
-            // hit only inside it, so the corners of a round knob's box belong to
-            // whatever is behind it — which is the whole reason the hook exists.
-            // A canvas that declared none is hit anywhere in its box, like every
-            // other element.
-            if let Some(region) = self.canvas_regions.get(&node)
-                && !region.contains(local)
-            {
-                continue;
-            }
-            let key = (
-                Self::used_z_index(computed, node),
-                Self::logical_depth(tree, node),
-                preorder.get(&node).copied().unwrap_or(0),
-            );
-            if best.is_none_or(|(bk, _)| key > bk) {
-                best = Some((key, node));
+        let zmap = effective_stacking_z(tree, computed);
+        let layermap = effective_paint_layer(tree, computed);
+        let mut best: Option<((i32, PaintLayer, i32, usize), NodeId)> = None;
+        let mut seen: HashSet<NodeId> = HashSet::new();
+        for probe in Self::query_points(tree, screen, scrolls) {
+            for hit in self.index.hits_at(probe) {
+                let node = hit.node();
+                // A node surfaced by one probe is judged once, at ITS point: the
+                // probe that found it is the broad phase's business, not the
+                // answer's.
+                if !seen.insert(node) {
+                    continue;
+                }
+                if !self.is_hittable(tree, computed, boxes, scrolls, node, screen) {
+                    continue;
+                }
+                // The canvas region, like the border box, is expressed in the node's
+                // own untransformed space, so a rotated canvas needs the point
+                // brought back to it too.
+                let local = self.local_point(node, Self::folded_point(tree, scrolls, node, screen));
+                // §4.13's Canvas custom hit test. A canvas that declared a shape is
+                // hit only inside it, so the corners of a round knob's box belong to
+                // whatever is behind it — which is the whole reason the hook exists.
+                // A canvas that declared none is hit anywhere in its box, like every
+                // other element.
+                if let Some(region) = self.canvas_regions.get(&node)
+                    && !region.contains(local)
+                {
+                    continue;
+                }
+                let key = (
+                    zmap.get(&node).copied().unwrap_or(0),
+                    layermap
+                        .get(&node)
+                        .copied()
+                        .unwrap_or(PaintLayer::NonPositioned),
+                    Self::logical_depth(tree, node),
+                    preorder.get(&node).copied().unwrap_or(0),
+                );
+                if best.is_none_or(|(bk, _)| key > bk) {
+                    best = Some((key, node));
+                }
             }
         }
         best.map(|(_, node)| node)
+    }
+
+    #[doc = include_str!("hit_testing.doc/folded_point.md")]
+    pub(crate) fn folded_point(
+        tree: &RetainedTree,
+        scrolls: &HashMap<NodeId, f32>,
+        node: NodeId,
+        screen: Point,
+    ) -> Point {
+        Point::new(screen.x, screen.y + Self::scroll_fold(tree, scrolls, node))
+    }
+
+    #[doc = include_str!("hit_testing.doc/content_point.md")]
+    pub(crate) fn content_point(
+        tree: &RetainedTree,
+        scrolls: &HashMap<NodeId, f32>,
+        node: NodeId,
+        screen: Point,
+    ) -> Point {
+        let own = scrolls.get(&node).copied().unwrap_or(0.0);
+        let folded = Self::folded_point(tree, scrolls, node, screen);
+        Point::new(folded.x, folded.y + own)
+    }
+
+    #[doc = include_str!("hit_testing.doc/scroll_fold.md")]
+    fn scroll_fold(tree: &RetainedTree, scrolls: &HashMap<NodeId, f32>, node: NodeId) -> f32 {
+        if scrolls.is_empty() {
+            return 0.0;
+        }
+        let mut total = 0.0;
+        let mut current = node;
+        let ancestor_walk_limit = tree.len();
+        for _ in 0..ancestor_walk_limit {
+            let Some(parent) = tree.get(current).and_then(|n| n.logical_parent().parent()) else {
+                break;
+            };
+            total += scrolls.get(&parent).copied().unwrap_or(0.0);
+            current = parent;
+        }
+        total
+    }
+
+    #[doc = include_str!("hit_testing.doc/query_points.md")]
+    fn query_points(
+        tree: &RetainedTree,
+        screen: Point,
+        scrolls: &HashMap<NodeId, f32>,
+    ) -> Vec<Point> {
+        let mut points = vec![screen];
+        for (&container, &own) in scrolls {
+            let fold = Self::scroll_fold(tree, scrolls, container) + own;
+            // A container scrolled nowhere (and under nothing scrolled) adds no
+            // probe: its subtree is already covered by the screen point.
+            if fold.abs() > 0.0 {
+                points.push(Point::new(screen.x, screen.y + fold));
+            }
+        }
+        points
     }
 
     #[doc = include_str!("hit_testing.doc/logical_depth.md")]
@@ -174,21 +250,6 @@ impl HitTesting {
             }
         }
         depth
-    }
-
-    #[doc = include_str!("hit_testing.doc/used_z_index.md")]
-    // `z-index` is lowered only from an integral `Number` (`fract() == 0.0`), so
-    // the truncation is exact across the representable stacking range.
-    #[allow(clippy::cast_possible_truncation)]
-    fn used_z_index(computed: &ComputedStyles, node: NodeId) -> i32 {
-        match computed
-            .get(&node)
-            .and_then(|style| style.get(PropertyId::ZIndex))
-            .map(ComputedValue::value)
-        {
-            Some(&PropertyValue::Number(n)) => n as i32,
-            _ => 0,
-        }
     }
 
     #[doc = include_str!("hit_testing.doc/preorder_index.md")]
@@ -222,8 +283,8 @@ impl HitTesting {
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
+        scrolls: &HashMap<NodeId, f32>,
         node: NodeId,
-        mapped: Point,
         screen: Point,
     ) -> bool {
         if Self::is_pointer_transparent(computed, node) {
@@ -231,16 +292,25 @@ impl HitTesting {
         }
         let ancestor_walk_limit = tree.len();
         let mut current = node;
+        // Walking up, the fold sheds one term per step: a node's fold is its
+        // parent's fold plus whatever that parent scrolls, so subtracting as we
+        // climb costs one lookup where recomputing the chain costs a walk.
+        let mut fold = Self::scroll_fold(tree, scrolls, node);
         for _ in 0..ancestor_walk_limit {
             let Some(parent) = tree.get(current).and_then(|n| n.logical_parent().parent()) else {
                 break;
             };
+            fold -= scrolls.get(&parent).copied().unwrap_or(0.0);
             // The clip is that ancestor's own border box, which a transform on or
             // above it moves on screen; the point has to enter the ancestor's
-            // space before it can be compared against the untransformed rect.
+            // space before it can be compared against the untransformed rect —
+            // and that space is scrolled by whatever scrolls ABOVE the ancestor,
+            // not by the ancestor's own scroll, which never moves its own box.
             if Self::overflow_clips(computed, parent)
                 && let Some(b) = boxes.get(&parent)
-                && !b.bounds.contains(self.local_point(parent, screen))
+                && !b
+                    .bounds
+                    .contains(self.local_point(parent, Point::new(screen.x, screen.y + fold)))
             {
                 return false;
             }
@@ -248,7 +318,8 @@ impl HitTesting {
         }
         if let Some(b) = boxes.get(&node) {
             let radii = Self::corner_radii(computed, node, b.bounds);
-            if !rounded_rect_contains(b.bounds, radii, self.local_point(node, mapped)) {
+            let at = self.local_point(node, Self::folded_point(tree, scrolls, node, screen));
+            if !rounded_rect_contains(b.bounds, radii, at) {
                 return false;
             }
         }
@@ -370,6 +441,7 @@ mod tests {
     use obscur_layout::model::LayoutBox;
     use obscur_style::computed::ComputedStyle;
     use obscur_style::property::Transform;
+    use obscur_style::property::layout_keyword;
     use obscur_style::property::layout_keyword::{POINTER_EVENTS_AUTO, POINTER_EVENTS_NONE};
     use obscur_tree::node::{LogicalParent, NodeKind};
 
@@ -403,6 +475,24 @@ mod tests {
         (tree, boxes, hits, button, overlay)
     }
 
+    /// The scroll map of a frame in which nothing scrolls — the shape every
+    /// pre-scroll-container test ran in, and the fast path of the folding.
+    fn unscrolled() -> HashMap<NodeId, f32> {
+        HashMap::new()
+    }
+
+    /// Allocates an element under `parent` and links it both ways.
+    fn kid(tree: &mut RetainedTree, parent: NodeId) -> NodeId {
+        let id = tree.alloc(NodeKind::Element {
+            component: ComponentId::from_raw(1),
+        });
+        tree.get_mut(id)
+            .expect("just allocated")
+            .set_logical_parent(LogicalParent::of(parent));
+        tree.get_mut(parent).expect("in tree").push_child(id);
+        id
+    }
+
     fn styled(node: NodeId, keyword: obscur_identity::InternedSymbol) -> ComputedStyles {
         let mut style = ComputedStyle::new();
         style.set(PropertyId::PointerEvents, ComputedValue::keyword(keyword));
@@ -418,7 +508,7 @@ mod tests {
         let (tree, boxes, hits, _button, overlay) = button_under_overlay();
         let at = Point::new(50.0, 50.0);
         assert_eq!(
-            hits.resolve(&tree, &ComputedStyles::new(), &boxes, at, at),
+            hits.resolve(&tree, &ComputedStyles::new(), &boxes, at, &unscrolled()),
             Some(overlay)
         );
     }
@@ -429,12 +519,12 @@ mod tests {
         let computed = styled(overlay, POINTER_EVENTS_NONE);
         let at = Point::new(50.0, 50.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, at, at),
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
             Some(button),
             "the overlay is transparent to the pointer (§4.7)"
         );
-        assert!(!hits.is_hittable(&tree, &computed, &boxes, overlay, at, at));
-        assert!(hits.is_hittable(&tree, &computed, &boxes, button, at, at));
+        assert!(!hits.is_hittable(&tree, &computed, &boxes, &unscrolled(), overlay, at));
+        assert!(hits.is_hittable(&tree, &computed, &boxes, &unscrolled(), button, at));
     }
 
     /// `root → [scroller → item, overlay]`, all three filling the same box, the
@@ -476,11 +566,17 @@ mod tests {
         let at = Point::new(50.0, 50.0);
 
         let mut raised = ComputedStyle::new();
+        // Positioned, because `z-index` applies to nothing else (CSS 2.1 §9.9.1)
+        // and the hit test now says so.
+        raised.set(
+            PropertyId::Position,
+            ComputedValue::keyword(layout_keyword::POSITION_ABSOLUTE),
+        );
         raised.set(PropertyId::ZIndex, ComputedValue::number(1.0));
         let mut computed = ComputedStyles::new();
         computed.insert(overlay, raised.clone());
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, at, at),
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
             Some(overlay),
             "z-index outranks the deeper item, so the overlay swallows the click"
         );
@@ -491,7 +587,7 @@ mod tests {
         );
         computed.insert(overlay, raised);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, at, at),
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
             Some(item),
             "made transparent, the same overlay stops swallowing it"
         );
@@ -506,7 +602,7 @@ mod tests {
         let computed = styled(overlay, POINTER_EVENTS_AUTO);
         let at = Point::new(50.0, 50.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, at, at),
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
             Some(overlay)
         );
     }
@@ -590,7 +686,7 @@ mod tests {
             card_with_transform(Some(rotation(std::f32::consts::FRAC_PI_4)), CARD);
         let at = Point::new(2.0, 2.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, at, at),
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
             None,
             "the rotated card does not cover its bounding box's top-left corner"
         );
@@ -606,11 +702,14 @@ mod tests {
         let (tree, boxes, computed, hits, card) =
             card_with_transform(Some(rotation(std::f32::consts::FRAC_PI_4)), CARD);
         let at = Point::new(92.43, 41.21);
-        assert_eq!(hits.resolve(&tree, &computed, &boxes, at, at), Some(card));
+        assert_eq!(
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
+            Some(card)
+        );
         // The centre is the rotation's fixed point and is hit either way.
         let centre = Point::new(50.0, 20.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, centre, centre),
+            hits.resolve(&tree, &computed, &boxes, centre, &unscrolled()),
             Some(card)
         );
     }
@@ -622,7 +721,7 @@ mod tests {
             card_with_transform(Some([2.0, 0.0, 0.0, 2.0, 0.0, 0.0]), CARD);
         let at = Point::new(120.0, 20.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, at, at),
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
             Some(card),
             "local (85, 20) is inside the card, so the pixel it was drawn on is live"
         );
@@ -635,10 +734,13 @@ mod tests {
         let (tree, boxes, computed, hits, card) =
             card_with_transform(Some([0.5, 0.0, 0.0, 0.5, 0.0, 0.0]), CARD);
         let at = Point::new(90.0, 20.0);
-        assert_eq!(hits.resolve(&tree, &computed, &boxes, at, at), None);
+        assert_eq!(
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
+            None
+        );
         let inside = Point::new(70.0, 20.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, inside, inside),
+            hits.resolve(&tree, &computed, &boxes, inside, &unscrolled()),
             Some(card)
         );
     }
@@ -649,12 +751,12 @@ mod tests {
             card_with_transform(Some([1.0, 0.0, 0.0, 1.0, 30.0, 0.0]), CARD);
         let moved_onto = Point::new(110.0, 20.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, moved_onto, moved_onto),
+            hits.resolve(&tree, &computed, &boxes, moved_onto, &unscrolled()),
             Some(card)
         );
         let vacated = Point::new(10.0, 20.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, vacated, vacated),
+            hits.resolve(&tree, &computed, &boxes, vacated, &unscrolled()),
             None
         );
     }
@@ -667,12 +769,12 @@ mod tests {
         let (tree, boxes, computed, hits, card) = card_with_transform(None, offset);
         let inside = Point::new(35.0, 15.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, inside, inside),
+            hits.resolve(&tree, &computed, &boxes, inside, &unscrolled()),
             Some(card)
         );
         let outside = Point::new(20.0, 15.0);
         assert_eq!(
-            hits.resolve(&tree, &computed, &boxes, outside, outside),
+            hits.resolve(&tree, &computed, &boxes, outside, &unscrolled()),
             None
         );
     }
@@ -705,7 +807,10 @@ mod tests {
             Point::new(2.0, 2.0),
             Point::new(99.0, 39.0),
         ] {
-            assert_eq!(hits.resolve(&tree, &computed, &boxes, at, at), None);
+            assert_eq!(
+                hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
+                None
+            );
         }
     }
 
@@ -719,9 +824,243 @@ mod tests {
                 &ComputedStyles::new(),
                 &LayoutBoxes::new(),
                 Point::new(1.0, 1.0),
-                Point::new(1.0, 1.0),
+                &unscrolled(),
             ),
             None
+        );
+    }
+
+    // ---- paint order: `z-index` is per stacking context (§9.9) --------------
+
+    fn positioned(z: Option<f32>) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::Position,
+            ComputedValue::keyword(layout_keyword::POSITION_ABSOLUTE),
+        );
+        if let Some(z) = z {
+            style.set(PropertyId::ZIndex, ComputedValue::number(z));
+        }
+        style
+    }
+
+    const WIDE: Size = Size::new(200.0, 200.0);
+
+    #[test]
+    fn a_raised_node_in_a_low_context_loses_to_a_plain_node_in_a_high_one() {
+        // `root → [early(z:0) → deep(z:5), late(z:10) → plain]`. `late`'s own box
+        // is a corner the probe misses, so the only two candidates are `deep` and
+        // `plain` — the pair the defect gets backwards. `plain` declares no
+        // `z-index` at all, and paints at 10 because its stacking context does.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let early = kid(&mut tree, root);
+        let deep = kid(&mut tree, early);
+        let late = kid(&mut tree, root);
+        let plain = kid(&mut tree, late);
+
+        let mut boxes = LayoutBoxes::new();
+        let full = Rect::new(Point::new(0.0, 0.0), WIDE);
+        boxes.insert(early, LayoutBox::new(full));
+        boxes.insert(deep, LayoutBox::new(full));
+        boxes.insert(
+            late,
+            LayoutBox::new(Rect::new(Point::new(0.0, 0.0), Size::new(10.0, 10.0))),
+        );
+        boxes.insert(plain, LayoutBox::new(full));
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(early, positioned(Some(0.0)));
+        computed.insert(deep, positioned(Some(5.0)));
+        computed.insert(late, positioned(Some(10.0)));
+        computed.insert(plain, ComputedStyle::new());
+
+        let mut hits = HitTesting::new();
+        hits.rebuild(&tree, &computed, &boxes);
+
+        let at = Point::new(50.0, 50.0);
+        let winner = hits.resolve(&tree, &computed, &boxes, at, &unscrolled());
+        assert_ne!(
+            winner,
+            Some(deep),
+            "`z-index: 5` inside a `z-index: 0` context must not outrank a \
+             `z-index: 10` context's content — that is comparing z globally"
+        );
+        assert_eq!(
+            winner,
+            Some(plain),
+            "the click lands on what paints on top: the z:10 subtree"
+        );
+    }
+
+    #[test]
+    fn a_z_index_on_a_static_box_is_ignored_until_it_is_positioned() {
+        // `root → [a(z:9), b]`, same box. `z-index` applies to positioned
+        // elements only (CSS 2.1 §9.9.1), so while `a` is static the two are
+        // equal and document order gives the click to `b`.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = kid(&mut tree, root);
+        let b = kid(&mut tree, root);
+
+        let mut boxes = LayoutBoxes::new();
+        let full = Rect::new(Point::new(0.0, 0.0), WIDE);
+        boxes.insert(a, LayoutBox::new(full));
+        boxes.insert(b, LayoutBox::new(full));
+
+        let mut raised_static = ComputedStyle::new();
+        raised_static.set(PropertyId::ZIndex, ComputedValue::number(9.0));
+        let mut computed = ComputedStyles::new();
+        computed.insert(a, raised_static);
+        computed.insert(b, ComputedStyle::new());
+
+        let mut hits = HitTesting::new();
+        hits.rebuild(&tree, &computed, &boxes);
+        let at = Point::new(50.0, 50.0);
+        assert_eq!(
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
+            Some(b),
+            "a `z-index` on a `position: static` box lifts nothing"
+        );
+
+        // The control: the identical declaration on a POSITIONED `a` does lift
+        // it, so the assertion above is the `position` check doing the work and
+        // not a hit test that lost track of `z-index` altogether.
+        computed.insert(a, positioned(Some(9.0)));
+        hits.rebuild(&tree, &computed, &boxes);
+        assert_eq!(
+            hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
+            Some(a),
+        );
+    }
+
+    // ---- per-node scroll folding -------------------------------------------
+
+    fn with_keyword(id: PropertyId, keyword: obscur_identity::InternedSymbol) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(id, ComputedValue::keyword(keyword));
+        style
+    }
+
+    #[test]
+    fn a_fixed_toolbar_over_a_scroller_is_clickable_at_every_offset() {
+        // `root → [scroller(overflow: scroll) → item, toolbar(position: fixed)]`,
+        // the toolbar a 50px strip across the top of the scrolled region. It does
+        // not ride the scroll, so its box is where the pointer already is —
+        // folding the scroll into the point before matching it against every node
+        // moved the probe off it and made it unclickable.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let scroller = kid(&mut tree, root);
+        let item = kid(&mut tree, scroller);
+        let toolbar = kid(&mut tree, root);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(
+            scroller,
+            LayoutBox::new(Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 400.0))),
+        );
+        boxes.insert(
+            item,
+            LayoutBox::new(Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 2000.0))),
+        );
+        boxes.insert(
+            toolbar,
+            LayoutBox::new(Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 50.0))),
+        );
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            scroller,
+            with_keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_SCROLL),
+        );
+        computed.insert(item, ComputedStyle::new());
+        computed.insert(
+            toolbar,
+            with_keyword(PropertyId::Position, layout_keyword::POSITION_FIXED),
+        );
+
+        let mut hits = HitTesting::new();
+        hits.rebuild(&tree, &computed, &boxes);
+
+        let on_toolbar = Point::new(50.0, 20.0);
+        for offset in [0.0_f32, 100.0, 300.0, 1500.0] {
+            let scrolls = HashMap::from([(scroller, offset)]);
+            assert_eq!(
+                hits.resolve(&tree, &computed, &boxes, on_toolbar, &scrolls),
+                Some(toolbar),
+                "the toolbar sits still on screen at scroll offset {offset}, so \
+                 it must take the click there"
+            );
+            // And the scrolled content below it still answers at its own folded
+            // point, which is the half a global fold got right.
+            let below = Point::new(50.0, 300.0);
+            assert_eq!(
+                hits.resolve(&tree, &computed, &boxes, below, &scrolls),
+                Some(item),
+                "content inside the scroller is still hit through the fold"
+            );
+        }
+    }
+
+    #[test]
+    fn a_clip_two_levels_up_is_tested_in_its_own_scrolled_space() {
+        // `root → outer(overflow: scroll, 200x200) → mid(overflow: hidden, y
+        // 100..250) → inner(y 200..300)`, with `outer` scrolled 100. `mid` states
+        // its box in `outer`'s UNSCROLLED space, so its clip has to be tested at
+        // the folded point; testing it at the raw screen point — right only for
+        // the first clipping ancestor — leaves `inner` clickable across a band
+        // `mid` clipped away.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let outer = kid(&mut tree, root);
+        let mid = kid(&mut tree, outer);
+        let inner = kid(&mut tree, mid);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(outer, LayoutBox::new(Rect::new(Point::new(0.0, 0.0), WIDE)));
+        boxes.insert(
+            mid,
+            LayoutBox::new(Rect::new(Point::new(0.0, 100.0), Size::new(200.0, 150.0))),
+        );
+        boxes.insert(
+            inner,
+            LayoutBox::new(Rect::new(Point::new(0.0, 200.0), Size::new(200.0, 100.0))),
+        );
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            outer,
+            with_keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_SCROLL),
+        );
+        computed.insert(
+            mid,
+            with_keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_HIDDEN),
+        );
+        computed.insert(inner, ComputedStyle::new());
+
+        let mut hits = HitTesting::new();
+        hits.rebuild(&tree, &computed, &boxes);
+        let scrolls = HashMap::from([(outer, 100.0_f32)]);
+
+        // `mid` shows content from unscrolled y 100..250, which after the 100px
+        // scroll is screen y 0..150. At screen y 170 `inner` is folded to y 270 —
+        // inside its own box, and 20px past the bottom of the clip.
+        assert_eq!(
+            hits.resolve(&tree, &computed, &boxes, Point::new(50.0, 170.0), &scrolls),
+            Some(outer),
+            "`inner` is clipped away by `mid` there; the click belongs to the \
+             scroller behind it"
+        );
+        // The other half: where `mid` does show `inner`, it is hit — so the
+        // assertion above is the clip and not a fold that lost the node.
+        assert_eq!(
+            hits.resolve(&tree, &computed, &boxes, Point::new(50.0, 120.0), &scrolls),
+            Some(inner),
         );
     }
 }

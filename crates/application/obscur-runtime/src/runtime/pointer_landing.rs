@@ -1,5 +1,7 @@
 #![doc = include_str!("pointer_landing.doc/_module.md")]
 
+use std::collections::HashMap;
+
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
 use obscur_interaction::pointer::{PointerEvent, PointerId};
@@ -62,12 +64,23 @@ impl<'a> PointerLandingResolver<'a> {
         pointers: &mut PointerSessions,
     ) -> PointerLanding {
         let screen = self.surface.to_content_point(event.position());
-        let folded = ScrollTargets::new(self.tree, self.computed, self.boxes, self.scroll)
-            .fold_point(screen);
+        let targets = ScrollTargets::new(self.tree, self.computed, self.boxes, self.scroll);
+        let scrolls: HashMap<NodeId, f32> = targets
+            .paint(self.computed)
+            .into_iter()
+            .map(|(node, paint)| (node, paint.scroll_top))
+            .collect();
         let target = self.captured_target(pointers, event.pointer()).or_else(|| {
             self.hits
-                .resolve(self.tree, self.computed, self.boxes, folded, screen)
+                .resolve(self.tree, self.computed, self.boxes, screen, &scrolls)
         });
+        // The fold belongs to the node that took the event, not to the pointer:
+        // a fixed toolbar over a scrolled list, or the scroll container's own
+        // border, rides no scroll and must be told where the pointer really is.
+        let folded = target.map_or_else(
+            || targets.fold_point(screen),
+            |node| HitTesting::content_point(self.tree, &scrolls, node, screen),
+        );
         PointerLanding {
             screen,
             folded,
@@ -149,6 +162,124 @@ mod tests {
                 .resolve(&down_at(Point::new(9999.0, 9999.0)), &mut pointers);
         // The index is empty, so the only way to land on `node` is the capture.
         assert_eq!(landing.target, Some(node));
+    }
+
+    /// `root → [scroller(overflow: scroll, 200x400) → item(200x2000),
+    /// toolbar(position: fixed, 200x50)]`, scrolled by `offset`.
+    fn scrolled_page_with_fixed_toolbar(
+        offset: f32,
+    ) -> (
+        RetainedTree,
+        ComputedStyles,
+        LayoutBoxes,
+        ScrollOffsets,
+        HitTesting,
+        NodeId,
+        NodeId,
+    ) {
+        use crate::orchestration::scroll_containers;
+        use crate::runtime::FoldInputs;
+        use obscur_layout::model::LayoutBox;
+        use obscur_style::computed::ComputedStyle;
+        use obscur_style::computed::ComputedValue;
+        use obscur_style::property::{PropertyId, layout_keyword};
+        use obscur_tree::node::LogicalParent;
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let kid = |tree: &mut RetainedTree, parent: NodeId| {
+            let id = tree.alloc(NodeKind::Element {
+                component: obscur_identity::ComponentId::from_raw(1),
+            });
+            tree.get_mut(id)
+                .expect("just allocated")
+                .set_logical_parent(LogicalParent::of(parent));
+            tree.get_mut(parent).expect("in tree").push_child(id);
+            id
+        };
+        let scroller = kid(&mut tree, root);
+        let item = kid(&mut tree, scroller);
+        let toolbar = kid(&mut tree, root);
+
+        let mut boxes = LayoutBoxes::new();
+        let at = |w: f32, h: f32| {
+            LayoutBox::new(obscur_geometry::Rect::new(
+                Point::new(0.0, 0.0),
+                Size::new(w, h),
+            ))
+        };
+        boxes.insert(scroller, at(200.0, 400.0));
+        boxes.insert(item, at(200.0, 2000.0));
+        boxes.insert(toolbar, at(200.0, 50.0));
+
+        let keyword = |id: PropertyId, sym| {
+            let mut style = ComputedStyle::new();
+            style.set(id, ComputedValue::keyword(sym));
+            style
+        };
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            scroller,
+            keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_SCROLL),
+        );
+        computed.insert(item, ComputedStyle::new());
+        computed.insert(
+            toolbar,
+            keyword(PropertyId::Position, layout_keyword::POSITION_FIXED),
+        );
+
+        let containers = scroll_containers(&tree, &computed, &boxes);
+        let container = *containers
+            .iter()
+            .find(|c| c.node == scroller)
+            .expect("the scroller overflows, so it is a scroll container");
+        let mut scroll = ScrollOffsets::new();
+        scroll.set(
+            container,
+            offset,
+            FoldInputs {
+                tree: &tree,
+                boxes: &boxes,
+                containers: &containers,
+            },
+        );
+
+        let mut hits = HitTesting::new();
+        hits.rebuild(&tree, &computed, &boxes);
+        (tree, computed, boxes, scroll, hits, item, toolbar)
+    }
+
+    #[test]
+    fn a_fixed_toolbar_takes_the_click_where_it_is_drawn_at_any_offset() {
+        // The whole-frame fold put the probe at (50, 20 + offset) — off the
+        // toolbar entirely — and the scrolled row behind it took the click. It
+        // also reported that shifted point as the event's position, so even the
+        // handler that did run was told the wrong place.
+        for offset in [0.0_f32, 120.0, 900.0] {
+            let (tree, computed, boxes, scroll, hits, item, toolbar) =
+                scrolled_page_with_fixed_toolbar(offset);
+            let surface = SurfaceGeometry::new(Size::new(400.0, 400.0));
+            let resolver =
+                PointerLandingResolver::new(surface, &tree, &computed, &boxes, &scroll, &hits);
+            let mut pointers = PointerSessions::new();
+
+            let on_toolbar = Point::new(50.0, 20.0);
+            let landing = resolver.resolve(&down_at(on_toolbar), &mut pointers);
+            assert_eq!(landing.target, Some(toolbar), "at scroll offset {offset}");
+            assert_eq!(
+                landing.folded, on_toolbar,
+                "the toolbar rides no scroll, so its event is where the pointer \
+                 is (offset {offset})"
+            );
+
+            // The control: the scrolled content below the toolbar still folds,
+            // both for the hit and for the point the handler is told.
+            let below = Point::new(50.0, 300.0);
+            let landing = resolver.resolve(&down_at(below), &mut pointers);
+            assert_eq!(landing.target, Some(item), "at scroll offset {offset}");
+            assert_eq!(landing.folded, Point::new(50.0, 300.0 + offset));
+        }
     }
 
     #[test]

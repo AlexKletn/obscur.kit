@@ -1,5 +1,7 @@
 #![doc = include_str!("scrolling.doc/_module.md")]
 
+use std::collections::HashMap;
+
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
 use obscur_interaction::event::UiEvent;
@@ -8,7 +10,7 @@ use obscur_view::view::EVENT_WHEEL;
 
 use crate::frame::FrameReason;
 use crate::orchestration::scroll_containers;
-use crate::runtime::{CommandDispatch, FoldInputs, ScrollTargets};
+use crate::runtime::{CommandDispatch, FoldInputs, HitTesting, ScrollTargets};
 
 use super::UiRuntime;
 
@@ -157,18 +159,23 @@ impl UiRuntime {
         if !self.pointer_bindings.binds(EVENT_WHEEL) {
             return None;
         }
-        // The node under the point, resolved exactly as a click's would be: fold
-        // the content point through the scroll containers it lies within, then
-        // hit-test in both spaces (a clip is tested on screen, a box in
-        // unscrolled layout space). Deliberately NOT the scroll container that
-        // would take the notch — that container is normally an ancestor of the
-        // hit node, and the ancestor walk below reaches it anyway, so targeting
-        // it directly would only rob a row of the chance to hear its own wheel.
-        let folded = ScrollTargets::new(&self.tree, &self.computed, &self.boxes, &self.scroll)
-            .fold_point(content);
-        let target = self
-            .hits
-            .resolve(&self.tree, &self.computed, &self.boxes, folded, content)?;
+        // The node under the point, resolved exactly as a click's would be: the
+        // content point plus every scroll container's offset, which the hit test
+        // folds back per candidate (a fixed box rides none of them).
+        // Deliberately NOT the scroll container that would take the notch — that
+        // container is normally an ancestor of the hit node, and the ancestor
+        // walk below reaches it anyway, so targeting it directly would only rob a
+        // row of the chance to hear its own wheel.
+        let scrolls: HashMap<NodeId, f32> =
+            ScrollTargets::new(&self.tree, &self.computed, &self.boxes, &self.scroll)
+                .paint(&self.computed)
+                .into_iter()
+                .map(|(node, paint)| (node, paint.scroll_top))
+                .collect();
+        let target =
+            self.hits
+                .resolve(&self.tree, &self.computed, &self.boxes, content, &scrolls)?;
+        let folded = HitTesting::content_point(&self.tree, &scrolls, target, content);
         let (node, command) = CommandDispatch::binding_for(&self.tree, target, EVENT_WHEEL)?;
         // Aimed at the FOLDED point so a listener and a hit test agree about
         // where the notch landed; everything else — both deltas, the unit, the

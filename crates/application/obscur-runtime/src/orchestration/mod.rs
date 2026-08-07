@@ -72,6 +72,7 @@ mod shaped_ch_metrics;
 pub(crate) use scroll::{ScrollContainer, overflow_scrolls, scroll_containers};
 pub use shaped_ch_metrics::ShapedChMetrics;
 mod stacking;
+pub(crate) use stacking::{PaintLayer, effective_paint_layer, effective_stacking_z};
 mod style_coordinator;
 pub use style_coordinator::{ComputedStyles, IncrementalRestyle, StyleCoordinator};
 mod style_inputs;
