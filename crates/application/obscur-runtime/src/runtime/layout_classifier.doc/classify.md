@@ -27,8 +27,12 @@ work:
 * a first frame, or a reconcile that ACTUALLY changed the tree, lays out in
   full;
 * any reason outside the refined set below lays out in full;
-* a moved viewport / scroll offset, or a changed node count, lays out in
-  full;
+* a moved viewport, a changed editing string / language, or a changed node
+  count, lays out in full;
+* a moved **scroll offset** lays out in full only when the document actually
+  contains a `position: sticky` box — see
+  [`scroll_reaches_layout`]; otherwise every box is unchanged in document
+  coordinates and the frame keeps its measures and its arranged boxes;
 * an unknown property is layout-affecting by default.
 
 # Why `reconciled` and not `plan.reconcile()`

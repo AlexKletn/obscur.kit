@@ -2,8 +2,9 @@
 
 use obscur_identity::NodeId;
 use obscur_layout::invalidation::LayoutInvalidation;
-use obscur_style::computed::ComputedStyle;
+use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::invalidation::StyleInvalidation;
+use obscur_style::property::{PropertyId, PropertyValue, layout_keyword};
 
 use super::{FramePlan, LayoutInputs, StyleDelta};
 use crate::frame::{FrameContext, FrameReason};
@@ -72,9 +73,24 @@ impl<'a> LayoutClassifier<'a> {
         ) {
             return LayoutPhase::Full;
         }
-        // Layout also reads the viewport, the sticky scroll offset and the live
-        // editing text — none of which are computed styles.
-        if self.last_inputs != Some(self.current_inputs) {
+        // Layout also reads the viewport, the scroll offset and the live editing
+        // text — none of which are computed styles.
+        let Some(last) = self.last_inputs else {
+            return LayoutPhase::Full;
+        };
+        // Destructured without `..` on purpose: a new layout input added to
+        // [`LayoutInputs`] breaks this line rather than being silently ignored
+        // by a classifier that would then reuse boxes it never proved valid.
+        let LayoutInputs {
+            viewport,
+            scroll,
+            editing,
+            language,
+        } = self.current_inputs;
+        if last.viewport != *viewport || last.editing != *editing || last.language != *language {
+            return LayoutPhase::Full;
+        }
+        if last.scroll != *scroll && scroll_reaches_layout(computed) {
             return LayoutPhase::Full;
         }
 
@@ -146,6 +162,16 @@ impl<'a> LayoutClassifier<'a> {
             LayoutPhase::Skip
         }
     }
+}
+
+#[doc = include_str!("layout_classifier.doc/scroll_reaches_layout.md")]
+fn scroll_reaches_layout(computed: &ComputedStyles) -> bool {
+    computed.values().any(|style| {
+        matches!(
+            style.get(PropertyId::Position).map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(sym)) if sym == layout_keyword::POSITION_STICKY
+        )
+    })
 }
 
 #[doc = include_str!("layout_classifier.doc/layout_affecting_changed.md")]
@@ -227,7 +253,7 @@ mod tests {
     fn a_moved_non_style_input_lays_out_in_full_however_still_the_styles_are() {
         let last = inputs();
         let mut current = inputs();
-        current.scroll = (0.0, 40.0);
+        current.viewport = Size::new(100.0, 140.0);
         let styles = ComputedStyles::new();
         let classifier = LayoutClassifier::new(Some(&last), &current, &styles, &styles);
         let plan = FramePlan::for_frame(FrameReason::Input, false);
@@ -240,6 +266,61 @@ mod tests {
                 &styles,
                 &StyleDelta::Full,
             ),
+            LayoutPhase::Full
+        ));
+    }
+
+    /// One styled node whose `position` is the given keyword.
+    fn positioned(keyword: obscur_identity::InternedSymbol) -> ComputedStyles {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::Position, ComputedValue::keyword(keyword));
+        let mut styles = ComputedStyles::new();
+        styles.insert(NodeId::from_raw(1), style);
+        styles
+    }
+
+    /// Classifies a scroll-only [`FrameReason::Input`] frame over `styles`,
+    /// with the styles unchanged since the last frame (so nothing but the
+    /// scroll offset moved).
+    fn classify_scroll_only(styles: &ComputedStyles) -> LayoutPhase {
+        let last = inputs();
+        let mut current = inputs();
+        current.scroll = (0.0, 40.0);
+        LayoutClassifier::new(Some(&last), &current, styles, styles).classify(
+            FramePlan::for_frame(FrameReason::Input, false),
+            &context(FrameReason::Input),
+            false,
+            false,
+            styles,
+            &StyleDelta::Full,
+        )
+    }
+
+    #[test]
+    fn scrolling_a_document_without_sticky_boxes_skips_layout_entirely() {
+        // Every box is laid out in DOCUMENT coordinates; the scroll offset only
+        // ever reaches `Inset::sticky_offset`. So with no sticky box the boxes
+        // this frame would produce are byte-identical to the retained ones, and
+        // re-deriving them would flush both layout caches (`Full` passes
+        // `dirty = None`) and re-shape every visible text leaf — once per
+        // scrolled pixel.
+        assert!(matches!(
+            classify_scroll_only(&positioned(layout_keyword::POSITION_RELATIVE)),
+            LayoutPhase::Skip
+        ));
+        // The same holds for a document that declares no `position` at all.
+        assert!(matches!(
+            classify_scroll_only(&ComputedStyles::new()),
+            LayoutPhase::Skip
+        ));
+    }
+
+    #[test]
+    fn scrolling_a_document_with_a_sticky_box_still_lays_out_in_full() {
+        // A sticky box's used position IS a function of the scroll offset, so
+        // this is the one case the skip above must not swallow.
+        assert!(matches!(
+            classify_scroll_only(&positioned(layout_keyword::POSITION_STICKY)),
             LayoutPhase::Full
         ));
     }

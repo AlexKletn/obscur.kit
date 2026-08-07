@@ -368,24 +368,26 @@ slider:focus {\
   outline: 2px dashed #2b2a27;\
   outline-offset: 3px;\
 }\
-/* The canvas child of a drawn control, addressed as `*` because there is nothing\
-   else to address it by: `Progress::contents` and `Slider::contents` build it\
-   with no local name and no class (`Canvas::into_view_node` contributes no name\
-   at all — the `img` defect this sheet's audit fixed, still open for the canvas\
-   primitive). It is given the control's whole box, as a PERCENTAGE rather than as\
-   the numbers above, and both reasons are about two boxes staying equal: a block\
-   child already stretches to its parent's content width, but an auto height on a\
-   childless box is 0, which is the zero-region case at the top of this block; and\
-   an author who writes `slider { height: 40px }` moves the painter's box with the\
-   control, where a repeated `20px` here would silently reintroduce the very\
-   divergence the bare `slider` rule exists to avoid. (On hand-written `<progress>`\
-   markup this reaches the author's own children too. That is the cost of the\
-   widget's part carrying no name.)\
-   LAST in the sheet on purpose: `canvas` above has the same specificity (0,0,1),\
-   so source order is what keeps a control's canvas at the control's size —\
-   including on the day someone gives the canvas primitive its missing local name\
-   and that rule starts reaching these children. */\
-progress > *, slider > * {\
+/* The canvas child of a drawn control, addressed BY NAME: `Progress::contents`\
+   and `Slider::contents` build it with `Canvas::into_view_node`, which names it\
+   `canvas` exactly as an authored `<canvas>` tag does. It used to name nothing at\
+   all — the `img` defect this sheet's audit fixed, open for the canvas primitive\
+   until now — so this rule had to say `progress > *, slider > *` and reach the\
+   child by being the only child. It is given the control's whole box, as a\
+   PERCENTAGE rather than as the numbers above, and both reasons are about two\
+   boxes staying equal: a block child already stretches to its parent's content\
+   width, but an auto height on a childless box is 0, which is the zero-region case\
+   at the top of this block; and an author who writes `slider { height: 40px }`\
+   moves the painter's box with the control, where a repeated `20px` here would\
+   silently reintroduce the very divergence the bare `slider` rule exists to avoid.\
+   The name is what makes this rule SAFE rather than merely tidy. `canvas` above\
+   now reaches these children too, and at (0,0,1) it used to tie with the anonymous\
+   form of this rule — a tie broken by source order alone, so reversing two blocks\
+   in this file would have stretched every slider's painter box to 300 × 150 while\
+   the pointer kept measuring 160 × 20. Two type selectors put this rule at (0,0,2)\
+   and it wins on specificity, whatever the order. It is still written last, and\
+   `a_drawn_controls_canvas_is_sized_after_the_bare_canvas_rule` still says so. */\
+progress > canvas, slider > canvas {\
   width: 100%;\
   height: 100%;\
 }\
@@ -433,21 +435,22 @@ mod tests {
 
     #[test]
     fn a_drawn_controls_canvas_is_sized_after_the_bare_canvas_rule() {
-        // The one property of this sheet that is carried by ORDER rather than by
-        // any declaration in it. `canvas { width: 300px; height: 150px }` and
-        // `progress > *, slider > *` have the same specificity — (0,0,1), one type
-        // selector each, `*` counting for nothing — so whichever is written last
-        // wins on a control's canvas child. Today the first rule cannot reach it at
-        // all (`Canvas::into_view_node` contributes no local name), which is
-        // exactly why the ordering is easy to break and impossible to notice:
-        // reversing these two would do nothing whatsoever until someone fixes that
-        // naming, and would then stretch every slider's painter box to 300 × 150
-        // while the pointer kept measuring 160 × 20 — a thumb that no longer lands
-        // under the finger, caused by a change in an unrelated file.
+        // What used to be the one property of this sheet carried by ORDER rather
+        // than by any declaration in it, kept now that it is carried by both.
+        // `canvas { width: 300px; height: 150px }` reaches a drawn control's canvas
+        // child — `Canvas::into_view_node` names it — and so does this rule; while
+        // the child rule was the anonymous `progress > *, slider > *` the two tied
+        // at (0,0,1) and only source order kept the painter's box at the control's
+        // size. Reversing two blocks in this file would have stretched every
+        // slider's painter box to 300 × 150 while the pointer kept measuring
+        // 160 × 20 — a thumb that no longer lands under the finger, caused by an
+        // edit that moved no declaration. Naming the child makes it (0,0,2) and
+        // settles it on specificity; the order is kept as the second lock, and this
+        // test is what says the second lock is still there.
         let sheet = ua_css();
         let bare = sheet.find("canvas {").expect("the bare canvas rule");
         let child = sheet
-            .find("progress > *, slider > * {")
+            .find("progress > canvas, slider > canvas {")
             .expect("the drawn controls' canvas-child rule");
         assert!(
             bare < child,

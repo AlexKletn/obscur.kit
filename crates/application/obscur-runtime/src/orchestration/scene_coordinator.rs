@@ -580,7 +580,14 @@ impl SceneCoordinator {
 
             // A node with no own paint (no background, no text) contributes no
             // unit — exactly as the historical walk emitted nothing for it.
-            let commands = node_paint.build().commands().to_vec();
+            //
+            // `build` already yields an OWNED list, so its commands are moved out;
+            // reading them back through `commands().to_vec()` deep-copied every
+            // path, glyph run and image handle the node had just produced, once per
+            // painted node per frame, and dropped the originals on the same line.
+            // `into_commands_hands_back_the_buffer_it_was_given` (obscur-scene)
+            // pins the difference the two spellings make.
+            let commands = node_paint.build().into_commands();
             if !commands.is_empty() {
                 let z = zmap.get(&node).copied().unwrap_or(0);
                 let layer = layermap

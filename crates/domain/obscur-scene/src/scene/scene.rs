@@ -1,12 +1,17 @@
 #![doc = include_str!("scene.doc/_module.md")]
 
+use std::sync::Arc;
+
 use crate::command::DisplayList;
 use crate::scene::{SceneGeneration, SceneSnapshot, SceneStatistics};
 
 #[doc = include_str!("scene.doc/Scene.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Scene {
-    root: DisplayList,
+    // Shared rather than owned outright so that `snapshot` — called at least once
+    // a frame, and once more per frame that composed nothing — is a refcount bump
+    // instead of a deep copy of every command in the frame.
+    root: Arc<DisplayList>,
     generation: SceneGeneration,
 }
 
@@ -15,7 +20,7 @@ impl Scene {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            root: DisplayList::new(),
+            root: Arc::new(DisplayList::new()),
             generation: SceneGeneration::FIRST,
         }
     }
@@ -26,9 +31,15 @@ impl Scene {
         &self.root
     }
 
+    #[doc = include_str!("scene.doc/shared_root.md")]
+    #[must_use]
+    pub fn shared_root(&self) -> &Arc<DisplayList> {
+        &self.root
+    }
+
     #[doc = include_str!("scene.doc/set_root.md")]
     pub fn set_root(&mut self, list: DisplayList) {
-        self.root = list;
+        self.root = Arc::new(list);
         self.generation = self.generation.next();
     }
 

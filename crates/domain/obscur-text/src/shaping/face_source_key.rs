@@ -30,4 +30,16 @@ impl FaceSourceKey {
             }
         }
     }
+
+    #[doc = include_str!("face_source_key.doc/matches.md")]
+    pub(crate) fn matches(&self, source: &FontSource) -> bool {
+        match (self, source) {
+            (Self::System(name), FontSource::System(other))
+            | (Self::Bundled(name), FontSource::Bundled(other)) => name == other,
+            (Self::Memory { ptr, len }, FontSource::Memory(data)) => {
+                *ptr == std::sync::Arc::as_ptr(data).cast::<u8>() as usize && *len == data.len()
+            }
+            _ => false,
+        }
+    }
 }

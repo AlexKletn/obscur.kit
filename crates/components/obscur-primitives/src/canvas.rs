@@ -1,7 +1,7 @@
 #![doc = include_str!("canvas.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
-use obscur_view::view::{View, ViewNode, ViewProperty, ViewValue, canvas_painter_prop};
+use obscur_view::view::{LOCAL_NAME, View, ViewNode, ViewProperty, ViewValue, canvas_painter_prop};
 
 #[doc = include_str!("canvas.doc/Canvas.md")]
 #[derive(Debug, Clone, PartialEq)]
@@ -54,7 +54,17 @@ impl Canvas {
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         let props = self.props();
-        let mut node = ViewNode::element(Self::COMPONENT_ID);
+        // The element names itself `canvas`, under the reserved LOCAL_NAME symbol
+        // the matcher reads as a node's CSS *type* (spec §4.13) — the same name an
+        // authored `<canvas>` tag contributes, and the same name this primitive is
+        // already the built-in for (`name_binding::builtin_component_id("canvas")`).
+        // Without it the two spellings were one component id over two different
+        // trees: the UA sheet's `canvas { … }` rule reached the markup and not the
+        // primitive, so no selector in any sheet — author's or the UA's — could
+        // size a drawn control's painter box, and the sheet had to reach it as the
+        // anonymous `progress > *, slider > *`.
+        let mut node = ViewNode::element(Self::COMPONENT_ID)
+            .with_prop(ViewProperty::new(LOCAL_NAME, ViewValue::from("canvas")));
         for prop in props {
             node = node.with_prop(prop);
         }
@@ -73,6 +83,13 @@ mod tests {
     use super::*;
     use obscur_view::view::canvas_painter;
 
+    fn prop(props: &[ViewProperty], name: InternedSymbol) -> Option<&ViewValue> {
+        props
+            .iter()
+            .find(|p| p.name() == name)
+            .map(ViewProperty::value)
+    }
+
     #[test]
     fn emits_size_hints() {
         let node = Canvas::new(320.0, 240.0).into_view_node();
@@ -81,13 +98,40 @@ mod tests {
         } = node
         {
             assert_eq!(component, Canvas::COMPONENT_ID);
-            assert_eq!(props[0].name(), Canvas::PROP_WIDTH);
-            assert_eq!(props[0].value(), &ViewValue::Float(320.0));
-            assert_eq!(props[1].name(), Canvas::PROP_HEIGHT);
-            assert_eq!(props[1].value(), &ViewValue::Float(240.0));
+            // Read by name rather than by position: the element now carries its
+            // local name too, and adding a property must not be the same event as
+            // changing one.
+            assert_eq!(
+                prop(&props, Canvas::PROP_WIDTH),
+                Some(&ViewValue::Float(320.0))
+            );
+            assert_eq!(
+                prop(&props, Canvas::PROP_HEIGHT),
+                Some(&ViewValue::Float(240.0))
+            );
         } else {
             panic!("expected element");
         }
+    }
+
+    #[test]
+    fn the_primitive_names_itself_canvas() {
+        // What a `canvas { … }` type selector matches. `<canvas>` in markup and
+        // `Canvas::new(…)` in Rust are one built-in — `builtin_component_id
+        // ("canvas")` is this very `COMPONENT_ID` — and until this name existed
+        // they were that one id over two different trees: the tag contributed a
+        // local name and the primitive contributed none, so a rule reached only
+        // one of them. The consequence was not cosmetic: the `<canvas>` child a
+        // drawn control hands its painter is built by this constructor, so NO
+        // selector in NO stylesheet could size the box a painter draws into.
+        let node = Canvas::new(1.0, 1.0).into_view_node();
+        let ViewNode::Element { props, .. } = node else {
+            panic!("expected element");
+        };
+        assert_eq!(
+            prop(&props, LOCAL_NAME),
+            Some(&ViewValue::Text("canvas".into()))
+        );
     }
 
     #[test]

@@ -22,8 +22,8 @@ The runtime shapes each text node twice per frame — once to **measure**
 when nothing changed, and the *whole* itemize + font-resolve + multi-run
 assembly re-runs each time. `ParagraphShaper` therefore memoizes each
 [`shape_paragraph`](Self::shape_paragraph) result behind an interior
-[`RefCell`] cache keyed by every input that affects the output
-([`ParagraphKey`]). Because the result is width-independent, measure and
+[`RefCell`] cache keyed by every input that affects the output — the
+paragraph's text, and the style it is shaped under. Because the result is width-independent, measure and
 compose share the same cached runs, so an unchanged node itemizes, resolves,
 and shapes exactly **once** per frame and hits the cache on later frames. The
 output is byte-identical to shaping without the cache — a pure performance

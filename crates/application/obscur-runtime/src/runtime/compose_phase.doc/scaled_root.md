@@ -12,3 +12,10 @@ guard). Otherwise the list is re-wrapped as `PushTransform(root)` + original
 commands + `PopTransform`, which keeps it balanced (one push, one matching
 pop) since the composed list is itself already balanced. When the offset is
 `(0, 0)` the root matrix reduces exactly to `scale(s, s)`.
+
+The composed list arrives **owned** and its commands are moved into the
+wrapper. It used to be re-read through `commands()` and copied with
+`extend_from_slice`, which deep-cloned every path, glyph run and image handle
+in the frame out of a list that was dropped on the next line — a cost paid on
+every frame of any surface that is not 1:1, since that is precisely when a root
+transform exists at all.

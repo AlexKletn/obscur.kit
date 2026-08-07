@@ -1,7 +1,7 @@
 #![doc = include_str!("paragraph_shaper.doc/_module.md")]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -9,7 +9,7 @@ use crate::font::{
     FontAttributes, FontFace, FontFallback, FontId, FontResolveRequest, FontResolver,
 };
 use crate::shaping::ScriptTag;
-use crate::shaping::paragraph_key::ParagraphKey;
+use crate::shaping::shape_cache::ShapeCache;
 use crate::shaping::{
     GlyphRun, LineMetrics, ShapedGlyph, ShapedRun, ShapingRequest, TextDirection, TextItemizer,
     TextShaper,
@@ -24,9 +24,7 @@ pub struct ParagraphShaper {
     #[doc = include_str!("paragraph_shaper.doc/language.md")]
     language: Option<Box<str>>,
     #[doc = include_str!("paragraph_shaper.doc/cache.md")]
-    cache: RefCell<HashMap<ParagraphKey, Vec<ShapedRun>>>,
-    #[doc = include_str!("paragraph_shaper.doc/capacity.md")]
-    capacity: usize,
+    cache: RefCell<ShapeCache>,
 }
 
 impl ParagraphShaper {
@@ -56,8 +54,7 @@ impl ParagraphShaper {
             resolver,
             shaper,
             language: None,
-            cache: RefCell::new(HashMap::new()),
-            capacity: capacity.max(1),
+            cache: RefCell::new(ShapeCache::new(capacity)),
         }
     }
 
@@ -125,35 +122,62 @@ impl ParagraphShaper {
         font_size: f32,
         base_direction: TextDirection,
     ) -> Vec<ShapedRun> {
-        let key = ParagraphKey::new(
-            text,
-            families,
-            *attributes,
-            default_face,
-            font_size,
-            base_direction,
-        );
-        if let Some(runs) = self.cache.borrow().get(&key) {
-            return runs.clone();
-        }
-
-        let runs = self.shape_paragraph_uncached(
+        self.shape_paragraph_shared(
             text,
             families,
             attributes,
             default_face,
             font_size,
             base_direction,
-        );
+        )
+        .to_vec()
+    }
 
-        let mut cache = self.cache.borrow_mut();
-        // Flush wholesale on overflow: a simple, deterministic bound with no
-        // eviction-order dependency (callers only ever observe the returned
-        // value, never iteration order).
-        if cache.len() >= self.capacity && !cache.contains_key(&key) {
-            cache.clear();
+    #[doc = include_str!("paragraph_shaper.doc/shape_paragraph_shared.md")]
+    #[must_use]
+    pub fn shape_paragraph_shared(
+        &self,
+        text: &str,
+        families: &FontFallback,
+        attributes: &FontAttributes,
+        default_face: &FontFace,
+        font_size: f32,
+        base_direction: TextDirection,
+    ) -> Arc<[ShapedRun]> {
+        // The borrow is released before the miss path runs: shaping calls back
+        // into the itemizer / resolver / shaper, and a live `RefCell` borrow
+        // across that would be a panic waiting for the first port that consults
+        // the cache.
+        if let Some(runs) = self.cache.borrow_mut().get(
+            text,
+            families,
+            *attributes,
+            default_face,
+            font_size,
+            base_direction,
+        ) {
+            return runs;
         }
-        cache.insert(key, runs.clone());
+
+        let runs: Arc<[ShapedRun]> = self
+            .shape_paragraph_uncached(
+                text,
+                families,
+                attributes,
+                default_face,
+                font_size,
+                base_direction,
+            )
+            .into();
+        self.cache.borrow_mut().insert(
+            text,
+            families,
+            *attributes,
+            default_face,
+            font_size,
+            base_direction,
+            Arc::clone(&runs),
+        );
         runs
     }
 
@@ -887,6 +911,103 @@ mod tests {
                 shaper.cache_len()
             );
         }
+    }
+
+    #[test]
+    fn the_entry_past_the_bound_does_not_evict_everything_before_it() {
+        // The load-bearing case is a long virtualized list: a 1000-file listing
+        // at two text runs a row is ~2000 distinct paragraphs against a
+        // 512-entry bound. Under a `clear()`-on-overflow bound the table is
+        // emptied by EVERY insertion past the 512th, so scrolling re-shapes
+        // every visible run from scratch, forever — the cache's hit rate
+        // collapses to zero exactly when the document is big enough to need it.
+        //
+        // What must hold instead: crossing the bound costs some of the LEAST
+        // recently touched entries and nothing else.
+        let calls = Rc::new(Cell::new(0));
+        let shaper = counting_shaper(calls.clone());
+        let default = face("Fallback");
+        let shape = |i: usize| {
+            let text = format!("paragraph {i}");
+            let _ = shaper.shape_paragraph(
+                &text,
+                &chain(),
+                &attrs(),
+                &default,
+                16.0,
+                TextDirection::LeftToRight,
+            );
+        };
+
+        let cap = ParagraphShaper::MAX_ENTRIES;
+        for i in 0..cap {
+            shape(i);
+        }
+        assert_eq!(calls.get(), cap, "each distinct paragraph shapes once");
+        assert_eq!(shaper.cache_len(), cap, "the bound is not yet crossed");
+
+        // The one that crosses it.
+        shape(cap);
+        assert!(
+            shaper.cache_len() > cap / 2,
+            "crossing the bound emptied the cache down to {} entries",
+            shaper.cache_len(),
+        );
+
+        // And an entry from before the bound was crossed is still THERE, not
+        // merely counted: re-asking for it reaches no port.
+        let before = calls.get();
+        shape(cap - 1);
+        shape(cap * 3 / 4);
+        assert_eq!(
+            calls.get(),
+            before,
+            "a paragraph cached before the bound was crossed had to be re-shaped",
+        );
+    }
+
+    #[test]
+    fn a_cache_hit_hands_back_the_very_same_runs() {
+        // Every hit used to deep-clone the paragraph: a fresh `Vec<ShapedRun>`
+        // and a fresh glyph buffer per run, allocated only so the caller could
+        // read advances off it. On the frame path that is once per visible text
+        // run per frame.
+        let shaper = ParagraphShaper::new(
+            Box::new(SingleRunItemizer::new()),
+            Box::new(MockFontResolver::new()),
+            Box::new(MockTextShaper::new()),
+        );
+        let default = face("Fallback");
+        let shape = || {
+            shaper.shape_paragraph_shared(
+                "a filename in a long list.txt",
+                &chain(),
+                &attrs(),
+                &default,
+                16.0,
+                TextDirection::LeftToRight,
+            )
+        };
+        let first = shape();
+        let second = shape();
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a hit must share the shaped runs, not copy them"
+        );
+        // The copying form still exists, and still agrees with the shared one.
+        assert_eq!(
+            shaper
+                .shape_paragraph(
+                    "a filename in a long list.txt",
+                    &chain(),
+                    &attrs(),
+                    &default,
+                    16.0,
+                    TextDirection::LeftToRight,
+                )
+                .as_slice(),
+            &*first,
+        );
     }
 
     #[test]

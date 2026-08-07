@@ -122,6 +122,32 @@ mod tests {
     }
 
     #[test]
+    fn into_commands_hands_back_the_buffer_it_was_given() {
+        // Why this is worth a test rather than being obvious from the signature:
+        // `into_commands` and `commands().to_vec()` produce equal `Vec`s, so no
+        // assertion about CONTENT can tell them apart, and the composer reached for
+        // the second on an owned list it was about to drop — a deep copy of every
+        // command of every painted node, once per node per frame. Pointer identity
+        // is the only observable difference, so it is the one asserted.
+        let commands = vec![draw(), draw(), draw()];
+        let source = commands.as_ptr();
+        let list = DisplayList::from_commands(commands);
+
+        let copied = list.commands().to_vec();
+        assert!(
+            !core::ptr::eq(copied.as_ptr(), source),
+            "`commands().to_vec()` is a copy — two live buffers cannot share an address"
+        );
+        drop(copied);
+
+        let moved = list.into_commands();
+        assert!(
+            core::ptr::eq(moved.as_ptr(), source),
+            "`into_commands` must move the buffer out, not copy it"
+        );
+    }
+
+    #[test]
     fn missing_pop_is_unbalanced() {
         let list = DisplayList::from_commands(vec![
             PaintCommand::PushClip(Clip::rect(Rect::default())),

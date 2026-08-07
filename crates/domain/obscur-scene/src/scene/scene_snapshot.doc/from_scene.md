@@ -1,4 +1,4 @@
 Captures an immutable snapshot of `scene`'s current state.
 
-Clones the scene's root display list and captures its generation and
-statistics. This is what [`Scene::snapshot`] calls.
+Shares the scene's root display list — a refcount bump, not a copy — and
+captures its generation and statistics. This is what [`Scene::snapshot`] calls.

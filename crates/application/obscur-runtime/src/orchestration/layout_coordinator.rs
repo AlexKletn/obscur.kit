@@ -1679,6 +1679,18 @@ mod tests {
         caches: &Caches,
         dirty: Option<&LayoutInvalidation>,
     ) -> LayoutBoxes {
+        lay_out_scrolled(tree, computed, paragraph, caches, dirty, (0.0, 0.0))
+    }
+
+    /// [`lay_out`] at an explicit viewport scroll offset.
+    fn lay_out_scrolled(
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        paragraph: &ParagraphShaper,
+        caches: &Caches,
+        dirty: Option<&LayoutInvalidation>,
+        scroll: (f32, f32),
+    ) -> LayoutBoxes {
         let coordinator = LayoutCoordinator::new();
         let styles = coordinator.layout_styles_from(computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         coordinator.layout_invalidated(
@@ -1687,7 +1699,7 @@ mod tests {
             computed,
             &GridTemplates::new(),
             Size::new(400.0, 300.0),
-            (0.0, 0.0),
+            scroll,
             paragraph,
             None,
             None,
@@ -1695,6 +1707,63 @@ mod tests {
             &caches.arranges,
             dirty,
         )
+    }
+
+    #[test]
+    fn a_scrolled_frame_reuses_every_measure_and_moves_no_box() {
+        // The half of the scroll claim that lives here: given the classifier no
+        // longer degrades a scroll-only frame to `Full` (which passes
+        // `dirty = None`, and `None` is what CLEARS both caches wholesale), the
+        // coordinator must actually be able to serve that frame from what it
+        // retained. Two things have to hold, and neither is obvious:
+        //
+        //  * no box moves — layout is in document coordinates, and the offset
+        //    reaches the walk only through `Inset::sticky_offset`;
+        //  * every text leaf's measure is a cache HIT — the measure key is
+        //    `(node, constraints)` and carries no scroll, so re-descending the
+        //    tree (the arrange key DOES carry scroll) re-shapes nothing.
+        //
+        // Without the classifier fix this frame arrives with `dirty = None`, both
+        // caches are emptied, and all three text leaves are re-shaped from
+        // scratch — at 60 Hz, for every pixel of a flick.
+        let (tree, computed, [_root, wrapper, a, b, c]) = flow_of_three_texts(Some((400.0, 300.0)));
+        let paragraph = test_paragraph();
+        let caches = Caches::default();
+
+        let at_rest = lay_out_scrolled(&tree, &computed, &paragraph, &caches, None, (0.0, 0.0));
+        let retained = caches.measures.len();
+        assert!(retained > 0, "frame 1 must retain some measures");
+        for node in [wrapper, a, b, c] {
+            assert!(caches.measures.measured(node), "frame 1 measures {node:?}");
+        }
+
+        // Frame 2: 40 pixels of scroll and nothing else, so the dirty set the
+        // classifier produces is empty — it names no node whose box can move.
+        let unchanged = LayoutInvalidation::new();
+        let scrolled = lay_out_scrolled(
+            &tree,
+            &computed,
+            &paragraph,
+            &caches,
+            Some(&unchanged),
+            (0.0, 40.0),
+        );
+
+        assert_eq!(
+            caches.measures.measured_count(),
+            0,
+            "a scrolled frame must re-measure NOTHING; it re-measured {} node(s)",
+            caches.measures.measured_count(),
+        );
+        assert_eq!(
+            caches.measures.len(),
+            retained,
+            "a scrolled frame must not evict a single retained measure"
+        );
+        assert_eq!(
+            at_rest, scrolled,
+            "no `position: sticky` box here, so scrolling moves nothing"
+        );
     }
 
     #[test]

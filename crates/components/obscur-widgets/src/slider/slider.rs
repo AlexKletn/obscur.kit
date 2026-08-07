@@ -228,9 +228,27 @@ mod tests {
                 .map(|p| p.value().clone())
         };
         assert_eq!(low_of(props), low_of(bar), "one truth, written twice");
-        assert!(
-            !bar.iter().any(|p| p.name() == LOCAL_NAME),
-            "the local name belongs to the host, or the canvas would claim the \
+        // The bar carries its OWN name — `Canvas::into_view_node` names every
+        // canvas `canvas`, which is what lets a stylesheet reach the box a painter
+        // draws into — and it must never carry the host's. `slider` is the name
+        // `role_of` turns into `SemanticRole::Slider`, so the copy loop drops it
+        // and the accessibility tree reports one slider rather than two; `canvas`
+        // maps to no role at all (`_ => SemanticRole::Group`), which is exactly
+        // what an unnamed element mapped to before it had a name.
+        let name_of = |set: &[obscur_view::view::ViewProperty]| {
+            set.iter()
+                .find(|p| p.name() == LOCAL_NAME)
+                .map(|p| p.value().clone())
+        };
+        assert_eq!(
+            name_of(bar),
+            Some(ViewValue::Text("canvas".into())),
+            "the bar is a canvas and says so, or no rule can size the painter's box"
+        );
+        assert_ne!(
+            name_of(bar),
+            name_of(props),
+            "the host's name belongs to the host, or the canvas would claim the \
              role and the accessibility tree would report two sliders"
         );
     }
