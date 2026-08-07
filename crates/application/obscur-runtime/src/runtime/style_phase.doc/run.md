@@ -15,3 +15,7 @@ of them, because only [`CascadeSheets`] may put the list together.
 
 `wants_animation_frame` reports that §4.17 S4 started a timeline off this
 cascade; the runtime, which owns the scheduler, is what asks for the frame.
+
+`reconcile_roots` also bounds the §4.16 generated-content pass, which is scoped
+by the same dirty set the cascade was and keeps the previous frame's answer for
+every node outside it.

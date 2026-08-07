@@ -18,3 +18,8 @@ make every authored field uneditable), so for those nodes the value is the text
 the field renders, which is the mounted control's editable run. Reading only the
 reserved attribute would paint the hint on top of an authored
 `<input value="abc" placeholder="Search"/>`.
+
+`candidates` is the pre-filtered set of rules whose subject is the exported
+`placeholder` part. Unlike a pseudo-element, an empty set does not mean an
+empty answer: the hint paints whether or not any rule styles it, and an empty
+set only means it paints in the text painter's default colour.

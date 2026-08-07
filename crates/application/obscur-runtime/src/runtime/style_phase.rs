@@ -134,7 +134,7 @@ impl<'a> StylePhase<'a> {
         phase_clock.mark_reconcile();
         // The cascade tier is borrowed only for the match + resolve itself, so the
         // motion overlay below can take `overlaid` back.
-        let (mut computed, resolved_count, delta) = {
+        let (mut computed, resolved_count, delta, dirty) = {
             let mut phase = RestylePhase::new(
                 self.tree,
                 self.pseudo,
@@ -158,18 +158,24 @@ impl<'a> StylePhase<'a> {
                 // sub-reconcile): restyle everything.
                 None => None,
             };
-            match scope {
+            // The dirty set outlives the match: the generated-content pass below
+            // is scoped by the same set the cascade was.
+            if let Some(dirty) = scope {
                 // The retained map is moved out and handed back as this frame's
                 // styles, so a node outside the dirty set costs nothing at all.
-                Some(dirty) => phase.invalidated(
+                let (computed, resolved, delta) = phase.invalidated(
                     std::mem::take(self.retained),
                     &sheets,
                     &environment,
                     ctx.viewport(),
                     &dirty,
                     self.diagnostics,
-                ),
-                None => phase.everything(&sheets, &environment, ctx.viewport(), self.diagnostics),
+                );
+                (computed, resolved, delta, Some(dirty))
+            } else {
+                let (computed, resolved, delta) =
+                    phase.everything(&sheets, &environment, ctx.viewport(), self.diagnostics);
+                (computed, resolved, delta, None)
             }
         };
         // §4.16 generated / synthetic decoration (`::before`/`::after` content
@@ -177,8 +183,18 @@ impl<'a> StylePhase<'a> {
         // author) and environment the cascade used, so compose can paint it and
         // `inspect_snapshot` can project the synthetic placeholder part. It is
         // pure decoration — it never becomes a tree / a11y / hit node — so it
-        // is computed here rather than materialised into the tree.
-        *self.generated_content = resolve_generated_content(self.tree, &sheets, &environment);
+        // is computed here rather than materialised into the tree. It is scoped
+        // the same way the cascade above was: an incremental frame resolves the
+        // dirty nodes and keeps the previous frame's answer for the rest, and
+        // the pass skips the selector engine entirely for a sheet set that
+        // authors no decoration — which is most of them.
+        resolve_generated_content(
+            self.generated_content,
+            self.tree,
+            &sheets,
+            &environment,
+            dirty.as_ref(),
+        );
         // Remember what these inputs/styles were produced from, so the next
         // frame can tell whether interaction state is all that moved.
         *self.last_style = Some(StyleKey {
