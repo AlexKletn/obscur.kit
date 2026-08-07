@@ -2,8 +2,9 @@
 
 use crate::property::{
     BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
-    ConicGradient, FilterOp, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length,
-    LengthExpr, LinearGradient, ObjectFit, RadialGradient, StyleColor, Transform, TransformOrigin,
+    ConicGradient, FilterFunction, FilterOp, GridAreaTemplate, GridLineValue, GridTrack,
+    GridTrackList, Length, LengthExpr, LinearGradient, ObjectFit, RadialGradient, StyleColor,
+    Transform, TransformFunction, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -42,6 +43,8 @@ pub enum PropertyValue {
     BoxShadow(Box<[BoxShadow]>),
     #[doc = include_str!("property_value.doc/Filter.md")]
     Filter(Box<[FilterOp]>),
+    #[doc = include_str!("property_value.doc/FilterFunctions.md")]
+    FilterFunctions(Box<[FilterFunction]>),
     #[doc = include_str!("property_value.doc/FontFamilies.md")]
     FontFamilies(Box<[Box<str>]>),
     #[doc = include_str!("property_value.doc/GridTracks.md")]
@@ -58,6 +61,8 @@ pub enum PropertyValue {
     String(Box<str>),
     #[doc = include_str!("property_value.doc/Transform.md")]
     Transform(Transform),
+    #[doc = include_str!("property_value.doc/TransformFunctions.md")]
+    TransformFunctions(Box<[TransformFunction]>),
     #[doc = include_str!("property_value.doc/TransformOrigin.md")]
     TransformOrigin(TransformOrigin),
     #[doc = include_str!("property_value.doc/CustomRef.md")]
@@ -80,6 +85,8 @@ impl PropertyValue {
             Self::GridTracks(tracks) => tracks.uses_ch(),
             Self::BoxShadow(shadows) => shadows.iter().any(BoxShadow::uses_ch),
             Self::Filter(ops) => ops.iter().any(FilterOp::uses_ch),
+            Self::FilterFunctions(list) => list.iter().any(FilterFunction::uses_ch),
+            Self::TransformFunctions(list) => list.iter().any(TransformFunction::uses_ch),
             Self::BackgroundSize(size) => size.uses_ch(),
             Self::BackgroundPosition(position) => position.x().is_ch() || position.y().is_ch(),
             Self::TransformOrigin(origin) => origin.x().is_ch() || origin.y().is_ch(),
@@ -87,10 +94,9 @@ impl PropertyValue {
             Self::ConicGradient(gradient) => gradient.uses_ch(),
             Self::BackgroundLayers(layers) => layers.iter().any(BackgroundLayer::uses_ch),
             // Carrying no length at all. `linear-gradient` carries an angle and
-            // stop offsets; `transform` and `filter: blur()` were flattened to
-            // numbers by the CSS lowering (so a relative unit is lost *there*, not
-            // here — see `absolutize_filter`); a `var()` reference is substituted
-            // before this is asked.
+            // stop offsets; a `Transform` / `Filter` is the RESOLVED form of the
+            // two variants above it, whose lengths are already numbers; a `var()`
+            // reference is substituted before this is asked.
             Self::Keyword(_)
             | Self::Number(_)
             | Self::Color(_)

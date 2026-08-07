@@ -1,10 +1,11 @@
 #![doc = include_str!("absolutize.doc/_module.md")]
 
 use crate::property::{
-    BackgroundLayer, BackgroundPosition, BackgroundSize, BoxShadow, ConicGradient, FilterOp,
-    GridTrack, GridTrackList, Length, LengthContext, LengthExpr, PropertyValue, RadialGradient,
-    RadialSize, TransformOrigin,
+    BackgroundLayer, BackgroundPosition, BackgroundSize, BoxShadow, ConicGradient, FilterFunction,
+    FilterOp, GridTrack, GridTrackList, Length, LengthContext, LengthExpr, PropertyValue,
+    RadialGradient, RadialSize, Transform, TransformFunction, TransformOrigin,
 };
+use obscur_geometry::AffineTransform;
 
 #[doc = include_str!("absolutize.doc/absolutize_value.md")]
 pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> PropertyValue {
@@ -17,6 +18,8 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
         PropertyValue::Filter(ops) => {
             PropertyValue::Filter(ops.iter().map(|op| absolutize_filter(op, ctx)).collect())
         }
+        PropertyValue::FilterFunctions(list) => absolutize_filter_functions(&list, ctx),
+        PropertyValue::TransformFunctions(list) => absolutize_transform_functions(&list, ctx),
         PropertyValue::BackgroundSize(size) => {
             PropertyValue::BackgroundSize(absolutize_background_size(size, ctx))
         }
@@ -43,10 +46,8 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
             list.line_names().to_vec().into_boxed_slice(),
         )),
         // `linear-gradient` carries an angle and stop offsets, never a length;
-        // `transform` and `filter: blur()` were already flattened to numbers by
-        // the CSS lowering (a relative unit is lost *there*, not here — see the
-        // module docs of `obscur_css`'s property compiler); and the rest carry
-        // no length to fold.
+        // a `Transform` is the RESOLVED matrix (its unresolved form is the
+        // `TransformFunctions` arm above); and the rest carry no length to fold.
         PropertyValue::Keyword(_)
         | PropertyValue::Number(_)
         | PropertyValue::Color(_)
@@ -88,6 +89,50 @@ fn absolutize_shadow(shadow: &BoxShadow, ctx: &LengthContext) -> BoxShadow {
         shadow.color(),
         shadow.is_inset(),
     )
+}
+
+#[doc = include_str!("absolutize.doc/absolutize_transform_functions.md")]
+fn absolutize_transform_functions(
+    list: &[TransformFunction],
+    ctx: &LengthContext,
+) -> PropertyValue {
+    let mut composed = AffineTransform::IDENTITY;
+    for function in list {
+        let Some(coeffs) = function.resolve(ctx) else {
+            // One unknown distance and the whole list stays symbolic: a matrix
+            // built from the rest would place the element at a distance nobody
+            // authored. The value keeps whatever this context DID fold, so a
+            // later pass (a measured `ch`) can finish it.
+            return PropertyValue::TransformFunctions(
+                list.iter().map(|f| f.absolutize(ctx)).collect(),
+            );
+        };
+        composed = composed.multiply(AffineTransform { coeffs });
+    }
+    PropertyValue::Transform(Transform::new(composed.coeffs))
+}
+
+#[doc = include_str!("absolutize.doc/absolutize_filter_functions.md")]
+fn absolutize_filter_functions(list: &[FilterFunction], ctx: &LengthContext) -> PropertyValue {
+    let mut ops: Vec<FilterOp> = Vec::with_capacity(list.len());
+    for function in list {
+        match function {
+            FilterFunction::Op(op) => ops.push(absolutize_filter(op, ctx)),
+            FilterFunction::Blur(_) => {
+                let Some(radius) = function.resolve_blur_radius(ctx) else {
+                    return PropertyValue::FilterFunctions(
+                        list.iter().map(|f| f.absolutize_blur(ctx)).collect(),
+                    );
+                };
+                // A zero (or negative) radius carries no op, matching the CSS
+                // lowering: `blur(0)` must stay byte-identical to no filter.
+                if radius > 0.0 {
+                    ops.push(FilterOp::Blur(radius));
+                }
+            }
+        }
+    }
+    PropertyValue::Filter(ops.into_boxed_slice())
 }
 
 #[doc = include_str!("absolutize.doc/absolutize_filter.md")]
@@ -321,6 +366,118 @@ mod tests {
         assert_eq!(shadow.offset_x(), Length::px(16.0));
         // `blur()`'s radius is already a number by lowering time; unchanged here.
         assert_eq!(out[1], FilterOp::Blur(4.0));
+    }
+
+    /// The defect this pass was extended for: `translate(2em, 10vw)` used to be
+    /// dropped entirely by the CSS lowering (no matrix, no diagnostic that said
+    /// which distance it could not read). It now arrives unresolved and folds
+    /// here — 2em = 32 against a 16px font, 10vw = 80 against an 800px viewport.
+    #[test]
+    fn a_relative_translate_folds_into_the_matrix() {
+        let list = PropertyValue::TransformFunctions(
+            vec![TransformFunction::Translate(
+                LengthExpr::leaf(Length::Em(2.0)),
+                LengthExpr::leaf(Length::Vw(10.0)),
+            )]
+            .into_boxed_slice(),
+        );
+        assert_eq!(
+            absolutize_value(list, &ctx()),
+            PropertyValue::Transform(Transform::new([1.0, 0.0, 0.0, 1.0, 32.0, 80.0]))
+        );
+    }
+
+    /// Composition order is the author's, and a relative translate composes with
+    /// the functions around it exactly as a `px` one would: `scale(2)
+    /// translate(1em)` scales the translation into e = 32, where `translate(1em)
+    /// scale(2)` leaves it at 16.
+    #[test]
+    fn a_relative_translate_composes_in_author_order() {
+        let scale_then_translate = PropertyValue::TransformFunctions(
+            vec![
+                TransformFunction::Matrix([2.0, 0.0, 0.0, 2.0, 0.0, 0.0]),
+                TransformFunction::Translate(
+                    LengthExpr::leaf(Length::Em(1.0)),
+                    LengthExpr::leaf(Length::px(0.0)),
+                ),
+            ]
+            .into_boxed_slice(),
+        );
+        assert_eq!(
+            absolutize_value(scale_then_translate, &ctx()),
+            PropertyValue::Transform(Transform::new([2.0, 0.0, 0.0, 2.0, 32.0, 0.0]))
+        );
+        let translate_then_scale = PropertyValue::TransformFunctions(
+            vec![
+                TransformFunction::Translate(
+                    LengthExpr::leaf(Length::Em(1.0)),
+                    LengthExpr::leaf(Length::px(0.0)),
+                ),
+                TransformFunction::Matrix([2.0, 0.0, 0.0, 2.0, 0.0, 0.0]),
+            ]
+            .into_boxed_slice(),
+        );
+        assert_eq!(
+            absolutize_value(translate_then_scale, &ctx()),
+            PropertyValue::Transform(Transform::new([2.0, 0.0, 0.0, 2.0, 16.0, 0.0]))
+        );
+    }
+
+    /// A distance this context cannot resolve keeps the whole list symbolic —
+    /// never a matrix with a `0` where the unknown was. (A `%` cannot reach here
+    /// from CSS, which reports it; `ch` before measurement can.)
+    #[test]
+    fn an_unresolvable_translate_keeps_the_list_and_folds_the_rest() {
+        let list = PropertyValue::TransformFunctions(
+            vec![TransformFunction::Translate(
+                LengthExpr::leaf(Length::Rem(1.0)),
+                LengthExpr::leaf(Length::Percent(50.0)),
+            )]
+            .into_boxed_slice(),
+        );
+        assert_eq!(
+            absolutize_value(list, &ctx()),
+            PropertyValue::TransformFunctions(
+                vec![TransformFunction::Translate(
+                    LengthExpr::leaf(Length::px(20.0)),
+                    LengthExpr::leaf(Length::Percent(50.0)),
+                )]
+                .into_boxed_slice(),
+            )
+        );
+    }
+
+    /// The filter half of the same defect: `blur(1rem)` used to become a radius
+    /// of `0` (an op that painted nothing, inside a valid-looking filter list).
+    #[test]
+    fn a_relative_blur_radius_folds_into_the_op_list() {
+        let list = PropertyValue::FilterFunctions(
+            vec![
+                FilterFunction::Op(FilterOp::Grayscale(1.0)),
+                FilterFunction::Blur(LengthExpr::leaf(Length::Rem(1.0))),
+            ]
+            .into_boxed_slice(),
+        );
+        assert_eq!(
+            absolutize_value(list, &ctx()),
+            PropertyValue::Filter(
+                vec![FilterOp::Grayscale(1.0), FilterOp::Blur(20.0)].into_boxed_slice()
+            )
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_blur_radius_keeps_the_list() {
+        let list = PropertyValue::FilterFunctions(
+            vec![FilterFunction::Blur(LengthExpr::leaf(Length::Percent(
+                10.0,
+            )))]
+            .into_boxed_slice(),
+        );
+        assert!(matches!(
+            absolutize_value(list, &ctx()),
+            PropertyValue::FilterFunctions(_)
+        ));
     }
 
     #[test]

@@ -1,6 +1,6 @@
-Absolutizes the one filter op that carries lengths (`drop-shadow(...)`).
+Absolutizes the one RESOLVED filter op that carries lengths (`drop-shadow(...)`).
 
-`blur(<length>)`'s radius is an `f32` by the time it reaches a computed value:
-the CSS lowering resolved it with `Length::as_px`, so a `blur(1em)` is already
-`0` before this pass sees it. That is a lowering-side limitation and is not
-papered over here.
+A `blur(<length>)` in this list is already an `f32` — the CSS lowering flattens a
+`px` radius directly. A radius it could NOT flatten (`blur(1rem)`) never reaches
+this function: it arrives as a `PropertyValue::FilterFunctions`, which
+`absolutize_filter_functions` resolves first.

@@ -1,10 +1,13 @@
 #![doc = include_str!("filter_lowering.doc/_module.md")]
 
+use super::calc_lowering::lower_math_function;
 use super::color_lowering::parse_stop_color;
 use super::property_compiler::narrow_f32;
 use super::shadow_lowering::shadow_length;
 use crate::parser::ParsedValue;
-use obscur_style::property::{BoxShadow, FilterOp, Length, PropertyValue, StyleColor};
+use obscur_style::property::{
+    BoxShadow, FilterFunction, FilterOp, Length, LengthExpr, PropertyValue, StyleColor,
+};
 
 #[doc = include_str!("filter_lowering.doc/lower_filter.md")]
 pub(super) fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
@@ -14,7 +17,7 @@ pub(super) fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
     {
         return Some(PropertyValue::Filter(Box::new([])));
     }
-    let mut ops: Vec<FilterOp> = Vec::new();
+    let mut functions: Vec<FilterFunction> = Vec::new();
     for value in values {
         let ParsedValue::Function { name, args } = value else {
             // A bare token in the filter list is not a filter function; the value
@@ -22,24 +25,47 @@ pub(super) fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
             return None;
         };
         if name.eq_ignore_ascii_case("drop-shadow") {
-            ops.push(FilterOp::DropShadow(lower_one_drop_shadow(args)?));
+            functions.push(FilterFunction::Op(FilterOp::DropShadow(
+                lower_one_drop_shadow(args)?,
+            )));
         } else if name.eq_ignore_ascii_case("blur") {
-            // A positive radius becomes a blur op; `blur(0)` / `blur()` is a no-op
-            // (kept out of the list so it stays byte-identical to no filter).
-            let radius = lower_one_blur(args)?;
-            if radius > 0.0 {
-                ops.push(FilterOp::Blur(radius));
-            }
+            push_blur(&mut functions, lower_one_blur(args)?);
         } else if is_color_filter_name(name) {
             // A color-matrix function (`brightness`/`contrast`/`saturate`/
             // `grayscale`/`sepia`/`invert`/`hue-rotate`/`opacity`): each is an
             // affine color transform the coordinator folds into ONE 4×5 matrix.
-            ops.push(lower_one_color_filter(name, args)?);
+            functions.push(FilterFunction::Op(lower_one_color_filter(name, args)?));
         }
         // Every other (unrecognised) filter function is out of scope and silently
         // dropped — not faked.
     }
-    Some(PropertyValue::Filter(ops.into_boxed_slice()))
+    Some(flatten_or_defer(functions))
+}
+
+#[doc = include_str!("filter_lowering.doc/flatten_or_defer.md")]
+fn flatten_or_defer(functions: Vec<FilterFunction>) -> PropertyValue {
+    let mut ops: Vec<FilterOp> = Vec::with_capacity(functions.len());
+    for function in &functions {
+        let FilterFunction::Op(op) = function else {
+            return PropertyValue::FilterFunctions(functions.into_boxed_slice());
+        };
+        ops.push(op.clone());
+    }
+    PropertyValue::Filter(ops.into_boxed_slice())
+}
+
+#[doc = include_str!("filter_lowering.doc/push_blur.md")]
+fn push_blur(functions: &mut Vec<FilterFunction>, radius: LengthExpr) {
+    // A radius already in pixels folds here, and a zero one carries no op at all
+    // (`blur(0)` / `blur()` stays byte-identical to no filter). A relative one
+    // rides on as a pending blur for computed value to resolve.
+    if let LengthExpr::Leaf(Length::Px(px)) = radius {
+        if px.0 > 0.0 {
+            functions.push(FilterFunction::Op(FilterOp::Blur(px.0)));
+        }
+        return;
+    }
+    functions.push(FilterFunction::Blur(radius));
 }
 
 #[doc = include_str!("filter_lowering.doc/is_color_filter_name.md")]
@@ -136,41 +162,42 @@ pub(super) fn lower_backdrop_filter(values: &[ParsedValue]) -> Option<PropertyVa
     {
         return Some(PropertyValue::Filter(Box::new([])));
     }
-    let mut ops: Vec<FilterOp> = Vec::new();
+    let mut functions: Vec<FilterFunction> = Vec::new();
     for value in values {
         let ParsedValue::Function { name, args } = value else {
             // A bare token in the list is not a filter function; it is malformed.
             return None;
         };
         if name.eq_ignore_ascii_case("blur") {
-            // A positive radius becomes a blur op; `blur(0)` / `blur()` is a no-op
-            // (kept out of the list so it stays byte-identical to no effect).
-            let radius = lower_one_blur(args)?;
-            if radius > 0.0 {
-                ops.push(FilterOp::Blur(radius));
-            }
+            push_blur(&mut functions, lower_one_blur(args)?);
         }
         // Every other function (color-matrix, `drop-shadow()`, `brightness()`, …)
         // is out of scope for `backdrop-filter` and silently dropped — not faked.
     }
-    Some(PropertyValue::Filter(ops.into_boxed_slice()))
+    Some(flatten_or_defer(functions))
 }
 
 #[doc = include_str!("filter_lowering.doc/lower_one_blur.md")]
-fn lower_one_blur(args: &[ParsedValue]) -> Option<f32> {
+fn lower_one_blur(args: &[ParsedValue]) -> Option<LengthExpr> {
     // `blur()` → 0 (the CSS initial): a no-op.
     if args.is_empty() {
-        return Some(0.0);
+        return Some(LengthExpr::leaf(Length::px(0.0)));
     }
     let [value] = args else {
         return None;
     };
-    let length = shadow_length(value)?;
-    let px = length.as_px().map_or(0.0, |px| px.0);
-    if px < 0.0 {
-        return None;
+    if let ParsedValue::Function { name, args } = value {
+        let expr = lower_math_function(name, args)?;
+        // `blur()` takes a `<length>`; a `%` has no basis at all, and taking one
+        // for `0` is what made `blur(1rem)` render sharp.
+        return (!expr.uses_percent()).then_some(expr);
     }
-    Some(px)
+    match shadow_length(value)? {
+        Length::Percent(_) => None,
+        // A negative radius is invalid CSS, and the whole declaration with it.
+        Length::Px(px) if px.0 < 0.0 => None,
+        length => Some(LengthExpr::leaf(length)),
+    }
 }
 
 #[doc = include_str!("filter_lowering.doc/lower_one_drop_shadow.md")]
@@ -219,7 +246,9 @@ mod tests {
 
     use crate::compiler::CompiledDeclaration;
 
-    use obscur_style::property::{BoxShadow, FilterOp, Length, PropertyValue, StyleColor};
+    use obscur_style::property::{
+        BoxShadow, FilterFunction, FilterOp, Length, LengthExpr, PropertyValue, StyleColor,
+    };
 
     /// Extracts the lowered ordered `filter` op list from a declaration.
     fn filter_ops_of(text: &str) -> Box<[FilterOp]> {
@@ -419,6 +448,79 @@ mod tests {
         // scope for the backdrop pass and silently dropped (empty list, not error).
         assert!(filter_ops_of("backdrop-filter: drop-shadow(2px 2px 2px black)").is_empty());
         assert!(filter_ops_of("backdrop-filter: brightness(0.5)").is_empty());
+    }
+
+    /// The defect: `blur(1rem)` used to be flattened with `Length::as_px`, which
+    /// answers `None` for every relative unit — and the `None` was read as a
+    /// radius of `0`, so a valid-looking empty filter painted nothing sharp.
+    /// The radius now survives lowering and is folded at computed-value time.
+    #[test]
+    fn filter_relative_blur_radius_survives_as_a_pending_blur() {
+        for text in [
+            "filter: blur(1rem)",
+            "filter: blur(0.5em)",
+            "filter: blur(2vw)",
+            "backdrop-filter: blur(1rem)",
+        ] {
+            let PropertyValue::FilterFunctions(list) = value_of(text) else {
+                panic!("{text} must carry its radius, not flatten it to 0");
+            };
+            assert_eq!(list.len(), 1, "{text}");
+            assert!(
+                matches!(list[0], FilterFunction::Blur(_)),
+                "{text} is a pending blur"
+            );
+        }
+    }
+
+    #[test]
+    fn filter_pending_blur_keeps_the_chain_in_order() {
+        let PropertyValue::FilterFunctions(list) = value_of("filter: grayscale(1) blur(1em)")
+        else {
+            panic!("the whole chain is carried once one function is unresolved");
+        };
+        assert_eq!(list[0], FilterFunction::Op(FilterOp::Grayscale(1.0)));
+        assert_eq!(
+            list[1],
+            FilterFunction::Blur(LengthExpr::leaf(Length::Em(1.0)))
+        );
+    }
+
+    #[test]
+    fn filter_blur_calc_is_carried_as_the_expression() {
+        let PropertyValue::FilterFunctions(list) = value_of("filter: blur(calc(1rem + 2px))")
+        else {
+            panic!("a calc radius is carried, not dropped");
+        };
+        assert_eq!(
+            list[0],
+            FilterFunction::Blur(LengthExpr::Sum(
+                Box::new(LengthExpr::leaf(Length::Rem(1.0))),
+                Box::new(LengthExpr::leaf(Length::px(2.0))),
+            ))
+        );
+    }
+
+    /// `blur()` takes a `<length>`: a percentage has no basis, and a negative
+    /// radius is invalid. Both report themselves rather than blurring by `0`.
+    #[test]
+    fn filter_percentage_and_negative_blur_are_unsupported() {
+        for text in [
+            "filter: blur(50%)",
+            "filter: blur(-4px)",
+            "backdrop-filter: blur(50%)",
+        ] {
+            assert!(
+                matches!(compile(text).0, CompiledDeclaration::Unsupported(_)),
+                "{text} must be reported"
+            );
+        }
+    }
+
+    #[test]
+    fn filter_absolute_blur_units_still_flatten_at_lower_time() {
+        // 12pt = 16px: absolute, so it never pays for the unresolved list.
+        assert_eq!(filter_ops_of("filter: blur(12pt)")[0], FilterOp::Blur(16.0));
     }
 
     #[test]

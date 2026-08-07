@@ -7,7 +7,10 @@ functions are modelled, kept in author order:
   a `box-shadow` DROP subset painted behind the element.
 - `blur(<length>)` → a [`FilterOp::Blur`] (via [`lower_one_blur`]), the radius
   resolved to logical pixels. A zero radius (`blur(0)`, `blur()`) yields **no**
-  op, so it round-trips to the byte-identical no-blur path.
+  op, so it round-trips to the byte-identical no-blur path. A radius in a
+  relative unit cannot resolve here at all (`rem` is the root font size), so the
+  whole list rides out as a [`PropertyValue::FilterFunctions`] for computed
+  value to fold.
 - the color-matrix functions (`brightness`, `contrast`, `saturate`,
   `grayscale`, `sepia`, `invert`, `hue-rotate`, `opacity`) → the matching
   [`FilterOp`] color variant (via [`lower_one_color_filter`]), each an affine

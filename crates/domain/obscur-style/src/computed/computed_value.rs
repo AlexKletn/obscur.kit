@@ -44,6 +44,14 @@ impl ComputedValue {
             // sheets is two different symbols and neither matches a registry.
             | PropertyValue::Name(_)
             | PropertyValue::Transform(_)
+            // The two specified-value list forms are concrete in the same sense
+            // a `Calc` is: they are a real value the cascade can carry, waiting
+            // for a length context. The resolver folds them into a `Transform` /
+            // `Filter` as it absolutizes, which is only reachable from HERE —
+            // rejecting them would drop `transform: translate(2em)` before the
+            // one pass that can resolve it ever runs.
+            | PropertyValue::TransformFunctions(_)
+            | PropertyValue::FilterFunctions(_)
             | PropertyValue::TransformOrigin(_) => Some(Self(value)),
             // `content` is a generated-content decoration, never a computed value
             // of a real element's box, so it has no place in a `ComputedValue`.

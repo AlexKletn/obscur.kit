@@ -42,6 +42,18 @@ impl LengthExpr {
         }
     }
 
+    #[doc = include_str!("length_expr.doc/uses_percent.md")]
+    #[must_use]
+    pub fn uses_percent(&self) -> bool {
+        match self {
+            Self::Leaf(length) => matches!(length, Length::Percent(_)),
+            Self::Product(inner, _) | Self::Quotient(inner, _) => inner.uses_percent(),
+            Self::Sum(a, b) | Self::Diff(a, b) => a.uses_percent() || b.uses_percent(),
+            Self::Min(terms) | Self::Max(terms) => terms.iter().any(Self::uses_percent),
+            Self::Clamp(a, b, c) => a.uses_percent() || b.uses_percent() || c.uses_percent(),
+        }
+    }
+
     #[doc = include_str!("length_expr.doc/absolutize.md")]
     #[must_use]
     pub fn absolutize(&self, ctx: &LengthContext) -> Self {
@@ -144,6 +156,36 @@ mod tests {
             ])),
         );
         assert!(!expr.uses_ch());
+    }
+
+    #[test]
+    fn uses_percent_finds_a_percent_leaf_at_any_depth() {
+        // `transform: translateX(calc(100% - 10px))` must be refused, not
+        // resolved with the `%` quietly taken as `0`.
+        let deep = LengthExpr::Diff(
+            Box::new(LengthExpr::leaf(Length::Percent(100.0))),
+            Box::new(LengthExpr::leaf(Length::px(10.0))),
+        );
+        assert!(deep.uses_percent());
+        assert!(
+            LengthExpr::Clamp(
+                Box::new(LengthExpr::leaf(Length::px(1.0))),
+                Box::new(LengthExpr::Product(
+                    Box::new(LengthExpr::leaf(Length::Percent(50.0))),
+                    2.0,
+                )),
+                Box::new(LengthExpr::leaf(Length::px(9.0))),
+            )
+            .uses_percent()
+        );
+        // Must not fire on the units a length context CAN resolve.
+        assert!(
+            !LengthExpr::Min(vec![
+                LengthExpr::leaf(Length::Em(1.0)),
+                LengthExpr::leaf(Length::Vw(2.0)),
+            ])
+            .uses_percent()
+        );
     }
 
     #[test]
