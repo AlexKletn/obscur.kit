@@ -6,10 +6,13 @@ use obscur_accessibility::semantic::{
     SemanticAction, SemanticNode, SemanticRole, SemanticState, SemanticValue,
 };
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
-use obscur_identity::NodeId;
+use obscur_identity::{InternedSymbol, NodeId};
 use obscur_tree::node::{NodeFlags, NodeKind, RetainedNode};
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
+use obscur_view::view::{
+    EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, SLIDER_HIGH, SLIDER_LOW, SLIDER_RANGED, SliderScale,
+    ViewProperty, ViewValue,
+};
 
 #[doc = include_str!("semantic_builder.doc/InheritedState.md")]
 #[derive(Debug, Clone, Copy, Default)]
@@ -39,6 +42,12 @@ impl InheritedState {
 pub struct SemanticTreeBuilder;
 
 impl SemanticTreeBuilder {
+    #[doc = include_str!("semantic_builder.doc/PROGRESS_VALUE.md")]
+    const PROGRESS_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0702);
+
+    #[doc = include_str!("semantic_builder.doc/PROGRESS_TRACKED.md")]
+    const PROGRESS_TRACKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0704);
+
     #[doc = include_str!("semantic_builder.doc/build.md")]
     #[must_use]
     pub fn build(tree: &RetainedTree, focused: Option<NodeId>) -> SemanticTree {
@@ -133,7 +142,83 @@ impl SemanticTreeBuilder {
             semantic = semantic.with_name(name);
         }
 
+        let value = Self::value_of(role, node);
+        if !value.is_none() {
+            semantic = semantic.with_value(value);
+        }
+
         semantic
+    }
+
+    #[doc = include_str!("semantic_builder.doc/value_of.md")]
+    fn value_of(role: SemanticRole, node: &RetainedNode) -> SemanticValue {
+        match role {
+            SemanticRole::Slider => Self::slider_value(node.props()),
+            SemanticRole::ProgressBar => Self::progress_value(node.props()),
+            _ => SemanticValue::None,
+        }
+    }
+
+    #[doc = include_str!("semantic_builder.doc/slider_value.md")]
+    fn slider_value(props: &[ViewProperty]) -> SemanticValue {
+        let Some(low) = Self::number_prop(props, SLIDER_LOW) else {
+            return SemanticValue::None;
+        };
+        let scale = SliderScale::read(props);
+        if Self::flag_prop(props, SLIDER_RANGED) {
+            let high = Self::number_prop(props, SLIDER_HIGH).unwrap_or(low);
+            SemanticValue::range(low, high, scale.min, scale.max)
+        } else {
+            SemanticValue::number(low, scale.min, scale.max)
+        }
+    }
+
+    #[doc = include_str!("semantic_builder.doc/progress_value.md")]
+    fn progress_value(props: &[ViewProperty]) -> SemanticValue {
+        // An untracked bar carries a value of zero — it has to carry something —
+        // and that zero is not a position. Reading it would announce "not
+        // started" for a bar that is running and does not know how far.
+        if !Self::is_tracked(props) {
+            return SemanticValue::None;
+        }
+        Self::number_prop(props, Self::PROGRESS_VALUE).map_or(SemanticValue::None, |fraction| {
+            // The scale the bar is drawn against, so the announced fraction and
+            // the painted one are the same number.
+            SemanticValue::number(fraction.clamp(0.0, 1.0), 0.0, 1.0)
+        })
+    }
+
+    #[doc = include_str!("semantic_builder.doc/is_tracked.md")]
+    fn is_tracked(props: &[ViewProperty]) -> bool {
+        // Absent means tracked, the same default the painter takes: only an
+        // explicit denial makes a bar indeterminate.
+        !props.iter().any(|p| {
+            p.name() == Self::PROGRESS_TRACKED && matches!(p.value(), ViewValue::Bool(false))
+        })
+    }
+
+    #[doc = include_str!("semantic_builder.doc/number_prop.md")]
+    fn number_prop(props: &[ViewProperty], name: InternedSymbol) -> Option<f32> {
+        props
+            .iter()
+            .find(|p| p.name() == name)
+            .and_then(|p| match p.value() {
+                #[allow(clippy::cast_possible_truncation)]
+                ViewValue::Float(v) => Some(*v as f32),
+                #[allow(clippy::cast_precision_loss)]
+                ViewValue::Int(v) => Some(*v as f32),
+                ViewValue::Text(text) => text.trim().parse::<f32>().ok(),
+                _ => None,
+            })
+            .filter(|v| v.is_finite())
+    }
+
+    #[doc = include_str!("semantic_builder.doc/flag_prop.md")]
+    fn flag_prop(props: &[ViewProperty], name: InternedSymbol) -> bool {
+        props
+            .iter()
+            .find(|p| p.name() == name)
+            .is_some_and(|p| matches!(p.value(), ViewValue::Bool(true)))
     }
 
     #[doc = include_str!("semantic_builder.doc/checked_state.md")]
@@ -239,8 +324,8 @@ mod tests {
     use super::*;
     use obscur_identity::{ComponentId, InternedSymbol};
     use obscur_view::view::{
-        CHECKED, CLASS, DISABLED, LOCAL_NAME, READONLY, StyleAttributes, ViewEventBinding,
-        ViewProperty, ViewValue,
+        CHECKED, CLASS, DISABLED, LOCAL_NAME, READONLY, SLIDER_MAX, SLIDER_MIN, StyleAttributes,
+        ViewEventBinding, ViewProperty, ViewValue,
     };
 
     /// Allocates an element whose local name (CSS type) is `local_name`.
@@ -273,6 +358,39 @@ mod tests {
             .unwrap()
             .set_attributes(StyleAttributes::extract(&props));
         id
+    }
+
+    /// Allocates an element with local name `local_name` carrying `props`
+    /// verbatim, exactly as the reconciler stamps a widget's property list onto
+    /// a retained node (`set_props`) alongside the extracted attributes.
+    fn element_carrying(
+        tree: &mut RetainedTree,
+        component: u64,
+        local_name: &str,
+        props: &[ViewProperty],
+    ) -> NodeId {
+        let id = tree.alloc(NodeKind::Element {
+            component: ComponentId::from_raw(component),
+        });
+        let mut all = vec![ViewProperty::new(
+            LOCAL_NAME,
+            ViewValue::Text(local_name.into()),
+        )];
+        all.extend_from_slice(props);
+        let node = tree.get_mut(id).unwrap();
+        node.set_attributes(StyleAttributes::extract(&all));
+        node.set_props(all.into_boxed_slice());
+        id
+    }
+
+    /// A single-node tree whose one child is `local_name` carrying `props`.
+    fn control_tree(local_name: &str, props: &[ViewProperty]) -> (RetainedTree, NodeId) {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        let id = element_carrying(&mut tree, 50, local_name, props);
+        tree.get_mut(root).unwrap().push_child(id);
+        tree.set_root(root);
+        (tree, id)
     }
 
     /// Binds each of `events` to a command on an already-allocated node.
@@ -610,6 +728,172 @@ mod tests {
                 "{cell}"
             );
         }
+    }
+
+    /// The headline defect: a slider was announced as a slider and then said
+    /// nothing about where it was — a control the user is told exists and
+    /// cannot read.
+    #[test]
+    fn a_slider_publishes_its_position_and_its_scale() {
+        let (tree, slider) = control_tree(
+            "slider",
+            &[
+                ViewProperty::new(SLIDER_MIN, ViewValue::Float(0.0)),
+                ViewProperty::new(SLIDER_MAX, ViewValue::Float(10.0)),
+                ViewProperty::new(SLIDER_LOW, ViewValue::Float(4.0)),
+                ViewProperty::new(SLIDER_HIGH, ViewValue::Float(4.0)),
+                ViewProperty::new(SLIDER_RANGED, ViewValue::Bool(false)),
+            ],
+        );
+
+        let semantic = SemanticTreeBuilder::build(&tree, None);
+        let node = semantic.get(slider).unwrap();
+        assert_eq!(node.role(), SemanticRole::Slider);
+        assert_eq!(
+            node.value(),
+            &SemanticValue::number(4.0, 0.0, 10.0),
+            "a slider at 4 on a 0..10 scale says so, bounds included"
+        );
+    }
+
+    /// A two-thumb slider has two positions and neither of them is "the value".
+    #[test]
+    fn a_ranged_slider_reports_both_ends_rather_than_half_of_itself() {
+        let (tree, slider) = control_tree(
+            "slider",
+            &[
+                ViewProperty::new(SLIDER_MIN, ViewValue::Float(0.0)),
+                ViewProperty::new(SLIDER_MAX, ViewValue::Float(100.0)),
+                ViewProperty::new(SLIDER_LOW, ViewValue::Float(20.0)),
+                ViewProperty::new(SLIDER_HIGH, ViewValue::Float(80.0)),
+                ViewProperty::new(SLIDER_RANGED, ViewValue::Bool(true)),
+            ],
+        );
+
+        let semantic = SemanticTreeBuilder::build(&tree, None);
+        let value = semantic.get(slider).unwrap().value();
+        assert_eq!(value, &SemanticValue::range(20.0, 80.0, 0.0, 100.0));
+        assert_eq!(
+            value.as_number(),
+            None,
+            "announcing 20 for a 20..80 control would be half the truth"
+        );
+    }
+
+    /// A bare `<slider/>` has not been given a position, and reporting `0`
+    /// would be a claim the tree never made.
+    #[test]
+    fn a_slider_with_no_stated_position_publishes_no_number() {
+        let (tree, slider) = control_tree("slider", &[]);
+        let semantic = SemanticTreeBuilder::build(&tree, None);
+        assert!(semantic.get(slider).unwrap().value().is_none());
+    }
+
+    /// The property list `Progress::new(0.5).view()` stamps on its host node.
+    fn progress_props(value: f64, tracked: bool) -> Vec<ViewProperty> {
+        vec![
+            ViewProperty::new(SemanticTreeBuilder::PROGRESS_VALUE, ViewValue::Float(value)),
+            ViewProperty::new(
+                SemanticTreeBuilder::PROGRESS_TRACKED,
+                ViewValue::Bool(tracked),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_progress_bar_publishes_its_fraction() {
+        let (tree, bar) = control_tree("progress", &progress_props(0.5, true));
+        let semantic = SemanticTreeBuilder::build(&tree, None);
+        let node = semantic.get(bar).unwrap();
+        assert_eq!(node.role(), SemanticRole::ProgressBar);
+        assert_eq!(node.value(), &SemanticValue::number(0.5, 0.0, 1.0));
+    }
+
+    /// A value written in markup arrives as a string, and spells the same fact.
+    #[test]
+    fn a_progress_bar_reads_a_fraction_written_as_text() {
+        let (tree, bar) = control_tree(
+            "progressbar",
+            &[ViewProperty::new(
+                SemanticTreeBuilder::PROGRESS_VALUE,
+                ViewValue::Text("0.25".into()),
+            )],
+        );
+        let semantic = SemanticTreeBuilder::build(&tree, None);
+        assert_eq!(
+            semantic.get(bar).unwrap().value(),
+            &SemanticValue::number(0.25, 0.0, 1.0)
+        );
+    }
+
+    /// "Running, position unknown" is spelled by the ABSENCE of a number —
+    /// exactly as ARIA omits `aria-valuenow`.
+    ///
+    /// The trap this pins: `Progress::indeterminate()` still carries a value,
+    /// and that value is `0.0`, because the property list has to carry
+    /// something. Reading it would announce "not started" about a bar that is
+    /// running — a different and false thing.
+    #[test]
+    fn an_indeterminate_progress_bar_publishes_no_number() {
+        let (tree, bar) = control_tree("progress", &progress_props(0.0, false));
+        let semantic = SemanticTreeBuilder::build(&tree, None);
+        let value = semantic.get(bar).unwrap().value();
+        assert!(value.is_none(), "an untracked bar states no position");
+        assert_eq!(value.as_number(), None);
+
+        // And a bar that states nothing at all is equally without a number.
+        let (bare, id) = control_tree("progress", &[]);
+        assert!(
+            SemanticTreeBuilder::build(&bare, None)
+                .get(id)
+                .unwrap()
+                .value()
+                .is_none()
+        );
+    }
+
+    /// A value that is correct only on the first frame is the defect a user
+    /// reports as "the screen reader never hears the update". The projection is
+    /// rebuilt from the tree on every publish, so it must follow the control.
+    #[test]
+    fn the_published_value_follows_the_control() {
+        let (mut tree, slider) = control_tree(
+            "slider",
+            &[
+                ViewProperty::new(SLIDER_MIN, ViewValue::Float(0.0)),
+                ViewProperty::new(SLIDER_MAX, ViewValue::Float(10.0)),
+                ViewProperty::new(SLIDER_LOW, ViewValue::Float(4.0)),
+            ],
+        );
+        assert_eq!(
+            SemanticTreeBuilder::build(&tree, None)
+                .get(slider)
+                .unwrap()
+                .value()
+                .as_number(),
+            Some(4.0)
+        );
+
+        // The drag moved the thumb; the reconciler restamped the props.
+        tree.get_mut(slider).unwrap().set_props(
+            vec![
+                ViewProperty::new(LOCAL_NAME, ViewValue::Text("slider".into())),
+                ViewProperty::new(SLIDER_MIN, ViewValue::Float(0.0)),
+                ViewProperty::new(SLIDER_MAX, ViewValue::Float(10.0)),
+                ViewProperty::new(SLIDER_LOW, ViewValue::Float(7.0)),
+            ]
+            .into_boxed_slice(),
+        );
+
+        assert_eq!(
+            SemanticTreeBuilder::build(&tree, None)
+                .get(slider)
+                .unwrap()
+                .value()
+                .as_number(),
+            Some(7.0),
+            "the next publish carries the new position, not the first frame's"
+        );
     }
 
     #[test]

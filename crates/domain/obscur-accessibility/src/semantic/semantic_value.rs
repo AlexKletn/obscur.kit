@@ -18,6 +18,17 @@ pub enum SemanticValue {
         #[doc = include_str!("semantic_value.doc/max.md")]
         max: f32,
     },
+    #[doc = include_str!("semantic_value.doc/Range.md")]
+    Range {
+        #[doc = include_str!("semantic_value.doc/low.md")]
+        low: f32,
+        #[doc = include_str!("semantic_value.doc/high.md")]
+        high: f32,
+        #[doc = include_str!("semantic_value.doc/min.md")]
+        min: f32,
+        #[doc = include_str!("semantic_value.doc/max.md")]
+        max: f32,
+    },
 }
 
 impl SemanticValue {
@@ -45,6 +56,17 @@ impl SemanticValue {
         Self::Number { value, min, max }
     }
 
+    #[doc = include_str!("semantic_value.doc/range.md")]
+    #[must_use]
+    pub const fn range(low: f32, high: f32, min: f32, max: f32) -> Self {
+        Self::Range {
+            low,
+            high,
+            min,
+            max,
+        }
+    }
+
     #[doc = include_str!("semantic_value.doc/is_none.md")]
     #[must_use]
     pub const fn is_none(&self) -> bool {
@@ -65,6 +87,15 @@ impl SemanticValue {
     pub const fn as_number(&self) -> Option<f32> {
         match self {
             Self::Number { value, .. } => Some(*value),
+            _ => None,
+        }
+    }
+
+    #[doc = include_str!("semantic_value.doc/as_range.md")]
+    #[must_use]
+    pub const fn as_range(&self) -> Option<(f32, f32)> {
+        match self {
+            Self::Range { low, high, .. } => Some((*low, *high)),
             _ => None,
         }
     }
@@ -117,6 +148,19 @@ mod tests {
     fn number_as_number() {
         let v = SemanticValue::number(3.0, 0.0, 10.0);
         assert_eq!(v.as_number(), Some(3.0));
+    }
+
+    #[test]
+    fn range_carries_both_ends_and_refuses_to_pass_for_one() {
+        // The whole point of the variant: a two-thumb control has two positions
+        // and no single one, so `as_number` must not hand back an end. A caller
+        // that got `Some(20.0)` for a 20..80 range would announce half the
+        // control as if it were the whole of it.
+        let v = SemanticValue::range(20.0, 80.0, 0.0, 100.0);
+        assert!(!v.is_none());
+        assert_eq!(v.as_range(), Some((20.0, 80.0)));
+        assert_eq!(v.as_number(), None);
+        assert_eq!(SemanticValue::number(5.0, 0.0, 10.0).as_range(), None);
     }
 
     #[test]

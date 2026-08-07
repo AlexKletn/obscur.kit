@@ -82,6 +82,23 @@ impl NodeConverter {
                 out.set_min_numeric_value(f64::from(*min));
                 out.set_max_numeric_value(f64::from(*max));
             }
+            SemanticValue::Range {
+                low,
+                high,
+                min,
+                max,
+            } => {
+                // AccessKit has one `numeric_value` per node, as every platform
+                // API it fronts does, so a two-thumb control cannot state its
+                // position numerically here. Filling that slot with one end
+                // would announce half the control as the whole of it, so it is
+                // left EMPTY and the two ends are spoken through the value
+                // string instead — which is what a reader falls back to.
+                // The bounds are still true of the control, so they are stated.
+                out.set_value(format!("{low} to {high}"));
+                out.set_min_numeric_value(f64::from(*min));
+                out.set_max_numeric_value(f64::from(*max));
+            }
         }
 
         for action in node.actions() {
@@ -169,6 +186,33 @@ mod tests {
         assert_eq!(out.numeric_value(), Some(5.0));
         assert_eq!(out.min_numeric_value(), Some(0.0));
         assert_eq!(out.max_numeric_value(), Some(10.0));
+    }
+
+    #[test]
+    fn range_value_names_both_ends_and_claims_no_single_number() {
+        // A two-thumb slider announced as "20" would be a lie about where the
+        // control is; announced as "20 to 80" it is the truth AccessKit's
+        // one-number slot cannot hold.
+        let node = SemanticNode::new(DomainNodeId::from_raw(30), SemanticRole::Slider)
+            .with_value(SemanticValue::range(20.0, 80.0, 0.0, 100.0));
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert_eq!(out.value(), Some("20 to 80"));
+        assert_eq!(out.numeric_value(), None);
+        assert_eq!(out.min_numeric_value(), Some(0.0));
+        assert_eq!(out.max_numeric_value(), Some(100.0));
+    }
+
+    #[test]
+    fn a_valueless_progress_bar_carries_no_number() {
+        // The indeterminate bar. Omitting the numeric value is exactly how ARIA
+        // and AccessKit spell "running, position unknown"; a zero here would say
+        // "not started", which is a different and false thing.
+        let node = SemanticNode::new(DomainNodeId::from_raw(31), SemanticRole::ProgressBar);
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert_eq!(out.numeric_value(), None);
+        assert_eq!(out.min_numeric_value(), None);
+        assert_eq!(out.max_numeric_value(), None);
+        assert_eq!(out.value(), None);
     }
 
     #[test]
