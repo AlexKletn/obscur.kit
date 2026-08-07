@@ -1,9 +1,12 @@
 #![doc = include_str!("style_matching_coordinator.doc/_module.md")]
 
-use obscur_identity::NodeId;
+use std::collections::HashMap;
+
+use obscur_identity::{InternedSymbol, NodeId};
 use obscur_style::cascade::{Cascade, CascadeOrigin, Declaration, ResolvedDeclarations};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, StyleMatcher, Stylesheet};
+use obscur_style::property::PropertyValue;
 use obscur_style::selector::{MatchElement, SelectorMatcher};
 use obscur_tree::tree::RetainedTree;
 
@@ -73,6 +76,10 @@ impl StyleMatchingCoordinator {
             if !resolved.is_empty() {
                 inputs.set_cascaded(id, resolved);
             }
+            let custom = custom_for_node(matcher, sheets, tree, id, pseudo, environment);
+            if !custom.is_empty() {
+                inputs.set_custom(id, custom);
+            }
         }
         inputs
     }
@@ -98,6 +105,15 @@ impl StyleMatchingCoordinator {
                 inputs.clear_cascaded(id);
             } else {
                 inputs.set_cascaded(id, resolved);
+            }
+            // Rematched with the declarations, not left behind: a node that
+            // stopped matching `.dark` must stop carrying `.dark`'s `--brand`,
+            // and the whole subtree below it inherits the difference.
+            let custom = custom_for_node(matcher, sheets, tree, id, pseudo, environment);
+            if custom.is_empty() {
+                inputs.clear_custom(id);
+            } else {
+                inputs.set_custom(id, custom);
             }
             matched += 1;
         }
@@ -160,6 +176,27 @@ fn resolved_for_node(
         None => matcher.match_element_in(sheets, &element, environment),
         Some(host) => scoped_internal_declarations(sheets, tree, node, host, pseudo, environment),
     }
+}
+
+#[doc = include_str!("style_matching_coordinator.doc/custom_for_node.md")]
+fn custom_for_node(
+    matcher: StyleMatcher,
+    sheets: &[Stylesheet],
+    tree: &RetainedTree,
+    node: NodeId,
+    pseudo: &PseudoStates,
+    environment: &MediaEnvironment,
+) -> HashMap<InternedSymbol, PropertyValue> {
+    // A component's internals declare none of their own: an app sheet's
+    // `.card { --pad: 8px }` must not reach inside a component that happens to
+    // use the class, exactly as its longhands do not. They still SEE the host's
+    // custom properties — those inherit down the computed tree, which is how a
+    // component is themed from outside without opening its boundary.
+    if component_host(tree, node).is_some() {
+        return HashMap::new();
+    }
+    let element = TreeElement::with_pseudo(tree, node, pseudo);
+    matcher.match_custom_properties_in(sheets, &element, environment)
 }
 
 #[doc = include_str!("style_matching_coordinator.doc/scoped_internal_declarations.md")]
@@ -369,6 +406,87 @@ mod tests {
             hot.cascaded_for(child).get(PropertyId::BackgroundColor),
             Some(&red()),
             ":hover matches once hover state is recorded"
+        );
+    }
+
+    /// A stylesheet: `.counter { --brand: red }`.
+    fn brand_sheet() -> Stylesheet {
+        use obscur_style::property::CustomProperty;
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                StyleRule::new(class_selectors("counter"), Vec::new()).with_custom_properties(
+                    vec![CustomProperty::new(InternedSymbol::named("--brand"), red())],
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_custom_property_a_rule_declares_reaches_the_node_that_matched_it() {
+        // The link this whole path exists for: a compiled `--brand` that never
+        // reaches `StyleInputs` is a `var(--brand)` that resolves to nothing,
+        // silently, in every sheet that uses one.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
+        ]));
+        let tree = reconcile(&view);
+        let child = tree
+            .get(tree.root().unwrap())
+            .unwrap()
+            .child_nodes()
+            .to_vec()[0];
+
+        let inputs = StyleMatchingCoordinator::new().match_single(&tree, &brand_sheet());
+
+        assert_eq!(
+            inputs
+                .custom_for(child)
+                .get(&InternedSymbol::named("--brand")),
+            Some(&red())
+        );
+        // The rule declared no longhand, so nothing entered the ordinary cascade.
+        assert!(inputs.cascaded_for(child).is_empty());
+    }
+
+    #[test]
+    fn a_node_that_no_longer_matches_loses_the_custom_property_it_declared() {
+        // The incremental path: a stale `--brand` would keep theming a subtree
+        // that stopped asking for it.
+        use obscur_style::invalidation::StyleInvalidation;
+
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
+        ]));
+        let tree = reconcile(&view);
+        let child = tree
+            .get(tree.root().unwrap())
+            .unwrap()
+            .child_nodes()
+            .to_vec()[0];
+
+        let coordinator = StyleMatchingCoordinator::new();
+        let mut inputs = coordinator.match_single(&tree, &brand_sheet());
+        assert!(!inputs.custom_for(child).is_empty());
+
+        let mut dirty = StyleInvalidation::new();
+        dirty.invalidate(
+            child,
+            obscur_style::invalidation::StyleInvalidationReason::StylesheetChanged,
+        );
+        coordinator.rematch_into(
+            &mut inputs,
+            &tree,
+            &[],
+            &PseudoStates::new(),
+            &MediaEnvironment::unbounded(),
+            &dirty,
+        );
+        assert!(
+            inputs.custom_for(child).is_empty(),
+            "no sheet declares it any more"
         );
     }
 

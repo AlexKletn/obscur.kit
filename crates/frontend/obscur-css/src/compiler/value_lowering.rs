@@ -5,6 +5,7 @@ use super::color_lowering::{color_from_function, named_color, parse_hex_color};
 use super::property_compiler::narrow_f32;
 use super::stylesheet_compiler::CssSymbolInterner;
 use crate::parser::ParsedValue;
+use obscur_identity::InternedSymbol;
 use obscur_style::property::{EnvVar, Length, PropertyValue, layout_keyword};
 
 #[doc = include_str!("value_lowering.doc/css_wide_keyword.md")]
@@ -141,8 +142,14 @@ fn lower_function(
 ) -> Option<PropertyValue> {
     if name.eq_ignore_ascii_case("var") {
         return args.iter().find_map(|arg| match arg {
+            // The reference is minted from the NAME, never from this sheet's
+            // interner, for the reason `property_compiler` gives where the
+            // declaration is minted: a per-source interner numbers from zero, so
+            // an interned `--brand` would only ever match a declaration compiled
+            // by the same compiler instance — never one from the theme sheet
+            // next to it, and never one from a `style` attribute.
             ParsedValue::Keyword(k) if k.starts_with("--") => {
-                Some(PropertyValue::CustomRef(interner.intern(k)))
+                Some(PropertyValue::CustomRef(InternedSymbol::named(k)))
             }
             _ => None,
         });
@@ -238,11 +245,17 @@ mod tests {
 
     #[test]
     fn lowers_var_to_custom_ref() {
-        let (d, interner) = standard("color: var(--brand)");
+        use obscur_identity::InternedSymbol;
+
+        let (d, _) = standard("color: var(--brand)");
         let PropertyValue::CustomRef(symbol) = d.value().clone() else {
             panic!("expected custom ref");
         };
-        assert_eq!(interner.resolve(symbol), Some("--brand"));
+        // Named rather than interned: the sheet this reference was written in
+        // is usually not the sheet the declaration was written in, and a
+        // per-source interner would give the two different numbers.
+        assert_eq!(symbol, InternedSymbol::named("--brand"));
+        assert_ne!(symbol, InternedSymbol::named("--other"));
     }
 
     #[test]

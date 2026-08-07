@@ -48,6 +48,12 @@ impl CssPipeline {
         for source in sources {
             let compiled = StylesheetCompiler::new().compile(self.cache.parse(source));
             collect_motion(&compiled, &mut transitions, &mut keyframes);
+            // `compiled.custom_properties` is deliberately not forwarded: it is a
+            // flat per-SHEET list that cannot say which elements a `--name` was
+            // declared for, and `:root { --brand: red }` next to
+            // `.dark { --brand: blue }` is two answers for two elements. The
+            // declarations the runtime actually cascades ride inside
+            // `matchable`, on the rule that declared them.
             self.sheets.push(compiled.matchable);
             self.errors.extend(compiled.errors);
             self.unsupported.extend(compiled.unsupported);

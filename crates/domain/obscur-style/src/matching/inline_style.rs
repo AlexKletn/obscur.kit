@@ -3,12 +3,15 @@
 use std::sync::Arc;
 
 use crate::matching::BlockDeclaration;
+use crate::property::CustomProperty;
 
 #[doc = include_str!("inline_style.doc/InlineStyle.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InlineStyle {
     #[doc = include_str!("inline_style.doc/declarations.md")]
     declarations: Arc<[BlockDeclaration]>,
+    #[doc = include_str!("inline_style.doc/custom_properties.md")]
+    custom_properties: Arc<[CustomProperty]>,
 }
 
 impl InlineStyle {
@@ -17,7 +20,21 @@ impl InlineStyle {
     pub fn new(declarations: impl Into<Arc<[BlockDeclaration]>>) -> Self {
         Self {
             declarations: declarations.into(),
+            custom_properties: Arc::from([]),
         }
+    }
+
+    #[doc = include_str!("inline_style.doc/with_custom_properties.md")]
+    #[must_use]
+    pub fn with_custom_properties(mut self, properties: impl Into<Arc<[CustomProperty]>>) -> Self {
+        self.custom_properties = properties.into();
+        self
+    }
+
+    #[doc = include_str!("inline_style.doc/custom_properties_2.md")]
+    #[must_use]
+    pub fn custom_properties(&self) -> &[CustomProperty] {
+        &self.custom_properties
     }
 
     #[doc = include_str!("inline_style.doc/empty.md")]
@@ -35,7 +52,10 @@ impl InlineStyle {
     #[doc = include_str!("inline_style.doc/is_empty.md")]
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.declarations.is_empty()
+        // A block that declares only `--brand: #f00` declares SOMETHING; callers
+        // skip an empty block, and one that answered `true` here would drop the
+        // custom property on the floor.
+        self.declarations.is_empty() && self.custom_properties.is_empty()
     }
 }
 
@@ -64,6 +84,22 @@ mod tests {
             &PropertyValue::Number(2.0),
             "the later one is still later"
         );
+    }
+
+    #[test]
+    fn a_block_that_declares_only_a_custom_property_is_not_empty() {
+        // The caller skips an empty block, so answering `true` here would be a
+        // silent way to lose `style="--brand: red"` entirely.
+        use crate::property::CustomProperty;
+        use obscur_identity::InternedSymbol;
+
+        let block = InlineStyle::new(Vec::new()).with_custom_properties(vec![CustomProperty::new(
+            InternedSymbol::named("--brand"),
+            PropertyValue::Number(1.0),
+        )]);
+        assert!(!block.is_empty());
+        assert!(block.declarations().is_empty());
+        assert_eq!(block.custom_properties().len(), 1);
     }
 
     #[test]

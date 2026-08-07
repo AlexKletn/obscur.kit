@@ -103,6 +103,17 @@ impl InlineStyles {
             let mut resolved = inputs.cascaded_for(node).clone();
             apply(&mut resolved, &block);
             inputs.set_cascaded(node, resolved);
+            if !block.custom_properties().is_empty() {
+                // Written over whatever the sheets cascaded for this node, with
+                // no comparison to make: the inline origin is above every
+                // authored one (§4.14), and a custom property carries no
+                // `!important` of its own for the one exception to apply to.
+                let mut custom = inputs.custom_for(node).clone();
+                for property in block.custom_properties() {
+                    custom.insert(property.name(), property.value().clone());
+                }
+                inputs.set_custom(node, custom);
+            }
         }
         // Swept against the tree that was just walked, so the cache cannot
         // outgrow the markup. An application that computes its attribute — a
@@ -373,6 +384,56 @@ mod tests {
             styles.apply_all(&tree, &mut inputs, &NullDiagnosticSink);
             assert_eq!(styles.cached(), 1, "one live string, one entry");
         }
+    }
+
+    #[test]
+    fn a_custom_property_written_on_the_element_outranks_the_sheets() {
+        // §4.14 origin 5: what an author wrote ON the element wins, and a custom
+        // property is a declaration like any other. The properties the sheets
+        // set that the attribute does not mention are left alone — an inline
+        // `--brand` overrides `--brand`, not the whole theme.
+        use crate::orchestration::StyleInputs;
+        use obscur_identity::{ComponentId, InternedSymbol};
+        use obscur_style::property::CustomProperty;
+        use obscur_tree::node::NodeKind;
+        use obscur_tree::tree::RetainedTree;
+        use obscur_view::view::{STYLE, StyleAttributes, ViewProperty, ViewValue};
+
+        let brand = InternedSymbol::named("--brand");
+        let accent = InternedSymbol::named("--accent");
+
+        let mut tree = RetainedTree::new();
+        let node = tree.alloc(NodeKind::Element {
+            component: ComponentId::from_raw(1),
+        });
+        tree.set_root(node);
+        let prop = ViewProperty::new(STYLE, ViewValue::Text("--brand: 2".into()));
+        tree.get_mut(node)
+            .expect("just allocated")
+            .set_attributes(StyleAttributes::extract(&[prop]));
+
+        let mut styles = InlineStyles::new();
+        styles.install(Box::new(move |_| {
+            InlineStyleOutcome::new(
+                InlineStyle::empty()
+                    .with_custom_properties(vec![CustomProperty::new(brand, value(2.0))]),
+            )
+        }));
+
+        let mut inputs = StyleInputs::new();
+        let mut from_sheets = std::collections::HashMap::new();
+        from_sheets.insert(brand, value(1.0));
+        from_sheets.insert(accent, value(9.0));
+        inputs.set_custom(node, from_sheets);
+
+        styles.apply_all(&tree, &mut inputs, &NullDiagnosticSink);
+
+        assert_eq!(inputs.custom_for(node).get(&brand), Some(&value(2.0)));
+        assert_eq!(
+            inputs.custom_for(node).get(&accent),
+            Some(&value(9.0)),
+            "the sheet's other custom property is untouched"
+        );
     }
 
     #[test]

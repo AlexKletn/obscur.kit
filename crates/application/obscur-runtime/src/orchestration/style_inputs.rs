@@ -41,6 +41,11 @@ impl StyleInputs {
         self.custom.insert(node, custom);
     }
 
+    #[doc = include_str!("style_inputs.doc/clear_custom.md")]
+    pub fn clear_custom(&mut self, node: NodeId) {
+        self.custom.remove(&node);
+    }
+
     #[doc = include_str!("style_inputs.doc/cascaded_for.md")]
     #[must_use]
     pub(crate) fn cascaded_for(&self, node: NodeId) -> &ResolvedDeclarations {

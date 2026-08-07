@@ -1,7 +1,7 @@
 #![doc = include_str!("style_rule.doc/_module.md")]
 
 use crate::matching::{BlockDeclaration, RuleCondition};
-use crate::property::PropertyId;
+use crate::property::{CustomProperty, PropertyId};
 use crate::selector::SelectorList;
 
 #[doc = include_str!("style_rule.doc/StyleRule.md")]
@@ -12,6 +12,8 @@ pub struct StyleRule {
     condition: Option<RuleCondition>,
     #[doc = include_str!("style_rule.doc/invalid_values.md")]
     invalid_values: Vec<PropertyId>,
+    #[doc = include_str!("style_rule.doc/custom_properties.md")]
+    custom_properties: Vec<CustomProperty>,
 }
 
 impl StyleRule {
@@ -23,7 +25,21 @@ impl StyleRule {
             block,
             condition: None,
             invalid_values: Vec::new(),
+            custom_properties: Vec::new(),
         }
+    }
+
+    #[doc = include_str!("style_rule.doc/with_custom_properties.md")]
+    #[must_use]
+    pub fn with_custom_properties(mut self, properties: Vec<CustomProperty>) -> Self {
+        self.custom_properties = properties;
+        self
+    }
+
+    #[doc = include_str!("style_rule.doc/custom_properties_2.md")]
+    #[must_use]
+    pub fn custom_properties(&self) -> &[CustomProperty] {
+        &self.custom_properties
     }
 
     #[doc = include_str!("style_rule.doc/with_invalid_values.md")]
@@ -91,6 +107,34 @@ mod tests {
         assert_eq!(rule.block()[0].property(), PropertyId::Color);
         // A rule built with `new` carries no condition.
         assert!(rule.condition().is_none());
+    }
+
+    #[test]
+    fn custom_properties_are_carried_beside_the_block_not_inside_it() {
+        // They are keyed by name, so the block — keyed by `PropertyId` — has no
+        // slot for them, and a rule that dropped them here is exactly how
+        // `var()` ends up resolving to nothing.
+        use crate::property::CustomProperty;
+        use obscur_identity::InternedSymbol;
+
+        let rule = StyleRule::new(class_selectors("foo"), Vec::new()).with_custom_properties(vec![
+            CustomProperty::new(
+                InternedSymbol::named("--brand"),
+                PropertyValue::Color(StyleColor::BLACK),
+            ),
+        ]);
+        assert!(rule.block().is_empty());
+        assert_eq!(rule.custom_properties().len(), 1);
+        assert_eq!(
+            rule.custom_properties()[0].name(),
+            InternedSymbol::named("--brand")
+        );
+        // A rule built with `new` carries none.
+        assert!(
+            StyleRule::new(class_selectors("foo"), Vec::new())
+                .custom_properties()
+                .is_empty()
+        );
     }
 
     #[test]

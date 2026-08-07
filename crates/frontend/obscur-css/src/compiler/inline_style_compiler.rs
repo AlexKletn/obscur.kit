@@ -35,14 +35,16 @@ pub fn compile_inline_style(text: &str) -> CompiledInlineStyle {
     let wrapped = format!("*{{{text}}}");
     let parsed = StylesheetParser::new(&CssSource::anonymous(wrapped.as_str())).parse();
     let compiled = StylesheetCompiler::new().compile(&parsed);
-    let declarations = compiled
-        .matchable
-        .rules()
-        .first()
-        .map(|rule| rule.block().to_vec())
+    let rule = compiled.matchable.rules().first();
+    let declarations = rule.map(|rule| rule.block().to_vec()).unwrap_or_default();
+    // `style="--brand: #f00"` is a declaration the cascade has to see: an inline
+    // custom property outranks every sheet that names the same one, and a block
+    // that carried only the longhands would silently drop it.
+    let custom_properties = rule
+        .map(|rule| rule.custom_properties().to_vec())
         .unwrap_or_default();
     CompiledInlineStyle {
-        style: InlineStyle::new(declarations),
+        style: InlineStyle::new(declarations).with_custom_properties(custom_properties),
         unsupported: compiled.unsupported,
         errors: compiled.errors,
     }
@@ -140,6 +142,30 @@ mod tests {
         assert!(
             !ids.contains(&PropertyId::ZIndex),
             "the second rule did not become part of this block: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn a_custom_property_in_the_attribute_reaches_the_block() {
+        // `style="--brand: #f00"` is how an author themes ONE element, and the
+        // block is the only channel it has: dropping it here would make an
+        // inline custom property silently inert.
+        use obscur_identity::InternedSymbol;
+        use obscur_style::property::StyleColor;
+
+        let compiled = compile_inline_style("--brand: #ff0000; color: var(--brand)");
+        let custom = compiled.style.custom_properties();
+        assert_eq!(custom.len(), 1);
+        assert_eq!(custom[0].name(), InternedSymbol::named("--brand"));
+        assert_eq!(
+            custom[0].value(),
+            &PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+        );
+        // And it is the same symbol the reading declaration asks for, even
+        // though a `style` attribute is compiled by its own compiler instance.
+        assert_eq!(
+            compiled.style.declarations()[0].value(),
+            &PropertyValue::CustomRef(InternedSymbol::named("--brand"))
         );
     }
 
