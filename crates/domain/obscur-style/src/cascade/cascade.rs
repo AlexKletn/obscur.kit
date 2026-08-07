@@ -101,24 +101,17 @@ mod tests {
 
     #[test]
     fn higher_priority_declaration_wins_per_property() {
-        // Normal Theme (loses) vs normal Inline (wins) for Color; a separate
-        // Width declaration is unaffected.
+        // The winning Inline declaration is deliberately FIRST: were the loop
+        // merely keeping the last declaration it saw, the trailing Theme one
+        // would take Color and this would pass for the wrong reason.
         let decls = [
-            decl(
-                PropertyId::Color,
-                PropertyValue::Number(1.0),
-                CascadeOrigin::Theme,
-                ImportantFlag::Normal,
-                spec(9, 9, 9),
-                0,
-            ),
             decl(
                 PropertyId::Color,
                 PropertyValue::Number(2.0),
                 CascadeOrigin::Inline,
                 ImportantFlag::Normal,
                 spec(0, 0, 0),
-                1,
+                0,
             ),
             decl(
                 PropertyId::Width,
@@ -126,6 +119,14 @@ mod tests {
                 CascadeOrigin::GlobalApp,
                 ImportantFlag::Normal,
                 spec(0, 0, 0),
+                1,
+            ),
+            decl(
+                PropertyId::Color,
+                PropertyValue::Number(1.0),
+                CascadeOrigin::Theme,
+                ImportantFlag::Normal,
+                spec(9, 9, 9),
                 2,
             ),
         ];
@@ -142,22 +143,89 @@ mod tests {
     }
 
     #[test]
-    fn runtime_override_beats_authored_important() {
-        let decls = [
-            decl(
-                PropertyId::Color,
-                PropertyValue::Number(1.0),
+    fn later_lower_priority_declaration_loses_to_earlier_winner() {
+        // The whole point of the priority comparison: source position alone must
+        // never promote a declaration. Every one of these losers comes after its
+        // winner, and each isolates a single axis of `CascadePriority`.
+        let cases = [
+            // Origin: Inline (winner, first) vs Theme (loser, later).
+            (
                 CascadeOrigin::Inline,
-                ImportantFlag::Important,
-                spec(9, 9, 9),
-                0,
+                ImportantFlag::Normal,
+                spec(0, 0, 0),
+                CascadeOrigin::Theme,
+                ImportantFlag::Normal,
+                spec(0, 0, 0),
             ),
+            // Importance: authored `!important` beats a later normal of the
+            // same origin and higher specificity.
+            (
+                CascadeOrigin::GlobalApp,
+                ImportantFlag::Important,
+                spec(0, 0, 1),
+                CascadeOrigin::GlobalApp,
+                ImportantFlag::Normal,
+                spec(9, 9, 9),
+            ),
+            // Specificity: within one band, the more specific selector wins
+            // even though the loser is later in source order.
+            (
+                CascadeOrigin::GlobalApp,
+                ImportantFlag::Normal,
+                spec(1, 0, 0),
+                CascadeOrigin::GlobalApp,
+                ImportantFlag::Normal,
+                spec(0, 9, 9),
+            ),
+        ];
+        for (win_origin, win_important, win_spec, lose_origin, lose_important, lose_spec) in cases {
+            let decls = [
+                decl(
+                    PropertyId::Color,
+                    PropertyValue::Number(1.0),
+                    win_origin,
+                    win_important,
+                    win_spec,
+                    0,
+                ),
+                decl(
+                    PropertyId::Color,
+                    PropertyValue::Number(2.0),
+                    lose_origin,
+                    lose_important,
+                    lose_spec,
+                    1,
+                ),
+            ];
+            let resolved = Cascade::new().resolve(&decls);
+            assert_eq!(
+                resolved.get(PropertyId::Color),
+                Some(&PropertyValue::Number(1.0)),
+                "the later {lose_origin:?}/{lose_important:?}/{lose_spec:?} declaration must not \
+                 displace the earlier {win_origin:?}/{win_important:?}/{win_spec:?} one"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_override_beats_authored_important() {
+        // Winner first, authored `!important` last, so passing cannot be an
+        // artefact of position.
+        let decls = [
             decl(
                 PropertyId::Color,
                 PropertyValue::Number(2.0),
                 CascadeOrigin::RuntimeOverride,
                 ImportantFlag::Normal,
                 spec(0, 0, 0),
+                0,
+            ),
+            decl(
+                PropertyId::Color,
+                PropertyValue::Number(1.0),
+                CascadeOrigin::Inline,
+                ImportantFlag::Important,
+                spec(9, 9, 9),
                 1,
             ),
         ];
@@ -171,7 +239,9 @@ mod tests {
     #[test]
     fn exact_tie_keeps_last_seen() {
         // Identical priority (same origin, importance, specificity, source
-        // order): the later declaration in the slice must win deterministically.
+        // order): the later of the two tied declarations must win
+        // deterministically. A strictly weaker declaration trails both of them,
+        // so "keeps the last seen" is pinned to the tie, not to the slice end.
         let decls = [
             decl(
                 PropertyId::Color,
@@ -189,6 +259,14 @@ mod tests {
                 spec(0, 0, 0),
                 0,
             ),
+            decl(
+                PropertyId::Color,
+                PropertyValue::Number(3.0),
+                CascadeOrigin::SystemDefault,
+                ImportantFlag::Normal,
+                spec(9, 9, 9),
+                9,
+            ),
         ];
         let resolved = Cascade::new().resolve(&decls);
         assert_eq!(
@@ -199,6 +277,9 @@ mod tests {
 
     #[test]
     fn later_source_order_wins_within_band() {
+        // Order 6 beats order 5 at equal specificity, and the trailing order-7
+        // declaration still loses because its specificity is lower: source order
+        // is the tiebreaker, not the ranking.
         let decls = [
             decl(
                 PropertyId::Color,
@@ -215,6 +296,14 @@ mod tests {
                 ImportantFlag::Normal,
                 spec(1, 1, 1),
                 6,
+            ),
+            decl(
+                PropertyId::Color,
+                PropertyValue::Number(3.0),
+                CascadeOrigin::GlobalApp,
+                ImportantFlag::Normal,
+                spec(1, 1, 0),
+                7,
             ),
         ];
         let resolved = Cascade::new().resolve(&decls);

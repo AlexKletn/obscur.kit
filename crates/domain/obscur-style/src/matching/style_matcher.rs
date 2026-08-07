@@ -1,8 +1,11 @@
 #![doc = include_str!("style_matcher.doc/_module.md")]
 
-use crate::cascade::{Cascade, Declaration, ResolvedDeclarations};
+use crate::cascade::{Cascade, CascadePriority, Declaration, ImportantFlag, ResolvedDeclarations};
 use crate::matching::{MediaEnvironment, Stylesheet};
+use crate::property::PropertyValue;
 use crate::selector::{MatchElement, SelectorMatcher};
+use obscur_identity::InternedSymbol;
+use std::collections::HashMap;
 
 #[doc = include_str!("style_matcher.doc/StyleMatcher.md")]
 #[derive(Debug, Clone, Copy, Default)]
@@ -65,6 +68,62 @@ impl StyleMatcher {
         }
 
         Cascade::new().resolve(&collected)
+    }
+
+    #[doc = include_str!("style_matcher.doc/match_custom_properties_in.md")]
+    #[must_use]
+    pub fn match_custom_properties_in<E: MatchElement>(
+        &self,
+        sheets: &[Stylesheet],
+        element: &E,
+        environment: &MediaEnvironment,
+    ) -> HashMap<InternedSymbol, PropertyValue> {
+        let mut winners: HashMap<InternedSymbol, (CascadePriority, PropertyValue)> = HashMap::new();
+        let mut source_order: u32 = 0;
+
+        for sheet in sheets {
+            let origin = sheet.origin();
+            for rule in sheet.rules() {
+                // Before the selector match, not after: the branch is what keeps
+                // this second walk free for the sheets that use no custom
+                // property, which is most of them.
+                if rule.custom_properties().is_empty() {
+                    continue;
+                }
+                let Some(specificity) = SelectorMatcher::matches_list(rule.selectors(), element)
+                else {
+                    continue;
+                };
+                if !rule
+                    .condition()
+                    .is_none_or(|condition| condition.holds(environment))
+                {
+                    continue;
+                }
+                for custom in rule.custom_properties() {
+                    let order = source_order;
+                    source_order = source_order.wrapping_add(1);
+                    // A custom property carries no `!important` of its own: the
+                    // compiler keeps its value verbatim, flag and all, so there is
+                    // nothing here to read one off. Every candidate therefore sits
+                    // in its origin's normal band and the comparison is decided by
+                    // origin, specificity and order alone.
+                    let priority =
+                        CascadePriority::new(origin, ImportantFlag::Normal, specificity, order);
+                    match winners.get(&custom.name()) {
+                        Some((winner, _)) if priority < *winner => {}
+                        _ => {
+                            winners.insert(custom.name(), (priority, custom.value().clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        winners
+            .into_iter()
+            .map(|(name, (_, value))| (name, value))
+            .collect()
     }
 
     #[doc = include_str!("style_matcher.doc/match_single.md")]
@@ -248,20 +307,23 @@ mod tests {
     #[test]
     fn higher_specificity_wins() {
         // #id { color: A } beats .cls { color: B }; div { color: C } loses too.
+        // The rules descend in specificity as they descend the sheet, so the
+        // winner is the FIRST declaration collected: a matcher that forwarded a
+        // constant specificity to the cascade would hand this to `div`.
         let sheet = Stylesheet::new(
             CascadeOrigin::GlobalApp,
             vec![
                 rule(
-                    vec![ty("div")],
-                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.3))],
+                    vec![id("main")],
+                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.9))],
                 ),
                 rule(
                     vec![class("cls")],
                     vec![BlockDeclaration::normal(PropertyId::Color, color(0.6))],
                 ),
                 rule(
-                    vec![id("main")],
-                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.9))],
+                    vec![ty("div")],
+                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.3))],
                 ),
             ],
         );
@@ -272,16 +334,17 @@ mod tests {
 
     #[test]
     fn class_beats_type() {
+        // Winner first again, so the type rule's later position cannot rescue it.
         let sheet = Stylesheet::new(
             CascadeOrigin::GlobalApp,
             vec![
                 rule(
-                    vec![ty("div")],
-                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.3))],
-                ),
-                rule(
                     vec![class("cls")],
                     vec![BlockDeclaration::normal(PropertyId::Color, color(0.6))],
+                ),
+                rule(
+                    vec![ty("div")],
+                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.3))],
                 ),
             ],
         );
@@ -293,7 +356,9 @@ mod tests {
     #[test]
     fn later_source_order_wins_on_equal_specificity() {
         // Two class rules of equal specificity set the same property; the later
-        // rule in document order must win.
+        // rule in document order must win. A trailing *type* rule then loses, so
+        // the winner sits in the middle of the sheet and "later wins" is pinned
+        // to the equal-specificity pair rather than to document position alone.
         let sheet = Stylesheet::new(
             CascadeOrigin::GlobalApp,
             vec![
@@ -305,6 +370,10 @@ mod tests {
                     vec![class("cls")],
                     vec![BlockDeclaration::normal(PropertyId::Color, color(0.8))],
                 ),
+                rule(
+                    vec![ty("div")],
+                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.4))],
+                ),
             ],
         );
         let element = FakeElement::new("div").with_class("cls");
@@ -314,17 +383,19 @@ mod tests {
 
     #[test]
     fn important_beats_normal_regardless_of_specificity() {
-        // Low-specificity !important beats high-specificity normal.
+        // Low-specificity !important beats high-specificity normal — and it does
+        // so from the earlier position, so only the carried `important` flag can
+        // explain the result.
         let sheet = Stylesheet::new(
             CascadeOrigin::GlobalApp,
             vec![
                 rule(
-                    vec![id("main")],
-                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.3))],
-                ),
-                rule(
                     vec![ty("div")],
                     vec![BlockDeclaration::important(PropertyId::Color, color(0.7))],
+                ),
+                rule(
+                    vec![id("main")],
+                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.3))],
                 ),
             ],
         );
@@ -336,7 +407,10 @@ mod tests {
     #[test]
     fn later_origin_normal_beats_earlier_origin_normal() {
         // A low-specificity normal declaration in a later origin (Inline) beats a
-        // high-specificity normal one in an earlier origin (Theme).
+        // high-specificity normal one in an earlier origin (Theme). The Inline
+        // sheet is passed FIRST: precedence follows the sheet's declared origin,
+        // never its position in the argument slice, and the Theme rule's higher
+        // specificity would take Color if the origin were dropped on the way in.
         let theme = Stylesheet::new(
             CascadeOrigin::Theme,
             vec![rule(
@@ -352,7 +426,7 @@ mod tests {
             )],
         );
         let element = FakeElement::new("div").with_id("main");
-        let resolved = StyleMatcher::new().match_element(&[theme, inline], &element);
+        let resolved = StyleMatcher::new().match_element(&[inline, theme], &element);
         assert_eq!(resolved.get(PropertyId::Color), Some(&color(0.9)));
     }
 
@@ -477,5 +551,91 @@ mod tests {
             let resolved = matcher.match_element_in(std::slice::from_ref(&sheet), &element, &env);
             assert_eq!(resolved.get(PropertyId::Color), Some(&color(0.4)));
         }
+    }
+
+    /// `--brand` and `--accent`, as the compiler mints them: from the name, so
+    /// two sheets that never met still agree on which property is which.
+    fn brand() -> InternedSymbol {
+        InternedSymbol::named("--brand")
+    }
+
+    fn custom_rule(sel: Vec<SimpleSelector>, name: InternedSymbol, v: f32) -> StyleRule {
+        StyleRule::new(selectors(sel), Vec::new())
+            .with_custom_properties(vec![crate::property::CustomProperty::new(name, color(v))])
+    }
+
+    #[test]
+    fn a_custom_property_a_matched_rule_declares_is_collected_for_the_element() {
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![custom_rule(vec![class("foo")], brand(), 0.5)],
+        );
+        let element = FakeElement::new("div").with_class("foo");
+        let custom = StyleMatcher::new().match_custom_properties_in(
+            std::slice::from_ref(&sheet),
+            &element,
+            &MediaEnvironment::unbounded(),
+        );
+        assert_eq!(custom.get(&brand()), Some(&color(0.5)));
+    }
+
+    #[test]
+    fn a_custom_property_from_a_rule_that_did_not_match_is_not_collected() {
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![custom_rule(vec![class("foo")], brand(), 0.5)],
+        );
+        let element = FakeElement::new("div"); // no `foo` class
+        let custom = StyleMatcher::new().match_custom_properties_in(
+            std::slice::from_ref(&sheet),
+            &element,
+            &MediaEnvironment::unbounded(),
+        );
+        assert!(custom.is_empty());
+    }
+
+    #[test]
+    fn the_more_specific_declaration_of_one_custom_property_wins() {
+        // The same cascade order the longhands resolve by: a custom property is
+        // a declaration, and §4.14 does not give it a cascade of its own.
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                custom_rule(vec![id("main")], brand(), 0.9),
+                custom_rule(vec![class("cls")], brand(), 0.6),
+                custom_rule(vec![ty("div")], brand(), 0.3),
+            ],
+        );
+        let element = FakeElement::new("div").with_id("main").with_class("cls");
+        let custom = StyleMatcher::new().match_custom_properties_in(
+            std::slice::from_ref(&sheet),
+            &element,
+            &MediaEnvironment::unbounded(),
+        );
+        assert_eq!(custom.get(&brand()), Some(&color(0.9)));
+    }
+
+    #[test]
+    fn two_sheets_declaring_different_custom_properties_both_survive() {
+        // The names are minted from the text, so nothing about the order the
+        // sheets were compiled in can make one sheet's `--brand` collide with
+        // another sheet's `--accent`.
+        let accent = InternedSymbol::named("--accent");
+        let first = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![custom_rule(vec![class("foo")], brand(), 0.5)],
+        );
+        let second = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![custom_rule(vec![class("foo")], accent, 0.25)],
+        );
+        let element = FakeElement::new("div").with_class("foo");
+        let custom = StyleMatcher::new().match_custom_properties_in(
+            &[first, second],
+            &element,
+            &MediaEnvironment::unbounded(),
+        );
+        assert_eq!(custom.get(&brand()), Some(&color(0.5)));
+        assert_eq!(custom.get(&accent), Some(&color(0.25)));
     }
 }
