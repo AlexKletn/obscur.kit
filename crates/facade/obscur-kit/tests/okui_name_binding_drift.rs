@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 use obscur_kit::ui_ir::name_binding::{self, TagPosition};
+use obscur_kit::ui_macros::okui;
 use obscur_kit::view::view;
 
 use obscur_kit::primitives::{Canvas, Container, ForeignSurface, Image, Layer, Portal, Scroll};
@@ -12,8 +13,10 @@ use obscur_kit::widgets::docking::Docking;
 use obscur_kit::widgets::input::Input;
 use obscur_kit::widgets::list::List;
 use obscur_kit::widgets::menu::Menu;
+use obscur_kit::widgets::progress::Progress;
 use obscur_kit::widgets::radio::Radio;
 use obscur_kit::widgets::select::Select;
+use obscur_kit::widgets::slider::Slider;
 use obscur_kit::widgets::table::Table;
 use obscur_kit::widgets::tabs::Tabs;
 use obscur_kit::widgets::tree::Tree;
@@ -213,6 +216,92 @@ fn widget_component_ids_match_their_source() {
     assert_eq!(name_binding::TABLE, Table::COMPONENT_ID);
     assert_eq!(name_binding::DOCKING, Docking::COMPONENT_ID);
     assert_eq!(name_binding::RADIO, Radio::COMPONENT_ID);
+    // The two the front ends could not name at all until now. Drift here binds
+    // `<progress/>` to an id no shipped widget answers to — which is exactly the
+    // state this pair was added to leave.
+    assert_eq!(name_binding::PROGRESS, Progress::COMPONENT_ID);
+    assert_eq!(name_binding::SLIDER, Slider::COMPONENT_ID);
+}
+
+#[test]
+fn the_control_attribute_symbols_match_the_tiers_that_read_them() {
+    // §4.x sliders. `obscur-ui-ir` is a frontend crate and cannot depend on the
+    // view tier, so it restates these four — and the readers are two floors down
+    // (`SliderScale::read`, and the runtime's `SliderControl::enclosing`), which
+    // is precisely why drift here is invisible: an authored `min="0"` would lower
+    // under a symbol nothing looks for, the scale would silently stay `0..1`, and
+    // no test on either side would notice.
+    assert_eq!(name_binding::SLIDER_MIN, view::SLIDER_MIN);
+    assert_eq!(name_binding::SLIDER_MAX, view::SLIDER_MAX);
+    assert_eq!(name_binding::SLIDER_STEP, view::SLIDER_STEP);
+    assert_eq!(name_binding::SLIDER_LOW, view::SLIDER_LOW);
+    // The progress value's home is the widget rather than the view tier, and the
+    // mirror is pinned the same way for the same reason.
+    assert_eq!(name_binding::PROGRESS_VALUE, Progress::PROP_VALUE);
+}
+
+#[test]
+fn an_authored_slider_is_the_node_the_rust_builder_builds() {
+    // "One handle, two spellings", carried all the way to the props. The scale a
+    // `<slider min="0" max="10" step="2" value="4"/>` lowers to has to be the
+    // scale `Slider::new(4.0).over(0.0, 10.0).stepped_by(2.0)` writes, or the one
+    // control has two behaviours depending on which front end built it — and the
+    // markup one would be the broken half, since a text attribute reaches the
+    // reader as no value at all.
+    let authored = okui! {
+        <slider min="0" max="10" step="2" value="4"/>
+    };
+    let built = Slider::new(4.0).over(0.0, 10.0).stepped_by(2.0).view();
+
+    let view::ViewNode::Element {
+        component,
+        props: authored_props,
+        ..
+    } = &authored.root().nodes()[0]
+    else {
+        panic!("an authored slider is an element");
+    };
+    let view::ViewNode::Element {
+        props: built_props, ..
+    } = &built.root().nodes()[0]
+    else {
+        panic!("a built slider is an element");
+    };
+
+    assert_eq!(*component, Slider::COMPONENT_ID);
+    assert_eq!(
+        view::SliderScale::read(authored_props),
+        view::SliderScale::read(built_props),
+        "the authored scale and the built one are one scale"
+    );
+    // The thumb, on the symbol the runtime's drag walks ancestors to find. Without
+    // it `SliderControl::enclosing` does not recognise the node as a slider at
+    // all, so no press could move it.
+    let low_of = |props: &[view::ViewProperty]| {
+        props
+            .iter()
+            .find(|prop| prop.name() == view::SLIDER_LOW)
+            .map(|prop| prop.value().clone())
+    };
+    assert_eq!(low_of(authored_props), Some(view::ViewValue::Float(4.0)));
+    assert_eq!(low_of(authored_props), low_of(built_props));
+}
+
+#[test]
+fn an_authored_progress_carries_the_value_the_widget_carries() {
+    let authored = okui! { <progress value="0.5"/> };
+    let view::ViewNode::Element {
+        component, props, ..
+    } = &authored.root().nodes()[0]
+    else {
+        panic!("an authored progress is an element");
+    };
+    assert_eq!(*component, Progress::COMPONENT_ID);
+    assert!(
+        props.iter().any(|prop| prop.name() == Progress::PROP_VALUE
+            && *prop.value() == view::ViewValue::Float(0.5)),
+        "the property the painter and the widget's own view both read"
+    );
 }
 
 #[test]
@@ -336,6 +425,12 @@ fn every_control_and_its_tag_agree_on_one_css_type() {
         ("radio", Radio::new("One", save).view()),
         ("select", Select::new(save).view()),
         ("table", Table::new().view()),
+        // The two whose lowercase tags were added last, and the two whose whole
+        // reason for a lowercase tag is this line: each widget's own `view()`
+        // already writes these names, so without the tag a `slider { … }` rule
+        // would reach the Rust control and a `div` an author wrote as `<slider>`.
+        ("progress", Progress::new(0.5).view()),
+        ("slider", Slider::new(0.5).view()),
     ] {
         let widget_type = widget_local_name(rendered);
         assert_eq!(widget_type.as_deref(), Some(tag), "{tag}");
@@ -372,6 +467,8 @@ fn every_contracted_widget_tag_resolves_to_a_real_widget() {
         Table::COMPONENT_ID,
         Docking::COMPONENT_ID,
         Radio::COMPONENT_ID,
+        Progress::COMPONENT_ID,
+        Slider::COMPONENT_ID,
     ];
     for contract in obscur_kit::okui_compiler::validation::widget_contracts() {
         let id = name_binding::component_id_for(contract.component(), TagPosition::Component);
@@ -394,7 +491,7 @@ fn every_shipped_widget_has_a_contract() {
         .collect();
     for expected in [
         "Button", "Input", "Checkbox", "Select", "Menu", "Dialog", "Tabs", "List", "Tree", "Table",
-        "Docking", "Radio",
+        "Docking", "Radio", "Progress", "Slider",
     ] {
         assert!(
             tags.contains(&expected),

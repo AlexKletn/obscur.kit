@@ -2,6 +2,8 @@
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
+use crate::document::{UiIrExpression, UiIrValue};
+
 // --- Reserved attribute symbols (mirror `obscur_view::view::style_attribute`). ---
 
 #[doc = include_str!("name_binding.doc/CLASS.md")]
@@ -31,6 +33,21 @@ pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
 
 #[doc = include_str!("name_binding.doc/SLOT.md")]
 pub const SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0301);
+
+// --- Reserved control symbols (mirror `obscur_view::view::slider` and
+//     `obscur_widgets::progress`). ---
+
+#[doc = include_str!("name_binding.doc/SLIDER_MIN.md")]
+pub const SLIDER_MIN: InternedSymbol = InternedSymbol::from_raw(0x0000_0501);
+#[doc = include_str!("name_binding.doc/SLIDER_MAX.md")]
+pub const SLIDER_MAX: InternedSymbol = InternedSymbol::from_raw(0x0000_0502);
+#[doc = include_str!("name_binding.doc/SLIDER_STEP.md")]
+pub const SLIDER_STEP: InternedSymbol = InternedSymbol::from_raw(0x0000_0503);
+#[doc = include_str!("name_binding.doc/SLIDER_LOW.md")]
+pub const SLIDER_LOW: InternedSymbol = InternedSymbol::from_raw(0x0000_0504);
+
+#[doc = include_str!("name_binding.doc/PROGRESS_VALUE.md")]
+pub const PROGRESS_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0702);
 
 #[doc = include_str!("name_binding.doc/SLOT_OUTLET.md")]
 pub const SLOT_OUTLET: ComponentId = ComponentId::from_raw(0x00B0_0001);
@@ -140,6 +157,19 @@ pub const TABLE: ComponentId = ComponentId::from_raw(0x00D0_000A);
 pub const DOCKING: ComponentId = ComponentId::from_raw(0x00D0_000B);
 #[doc = include_str!("name_binding.doc/RADIO.md")]
 pub const RADIO: ComponentId = ComponentId::from_raw(0x00D0_000C);
+// 2026-08-07. These two are the ids the shipped widgets carry, and they are the
+// ids `Tabs` and `List` carry as well — `Progress` was numbered 0x00D0_0007 and
+// `Tabs` was too, `Slider` 0x00D0_0008 and `List` too. The collision is real and
+// it is not this crate's to resolve: a mirror that renumbered them would bind
+// `<progress/>` to an id no shipped widget answers to, which is the exact defect
+// this stage closes. It is harmless only for as long as no factory claims either
+// number (a registry keyed by id would then mount a progress bar for `<Tabs/>`),
+// so the widgets' own constants are where it has to be fixed, and the facade's
+// drift test is what will fail here when they are.
+#[doc = include_str!("name_binding.doc/PROGRESS.md")]
+pub const PROGRESS: ComponentId = ComponentId::from_raw(0x00D0_0007);
+#[doc = include_str!("name_binding.doc/SLIDER.md")]
+pub const SLIDER: ComponentId = ComponentId::from_raw(0x00D0_0008);
 
 #[doc = include_str!("name_binding.doc/TagPosition.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -179,6 +209,18 @@ pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
         "Radio" | "radio" => RADIO,
         "Select" | "select" => SELECT,
         "Table" | "table" => TABLE,
+        // The two controls that were authorable in neither spelling: they hashed
+        // by POSITION into an id nothing is registered under, so `<progress/>`
+        // mounted nothing and said nothing. Both get the lowercase spelling too,
+        // and not on the general "HTML has one" argument — HTML has a
+        // `<progress>` but nothing it spells `<slider>` — but on the narrower one
+        // that decides every pair above it: each widget's own `view()` writes
+        // `progress` / `slider` as its LOCAL_NAME, so a `slider { … }` rule
+        // already reaches the Rust-built control. Without the lowercase tag the
+        // same rule would also reach a `div` an author wrote as `<slider>`, which
+        // is one selector over two different trees.
+        "Progress" | "progress" => PROGRESS,
+        "Slider" | "slider" => SLIDER,
         // Widgets with a component spelling only. The UA sheet styles none of
         // them by type, and a lowercase tag no rule reaches would be vocabulary
         // with nothing behind it; `Menu`, `Tabs`, `Tree`, `List` and `Docking`
@@ -237,7 +279,68 @@ pub fn attr_symbol_on(tag: &str, name: &str) -> InternedSymbol {
     if tag == OUTLET_TAG && name == "name" {
         return SLOT;
     }
+    if let Some(symbol) = control_attr_symbol(tag, name) {
+        return symbol;
+    }
     attr_symbol(name)
+}
+
+#[doc = include_str!("name_binding.doc/control_attr_symbol.md")]
+#[must_use]
+fn control_attr_symbol(tag: &str, name: &str) -> Option<InternedSymbol> {
+    let symbol = match (tag, name) {
+        ("Slider" | "slider", "min") => SLIDER_MIN,
+        ("Slider" | "slider", "max") => SLIDER_MAX,
+        ("Slider" | "slider", "step") => SLIDER_STEP,
+        // The low end, because a single slider is a range of one point and the
+        // high end defaults to it. `<slider low=… high=…>` is deliberately absent:
+        // a two-thumb slider needs a third fact — `SLIDER_RANGED` — that no
+        // authored attribute states, and a pair of ends without it is a control
+        // whose two thumbs move together. The closed contract turns the attempt
+        // into a compile error that names the attribute instead.
+        ("Slider" | "slider", "value") => SLIDER_LOW,
+        ("Progress" | "progress", "value") => PROGRESS_VALUE,
+        _ => return None,
+    };
+    Some(symbol)
+}
+
+#[doc = include_str!("name_binding.doc/is_numeric_attribute_on.md")]
+#[must_use]
+fn is_numeric_attribute_on(tag: &str, name: &str) -> bool {
+    matches!(
+        (tag, name),
+        ("Slider" | "slider", "min" | "max" | "step" | "value")
+            | ("Progress" | "progress", "value")
+    )
+}
+
+#[doc = include_str!("name_binding.doc/attr_value_on.md")]
+#[must_use]
+pub fn attr_value_on(tag: &str, name: &str, value: &UiIrExpression) -> UiIrExpression {
+    let UiIrExpression::Literal(literal) = value else {
+        return value.clone();
+    };
+    if !is_numeric_attribute_on(tag, name) {
+        return value.clone();
+    }
+    match literal_number(literal) {
+        Some(number) => UiIrExpression::literal(UiIrValue::Float(number)),
+        None => value.clone(),
+    }
+}
+
+#[doc = include_str!("name_binding.doc/literal_number.md")]
+#[must_use]
+fn literal_number(value: &UiIrValue) -> Option<f64> {
+    let number = match value {
+        #[allow(clippy::cast_precision_loss)]
+        UiIrValue::Int(whole) => *whole as f64,
+        UiIrValue::Float(number) => *number,
+        UiIrValue::Text(text) => text.trim().parse().ok()?,
+        UiIrValue::Null | UiIrValue::Bool(_) => return None,
+    };
+    number.is_finite().then_some(number)
 }
 
 #[doc = include_str!("name_binding.doc/attr_symbol.md")]
@@ -453,6 +556,173 @@ mod tests {
                 CONTAINER,
                 "{tag}"
             );
+        }
+    }
+
+    #[test]
+    fn the_two_controls_that_were_authorable_in_no_spelling_now_are() {
+        // THE defect. Neither tag named a built-in, so `<progress/>` fell through
+        // to `component_id_for`, which hashed it BY POSITION into an id nobody
+        // registered — an element that mounts nothing, with no diagnostic. Both
+        // spellings bind to the shipped widget now, and to the same one.
+        assert_eq!(builtin_component_id("progress"), Some(PROGRESS));
+        assert_eq!(builtin_component_id("slider"), Some(SLIDER));
+        for (element, component, id) in [
+            ("progress", "Progress", PROGRESS),
+            ("slider", "Slider", SLIDER),
+        ] {
+            assert_eq!(
+                component_id_for(element, TagPosition::Element),
+                component_id_for(component, TagPosition::Component),
+                "{element}/{component}"
+            );
+            assert_eq!(component_id_for(element, TagPosition::Element), id);
+            assert_ne!(
+                component_id_for(element, TagPosition::Element),
+                CONTAINER,
+                "{element}"
+            );
+            assert_ne!(
+                component_id_for(element, TagPosition::Element),
+                user_component_id(element),
+                "{element} must not hash into the user namespace"
+            );
+            // And the tag still contributes the local name the widget's own
+            // `view()` writes, so one `slider { … }` rule reaches both trees.
+            assert_eq!(local_name_for(element, TagPosition::Element), Some(element));
+        }
+    }
+
+    #[test]
+    fn a_sliders_scale_binds_to_the_symbols_the_tiers_below_read() {
+        // The scale is read by `SliderScale::read` and by the runtime's drag,
+        // neither of which can call this module — so a hashed `min` is carried
+        // through the whole tree and then read by nobody.
+        assert_eq!(attr_symbol_on("slider", "min"), SLIDER_MIN);
+        assert_eq!(attr_symbol_on("slider", "max"), SLIDER_MAX);
+        assert_eq!(attr_symbol_on("slider", "step"), SLIDER_STEP);
+        assert_eq!(attr_symbol_on("slider", "value"), SLIDER_LOW);
+        for name in ["min", "max", "step", "value"] {
+            assert_ne!(
+                attr_symbol_on("slider", name),
+                fallback_symbol(name),
+                "{name}"
+            );
+            // Both spellings of the tag, or the component form would be a
+            // different control from the element one.
+            assert_eq!(
+                attr_symbol_on("Slider", name),
+                attr_symbol_on("slider", name),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn value_still_means_the_fields_text_everywhere_but_a_control() {
+        // The binding that could not be tag-blind. `value` on an `<input>` is the
+        // field's DEFAULT text and hashes on purpose — the reserved
+        // `obscur_view::view::VALUE` declares a *controlled* value instead, and
+        // `InputProps::VALUE` is the hash. One tag-blind table would have made
+        // every authored field's value a slider position.
+        assert_eq!(attr_symbol_on("input", "value"), fallback_symbol("value"));
+        assert_eq!(attr_symbol_on("div", "value"), fallback_symbol("value"));
+        assert_eq!(attr_symbol_on("Card", "value"), fallback_symbol("value"));
+        assert_ne!(attr_symbol_on("slider", "value"), fallback_symbol("value"));
+        assert_ne!(
+            attr_symbol_on("progress", "value"),
+            attr_symbol_on("slider", "value"),
+            "two controls, two meanings of the same word"
+        );
+        // And nothing else on a control tag is rebound: only the named pairs are.
+        assert_eq!(attr_symbol_on("slider", "class"), CLASS);
+        assert_eq!(
+            attr_symbol_on("slider", "min-width"),
+            attr_symbol("min-width")
+        );
+        assert_eq!(attr_symbol_on("progress", "min"), fallback_symbol("min"));
+    }
+
+    #[test]
+    fn a_progress_value_binds_to_the_widgets_own_symbol() {
+        assert_eq!(attr_symbol_on("progress", "value"), PROGRESS_VALUE);
+        assert_eq!(attr_symbol_on("Progress", "value"), PROGRESS_VALUE);
+        // Pinned here as well as in the facade's drift test, because this crate
+        // restates a constant that lives in `obscur_widgets::Progress`.
+        assert_eq!(PROGRESS_VALUE.raw(), 0x00D1_0702);
+        assert_eq!(PROGRESS_VALUE.raw() & 0x8000_0000, 0);
+    }
+
+    #[test]
+    fn a_quoted_number_on_a_control_lowers_to_a_number() {
+        // Markup spells its values with quotes, and the tiers that read a scale
+        // accept `Int` and `Float` and nothing else — so `Text("0")` reaches them
+        // as no value at all and the control keeps the default `0..1`. The
+        // attribute would compile, travel the tree, and mean nothing.
+        let quoted = UiIrExpression::literal(UiIrValue::Text("0.5".into()));
+        assert_eq!(
+            attr_value_on("progress", "value", &quoted),
+            UiIrExpression::literal(UiIrValue::Float(0.5))
+        );
+        // Both authored spellings converge on one value, so `min="0"` and
+        // `min={0}` build the same node — and the same one `Slider::over` writes.
+        for spelling in [
+            UiIrExpression::literal(UiIrValue::Text("10".into())),
+            UiIrExpression::literal(UiIrValue::Int(10)),
+            UiIrExpression::literal(UiIrValue::Float(10.0)),
+        ] {
+            assert_eq!(
+                attr_value_on("slider", "max", &spelling),
+                UiIrExpression::literal(UiIrValue::Float(10.0)),
+                "{spelling:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_value_that_names_no_number_is_left_exactly_as_written() {
+        // A guess would be worse than the reader's own default, and the value
+        // stays visible in the tree for whoever is asking why.
+        for text in ["wide", "", "inf", "NaN"] {
+            let written = UiIrExpression::literal(UiIrValue::Text(text.into()));
+            assert_eq!(attr_value_on("slider", "min", &written), written, "{text}");
+        }
+        // A binding has no compile-time value to normalise at all.
+        let bound = UiIrExpression::binding("state.volume");
+        assert_eq!(attr_value_on("slider", "value", &bound), bound);
+    }
+
+    #[test]
+    fn the_value_rule_reaches_no_attribute_but_a_controls_own() {
+        // The disjoint half: this is a rebinding of named pairs, not a rule about
+        // numbers. A `<div count="3">` keeps its text, or every authored
+        // attribute in the language would silently change type.
+        let quoted = UiIrExpression::literal(UiIrValue::Text("3".into()));
+        for (tag, name) in [
+            ("div", "count"),
+            ("input", "value"),
+            ("slider", "width"),
+            ("progress", "min"),
+        ] {
+            assert_eq!(attr_value_on(tag, name, &quoted), quoted, "{tag}/{name}");
+        }
+    }
+
+    #[test]
+    fn every_reserved_control_attribute_is_one_the_tiers_below_read_as_a_number() {
+        // The two tables are separate on purpose — "which symbol" and "is it a
+        // number" are different questions — so pin that they agree on today's
+        // set. A control attribute that is a string will need this list split,
+        // and this is where that shows up.
+        for (tag, name) in [
+            ("slider", "min"),
+            ("slider", "max"),
+            ("slider", "step"),
+            ("slider", "value"),
+            ("progress", "value"),
+        ] {
+            assert!(control_attr_symbol(tag, name).is_some(), "{tag}/{name}");
+            assert!(is_numeric_attribute_on(tag, name), "{tag}/{name}");
         }
     }
 
@@ -835,6 +1105,11 @@ mod tests {
             TEST_ID,
             AUTOMATION_ID,
             SLOT,
+            SLIDER_MIN,
+            SLIDER_MAX,
+            SLIDER_STEP,
+            SLIDER_LOW,
+            PROGRESS_VALUE,
         ] {
             assert_eq!(symbol.raw() & 0x8000_0000, 0);
         }

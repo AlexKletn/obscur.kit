@@ -32,9 +32,17 @@ removes the duplicated ad-hoc hashing they used to carry.
   (`class`, `id`, `type`, `src`, `disabled`, `checked`) map to the reserved
   `obscur-view` symbols the reconciler and matcher read; any other name is
   deterministically hashed into a high symbol namespace (top bit set) that
-  never collides with the reserved low range. Exactly one binding depends on
-  the tag the attribute sits on — `name` on a [`OUTLET_TAG`] — which is why
-  [`attr_symbol_on`] exists alongside [`attr_symbol`].
+  never collides with the reserved low range. A few bindings depend on the tag
+  the attribute sits on — `name` on a [`OUTLET_TAG`], and a control's own scale
+  (`min`/`max`/`step`/`value` on a `<slider>`, `value` on a `<progress>`) —
+  which is why [`attr_symbol_on`] exists alongside [`attr_symbol`]. `value` is
+  the pair that shows why the tag has to be an argument: it is the field's
+  default text on an `<input>`, where it stays hashed, and the thumb's position
+  on a `<slider>`, where the runtime's drag reads it by symbol.
+- **Attribute *values*, on those same tags**: markup spells everything with
+  quotes, and the tiers that read a slider's scale take numbers only — so
+  [`attr_value_on`] normalises a literal that names a number into a number,
+  and `min="0"` and `min={0}` build the one node `Slider::over` builds.
 - **Event names → [`InternedSymbol`]**: `click`/`input`/`change` map to the
   reserved `EVENT_*` symbols the runtime's dispatcher resolves; any other name
   is hashed like an attribute.

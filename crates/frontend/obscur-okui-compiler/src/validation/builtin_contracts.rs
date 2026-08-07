@@ -93,6 +93,39 @@ pub fn widget_contracts() -> Vec<ComponentContract> {
         ComponentContract::new("List")
             .allowing_prop("multi")
             .no_children(),
+        // `Progress::new(value)` — a fraction in `0..=1`, and the ONE attribute
+        // this bar takes. `indeterminate` is not a prop but the absence of one:
+        // `<progress/>` with no value is `Progress::indeterminate()`, the way
+        // HTML reads the same markup. `shaped(Ring)` and `along(path)` are left
+        // out deliberately — a shape is an enum with no authored spelling and a
+        // path is SVG data, so admitting either would be a vocabulary the
+        // lowering cannot yet turn into the `Int` / path the painter reads.
+        //
+        // No event surface: a bar reports and accepts nothing, and stating an
+        // empty `allowed_events` would leave events unrestricted rather than
+        // forbidden (see `check_props`) — which is the same open surface every
+        // other non-interactive contract here has.
+        ComponentContract::new("Progress")
+            .allowing_prop("value")
+            .no_children(),
+        // `Slider::new(value)` + `.over(min, max)` + `.stepped_by(step)`, one
+        // attribute each; binds `input`, which is what the runtime's drag and its
+        // arrow keys dispatch (`report_slider`).
+        //
+        // `Slider::ranging(low, high)` is deliberately NOT authorable. A two-thumb
+        // slider needs a third fact — `SLIDER_RANGED` — that decides which thumb a
+        // press grabs and whether the ends may cross, and no authored attribute
+        // states it; a `low`/`high` pair without it would be a control whose two
+        // thumbs move together. Because this surface is CLOSED, `<Slider low=…>`
+        // is a compile error that names the attribute rather than a slider that
+        // quietly has one thumb.
+        ComponentContract::new("Slider")
+            .allowing_prop("value")
+            .allowing_prop("min")
+            .allowing_prop("max")
+            .allowing_prop("step")
+            .allowing_event("input")
+            .no_children(),
         // Open PROP surface, leaf CHILD surface — see "No children" above: their
         // content is typed Rust values, so no authored child could name it.
         ComponentContract::new("Menu").no_children(),
@@ -139,12 +172,17 @@ mod tests {
 
     #[test]
     fn covers_every_shipped_widget() {
-        // All twelve tags `name_binding` resolves to a widget COMPONENT_ID.
+        // All fourteen tags `name_binding` resolves to a widget COMPONENT_ID.
+        //
+        // 2026-08-07. This asserted twelve, and the two it was missing are the two
+        // that had no authored spelling at all: `<Progress/>` and `<Slider/>` bound
+        // to a hashed id nobody registered, so there was nothing for a contract to
+        // check. They are tags now, so they are contracts now.
         let contracts = widget_contracts();
         let names: Vec<&str> = contracts.iter().map(ComponentContract::component).collect();
         for expected in [
             "Button", "Input", "Checkbox", "Radio", "Select", "Dialog", "List", "Menu", "Tabs",
-            "Tree", "Table", "Docking",
+            "Tree", "Table", "Docking", "Progress", "Slider",
         ] {
             assert!(
                 names.contains(&expected),
@@ -153,9 +191,42 @@ mod tests {
         }
         assert_eq!(
             names.len(),
-            12,
+            14,
             "exactly the shipped widgets, no invented tags"
         );
+    }
+
+    #[test]
+    fn the_two_controls_mirror_their_builders_and_close_their_surfaces() {
+        // `Progress::new(value)` and `Slider::new(value).over(min, max)
+        // .stepped_by(step)`: one attribute per builder argument, and nothing
+        // else. Closing the surface is the point — an authored `<Slider valu=…>`
+        // has to be a named compile error, because the alternative is the defect
+        // this whole stage exists to end: an attribute that lowers, travels the
+        // tree, and is read by nobody.
+        let progress = widget("Progress");
+        assert!(progress.required_props().is_empty(), "a bare bar is legal");
+        assert_eq!(progress.allowed_props(), &["value".into()]);
+        assert!(
+            progress.allowed_events().is_empty(),
+            "a bar reports; it accepts nothing"
+        );
+
+        let slider = widget("Slider");
+        assert!(slider.required_props().is_empty(), "0..1 is a real default");
+        for prop in ["value", "min", "max", "step"] {
+            assert!(slider.allowed_props().contains(&prop.into()), "{prop}");
+        }
+        // The state the markup deliberately cannot reach. `Slider::ranging` needs
+        // `SLIDER_RANGED` as well as two ends, and no attribute states it — so the
+        // closed surface turns the attempt into an error rather than into a slider
+        // whose two thumbs silently move together.
+        for absent in ["low", "high", "ranged"] {
+            assert!(!slider.allowed_props().contains(&absent.into()), "{absent}");
+        }
+        // `input` and only `input`: it is what `report_slider` dispatches on a
+        // drag and on an arrow key alike.
+        assert_eq!(slider.allowed_events(), &["input".into()]);
     }
 
     #[test]

@@ -58,7 +58,14 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
             // tag was always here: this loop has `node.tag()` in scope and is
             // already threading the node's position from it.
             name_binding::attr_symbol_on(node.tag(), property.name()),
-            lower_value(property.value()),
+            // And through the tag-aware *value*, so `<slider min="0">` carries the
+            // number the scale is read as rather than the text it was written as.
+            // The code generator makes the identical call.
+            lower_value(&name_binding::attr_value_on(
+                node.tag(),
+                property.name(),
+                property.value(),
+            )),
         ));
     }
     // The tag itself, as the reserved LOCAL_NAME property — the element's local
@@ -208,6 +215,68 @@ mod tests {
         assert_eq!(*component, ComponentId::from_raw(0x00C0_0003));
         assert_eq!(props[0].name(), SRC);
         assert_eq!(props[0].value(), &ViewValue::Text("logo.png".into()));
+    }
+
+    #[test]
+    fn an_authored_slider_is_a_scale_the_view_tier_can_read_back() {
+        // <slider min="0" max="10" step="2" value="4"/>. Asserted through the REAL
+        // reader rather than through the symbols, because the symbols agreeing is
+        // not the claim — the claim is that the tier below, which cannot call
+        // `name_binding` at all, gets the scale the author wrote. It used to get
+        // nothing: the tag hashed by position and every attribute with it.
+        let root = UiIrNode::element(1, "slider")
+            .with_property(UiIrProperty::text("min", "0"))
+            .with_property(UiIrProperty::text("max", "10"))
+            .with_property(UiIrProperty::text("step", "2"))
+            .with_property(UiIrProperty::text("value", "4"));
+        let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(root));
+        let ViewNode::Element {
+            component, props, ..
+        } = &view.root().nodes()[0]
+        else {
+            panic!("element");
+        };
+        assert_eq!(*component, ComponentId::from_raw(0x00D0_0008));
+        assert_eq!(
+            obscur_view::view::SliderScale::read(props),
+            obscur_view::view::SliderScale::new(0.0, 10.0).stepped_by(2.0)
+        );
+        // And the thumb, on the symbol the runtime's drag walks ancestors to find.
+        assert!(
+            props
+                .iter()
+                .any(|prop| prop.name() == obscur_view::view::SLIDER_LOW
+                    && *prop.value() == ViewValue::Float(4.0))
+        );
+        // The node still names itself, so `slider { … }` reaches it.
+        assert!(
+            props.iter().any(|prop| prop.name() == LOCAL_NAME
+                && *prop.value() == ViewValue::Text("slider".into()))
+        );
+    }
+
+    #[test]
+    fn an_authored_progress_carries_the_value_the_widgets_own_view_carries() {
+        // One node shape from two spellings: the property an authored
+        // `<progress value="0.5"/>` lowers to is the property
+        // `Progress::new(0.5).view()` writes, under the same symbol and with the
+        // same value — which is what lets one painter and one decoder read it.
+        let root =
+            UiIrNode::element(1, "progress").with_property(UiIrProperty::text("value", "0.5"));
+        let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(root));
+        let ViewNode::Element {
+            component, props, ..
+        } = &view.root().nodes()[0]
+        else {
+            panic!("element");
+        };
+        assert_eq!(*component, ComponentId::from_raw(0x00D0_0007));
+        assert!(
+            props
+                .iter()
+                .any(|prop| prop.name() == name_binding::PROGRESS_VALUE
+                    && *prop.value() == ViewValue::Float(0.5))
+        );
     }
 
     #[test]

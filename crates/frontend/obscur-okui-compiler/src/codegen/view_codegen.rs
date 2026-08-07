@@ -324,7 +324,13 @@ fn emit_element(
         // runtime bridge makes the identical call, which is what keeps an
         // interpreted document and a compiled one the same outlet.
         let symbol = name_binding::attr_symbol_on(node.tag(), property.name()).raw();
-        let value = emit_value(property.value(), root);
+        // And the value through the tag-aware binding too: `<slider min="0">` has
+        // to carry the number the scale is read as, not the text it was written
+        // as. The runtime bridge makes the identical call.
+        let value = emit_value(
+            &name_binding::attr_value_on(node.tag(), property.name(), property.value()),
+            root,
+        );
         let _ = writeln!(
             out,
             "{inner}.with_prop({view}::ViewProperty::new({identity}::InternedSymbol::from_raw({symbol:#x}), {value}))"
@@ -490,6 +496,56 @@ mod tests {
             out.contains(r#"ViewValue::Text("logo.png".into())"#),
             "{out}"
         );
+    }
+
+    #[test]
+    fn an_authored_progress_emits_the_widgets_id_and_the_symbol_its_painter_reads() {
+        // Progress::COMPONENT_ID == 0x00D0_0007, PROP_VALUE == 0x00D1_0702. The
+        // tag used to name no built-in at all, so it hashed by position into an id
+        // nobody registered — and the value hashed with it.
+        let out = expr(
+            UiIrNode::element(0, "progress").with_property(UiIrProperty::text("value", "0.5")),
+        );
+        assert!(out.contains("ComponentId::from_raw(0xd00007)"), "{out}");
+        assert!(out.contains("InternedSymbol::from_raw(0xd10702)"), "{out}");
+        // A NUMBER, not the text it was written as: the painter and the widget's
+        // decoder read `Float`/`Int` and nothing else.
+        assert!(out.contains("ViewValue::Float(0.5)"), "{out}");
+        assert!(!out.contains(r#"ViewValue::Text("0.5""#), "{out}");
+        // And the tag still contributes its own name, so `progress { … }` matches.
+        assert!(
+            out.contains(r#"ViewValue::Text("progress".into())"#),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn an_authored_slider_emits_the_whole_scale_the_runtime_reads() {
+        // Slider::COMPONENT_ID == 0x00D0_0008; SLIDER_MIN/MAX/LOW == 0x501/0x502/
+        // 0x504. Every one of these is read below the front ends — by
+        // `SliderScale::read` and by the drag's `SliderControl::enclosing` — so a
+        // hashed spelling is a scale nothing applies and a thumb nothing grabs.
+        let out = expr(
+            UiIrNode::element(0, "slider")
+                .with_property(UiIrProperty::text("min", "0"))
+                .with_property(UiIrProperty::text("max", "10"))
+                .with_property(UiIrProperty::text("value", "4")),
+        );
+        assert!(out.contains("ComponentId::from_raw(0xd00008)"), "{out}");
+        for (symbol, value) in [
+            ("0x501", "ViewValue::Float(0.0)"),
+            ("0x502", "ViewValue::Float(10.0)"),
+            ("0x504", "ViewValue::Float(4.0)"),
+        ] {
+            assert!(
+                out.contains(&format!(
+                    "InternedSymbol::from_raw({symbol}), ::obscur_kit::view::view::{value}"
+                )),
+                "{symbol} -> {value}: {out}"
+            );
+        }
+        // A slider with no step is a FREE slider, so nothing is invented for it.
+        assert!(!out.contains("InternedSymbol::from_raw(0x503)"), "{out}");
     }
 
     #[test]

@@ -725,6 +725,47 @@ mod tests {
     }
 
     #[test]
+    fn an_authored_slider_compiles_and_a_misspelled_scale_attribute_does_not() {
+        // The whole authored surface of a control, through a default compile. The
+        // second half is what makes the first one worth having: a closed contract
+        // is the only thing standing between `steP="2"` and a step nothing applies.
+        let ok = Compiler::new("app.okui").compile(&document(
+            "<div><Slider min=\"0\" max=\"10\" step=\"2\" value=\"4\" on:input=setVolume/>\
+             <Progress value=\"0.5\"/></div>",
+        ));
+        assert!(!ok.has_errors(), "diagnostics: {:?}", ok.diagnostics());
+
+        let typo = Compiler::new("app.okui").compile(&document("<Slider mn=\"0\" value=\"4\"/>"));
+        assert!(
+            typo.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "unknown attribute 'mn' on component 'Slider'"
+            )),
+            "diagnostics: {:?}",
+            typo.diagnostics()
+        );
+
+        // The state markup deliberately cannot reach is reported the same way,
+        // rather than compiling into a two-thumb slider with one thumb.
+        let ranged = Compiler::new("app.okui").compile(&document("<Slider low=\"2\" high=\"8\"/>"));
+        assert!(
+            ranged.has_errors(),
+            "diagnostics: {:?}",
+            ranged.diagnostics()
+        );
+
+        // And a bar takes one attribute: `shape` names a state the lowering cannot
+        // yet carry, so admitting it would be vocabulary with nothing behind it.
+        let shaped = Compiler::new("app.okui").compile(&document("<Progress shape=\"ring\"/>"));
+        assert!(
+            shaped.has_errors(),
+            "diagnostics: {:?}",
+            shaped.diagnostics()
+        );
+    }
+
+    #[test]
     fn default_compile_reports_missing_required_prop_on_builtin() {
         let doc = document("<Image alt=\"logo\"/>");
         let result = Compiler::new("app.okui").compile(&doc);
