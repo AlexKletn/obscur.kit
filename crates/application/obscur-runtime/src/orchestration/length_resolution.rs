@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn root_font_size_reads_root_node_defaulting_to_sixteen() {
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut root = ComputedStyle::new();
         root.set(
             PropertyId::FontSize,

@@ -65,6 +65,9 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
         | PropertyValue::String(_)
         | PropertyValue::Name(_)
         | PropertyValue::CustomRef(_)
+        // Text, not a value: it is parsed at substitution and never survives to
+        // the step that folds lengths.
+        | PropertyValue::RawTokens(_)
         | PropertyValue::Inherit
         | PropertyValue::Initial
         | PropertyValue::Unset => value,

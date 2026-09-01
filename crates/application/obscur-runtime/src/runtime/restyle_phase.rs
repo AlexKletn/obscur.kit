@@ -197,7 +197,7 @@ impl<'a> RestylePhase<'a> {
         // starts from what the overlay had put there, because that is what the
         // previous frame's LAYOUT ran on, and the layout classifier compares
         // against that.
-        let mut replaced = ComputedStyles::new();
+        let mut replaced = ComputedStyles::default();
         for (node, pure) in self.overlaid.drain() {
             if let Some(slot) = computed.get_mut(&node) {
                 replaced.insert(node, std::mem::replace(slot, pure));

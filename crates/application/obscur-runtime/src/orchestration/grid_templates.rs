@@ -1,9 +1,7 @@
 #![doc = include_str!("grid_templates.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_geometry::Size;
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_layout::algorithm::{AutoRepeat, AutoRepeatMode, GridTemplate, TrackList, TrackSize};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{GridTrack, Length, LengthContext, PropertyId, PropertyValue};
@@ -14,7 +12,7 @@ use super::ComputedStyles;
 use super::length_resolution::{ch_width_for, length_context};
 
 #[doc = include_str!("grid_templates.doc/GridTemplates.md")]
-pub type GridTemplates = HashMap<NodeId, GridTemplate>;
+pub type GridTemplates = FastMap<NodeId, GridTemplate>;
 
 #[doc = include_str!("grid_templates.doc/grid_templates_from.md")]
 #[must_use]
@@ -407,7 +405,7 @@ mod tests {
 
     #[test]
     fn grid_templates_from_only_maps_authored_nodes() {
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut with_template = ComputedStyle::new();
         with_template.set(
             PropertyId::GridTemplateColumns,

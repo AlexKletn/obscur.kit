@@ -1,4 +1,5 @@
-Reads one present `value` as `T`, naming `name` in the error.
+Reads one present `value` as `T`, naming `name` — and, when `label` is not
+empty, naming it in words — in the error.
 
 # Errors
 

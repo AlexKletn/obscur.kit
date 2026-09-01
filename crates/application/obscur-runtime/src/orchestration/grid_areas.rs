@@ -123,11 +123,11 @@ mod tests {
     fn named_area_resolves_to_line_placement() {
         let (tree, parent, child) = tree_with_child();
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(parent, container_style());
         computed.insert(child, item_style("main"));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(parent, LayoutStyle::default());
         styles.insert(child, LayoutStyle::default());
 
@@ -145,11 +145,11 @@ mod tests {
     fn unknown_area_name_leaves_auto_placement() {
         let (tree, parent, child) = tree_with_child();
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(parent, container_style());
         computed.insert(child, item_style("nope"));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(parent, LayoutStyle::default());
         styles.insert(child, LayoutStyle::default());
 
@@ -166,12 +166,12 @@ mod tests {
     fn item_without_marker_is_untouched() {
         let (tree, parent, child) = tree_with_child();
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(parent, container_style());
         // Child authored no grid-area.
         computed.insert(child, ComputedStyle::new());
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(child, LayoutStyle::default());
 
         resolve_named_grid_areas(&mut styles, &tree, &computed);

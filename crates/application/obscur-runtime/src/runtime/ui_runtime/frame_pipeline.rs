@@ -141,7 +141,7 @@ impl UiRuntime {
         // `overlaid`, `computed`, `last_style`, `generated_content`, `sheets`,
         // `motion`, `telemetry` and `diagnostics` are disjoint fields: a legal
         // split borrow, and the whole of what styling this frame touches.
-        let (computed, restyled, delta, wants_animation_frame) = StylePhase::new(
+        let (mut computed, restyled, delta, wants_animation_frame) = StylePhase::new(
             &self.tree,
             &self.pseudo,
             self.environment,
@@ -284,7 +284,7 @@ impl UiRuntime {
                 &self.surface,
                 &mut self.telemetry,
             )
-            .run(&ctx, &computed, editing, hovered, &phase_clock);
+            .run(&ctx, &mut computed, editing, hovered, &phase_clock);
             // A painter that says it is still moving must be asked again, or it
             // draws one frame and freezes. One that says it is not must not be,
             // or an idle application renders forever. Requested after the block

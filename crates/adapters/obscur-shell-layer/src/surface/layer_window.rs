@@ -4,51 +4,59 @@ use core::ptr::NonNull;
 
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
+use obscur_capability::SupportLevel;
 use obscur_geometry::Size;
 use obscur_windowing::layer::{
-    LayerAnchor, LayerKeyboardInteractivity, LayerKind, LayerSurfaceConfig,
+    LayerDisplay, LayerPointerPolicy, LayerSettings, LayerSurfaceEvent, LayerSurfaceState,
 };
-use smithay_client_toolkit::compositor::CompositorState;
+use obscur_windowing::port::{LayerBackend, LayerError, LayerFeature};
+use obscur_windowing::request::WindowOperationResult;
+use smithay_client_toolkit::compositor::{CompositorState, Region};
 use smithay_client_toolkit::output::OutputState;
 use smithay_client_toolkit::registry::RegistryState;
 use smithay_client_toolkit::seat::SeatState;
 use smithay_client_toolkit::shell::WaylandSurface;
-use smithay_client_toolkit::shell::wlr_layer::{
-    Anchor, KeyboardInteractivity, Layer, LayerShell, LayerSurface,
-};
+use smithay_client_toolkit::shell::wlr_layer::{LayerShell, LayerSurface};
 use wayland_client::globals::registry_queue_init;
 use wayland_client::{Connection, Proxy};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
+use wayland_protocols::wp::presentation_time::client::wp_presentation::WpPresentation;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 
 use crate::error::LayerShellError;
-use crate::event::LayerEvent;
+use crate::event::{LayerInput, Presented};
 
 use super::layer_state::LayerState;
 use super::layer_waker::LayerWaker;
 use super::layer_window_target::LayerWindowTarget;
+use super::wlr_mapper::WlrMapper;
 
 #[doc = include_str!("layer_window.doc/LayerWindow.md")]
 pub struct LayerWindow {
     connection: Connection,
     event_loop: EventLoop<'static, LayerState>,
     state: LayerState,
-    #[doc = include_str!("layer_window.doc/_compositor.md")]
-    _compositor: CompositorState,
+    #[doc = include_str!("layer_window.doc/settings.md")]
+    settings: LayerSettings,
+    #[doc = include_str!("layer_window.doc/compositor.md")]
+    compositor: CompositorState,
     #[doc = include_str!("layer_window.doc/_fractional_manager.md")]
     _fractional_manager: Option<WpFractionalScaleManagerV1>,
     _viewporter: Option<WpViewporter>,
+    #[doc = include_str!("layer_window.doc/queue.md")]
+    queue: wayland_client::QueueHandle<LayerState>,
 }
 
 impl LayerWindow {
     #[doc = include_str!("layer_window.doc/open.md")]
-    pub fn open(config: &LayerSurfaceConfig) -> Result<Self, LayerShellError> {
-        Self::open_with(config, None)
+    pub fn open(settings: &LayerSettings, namespace: &str) -> Result<Self, LayerShellError> {
+        Self::open_with(settings, namespace, None)
     }
 
     #[doc = include_str!("layer_window.doc/open_with.md")]
     pub fn open_with(
-        config: &LayerSurfaceConfig,
+        settings: &LayerSettings,
+        namespace: &str,
         waker: Option<&LayerWaker>,
     ) -> Result<Self, LayerShellError> {
         let connection = Connection::connect_to_env()
@@ -63,32 +71,29 @@ impl LayerWindow {
 
         // Outputs must be enumerated before the surface can name one, so the
         // state exists first and the surface is created into it. One roundtrip
-        // is what turns the registry's bare globals into named connectors.
+        // is what turns the registry's bare globals into identified displays.
         let mut state = LayerState::new(
             RegistryState::new(&globals),
             SeatState::new(&globals, &qh),
             OutputState::new(&globals, &qh),
-            config.size,
+            initial_size(settings),
         );
         let mut queue = queue;
         queue
             .roundtrip(&mut state)
             .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
 
-        let chosen = config
-            .output
-            .name()
-            .and_then(|name| state.output_named(name));
+        let chosen = settings.display.and_then(|id| state.output_with_id(id));
 
         let surface = compositor.create_surface(&qh);
         let layer = shell.create_layer_surface(
             &qh,
             surface,
-            layer_of(config.layer),
-            Some(config.namespace.clone()),
+            WlrMapper::layer(settings.band),
+            Some(namespace.to_owned()),
             chosen.as_ref(),
         );
-        apply(&layer, config);
+        apply(&compositor, &layer, settings);
 
         // Fractional scaling, where the compositor offers it. Both halves are
         // needed: the fractional-scale object reports a scale in 120ths, and the
@@ -99,6 +104,16 @@ impl LayerWindow {
             .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
             .ok();
         let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
+        // Optional on purpose: a compositor without `wp_presentation` loses the
+        // timings and keeps the surface. Nothing below this line may depend on
+        // it existing.
+        state.presentation = globals.bind::<WpPresentation, _, _>(&qh, 1..=2, ()).ok();
+        if state.presentation.is_none() {
+            eprintln!(
+                "obscur-shell-layer: no wp_presentation here; \
+                 frames cannot be timed to the screen"
+            );
+        }
         if let (Some(manager), Some(viewporter)) = (&fractional_manager, &viewporter) {
             state.fractional = Some(manager.get_fractional_scale(layer.wl_surface(), &qh, ()));
             state.viewport = Some(viewporter.get_viewport(layer.wl_surface(), &qh, ()));
@@ -122,7 +137,7 @@ impl LayerWindow {
                 .insert_source(source, |(), (), state: &mut LayerState| {
                     // The turn alone is not enough: a host renders when it has a
                     // reason to, so the wake has to become one.
-                    state.events.push(LayerEvent::Woken);
+                    state.surface_events.push(LayerSurfaceEvent::Woken);
                 })
                 .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
         }
@@ -131,9 +146,11 @@ impl LayerWindow {
             connection,
             event_loop,
             state,
-            _compositor: compositor,
+            settings: settings.clone(),
+            compositor,
             _fractional_manager: fractional_manager,
             _viewporter: viewporter,
+            queue: qh,
         })
     }
 
@@ -141,11 +158,52 @@ impl LayerWindow {
     pub fn dispatch(
         &mut self,
         timeout: Option<std::time::Duration>,
-    ) -> Result<Vec<LayerEvent>, LayerShellError> {
+    ) -> Result<(), LayerShellError> {
         self.event_loop
             .dispatch(timeout, &mut self.state)
-            .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
-        Ok(core::mem::take(&mut self.state.events))
+            .map_err(|error| LayerShellError::Dispatch(error.to_string()))
+    }
+
+    #[doc = include_str!("layer_window.doc/poll_input.md")]
+    pub fn poll_input(&mut self) -> Vec<LayerInput> {
+        core::mem::take(&mut self.state.input)
+    }
+
+    #[doc = include_str!("layer_window.doc/ask_when_shown.md")]
+    pub fn ask_when_shown(&mut self) {
+        let (Some(presentation), Some(layer)) = (&self.state.presentation, &self.state.layer)
+        else {
+            return;
+        };
+        let seq = self.state.feedbacks_asked;
+        self.state.feedbacks_asked += 1;
+        // Bound to the surface's *next* commit, which is the one wgpu is about
+        // to make. Asked before presenting rather than after, because after is
+        // the commit following the one being measured.
+        presentation.feedback(layer.wl_surface(), &self.queue, seq);
+    }
+
+    #[doc = include_str!("layer_window.doc/take_presented.md")]
+    pub fn take_presented(&mut self) -> Vec<Presented> {
+        core::mem::take(&mut self.state.presented)
+    }
+
+    #[doc = include_str!("layer_window.doc/add_turn_waker.md")]
+    pub fn add_turn_waker(&self, waker: &LayerWaker) -> Result<(), LayerShellError> {
+        let Some(source) = waker.take_source() else {
+            return Ok(());
+        };
+        self.event_loop
+            .handle()
+            .insert_source(source, |(), (), _state: &mut LayerState| {
+                // Deliberately empty. Ringing this means "your `dispatch` may
+                // return now", not "something changed" — the caller looks at
+                // whatever it was waiting for. Pushing a `Woken` here would tell
+                // the host to reconsider the interface, which is a different
+                // claim and would cost a frame nobody asked for.
+            })
+            .map(|_| ())
+            .map_err(|error| LayerShellError::Dispatch(error.to_string()))
     }
 
     #[doc = include_str!("layer_window.doc/loop_handle.md")]
@@ -161,18 +219,6 @@ impl LayerWindow {
             .map_err(|error| LayerShellError::Dispatch(error.to_string()))
     }
 
-    #[doc = include_str!("layer_window.doc/size.md")]
-    #[must_use]
-    pub const fn size(&self) -> Size {
-        self.state.size
-    }
-
-    #[doc = include_str!("layer_window.doc/scale.md")]
-    #[must_use]
-    pub const fn scale(&self) -> f32 {
-        self.state.scale
-    }
-
     #[doc = include_str!("layer_window.doc/is_configured.md")]
     #[must_use]
     pub const fn is_configured(&self) -> bool {
@@ -185,16 +231,16 @@ impl LayerWindow {
         self.state.closed
     }
 
-    #[doc = include_str!("layer_window.doc/reconfigure.md")]
-    pub fn reconfigure(&self, config: &LayerSurfaceConfig) {
-        apply(self.state.layer(), config);
-        self.state.layer().commit();
+    #[doc = include_str!("layer_window.doc/settings_fn.md")]
+    #[must_use]
+    pub const fn settings(&self) -> &LayerSettings {
+        &self.settings
     }
 
-    #[doc = include_str!("layer_window.doc/outputs.md")]
+    #[doc = include_str!("layer_window.doc/displays.md")]
     #[must_use]
-    pub fn outputs(&self) -> Vec<String> {
-        self.state.output_names()
+    pub fn displays(&self) -> Vec<LayerDisplay> {
+        self.state.displays()
     }
 
     #[doc = include_str!("layer_window.doc/sync_scale.md")]
@@ -213,15 +259,6 @@ impl LayerWindow {
             self.state.layer().wl_surface().set_buffer_scale(integer);
         }
         self.state.layer().commit();
-    }
-
-    #[doc = include_str!("layer_window.doc/physical_size.md")]
-    #[must_use]
-    pub fn physical_size(&self) -> Size {
-        Size::new(
-            (self.state.size.width * self.state.scale).round(),
-            (self.state.size.height * self.state.scale).round(),
-        )
     }
 
     #[doc = include_str!("layer_window.doc/has_fractional_scale.md")]
@@ -243,101 +280,171 @@ impl LayerWindow {
     }
 }
 
+impl LayerBackend for LayerWindow {
+    #[doc = include_str!("layer_window.doc/backend_open.md")]
+    fn open(&mut self, settings: &LayerSettings) -> Result<(), LayerError> {
+        // The connection and the loop belong to the surface that already exists,
+        // so re-opening is applying: there is nothing here that a second
+        // handshake would establish that this one has not.
+        match self.apply(settings) {
+            WindowOperationResult::Performed(_) => Ok(()),
+            WindowOperationResult::Unsupported => Err(LayerError::Unsupported),
+            WindowOperationResult::Failed(why) => Err(LayerError::BackendFailure(why)),
+        }
+    }
+
+    fn apply(&mut self, settings: &LayerSettings) -> WindowOperationResult {
+        if self.state.closed {
+            return WindowOperationResult::failed("the surface has already been taken down");
+        }
+        // A display change is the one setting a live surface cannot carry: the
+        // output is chosen when the surface is created and the protocol has no
+        // request to move it. Asked before the new settings are stored, or the
+        // comparison would be against themselves.
+        let moved_display = settings.display.is_some() && settings.display != self.settings.display;
+
+        apply(&self.compositor, self.state.layer(), settings);
+        self.state.layer().commit();
+        self.settings = settings.clone();
+
+        if moved_display {
+            WindowOperationResult::conditional()
+        } else {
+            WindowOperationResult::native()
+        }
+    }
+
+    fn close(&mut self) -> WindowOperationResult {
+        if self.state.closed {
+            return WindowOperationResult::native();
+        }
+        self.state.closed = true;
+        self.state
+            .surface_events
+            .push(LayerSurfaceEvent::CloseRequested);
+        WindowOperationResult::native()
+    }
+
+    fn state(&self) -> LayerSurfaceState {
+        if self.state.closed {
+            LayerSurfaceState::Closed
+        } else if self.state.configured {
+            LayerSurfaceState::Ready
+        } else {
+            LayerSurfaceState::Configuring
+        }
+    }
+
+    fn size(&self) -> Size {
+        self.state.size
+    }
+
+    fn scale(&self) -> f32 {
+        self.state.scale
+    }
+
+    #[doc = include_str!("layer_window.doc/supports.md")]
+    fn supports(&self, feature: LayerFeature) -> SupportLevel {
+        match feature {
+            // wlr-layer-shell names all four bands, both anchor freedoms, all
+            // three keyboard modes, a signed exclusive zone and a per-output
+            // surface. Every one of these is the protocol's own vocabulary.
+            LayerFeature::Bands
+            | LayerFeature::Reservation
+            | LayerFeature::FreeAnchor
+            | LayerFeature::ExclusiveKeyboard
+            | LayerFeature::DisplaySelection
+            | LayerFeature::NegativeMargin
+            // An empty input region is `wl_surface`'s own, not the layer
+            // shell's, so it is there on every compositor that speaks Wayland
+            // at all.
+            | LayerFeature::InputTransparency => SupportLevel::Native,
+            // Only when the compositor offered both halves of the fractional
+            // path. Without them the integer path rounds up, which is a real
+            // answer but not the one that was asked for.
+            LayerFeature::FractionalScale => {
+                if self.has_fractional_scale() {
+                    SupportLevel::Native
+                } else {
+                    SupportLevel::Emulated
+                }
+            }
+        }
+    }
+
+    fn poll_events(&mut self) -> Vec<LayerSurfaceEvent> {
+        core::mem::take(&mut self.state.surface_events)
+    }
+}
+
 #[doc = include_str!("layer_window.doc/apply.md")]
-fn apply(layer: &LayerSurface, config: &LayerSurfaceConfig) {
-    layer.set_layer(layer_of(config.layer));
-    layer.set_anchor(anchor_of(config.anchor));
-    layer.set_keyboard_interactivity(keyboard_of(config.keyboard_interactivity));
-    layer.set_exclusive_zone(config.exclusive_zone.to_raw());
+fn apply(compositor: &CompositorState, layer: &LayerSurface, settings: &LayerSettings) {
+    layer.set_layer(WlrMapper::layer(settings.band));
+    layer.set_anchor(WlrMapper::anchor(settings.anchor));
+    layer.set_keyboard_interactivity(WlrMapper::keyboard(settings.focus));
+    layer.set_exclusive_zone(WlrMapper::exclusive_zone(settings.reservation));
     layer.set_margin(
-        config.margin.top,
-        config.margin.right,
-        config.margin.bottom,
-        config.margin.left,
+        settings.margin.top,
+        settings.margin.right,
+        settings.margin.bottom,
+        settings.margin.left,
     );
-    let (width, height) = config.requested_size();
+    let (width, height) = WlrMapper::requested_size(settings);
     layer.set_size(width, height);
+    apply_pointer(compositor, layer, settings.pointer);
 }
 
-#[doc = include_str!("layer_window.doc/layer_of.md")]
-const fn layer_of(kind: LayerKind) -> Layer {
-    match kind {
-        LayerKind::Background => Layer::Background,
-        LayerKind::Bottom => Layer::Bottom,
-        LayerKind::Top => Layer::Top,
-        LayerKind::Overlay => Layer::Overlay,
+#[doc = include_str!("layer_window.doc/apply_pointer.md")]
+fn apply_pointer(compositor: &CompositorState, layer: &LayerSurface, policy: LayerPointerPolicy) {
+    let surface = layer.wl_surface();
+    if policy.takes_pointer() {
+        // A null region is the protocol's own word for "all of it", and it is
+        // what an untouched surface already has — set explicitly all the same,
+        // because this path is also how a transparent surface becomes
+        // interactive again on a reconfigure.
+        surface.set_input_region(None);
+        return;
+    }
+    match Region::new(compositor) {
+        // Empty because nothing was added to it: input lands on whatever is
+        // behind the surface instead. The region is copied into the pending
+        // state here, so dropping it at the end of this function is correct.
+        Ok(region) => surface.set_input_region(Some(region.wl_region())),
+        Err(error) => eprintln!(
+            "obscur-shell-layer: no wl_region here ({error}); \
+             the surface stays clickable"
+        ),
     }
 }
 
-#[doc = include_str!("layer_window.doc/anchor_of.md")]
-fn anchor_of(anchor: LayerAnchor) -> Anchor {
-    let mut out = Anchor::empty();
-    if anchor.top {
-        out |= Anchor::TOP;
-    }
-    if anchor.right {
-        out |= Anchor::RIGHT;
-    }
-    if anchor.bottom {
-        out |= Anchor::BOTTOM;
-    }
-    if anchor.left {
-        out |= Anchor::LEFT;
-    }
-    out
-}
-
-#[doc = include_str!("layer_window.doc/keyboard_of.md")]
-const fn keyboard_of(interactivity: LayerKeyboardInteractivity) -> KeyboardInteractivity {
-    match interactivity {
-        LayerKeyboardInteractivity::None => KeyboardInteractivity::None,
-        LayerKeyboardInteractivity::Exclusive => KeyboardInteractivity::Exclusive,
-        LayerKeyboardInteractivity::OnDemand => KeyboardInteractivity::OnDemand,
-    }
+#[doc = include_str!("layer_window.doc/initial_size.md")]
+fn initial_size(settings: &LayerSettings) -> Size {
+    #[allow(clippy::cast_precision_loss)]
+    Size::new(
+        settings.width.unwrap_or(0) as f32,
+        settings.height.unwrap_or(0) as f32,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_windowing::layer::LayerAnchor;
 
-    /// The three enum bridges are pure mappings, and they are the one place a
-    /// wrong pairing would put a panel in the wrong band with no error anywhere.
     #[test]
-    fn every_band_maps_to_its_own_protocol_layer() {
-        assert!(matches!(layer_of(LayerKind::Background), Layer::Background));
-        assert!(matches!(layer_of(LayerKind::Bottom), Layer::Bottom));
-        assert!(matches!(layer_of(LayerKind::Top), Layer::Top));
-        assert!(matches!(layer_of(LayerKind::Overlay), Layer::Overlay));
+    fn a_bar_starts_at_the_thickness_it_asked_for() {
+        // The stretched axis has no number yet — the compositor supplies it at
+        // configure — and zero is what "not yet known" looks like in a `Size`.
+        let size = initial_size(&LayerSettings::top_bar(36));
+        assert_eq!(size.height, 36.0);
+        assert_eq!(size.width, 0.0);
     }
 
     #[test]
-    fn a_top_bar_anchors_to_three_edges() {
-        let anchor = anchor_of(LayerAnchor::TOP_BAR);
-        assert!(anchor.contains(Anchor::TOP));
-        assert!(anchor.contains(Anchor::LEFT));
-        assert!(anchor.contains(Anchor::RIGHT));
-        assert!(!anchor.contains(Anchor::BOTTOM));
-    }
-
-    #[test]
-    fn an_empty_anchor_maps_to_no_bits() {
-        assert!(anchor_of(LayerAnchor::NONE).is_empty());
-        assert_eq!(anchor_of(LayerAnchor::ALL), Anchor::all());
-    }
-
-    #[test]
-    fn keyboard_modes_map_one_to_one() {
-        assert!(matches!(
-            keyboard_of(LayerKeyboardInteractivity::None),
-            KeyboardInteractivity::None
-        ));
-        assert!(matches!(
-            keyboard_of(LayerKeyboardInteractivity::Exclusive),
-            KeyboardInteractivity::Exclusive
-        ));
-        assert!(matches!(
-            keyboard_of(LayerKeyboardInteractivity::OnDemand),
-            KeyboardInteractivity::OnDemand
-        ));
+    fn a_floating_surface_starts_at_its_explicit_size() {
+        let settings = LayerSettings::new()
+            .with_anchor(LayerAnchor::NONE)
+            .with_size(320, 200);
+        assert_eq!(initial_size(&settings), Size::new(320.0, 200.0));
     }
 }

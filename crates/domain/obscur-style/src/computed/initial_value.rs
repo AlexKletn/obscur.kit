@@ -304,7 +304,8 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         // `overflow` initial is `visible` (no clip); its keyword initial
         // likewise needs the interner, so an absent value falls back to the
         // coordinator's default (no added clip) — byte-for-byte identical.
-        | PropertyId::Overflow
+        | PropertyId::OverflowX
+        | PropertyId::OverflowY
         // `pointer-events` initial is `auto`. Its handle needs no interner, but
         // storing it would put one entry in every node's computed style for a
         // property almost no node declares — and hit testing already reads an

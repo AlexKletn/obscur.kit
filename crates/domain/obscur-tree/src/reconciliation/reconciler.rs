@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::{ComponentId, NodeId, StableKey};
+use obscur_identity::{ComponentId, FastMap, NodeId, StableKey};
 use obscur_view::view::{
     StyleAttributes, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, assigns_slots,
     is_outlet, may_project_content,
@@ -107,7 +107,7 @@ impl Reconciler {
         let (matches, removed) = matching.into_parts();
 
         // Old relative order of the reused nodes, for reorder detection.
-        let old_rank: HashMap<NodeId, usize> = existing
+        let old_rank: FastMap<NodeId, usize> = existing
             .iter()
             .enumerate()
             .map(|(rank, &id)| (id, rank))
@@ -269,7 +269,7 @@ fn node_kind_of(node: &ViewNode) -> NodeKind {
 
 #[doc = include_str!("reconciler.doc/report_duplicate_keys.md")]
 fn report_duplicate_keys(parent: NodeId, desired: &[ViewNode], plan: &mut ReconciliationPlan) {
-    let mut counts: HashMap<StableKey, usize> = HashMap::new();
+    let mut counts: FastMap<StableKey, usize> = HashMap::default();
     for node in desired {
         if let Some(key) = desired_key(node) {
             *counts.entry(key).or_insert(0) += 1;

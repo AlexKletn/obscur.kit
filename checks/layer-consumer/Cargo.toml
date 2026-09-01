@@ -1,0 +1,45 @@
+# The workspace's other missing consumer: a crate on the far side of the facade
+# boundary that opens a DESKTOP SURFACE rather than a window.
+#
+# `checks/facade-consumer` already stands outside the facade, and it closed the
+# "no consumer outside the facade" gap for the authoring surface. It opens a
+# window, so everything past `AppParts::boot` on the layer branch is code it never
+# reaches. `docs/layer-consumer-audit.md` is what an application on that branch
+# found the first time one existed, and this fixture is why there will not be a
+# first time again.
+#
+# THE FEATURE SET IS THE POINT. `window-winit` is deliberately absent:
+#
+#  - it is what a panel or an on-screen keyboard actually builds with, and
+#  - it is the only configuration in which the layer runner is the *sole* reader
+#    of what `AppParts::boot` produces. Under `full` the windowed runner reads
+#    every field, so a field the layer runner forgot looks used. That is exactly
+#    how audit finding 1-A stayed invisible: the compiler had already written
+#    `fields ... are never read`, in a build nobody ran.
+#
+# Run it: `cargo run -p xtask -- consumer` (or `cargo test` in this directory).
+[package]
+name = "layer-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+# Its own workspace root, so the repository's workspace does not adopt it and the
+# facade ban keeps holding.
+[workspace]
+
+[dependencies]
+# The ONE dependency, and not the default feature set. Nothing internal may be
+# added here — reaching for `obscur-windowing` directly to make something compile
+# is the workaround this fixture exists to make impossible.
+obscur-kit = { path = "../../crates/facade/obscur-kit", default-features = false, features = [
+    "shell-layer",
+    "render-vello",
+    "text-harfrust",
+    "text-unicode",
+    "font-fontconfig",
+    "resource-fs",
+    "resource-decode",
+    "task-smol",
+] }

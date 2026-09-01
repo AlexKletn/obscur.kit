@@ -1,9 +1,7 @@
 #![doc = include_str!("scrolling.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_geometry::Point;
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_interaction::event::UiEvent;
 use obscur_interaction::pointer::WheelEvent;
 use obscur_view::view::EVENT_WHEEL;
@@ -166,7 +164,7 @@ impl UiRuntime {
         // container is normally an ancestor of the hit node, and the ancestor
         // walk below reaches it anyway, so targeting it directly would only rob a
         // row of the chance to hear its own wheel.
-        let scrolls: HashMap<NodeId, f32> =
+        let scrolls: FastMap<NodeId, f32> =
             ScrollTargets::new(&self.tree, &self.computed, &self.boxes, &self.scroll)
                 .paint(&self.computed)
                 .into_iter()

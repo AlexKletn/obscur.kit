@@ -1,9 +1,7 @@
 #![doc = include_str!("subtree_brackets.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_geometry::{AffineTransform, Rect};
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_scene::clip::Clip;
 use obscur_scene::command::PaintCommand;
 use obscur_scene::layer::{LayerEffect, SceneLayer};
@@ -16,11 +14,11 @@ use super::stacking::{PaintLayer, PaintUnit};
 #[derive(Debug, Default)]
 pub(super) struct SubtreeBrackets {
     #[doc = include_str!("subtree_brackets.doc/enter_index.md")]
-    enter_index: HashMap<NodeId, usize>,
+    enter_index: FastMap<NodeId, usize>,
     #[doc = include_str!("subtree_brackets.doc/parent_of.md")]
-    parent_of: HashMap<NodeId, Option<NodeId>>,
+    parent_of: FastMap<NodeId, Option<NodeId>>,
     #[doc = include_str!("subtree_brackets.doc/depth_of.md")]
-    depth_of: HashMap<NodeId, u32>,
+    depth_of: FastMap<NodeId, u32>,
     #[doc = include_str!("subtree_brackets.doc/preorder.md")]
     preorder: Vec<NodeId>,
     #[doc = include_str!("subtree_brackets.doc/clips.md")]
@@ -124,8 +122,8 @@ impl SubtreeBrackets {
     #[doc = include_str!("subtree_brackets.doc/emit.md")]
     pub(super) fn emit(
         self,
-        zmap: &HashMap<NodeId, i32>,
-        layermap: &HashMap<NodeId, PaintLayer>,
+        zmap: &FastMap<NodeId, i32>,
+        layermap: &FastMap<NodeId, PaintLayer>,
         units: &mut Vec<PaintUnit>,
     ) {
         if self.is_empty() {

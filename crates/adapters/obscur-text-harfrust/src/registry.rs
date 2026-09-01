@@ -21,6 +21,8 @@ pub struct FontRegistry {
     discovered: Rc<RefCell<Vec<RegisteredFont>>>,
     #[doc = include_str!("registry.doc/undelivered.md")]
     undelivered: UndeliveredFaces,
+    #[doc = include_str!("registry.doc/asked_families.md")]
+    asked_families: Rc<RefCell<Vec<Box<str>>>>,
     #[doc = include_str!("registry.doc/fallback.md")]
     fallback: Option<Arc<dyn SystemFontFallback>>,
 }
@@ -32,6 +34,7 @@ impl std::fmt::Debug for FontRegistry {
             .field("fonts", &self.fonts)
             .field("discovered", &self.discovered)
             .field("undelivered", &self.undelivered.borrow().len())
+            .field("asked_families", &self.asked_families)
             .field(
                 "fallback",
                 &self.fallback.as_ref().map(|_| "<SystemFontFallback>"),
@@ -133,6 +136,65 @@ impl FontRegistry {
         Some(discovered.len() - 1)
     }
 
+    #[doc = include_str!("registry.doc/discover_family.md")]
+    fn discover_family(
+        &self,
+        family: &FontFamily,
+        attributes: FontAttributes,
+        text: &str,
+    ) -> Option<RegisteredFont> {
+        // Only a *named* family is asked for by name. A generic is the host's
+        // own idea of a category, already answered once at bootstrap and
+        // registered under its generic name; asking a font database for a
+        // family literally called "sans-serif" would either miss or return the
+        // same face a second time.
+        let FontFamily::Named(name) = family else {
+            return None;
+        };
+        let fallback = self.fallback.as_ref()?;
+        if let Some(font) = self
+            .discovered
+            .borrow()
+            .iter()
+            .find(|font| font.family.name().eq_ignore_ascii_case(name) && font.covers(text))
+        {
+            return Some(font.clone());
+        }
+        {
+            // Both answers are remembered — a host that does not have the
+            // family is asked once, not once per text run, and the negative is
+            // by far the common case for a sheet transcribed from a mockup.
+            let mut asked = self.asked_families.borrow_mut();
+            if asked.iter().any(|asked| asked.eq_ignore_ascii_case(name)) {
+                return None;
+            }
+            asked.push(name.clone());
+        }
+        let face = fallback.face_for_family(name, &attributes)?;
+        let bytes = Arc::clone(face.bytes());
+        let candidate = RegisteredFont {
+            id: self.next_id(),
+            // Keyed by the name the *sheet* asked for rather than the one the
+            // host answered with, because that is the key the next run looks
+            // it up under; the two differ whenever a font database resolves an
+            // alias or normalizes a name.
+            family: FontFamily::named(name.clone()),
+            attributes: *face.attributes(),
+            metrics: read_metrics(&bytes),
+            bytes,
+        };
+        // Kept whether or not it covers *this* run: unlike the per-character
+        // answer, which is only ever right for the character it was asked
+        // about, a named face is the family from now on — a run it cannot draw
+        // falls through to the next family in the chain, and the run after that
+        // finds it here without a second lookup.
+        self.undelivered
+            .borrow_mut()
+            .push((candidate.id, Arc::clone(&candidate.bytes)));
+        self.discovered.borrow_mut().push(candidate.clone());
+        candidate.covers(text).then_some(candidate)
+    }
+
     #[doc = include_str!("registry.doc/next_id.md")]
     fn next_id(&self) -> FontId {
         let used = self.fonts.len() + self.discovered.borrow().len();
@@ -175,22 +237,34 @@ impl FontResolver for FontRegistry {
             let best = self
                 .fonts
                 .iter()
-                .filter(|font| font.family.name() == family.name())
+                // Case-insensitively, because a CSS family name is
+                // (css-fonts-4 §2.2), and an author who writes `figtree` for a
+                // face registered as `Figtree` has named the same font.
+                .filter(|font| font.family.name().eq_ignore_ascii_case(family.name()))
                 .filter(|font| font.covers(text))
                 .min_by_key(|font| font.attributes.distance(requested));
-            if let Some(font) = best {
-                let face = FontFace::new(
-                    font.family.clone(),
-                    font.attributes,
-                    FontSource::memory(Arc::clone(&font.bytes)),
-                    font.metrics.unwrap_or(IDEALIZED_METRICS),
-                );
-                // Detect synthesis: the request wants a slant/weight the matched
-                // face — chosen as the nearest available cut — does not actually
-                // carry, so the renderer must fake it (spec §5.18).
-                let (oblique, bold) = synthesis(requested, &font.attributes);
-                return Some(ResolvedFont::new(font.id, face).with_synthesis(oblique, bold));
-            }
+            // Nothing registered carries this name. Before moving on to the
+            // next family in the chain — which is what made a named font
+            // unusable, since an application that installed it changed nothing
+            // — ask the host whether it has a family under that name.
+            let best = match best {
+                Some(font) => font.clone(),
+                None => match self.discover_family(family, *requested, text) {
+                    Some(font) => font,
+                    None => continue,
+                },
+            };
+            let face = FontFace::new(
+                best.family.clone(),
+                best.attributes,
+                FontSource::memory(Arc::clone(&best.bytes)),
+                best.metrics.unwrap_or(IDEALIZED_METRICS),
+            );
+            // Detect synthesis: the request wants a slant/weight the matched
+            // face — chosen as the nearest available cut — does not actually
+            // carry, so the renderer must fake it (spec §5.18).
+            let (oblique, bold) = synthesis(requested, &best.attributes);
+            return Some(ResolvedFont::new(best.id, face).with_synthesis(oblique, bold));
         }
         // Nothing the application named can draw this run. Before giving up —
         // which means drawing *nothing*, since an unresolved run paints no
@@ -729,6 +803,149 @@ mod tests {
         // than handing back the idealized stand-in as if it were the font's own.
         assert_eq!(registry.face_metrics().len(), 1);
         assert!(registry.face_metrics().get(id).is_none());
+    }
+
+    /// A host that has exactly one family installed, under a name no
+    /// application registered, and counts how often it is asked.
+    #[derive(Debug, Default)]
+    struct HostWithFigtree {
+        by_name: std::sync::atomic::AtomicUsize,
+    }
+
+    impl obscur_text::font::SystemFontFallback for HostWithFigtree {
+        fn face_for_char(&self, _character: char) -> Option<obscur_text::font::FallbackFace> {
+            None
+        }
+
+        fn face_for_family(
+            &self,
+            name: &str,
+            _attributes: &FontAttributes,
+        ) -> Option<obscur_text::font::FallbackFace> {
+            self.by_name
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if !name.eq_ignore_ascii_case("Figtree") {
+                return None;
+            }
+            Some(
+                obscur_text::font::FallbackFace::new(
+                    // The host names it its own way; the sheet asked for
+                    // "Figtree".
+                    FontFamily::named("Figtree Variable"),
+                    Arc::from(alpha_font()),
+                )
+                .with_attributes(
+                    FontAttributes::default().with_weight(obscur_text::span::FontWeight::BOLD),
+                ),
+            )
+        }
+    }
+
+    fn host_registry() -> (FontRegistry, Arc<HostWithFigtree>) {
+        let host = Arc::new(HostWithFigtree::default());
+        let mut registry = FontRegistry::new();
+        // The kit's own wiring: only the generic families are registered.
+        registry.register(
+            FontFamily::generic(obscur_text::font::GenericFamily::SansSerif),
+            FontAttributes::default(),
+            beta_font(),
+        );
+        (
+            registry.with_system_fallback(Arc::clone(&host) as Arc<dyn SystemFontFallback>),
+            host,
+        )
+    }
+
+    #[test]
+    fn a_named_family_the_host_installs_is_resolved_by_name() {
+        let (registry, host) = host_registry();
+        let chain = FontFallback::new(FontFamily::named("Figtree")).with(FontFamily::generic(
+            obscur_text::font::GenericFamily::SansSerif,
+        ));
+        let attributes = FontAttributes::default();
+
+        let resolved = registry
+            .resolve(&request(&chain, &attributes, "A"))
+            .expect("the host has Figtree");
+        assert_eq!(
+            resolved.face().family(),
+            &FontFamily::named("Figtree"),
+            "the sheet asked for Figtree and must be answered with it, not with \
+             the generic that follows it in the chain"
+        );
+        assert_eq!(host.by_name.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+        // The face is offered to the renderer exactly once, with its bytes.
+        let handed = registry.take_undelivered_faces();
+        assert_eq!(handed.len(), 1);
+        assert_eq!(handed[0].0, resolved.font());
+        assert!(registry.take_undelivered_faces().is_empty());
+
+        // …and a second run under the same name costs no further lookup.
+        let again = registry
+            .resolve(&request(&chain, &attributes, "AV"))
+            .expect("the discovered face is kept");
+        assert_eq!(again.font(), resolved.font());
+        assert_eq!(
+            host.by_name.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the host is asked once per name"
+        );
+    }
+
+    #[test]
+    fn a_named_family_the_host_does_not_have_falls_through_and_is_asked_once() {
+        let (registry, host) = host_registry();
+        let chain = FontFallback::new(FontFamily::named("Caprasimo")).with(FontFamily::generic(
+            obscur_text::font::GenericFamily::SansSerif,
+        ));
+        let attributes = FontAttributes::default();
+
+        // 'Я' is what the registered generic covers, so the chain still answers.
+        let resolved = registry
+            .resolve(&request(&chain, &attributes, "Я"))
+            .expect("the generic covers it");
+        assert_eq!(resolved.font(), FontId::new(0));
+        let _ = registry.resolve(&request(&chain, &attributes, "Я"));
+        assert_eq!(
+            host.by_name.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "a family the host does not have is asked about once, not once per run"
+        );
+    }
+
+    #[test]
+    fn a_named_face_is_matched_case_insensitively() {
+        // css-fonts-4 §2.2: family names are case-insensitive, so an author who
+        // writes `figtree` for a face registered as `Figtree` named that font.
+        let mut registry = FontRegistry::new();
+        registry.register(
+            FontFamily::named("Figtree"),
+            FontAttributes::default(),
+            alpha_font(),
+        );
+        let chain = FontFallback::new(FontFamily::named("FIGTREE"));
+        let attributes = FontAttributes::default();
+        assert_eq!(
+            registry
+                .resolve(&request(&chain, &attributes, "A"))
+                .expect("the same family under another casing")
+                .font(),
+            FontId::new(0)
+        );
+    }
+
+    #[test]
+    fn a_host_answer_states_its_own_cut_rather_than_being_faux_bolded() {
+        let (registry, _host) = host_registry();
+        let chain = FontFallback::new(FontFamily::named("Figtree"));
+        // The host's Figtree *is* a bold cut, so a bold request must not also
+        // be thickened by the renderer.
+        let bold = FontAttributes::default().with_weight(obscur_text::span::FontWeight::BOLD);
+        let resolved = registry
+            .resolve(&request(&chain, &bold, "A"))
+            .expect("the host has Figtree");
+        assert!(!resolved.synth_bold(), "a real bold cut is not faux-bolded");
     }
 
     #[test]

@@ -211,7 +211,7 @@ mod tests {
         // A compose-only text edit plans no layout at all, and the classifier only
         // ever removes work — so it must not put the phase back.
         let current = inputs();
-        let styles = ComputedStyles::new();
+        let styles = ComputedStyles::default();
         let classifier = LayoutClassifier::new(Some(&current), &current, &styles, &styles);
         let plan = FramePlan::for_frame(FrameReason::TextEdit, false);
         assert!(!plan.layout());
@@ -233,7 +233,7 @@ mod tests {
         // The first frame has no retained inputs at all, so the classifier cannot
         // prove anything and must take the whole pass.
         let current = inputs();
-        let styles = ComputedStyles::new();
+        let styles = ComputedStyles::default();
         let classifier = LayoutClassifier::new(None, &current, &styles, &styles);
         let plan = FramePlan::for_frame(FrameReason::Input, true);
         assert!(matches!(
@@ -254,7 +254,7 @@ mod tests {
         let last = inputs();
         let mut current = inputs();
         current.viewport = Size::new(100.0, 140.0);
-        let styles = ComputedStyles::new();
+        let styles = ComputedStyles::default();
         let classifier = LayoutClassifier::new(Some(&last), &current, &styles, &styles);
         let plan = FramePlan::for_frame(FrameReason::Input, false);
         assert!(matches!(
@@ -274,7 +274,7 @@ mod tests {
     fn positioned(keyword: obscur_identity::InternedSymbol) -> ComputedStyles {
         let mut style = ComputedStyle::new();
         style.set(PropertyId::Position, ComputedValue::keyword(keyword));
-        let mut styles = ComputedStyles::new();
+        let mut styles = ComputedStyles::default();
         styles.insert(NodeId::from_raw(1), style);
         styles
     }
@@ -310,7 +310,7 @@ mod tests {
         ));
         // The same holds for a document that declares no `position` at all.
         assert!(matches!(
-            classify_scroll_only(&ComputedStyles::new()),
+            classify_scroll_only(&ComputedStyles::default()),
             LayoutPhase::Skip
         ));
     }

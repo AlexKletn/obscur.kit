@@ -57,6 +57,10 @@ impl ComputedValue {
             // of a real element's box, so it has no place in a `ComputedValue`.
             PropertyValue::String(_)
             | PropertyValue::CustomRef(_)
+            // A custom property's declared text is a pre-substitution
+            // placeholder in exactly the sense a `CustomRef` is: no element's
+            // computed value is a token sequence.
+            | PropertyValue::RawTokens(_)
             | PropertyValue::Inherit
             | PropertyValue::Initial
             | PropertyValue::Unset => None,

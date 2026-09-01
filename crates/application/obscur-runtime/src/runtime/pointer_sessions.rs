@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use obscur_geometry::Point;
-use obscur_identity::{InternedSymbol, NodeId};
+use obscur_identity::{FastMap, InternedSymbol, NodeId};
 use obscur_interaction::gesture::{Fling, LongPressRecognizer, PanRecognizer, RecognizerId};
 use obscur_interaction::pointer::{PointerCaptureRegistry, PointerId};
 use obscur_tree::tree::RetainedTree;
@@ -95,19 +95,19 @@ pub(crate) struct PanStep {
 #[doc = include_str!("pointer_sessions.doc/PointerSessions.md")]
 pub(crate) struct PointerSessions {
     #[doc = include_str!("pointer_sessions.doc/presses.md")]
-    presses: HashMap<PointerId, Press>,
+    presses: FastMap<PointerId, Press>,
     #[doc = include_str!("pointer_sessions.doc/captures.md")]
     captures: PointerCaptureRegistry,
     #[doc = include_str!("pointer_sessions.doc/pans.md")]
-    pans: HashMap<PointerId, ActivePan>,
+    pans: FastMap<PointerId, ActivePan>,
     #[doc = include_str!("pointer_sessions.doc/flings.md")]
-    flings: HashMap<NodeId, Fling>,
+    flings: FastMap<NodeId, Fling>,
     #[doc = include_str!("pointer_sessions.doc/holds.md")]
-    holds: HashMap<PointerId, ActiveHold>,
+    holds: FastMap<PointerId, ActiveHold>,
     #[doc = include_str!("pointer_sessions.doc/text_drag.md")]
     text_drag: Option<(NodeId, usize)>,
     #[doc = include_str!("pointer_sessions.doc/last_clicks.md")]
-    last_clicks: HashMap<PointerId, PointerClick>,
+    last_clicks: FastMap<PointerId, PointerClick>,
     #[doc = include_str!("pointer_sessions.doc/click_count.md")]
     click_count: u32,
 }
@@ -116,13 +116,13 @@ impl PointerSessions {
     #[doc = include_str!("pointer_sessions.doc/new.md")]
     pub(crate) fn new() -> Self {
         Self {
-            presses: HashMap::new(),
+            presses: HashMap::default(),
             captures: PointerCaptureRegistry::new(),
-            pans: HashMap::new(),
-            flings: HashMap::new(),
-            holds: HashMap::new(),
+            pans: HashMap::default(),
+            flings: HashMap::default(),
+            holds: HashMap::default(),
             text_drag: None,
-            last_clicks: HashMap::new(),
+            last_clicks: HashMap::default(),
             click_count: 1,
         }
     }

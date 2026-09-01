@@ -67,6 +67,8 @@ pub enum PropertyValue {
     TransformOrigin(TransformOrigin),
     #[doc = include_str!("property_value.doc/CustomRef.md")]
     CustomRef(InternedSymbol),
+    #[doc = include_str!("property_value.doc/RawTokens.md")]
+    RawTokens(Box<str>),
     #[doc = include_str!("property_value.doc/Inherit.md")]
     Inherit,
     #[doc = include_str!("property_value.doc/Initial.md")]
@@ -114,6 +116,11 @@ impl PropertyValue {
             | Self::String(_)
             | Self::Name(_)
             | Self::CustomRef(_)
+            // A custom property's declared text carries whatever units it was
+            // written with, `ch` included — but it is parsed into a real value
+            // before it reaches any property, and it is that value which is
+            // asked.
+            | Self::RawTokens(_)
             | Self::Inherit
             | Self::Initial
             | Self::Unset => false,

@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod appearance;
 pub mod capture;
 pub mod dialog;
 pub mod document;

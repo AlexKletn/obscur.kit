@@ -1,6 +1,6 @@
 #![doc = include_str!("layout_dependency.doc/_module.md")]
 
-use obscur_identity::NodeId;
+use obscur_identity::{FastSet, NodeId};
 use std::collections::HashSet;
 
 #[doc = include_str!("layout_dependency.doc/LayoutDependency.md")]
@@ -9,7 +9,7 @@ pub struct LayoutDependency {
     #[doc = include_str!("layout_dependency.doc/constraints_affect_size.md")]
     constraints_affect_size: bool,
     #[doc = include_str!("layout_dependency.doc/children.md")]
-    children: HashSet<NodeId>,
+    children: FastSet<NodeId>,
 }
 
 impl LayoutDependency {
@@ -18,7 +18,7 @@ impl LayoutDependency {
     pub fn new() -> Self {
         Self {
             constraints_affect_size: false,
-            children: HashSet::new(),
+            children: HashSet::default(),
         }
     }
 
@@ -42,7 +42,7 @@ impl LayoutDependency {
 
     #[doc = include_str!("layout_dependency.doc/children_2.md")]
     #[must_use]
-    pub const fn children(&self) -> &HashSet<NodeId> {
+    pub const fn children(&self) -> &FastSet<NodeId> {
         &self.children
     }
 

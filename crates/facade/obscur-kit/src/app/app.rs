@@ -1,7 +1,12 @@
 #![doc = include_str!("app.doc/_module.md")]
 
 use super::app_error::AppError;
+use super::app_parts::{AppParts, DiagnosticSinkBox, RowBuilder, RowClick, RowHold, ScrollHandler};
+#[cfg(feature = "shell-layer")]
+use super::layer_control::LayerControl;
+#[cfg(feature = "window-winit")]
 use super::runner;
+use crate::bootstrap::{FontFaceBytes, FontSet};
 use crate::control::AppControl;
 use crate::geometry::Size;
 use crate::headless::input::SelectorTarget;
@@ -11,6 +16,8 @@ use crate::runtime::{CommandHandler, IntoCommandHandler};
 use crate::scene::command::CanvasRegion;
 use crate::screen::{OkuiScreen, ScreenData};
 use crate::view::view::{CanvasPaint, View, ViewNode};
+#[cfg(feature = "shell-layer")]
+use crate::windowing::layer::LayerSettings;
 
 #[doc = include_str!("app.doc/DEFAULT_SIZE.md")]
 const DEFAULT_SIZE: (f32, f32) = (800.0, 600.0);
@@ -44,16 +51,28 @@ pub struct App {
     app_id: String,
     size: (f32, f32),
     stylesheets: Vec<String>,
+    #[doc = include_str!("app.doc/fonts_field.md")]
+    fonts: FontSet,
     root: Option<Root>,
     commands: Vec<(InternedSymbol, CommandHandler)>,
     #[doc = include_str!("app.doc/control.md")]
     control: AppControl,
     #[doc = include_str!("app.doc/screen_data.md")]
     screen_data: ScreenData,
-    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
-    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
-    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
-    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
+    scroll: Option<ScrollHandler>,
+    virtual_lists: Vec<(InternedSymbol, RowBuilder)>,
+    virtual_clicks: Vec<(InternedSymbol, RowClick)>,
+    virtual_holds: Vec<(InternedSymbol, RowHold)>,
+    #[doc = include_str!("app.doc/diagnostics_field.md")]
+    diagnostics: Option<DiagnosticSinkBox>,
+    #[doc = include_str!("app.doc/layer_field.md")]
+    #[cfg(feature = "shell-layer")]
+    layer: Option<LayerSettings>,
+    #[doc = include_str!("app.doc/layer_control_field.md")]
+    #[cfg(feature = "shell-layer")]
+    layer_control: LayerControl,
+    #[cfg(feature = "shell-layer")]
+    layer_waker: Option<crate::shell_layer::surface::LayerWaker>,
 }
 
 impl App {
@@ -64,6 +83,7 @@ impl App {
             app_id: DEFAULT_APP_ID.to_owned(),
             size: DEFAULT_SIZE,
             stylesheets: Vec::new(),
+            fonts: FontSet::new(),
             root: None,
             commands: Vec::new(),
             control: AppControl::new(),
@@ -72,7 +92,41 @@ impl App {
             virtual_lists: Vec::new(),
             virtual_clicks: Vec::new(),
             virtual_holds: Vec::new(),
+            diagnostics: None,
+            #[cfg(feature = "shell-layer")]
+            layer: None,
+            #[cfg(feature = "shell-layer")]
+            layer_control: LayerControl::new(),
+            #[cfg(feature = "shell-layer")]
+            layer_waker: None,
         }
+    }
+
+    #[doc = include_str!("app.doc/layer.md")]
+    #[cfg(feature = "shell-layer")]
+    pub fn layer(mut self, settings: LayerSettings) -> Self {
+        self.layer = Some(settings);
+        self
+    }
+
+    #[doc = include_str!("app.doc/displays.md")]
+    #[cfg(feature = "shell-layer")]
+    pub fn displays() -> Result<Vec<crate::windowing::layer::LayerDisplay>, AppError> {
+        Ok(crate::shell_layer::surface::LayerProbe::displays()?)
+    }
+
+    #[doc = include_str!("app.doc/layer_control.md")]
+    #[cfg(feature = "shell-layer")]
+    #[must_use]
+    pub fn layer_control(&self) -> LayerControl {
+        self.layer_control.clone()
+    }
+
+    #[doc = include_str!("app.doc/waker.md")]
+    #[cfg(feature = "shell-layer")]
+    pub fn waker(mut self, waker: crate::shell_layer::surface::LayerWaker) -> Self {
+        self.layer_waker = Some(waker);
+        self
     }
 
     #[doc = include_str!("app.doc/app_id.md")]
@@ -90,6 +144,22 @@ impl App {
     #[doc = include_str!("app.doc/stylesheet.md")]
     pub fn stylesheet(mut self, css: &str) -> Self {
         self.stylesheets.push(css.to_owned());
+        self
+    }
+
+    #[doc = include_str!("app.doc/font.md")]
+    pub fn font(mut self, family: &str, bytes: impl Into<std::sync::Arc<[u8]>>) -> Self {
+        self.fonts.push(FontFaceBytes::new(
+            crate::text::font::FontFamily::named(family),
+            crate::text::font::FontAttributes::new(),
+            bytes,
+        ));
+        self
+    }
+
+    #[doc = include_str!("app.doc/font_face.md")]
+    pub fn font_face(mut self, face: FontFaceBytes) -> Self {
+        self.fonts.push(face);
         self
     }
 
@@ -187,6 +257,12 @@ impl App {
         self.control.clone()
     }
 
+    #[doc = include_str!("app.doc/diagnostics.md")]
+    pub fn diagnostics(mut self, sink: impl obscur_diagnostics::DiagnosticSink + 'static) -> Self {
+        self.diagnostics = Some(Box::new(sink));
+        self
+    }
+
     #[doc = include_str!("app.doc/on_command.md")]
     pub fn on_command<M>(
         mut self,
@@ -224,52 +300,88 @@ impl App {
 
     #[doc = include_str!("app.doc/run.md")]
     pub fn run(mut self) -> Result<(), AppError> {
+        let root = self.root.take();
+        #[cfg(feature = "shell-layer")]
+        let layer = self.layer.take();
+        #[cfg(feature = "shell-layer")]
+        let layer_control = self.layer_control.clone();
+        #[cfg(feature = "shell-layer")]
+        let layer_waker = self.layer_waker.take();
+        let screen_data = self.screen_data.clone();
+
         // Resolve the root into a `FnMut` builder the runtime can hold. A `.screen` is
-        // compiled to IR here — once, before any window is opened, so a compile
+        // compiled to IR here — once, before any surface is opened, so a compile
         // failure is an error rather than a blank window — and the builder lowers that
         // IR every frame, which is what lets `ScreenData` reach it.
-        let builder: Box<dyn FnMut() -> View + 'static> = match self.root.take() {
+        let builder: Box<dyn FnMut() -> View + 'static> = match root {
             Some(Root::View(builder)) => builder,
             Some(Root::Screen(src)) => {
                 // Compiled against the table, so the names the application bound
                 // before `run` are declared to the compiler and a reference to
                 // anything else is a §2.13 diagnostic here rather than a value that
                 // never arrives.
-                let screen = OkuiScreen::compile_with(&src, self.screen_data.clone())?;
+                let screen = OkuiScreen::compile_with(&src, screen_data)?;
                 Box::new(move || screen.view())
             }
-            // The frame-aware builder is wrapped by the runner, which owns the
-            // window and therefore the only authoritative viewport.
+            // The frame-aware builder is wrapped by the windowed runner, which owns
+            // the window and therefore the only authoritative viewport.
             Some(Root::ViewWith(builder)) => {
-                return runner::run_with_frame(
-                    self.title,
-                    self.app_id,
-                    self.size,
-                    self.stylesheets,
-                    builder,
-                    self.commands,
-                    self.control,
-                    self.scroll,
-                    self.virtual_lists,
-                    self.virtual_clicks,
-                    self.virtual_holds,
-                );
+                #[cfg(feature = "shell-layer")]
+                if layer.is_some() {
+                    // A layer surface's viewport is the compositor's to give and it
+                    // arrives before the first frame, so there is nothing a
+                    // frame-aware builder would learn that `.view` does not.
+                    return Err(AppError::FrameAwareLayerRoot);
+                }
+                #[cfg(feature = "window-winit")]
+                return runner::run_with_frame(self.into_parts(), builder);
+                #[cfg(not(feature = "window-winit"))]
+                {
+                    drop(builder);
+                    return Err(AppError::NoWindowBackend);
+                }
             }
             None => Box::new(View::default),
         };
-        runner::run(
-            self.title,
-            self.app_id,
-            self.size,
-            self.stylesheets,
-            builder,
-            self.commands,
-            self.control,
-            self.scroll,
-            self.virtual_lists,
-            self.virtual_clicks,
-            self.virtual_holds,
-        )
+
+        #[cfg(feature = "shell-layer")]
+        if let Some(settings) = layer {
+            return super::layer_runner::run(
+                self.into_parts(),
+                &settings,
+                builder,
+                &layer_control,
+                layer_waker.as_ref(),
+            );
+        }
+
+        #[cfg(feature = "window-winit")]
+        {
+            runner::run(self.into_parts(), builder)
+        }
+        #[cfg(not(feature = "window-winit"))]
+        {
+            drop(builder);
+            Err(AppError::NoWindowBackend)
+        }
+    }
+
+    #[doc = include_str!("app.doc/into_parts.md")]
+    fn into_parts(self) -> AppParts {
+        AppParts {
+            title: self.title,
+            app_id: self.app_id,
+            size: self.size,
+            stylesheets: self.stylesheets,
+            fonts: self.fonts,
+            commands: self.commands,
+            control: self.control,
+            scroll: self.scroll,
+            virtual_lists: self.virtual_lists,
+            virtual_clicks: self.virtual_clicks,
+            virtual_holds: self.virtual_holds,
+            diagnostics: self.diagnostics,
+        }
     }
 }
 
@@ -290,6 +402,41 @@ mod tests {
             .stylesheet(".b {}")
             .stylesheet(".c {}");
         assert_eq!(app.stylesheets, vec![".a {}", ".b {}", ".c {}"]);
+    }
+
+    /// Audit 2-F: a face named on the builder has to survive as far as the
+    /// `KitBootstrap` the runner installs the text stack from, or an
+    /// application still cannot name a font. The runner's own line —
+    /// `boot.font_set()` — needs a window and is not exercised here.
+    #[test]
+    fn an_application_face_reaches_the_bootstrap_that_installs_it() {
+        use super::View;
+        use crate::bootstrap::FontFaceBytes;
+        use crate::text::font::{FontAttributes, FontFamily};
+        use crate::text::span::FontWeight;
+
+        let parts = App::new("t")
+            .font("Figtree", &b"regular"[..])
+            .font_face(FontFaceBytes::new(
+                FontFamily::named("Figtree"),
+                FontAttributes::new().with_weight(FontWeight::BOLD),
+                &b"bold"[..],
+            ))
+            .into_parts();
+        assert_eq!(parts.fonts.len(), 2, "both cuts travel with the parts");
+
+        let booted = parts.boot(Box::new(View::default), super::Size::new(100.0, 100.0));
+        let set = booted.boot.font_set();
+        let named: Vec<&str> = set
+            .faces()
+            .iter()
+            .map(|face| face.family().name())
+            .collect();
+        assert_eq!(
+            named.iter().filter(|name| **name == "Figtree").count(),
+            2,
+            "the set the runner installs carries the application's faces: {named:?}"
+        );
     }
 
     #[test]

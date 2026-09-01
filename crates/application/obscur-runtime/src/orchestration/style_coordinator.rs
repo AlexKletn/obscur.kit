@@ -1,10 +1,13 @@
 #![doc = include_str!("style_coordinator.doc/_module.md")]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use std::rc::Rc;
 
 use obscur_geometry::Size;
-use obscur_identity::NodeId;
-use obscur_style::computed::{ChMetrics, ComputedStyle, ResolutionContext, StyleResolver};
+use obscur_identity::{FastBuildHasher, FastMap, FastSet, NodeId};
+use obscur_style::computed::{
+    ChMetrics, ComputedStyle, CustomValueParser, ResolutionContext, StyleResolver,
+};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::property::EnvironmentValues;
 use obscur_tree::tree::RetainedTree;
@@ -12,7 +15,7 @@ use obscur_tree::tree::RetainedTree;
 use super::StyleInputs;
 
 #[doc = include_str!("style_coordinator.doc/ComputedStyles.md")]
-pub type ComputedStyles = HashMap<NodeId, ComputedStyle>;
+pub type ComputedStyles = FastMap<NodeId, ComputedStyle>;
 
 #[doc = include_str!("style_coordinator.doc/IncrementalRestyle.md")]
 #[derive(Debug, Clone, Default)]
@@ -25,11 +28,25 @@ pub struct IncrementalRestyle {
     pub introduced: bool,
 }
 
+#[doc = include_str!("style_coordinator.doc/CustomValues.md")]
+pub type CustomValues = Rc<dyn CustomValueParser>;
+
 #[doc = include_str!("style_coordinator.doc/StyleCoordinator.md")]
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct StyleCoordinator {
     #[doc = include_str!("style_coordinator.doc/resolver.md")]
     resolver: StyleResolver,
+    #[doc = include_str!("style_coordinator.doc/custom_values.md")]
+    custom_values: Option<CustomValues>,
+}
+
+impl std::fmt::Debug for StyleCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StyleCoordinator")
+            .field("resolver", &self.resolver)
+            .field("custom_values", &self.custom_values.is_some())
+            .finish()
+    }
 }
 
 impl StyleCoordinator {
@@ -38,16 +55,33 @@ impl StyleCoordinator {
     pub fn new() -> Self {
         Self {
             resolver: StyleResolver::new(),
+            custom_values: None,
         }
     }
 
+    #[doc = include_str!("style_coordinator.doc/set_custom_values.md")]
+    pub fn set_custom_values(&mut self, parser: CustomValues) {
+        self.custom_values = Some(parser);
+    }
+
+    #[doc = include_str!("style_coordinator.doc/has_custom_values.md")]
+    #[must_use]
+    pub fn has_custom_values(&self) -> bool {
+        self.custom_values.is_some()
+    }
+
     #[doc = include_str!("style_coordinator.doc/attach.md")]
-    const fn attach<'a>(
+    fn attach<'a>(
+        &'a self,
         ctx: ResolutionContext<'a>,
         metrics: Option<&'a dyn ChMetrics>,
         environment: EnvironmentValues,
     ) -> ResolutionContext<'a> {
         let ctx = ctx.with_environment(environment);
+        let ctx = match self.custom_values.as_deref() {
+            Some(parser) => ctx.with_custom_values(parser),
+            None => ctx,
+        };
         match metrics {
             Some(metrics) => ctx.with_metrics(metrics),
             None => ctx,
@@ -65,7 +99,7 @@ impl StyleCoordinator {
         metrics: Option<&dyn ChMetrics>,
     ) -> ComputedStyles {
         let Some(root) = tree.root() else {
-            return ComputedStyles::new();
+            return ComputedStyles::default();
         };
         let order = Self::preorder(root, |id| {
             tree.get(id)
@@ -103,7 +137,7 @@ impl StyleCoordinator {
             .map(|&(node, _)| node)
             .find(|&node| tree.get(node).is_some_and(|n| n.kind().is_element()));
 
-        let mut ctx = Self::attach(
+        let mut ctx = self.attach(
             ResolutionContext::for_root(viewport.width, viewport.height),
             metrics,
             environment,
@@ -136,7 +170,7 @@ impl StyleCoordinator {
             if Some(node) == root_element
                 && let Some(style) = styles.get(&node)
             {
-                ctx = Self::attach(
+                ctx = self.attach(
                     ResolutionContext::new(
                         StyleResolver::font_size_of(style),
                         viewport.width,
@@ -156,7 +190,7 @@ impl StyleCoordinator {
         F: Fn(NodeId) -> Vec<NodeId>,
     {
         let mut order: Vec<(NodeId, Option<NodeId>)> = Vec::new();
-        let mut visited: HashSet<NodeId> = HashSet::new();
+        let mut visited: FastSet<NodeId> = HashSet::default();
         let mut stack: Vec<(NodeId, Option<NodeId>)> = vec![(root, None)];
 
         while let Some((node, parent)) = stack.pop() {
@@ -187,8 +221,9 @@ impl StyleCoordinator {
         root_element: Option<NodeId>,
         metrics: Option<&dyn ChMetrics>,
     ) -> ComputedStyles {
-        let mut out: ComputedStyles = HashMap::with_capacity(order.len());
-        let mut ctx = Self::attach(
+        let mut out: ComputedStyles =
+            ComputedStyles::with_capacity_and_hasher(order.len(), FastBuildHasher::default());
+        let mut ctx = self.attach(
             ResolutionContext::for_root(viewport.width, viewport.height),
             metrics,
             environment,
@@ -202,7 +237,7 @@ impl StyleCoordinator {
                 ctx,
             );
             if Some(node) == root_element {
-                ctx = Self::attach(
+                ctx = self.attach(
                     ResolutionContext::new(
                         StyleResolver::font_size_of(&computed),
                         viewport.width,
@@ -220,6 +255,8 @@ impl StyleCoordinator {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     /// A viewport for tests that are about the walk, not about `vw`/`vh`.
@@ -257,7 +294,7 @@ mod tests {
     fn preorder_is_parent_first() {
         // root -> child -> grandchild (a chain).
         let (root, child, grandchild) = (node(1), node(2), node(3));
-        let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        let mut children: FastMap<NodeId, Vec<NodeId>> = HashMap::default();
         children.insert(root, vec![child]);
         children.insert(child, vec![grandchild]);
 
@@ -274,7 +311,7 @@ mod tests {
     fn preorder_visits_siblings_left_to_right_parent_before_children() {
         // root -> [a, b]; a -> [a1].
         let (root, a, b, a1) = (node(1), node(2), node(3), node(4));
-        let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        let mut children: FastMap<NodeId, Vec<NodeId>> = HashMap::default();
         children.insert(root, vec![a, b]);
         children.insert(a, vec![a1]);
 
@@ -295,7 +332,7 @@ mod tests {
     fn preorder_is_cycle_safe() {
         // root -> child -> root (a cycle) and child -> root again via diamond.
         let (root, child) = (node(1), node(2));
-        let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        let mut children: FastMap<NodeId, Vec<NodeId>> = HashMap::default();
         children.insert(root, vec![child]);
         children.insert(child, vec![root]);
 

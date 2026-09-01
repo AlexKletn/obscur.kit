@@ -151,15 +151,17 @@ mod tests {
         // block is the only channel it has: dropping it here would make an
         // inline custom property silently inert.
         use obscur_identity::InternedSymbol;
-        use obscur_style::property::StyleColor;
 
         let compiled = compile_inline_style("--brand: #ff0000; color: var(--brand)");
         let custom = compiled.style.custom_properties();
         assert_eq!(custom.len(), 1);
         assert_eq!(custom[0].name(), InternedSymbol::named("--brand"));
+        // Kept as the text it was written with: a custom property has no
+        // grammar until a `var()` puts it somewhere, and `color` is what says
+        // this text is a colour (`custom_value::lower_custom_value`).
         assert_eq!(
             custom[0].value(),
-            &PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+            &PropertyValue::RawTokens("#ff0000".into())
         );
         // And it is the same symbol the reading declaration asks for, even
         // though a `style` attribute is compiled by its own compiler instance.

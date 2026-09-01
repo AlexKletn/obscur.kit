@@ -879,9 +879,9 @@ mod tests {
 
     fn sweep(bridge: &mut ResourceBridge, tree: &RetainedTree) {
         bridge.mark_image_visibility(
-            &ComputedStyles::new(),
+            &ComputedStyles::default(),
             tree,
-            &LayoutBoxes::new(),
+            &LayoutBoxes::default(),
             Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0)),
         );
     }

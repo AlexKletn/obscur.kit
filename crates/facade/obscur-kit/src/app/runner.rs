@@ -1,32 +1,35 @@
 #![doc = include_str!("runner.doc/_module.md")]
 
+use obscur_diagnostics::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
+
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, Ime, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event::{ElementState, Ime, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::PhysicalKey as WinitPhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use super::AppError;
 use super::app::FrameInfo;
+use super::app_parts::AppParts;
 use crate::bootstrap::{CssPipeline, KitBootstrap};
 use crate::control::AppControl;
 use crate::geometry::{Point, Size};
-use crate::identity::{InternedSymbol, RuntimeId};
 use crate::interaction::command::KeyEvent;
-use crate::interaction::event::UiEvent;
 use crate::interaction::pointer::{PointerButton, PointerButtons, PointerEvent, PointerId};
 use crate::render::frame::{FrameSubmission, RenderFrame};
 use crate::render::renderer::RendererId;
-use crate::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
+use crate::render_vello::renderer::{
+    AcquireWake, SurfaceAcquirer, VelloDevice, VelloRenderer, VelloSurface,
+};
+use crate::runtime::UiRuntime;
 use crate::runtime::frame::FrameReason;
-use crate::runtime::{CommandHandler, UiRuntime};
 use crate::text::ime::{CompositionEvent, Preedit};
-use crate::view::view::{View, ViewNode};
+use crate::view::view::View;
 use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 
 #[doc = include_str!("runner.doc/MAX_FRAME_DELTA.md")]
@@ -78,145 +81,58 @@ impl FrameStats {
 }
 
 #[doc = include_str!("runner.doc/run.md")]
-#[allow(clippy::too_many_arguments)]
 pub(super) fn run(
-    title: String,
-    app_id: String,
-    size: (f32, f32),
-    stylesheets: Vec<String>,
+    parts: AppParts,
     builder: Box<dyn FnMut() -> View + 'static>,
-    commands: Vec<(InternedSymbol, CommandHandler)>,
-    control: AppControl,
-    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
-    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
-    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
-    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
 ) -> Result<(), AppError> {
-    run_inner(
-        title,
-        app_id,
-        size,
-        stylesheets,
-        builder,
-        commands,
-        control,
-        scroll,
-        None,
-        virtual_lists,
-        virtual_clicks,
-        virtual_holds,
-    )
+    run_inner(parts, builder, None)
 }
 
 #[doc = include_str!("runner.doc/run_with_frame.md")]
-#[allow(clippy::too_many_arguments)]
 pub(super) fn run_with_frame(
-    title: String,
-    app_id: String,
-    size: (f32, f32),
-    stylesheets: Vec<String>,
+    parts: AppParts,
     mut builder: Box<dyn FnMut(&FrameInfo) -> View + 'static>,
-    commands: Vec<(InternedSymbol, CommandHandler)>,
-    control: AppControl,
-    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
-    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
-    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
-    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
 ) -> Result<(), AppError> {
     let info = Rc::new(Cell::new(FrameInfo {
-        viewport: Size::new(size.0, size.1),
+        viewport: Size::new(parts.size.0, parts.size.1),
         scale: 1.0,
     }));
     let seen = Rc::clone(&info);
     let wrapped: Box<dyn FnMut() -> View + 'static> = Box::new(move || builder(&seen.get()));
-    run_inner(
-        title,
-        app_id,
-        size,
-        stylesheets,
-        wrapped,
-        commands,
-        control,
-        scroll,
-        Some(info),
-        virtual_lists,
-        virtual_clicks,
-        virtual_holds,
-    )
+    run_inner(parts, wrapped, Some(info))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_inner(
-    title: String,
-    app_id: String,
-    size: (f32, f32),
-    stylesheets: Vec<String>,
+    parts: AppParts,
     builder: Box<dyn FnMut() -> View + 'static>,
-    commands: Vec<(InternedSymbol, CommandHandler)>,
-    control: AppControl,
-    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     frame_info: Option<Rc<Cell<FrameInfo>>>,
-    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
-    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
-    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
 ) -> Result<(), AppError> {
+    // Read before `boot` consumes the parts. A layer surface has no title and no
+    // requested size — the platform decides both — so these belong to the window
+    // runner rather than to the shared `BootedApp`, where they would sit unread in
+    // a build with no windowing backend.
+    let (title, app_id, size) = (parts.title.clone(), parts.app_id.clone(), parts.size);
     let (width, height) = size;
-    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
+    let booted = parts.boot(builder, Size::new(width, height));
 
-    // The root view builder and command handlers are the app's own; forward them
-    // into the runtime verbatim (the same shapes `set_root_view` / `on_command`
-    // take). A `Box<dyn FnMut() -> View>` is itself `FnMut() -> View`.
-    runtime.set_root_view(builder);
-    for (command, mut handler) in commands {
-        // The handler was already normalized by the builder (an app may register a
-        // zero-argument closure or an event-taking one, and `App::on_command` folded
-        // both into this one shape), so what is forwarded is a trampoline that hands
-        // the propagating event straight through.
-        runtime.on_command(command, move |event: &mut UiEvent| handler.call(event));
-    }
-    for (id, build) in virtual_lists {
-        runtime.register_virtual_list(id, build);
-    }
-    for (id, handler) in virtual_clicks {
-        runtime.on_virtual_row_click(id, handler);
-    }
-    for (id, handler) in virtual_holds {
-        runtime.on_virtual_row_long_press(id, handler);
-    }
-
-    let boot = KitBootstrap::new();
-
-    // Defaults-on that need no window (§5.18 / §3.3): the UA default sheet (below
-    // every author sheet), the accumulated author CSS through the motion-aware
-    // pipeline, filesystem images, and the threaded blocking executor (correct for
-    // a standalone window — it is not a headless host).
-    boot.install_default_stylesheet(&mut runtime);
-    // …and the controls that sheet styles, mounted rather than merely named: the id
-    // an authored `<checkbox>` carries is only a handle until a factory sits under
-    // it. The only failure is a duplicate id, which cannot happen on a runtime this
-    // function has just created.
-    let _ = boot.install_builtin_components(&mut runtime);
-    let mut css = CssPipeline::new();
-    // The authored set goes in through the same handle a later replacement uses, so
-    // the identity and revision each source is stamped with (§4.12's cache key) is
-    // decided in exactly one place — and the first install is not a special case.
-    // Queued last, so `App::stylesheet` wins over a replacement an application asked
-    // for before `run`: those sheets are the initial set by definition, and the
-    // application's own replacement belongs to the loop that has not started yet.
-    control.set_stylesheets(stylesheets);
-    control.apply(&mut runtime, &mut css);
-    install_resources(&boot, &mut runtime);
+    // Built before the runner: the acquire thread needs something to wake this
+    // loop with, and `Window::request_redraw` is not it — it marks the window
+    // dirty without promising to rouse a loop parked in `wait`, which is exactly
+    // where a frame skipped for want of a swapchain image leaves it.
+    let event_loop = EventLoop::new().map_err(|error| AppError::EventLoop(error.to_string()))?;
+    let proxy = event_loop.create_proxy();
 
     let mut app = AppRunner {
         title,
         app_id,
         size,
-        runtime,
-        css,
-        control,
+        runtime: booted.runtime,
+        css: booted.css,
+        control: booted.control,
         window: None,
-        surface: None,
-        device: None,
+        acquirer: None,
+        extent: (0, 0),
+        proxy: Some(proxy),
         renderer: None,
         scale_factor: 1.0,
         cursor: (0.0, 0.0),
@@ -227,14 +143,13 @@ fn run_inner(
         epoch: std::time::Instant::now(),
         last_frame: None,
         init_failure: None,
-        scroll,
+        scroll: booted.scroll,
         ime_allowed: false,
         frame_info,
         stats: std::env::var_os("OBSCUR_FRAME_STATS").map(|_| FrameStats::default()),
         fonts: None,
     };
 
-    let event_loop = EventLoop::new().map_err(|error| AppError::EventLoop(error.to_string()))?;
     event_loop
         .run_app(&mut app)
         .map_err(|error| AppError::EventLoop(error.to_string()))?;
@@ -247,20 +162,6 @@ fn run_inner(
     }
 }
 
-#[doc = include_str!("runner.doc/install_resources.md")]
-#[allow(unused_variables)]
-fn install_resources(boot: &KitBootstrap, runtime: &mut UiRuntime) {
-    #[cfg(all(feature = "resource-fs", feature = "resource-decode"))]
-    {
-        boot.install_image_resources(runtime, ".");
-        boot.install_vector_resources(runtime);
-    }
-    #[cfg(feature = "task-smol")]
-    {
-        let _spawner = boot.install_blocking_executor(runtime);
-    }
-}
-
 #[doc = include_str!("runner.doc/install_text.md")]
 #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
 fn install_text(
@@ -268,10 +169,9 @@ fn install_text(
     runtime: &mut UiRuntime,
     renderer: &mut VelloRenderer,
 ) -> crate::bootstrap::InstalledFonts {
-    #[cfg(feature = "font-fontconfig")]
-    let font_set = boot.system_font_set().unwrap_or_default();
-    #[cfg(not(feature = "font-fontconfig"))]
-    let font_set = crate::bootstrap::FontSet::new();
+    // The application's own faces and the host's generics, in that order — a
+    // named family an application shipped is only a font from here on.
+    let font_set = boot.font_set();
 
     let installed = boot.install_text_stack(runtime, &font_set);
     for (handle, bytes) in installed.iter() {
@@ -300,8 +200,12 @@ struct AppRunner {
     #[doc = include_str!("runner.doc/control.md")]
     control: AppControl,
     window: Option<Arc<Window>>,
-    surface: Option<VelloSurface>,
-    device: Option<wgpu::Device>,
+    #[doc = include_str!("runner.doc/acquirer.md")]
+    acquirer: Option<SurfaceAcquirer>,
+    #[doc = include_str!("runner.doc/extent.md")]
+    extent: (u32, u32),
+    #[doc = include_str!("runner.doc/proxy.md")]
+    proxy: Option<EventLoopProxy<()>>,
     renderer: Option<VelloRenderer>,
     #[doc = include_str!("runner.doc/scale_factor.md")]
     scale_factor: f64,
@@ -345,21 +249,23 @@ impl AppRunner {
     #[doc = include_str!("runner.doc/sync_surface.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn sync_surface(&mut self) {
-        if let Some(surface) = self.surface.as_ref() {
-            let config = surface.config();
-            self.runtime.set_surface(
-                Size::new(config.width as f32, config.height as f32),
-                self.scale(),
-            );
-            if let Some(info) = self.frame_info.as_ref() {
-                let scale = self.scale();
-                info.set(FrameInfo {
-                    // Logical, because that is the space the app's CSS and its
-                    // layout are in; the physical extent is the runner's business.
-                    viewport: Size::new(config.width as f32 / scale, config.height as f32 / scale),
-                    scale,
-                });
-            }
+        // The extent is tracked here rather than read off the surface: the
+        // surface lives on the acquire thread now, and asking it would mean
+        // reaching across the very boundary that keeps this thread unblocked.
+        let (width, height) = self.extent;
+        if width == 0 || height == 0 {
+            return;
+        }
+        self.runtime
+            .set_surface(Size::new(width as f32, height as f32), self.scale());
+        if let Some(info) = self.frame_info.as_ref() {
+            let scale = self.scale();
+            info.set(FrameInfo {
+                // Logical, because that is the space the app's CSS and its
+                // layout are in; the physical extent is the runner's business.
+                viewport: Size::new(width as f32 / scale, height as f32 / scale),
+                scale,
+            });
         }
     }
 
@@ -379,6 +285,42 @@ impl AppRunner {
         // passing every headless test (the test harnesses tick it themselves).
         // §4.17's "active animations keep requesting frames" was half-true — the
         // runtime asked for the frames, and nothing moved the clock they were for.
+        // The swapchain image BEFORE anything else. Acquiring it blocks until the
+        // compositor releases a buffer, and this is the thread winit delivers
+        // input on — so acquiring here would stop the application hearing the
+        // pointer for as long as the wait lasts (audit 1-D, and core principle 5:
+        // platform calls are to be asynchronous and synchronous work
+        // frame-bounded). A `SurfaceAcquirer` does the waiting elsewhere.
+        //
+        // No image yet means no frame this turn. The pending frame stays pending
+        // because nothing below has run, and the acquire thread asks winit for a
+        // redraw when one lands — so nothing spins and nothing is lost. §3.5
+        // permits the skip in so many words.
+        let image = if self.runtime.has_pending_frame() {
+            let Some(image) = self.acquirer.as_mut().and_then(SurfaceAcquirer::try_take) else {
+                if let Some(acquirer) = self.acquirer.as_mut() {
+                    acquirer.request();
+                }
+                return;
+            };
+            // The extent it was taken at against the extent the window has now.
+            // A blit scales whatever it is handed, so a stale image is a frame at
+            // the wrong size and nothing downstream can tell — the layer path met
+            // exactly that as audit 1-E. One dropped frame, then a resize, and the
+            // pending frame is still pending because it has not been run.
+            let (width, height) = self.extent;
+            if !image.matches(width, height) {
+                drop(image);
+                if let Some(acquirer) = self.acquirer.as_mut() {
+                    acquirer.resize(width, height);
+                }
+                return;
+            }
+            image
+        } else {
+            return;
+        };
+
         let started = std::time::Instant::now();
         let delta = self
             .last_frame
@@ -420,8 +362,7 @@ impl AppRunner {
         let snapshotted = snapshot_at.elapsed();
         let present_at = std::time::Instant::now();
 
-        let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
-        else {
+        let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
 
@@ -437,16 +378,15 @@ impl AppRunner {
             }
         }
 
-        let physical = Size::new(
-            surface.config().width as f32,
-            surface.config().height as f32,
-        );
+        // The extent came with the image: the surface is on the acquire thread,
+        // and an image acquired before a resize must not be blitted against the
+        // new numbers.
+        let physical = Size::new(image.width as f32, image.height as f32);
         let submission = FrameSubmission::new(RenderFrame::new(snapshot, physical));
-        if let Err(error) = renderer.present_to_surface(&submission, surface) {
+        if let Err(error) = renderer.present_to_texture(&submission, image) {
+            // A lost surface is reconfigured by the acquire thread on its next
+            // attempt; there is nothing to reconfigure from here.
             eprintln!("present failed: {error:?}");
-            if let (Some(surface), Some(device)) = (self.surface.as_ref(), self.device.as_ref()) {
-                surface.configure(device);
-            }
         }
         if let Some(stats) = self.stats.as_mut() {
             stats.record(built, snapshotted, present_at.elapsed());
@@ -543,7 +483,7 @@ impl ApplicationHandler for AppRunner {
         // no field to type into.
         window.set_ime_allowed(false);
 
-        let (surface, config, device, queue) = match init_gpu(&window) {
+        let (surface, config, device, queue, gpu) = match init_gpu(&window) {
             Ok(gpu) => gpu,
             Err(error) => {
                 self.init_failure = Some(AppError::Gpu(error));
@@ -551,6 +491,7 @@ impl ApplicationHandler for AppRunner {
                 return;
             }
         };
+        self.runtime.report_diagnostic(&gpu_diagnostic(&gpu));
         let vello_surface = VelloSurface::new(surface, config);
         vello_surface.configure(&device);
         let vello_device = match VelloDevice::new(device.clone(), queue) {
@@ -569,8 +510,18 @@ impl ApplicationHandler for AppRunner {
         ));
 
         self.scale_factor = window.scale_factor();
-        self.surface = Some(vello_surface);
-        self.device = Some(device);
+        self.extent = (vello_surface.config().width, vello_surface.config().height);
+
+        // The surface moves onto the acquire thread, and its wake is an
+        // `EventLoopProxy`: a user event both rouses a parked loop and lands on
+        // this thread, which `request_redraw` alone does not promise.
+        let wake: Option<AcquireWake> = self.proxy.clone().map(|proxy| {
+            Arc::new(move || {
+                let _ = proxy.send_event(());
+            }) as AcquireWake
+        });
+        self.acquirer = Some(SurfaceAcquirer::spawn(vello_surface, device, wake));
+
         self.renderer = Some(renderer);
         self.window = Some(window);
         self.sync_surface();
@@ -586,9 +537,11 @@ impl ApplicationHandler for AppRunner {
     ) {
         match event {
             WindowEvent::Resized(new_size) => {
-                if let (Some(surface), Some(device)) = (self.surface.as_mut(), self.device.as_ref())
-                {
-                    surface.resize(device, new_size.width, new_size.height);
+                self.extent = (new_size.width, new_size.height);
+                if let Some(acquirer) = self.acquirer.as_mut() {
+                    // Also discards anything already acquired: an image fetched
+                    // at the old extent would present stretched.
+                    acquirer.resize(new_size.width, new_size.height);
                 }
                 self.sync_surface();
                 self.runtime.request_frame(FrameReason::WindowChange);
@@ -763,6 +716,13 @@ impl ApplicationHandler for AppRunner {
     }
 
     #[doc = include_str!("runner.doc/about_to_wait.md")]
+    #[doc = include_str!("runner.doc/user_event.md")]
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, (): ()) {
+        // The acquire thread has an image. The frame this loop skipped for want
+        // of one can now be drawn.
+        self.request_redraw();
+    }
+
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if self.runtime.poll_resource_tasks() > 0 {
             self.runtime.request_frame(FrameReason::UiCommit);
@@ -790,6 +750,7 @@ fn init_gpu(
         wgpu::SurfaceConfiguration,
         wgpu::Device,
         wgpu::Queue,
+        wgpu::AdapterInfo,
     ),
     String,
 > {
@@ -802,9 +763,15 @@ fn init_gpu(
         ..Default::default()
     }))
     .map_err(|error| error.to_string())?;
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-            .map_err(|error| error.to_string())?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        // Not `Limits::default()`: those are the desktop tier, and asking for
+        // them on a device that cannot meet one of them fails the whole
+        // request with nothing on screen and nothing to read. The renderer
+        // needs what the adapter has, so ask for exactly that.
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .map_err(|error| error.to_string())?;
     let size = window.inner_size();
     let mut config = surface
         .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -844,7 +811,7 @@ fn init_gpu(
         }
         println!("[present-mode] {:?}", config.present_mode);
     }
-    Ok((surface, config, device, queue))
+    Ok((surface, config, device, queue, adapter.get_info()))
 }
 
 #[doc = include_str!("runner.doc/held_after.md")]
@@ -921,4 +888,21 @@ mod tests {
         let after = held_after(held, PointerButton::Forward, ElementState::Released);
         assert_eq!(after, held);
     }
+}
+
+#[doc = include_str!("runner.doc/gpu_diagnostic.md")]
+fn gpu_diagnostic(info: &wgpu::AdapterInfo) -> Diagnostic {
+    // Reported on success, because "which backend did wgpu settle on" is the
+    // first question behind a slow or blank surface and nothing else answers it:
+    // a Vulkan initialisation that quietly fell back to GL looks, from here,
+    // exactly like a Vulkan one that is simply slow.
+    Diagnostic::new(
+        DiagnosticCode::new("render.adapter"),
+        DiagnosticSeverity::Info,
+        DiagnosticSubsystem::Render,
+        format!(
+            "{:?} on {} ({:?}), driver {} {}",
+            info.backend, info.name, info.device_type, info.driver, info.driver_info
+        ),
+    )
 }

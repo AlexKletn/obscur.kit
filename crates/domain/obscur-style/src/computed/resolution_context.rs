@@ -1,7 +1,7 @@
 #![doc = include_str!("resolution_context.doc/_module.md")]
 
-use crate::computed::ChMetrics;
 use crate::computed::initial_value::INITIAL_FONT_SIZE;
+use crate::computed::{ChMetrics, CustomValueParser};
 use crate::property::EnvironmentValues;
 
 #[doc = include_str!("resolution_context.doc/ResolutionContext.md")]
@@ -15,6 +15,8 @@ pub struct ResolutionContext<'a> {
     pub viewport_height: f32,
     #[doc = include_str!("resolution_context.doc/metrics.md")]
     pub metrics: Option<&'a dyn ChMetrics>,
+    #[doc = include_str!("resolution_context.doc/custom_values.md")]
+    pub custom_values: Option<&'a dyn CustomValueParser>,
     #[doc = include_str!("resolution_context.doc/environment.md")]
     pub environment: EnvironmentValues,
 }
@@ -27,6 +29,10 @@ impl std::fmt::Debug for ResolutionContext<'_> {
             .field("viewport_width", &self.viewport_width)
             .field("viewport_height", &self.viewport_height)
             .field("metrics", &self.metrics.map(|_| "<ChMetrics>"))
+            .field(
+                "custom_values",
+                &self.custom_values.map(|_| "<CustomValueParser>"),
+            )
             .field("environment", &self.environment)
             .finish()
     }
@@ -41,6 +47,7 @@ impl<'a> ResolutionContext<'a> {
             viewport_width,
             viewport_height,
             metrics: None,
+            custom_values: None,
             environment: EnvironmentValues::none(),
         }
     }
@@ -55,6 +62,13 @@ impl<'a> ResolutionContext<'a> {
     #[must_use]
     pub const fn with_metrics(mut self, metrics: &'a dyn ChMetrics) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+
+    #[doc = include_str!("resolution_context.doc/with_custom_values.md")]
+    #[must_use]
+    pub const fn with_custom_values(mut self, parser: &'a dyn CustomValueParser) -> Self {
+        self.custom_values = Some(parser);
         self
     }
 

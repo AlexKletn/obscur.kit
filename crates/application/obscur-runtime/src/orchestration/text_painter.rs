@@ -40,14 +40,21 @@ fn positioned_run(
     content: &str,
 ) -> GlyphRun {
     let mut pen_x = 0.0_f32;
-    let mut glyphs: Vec<PositionedGlyph> = Vec::new();
-    for glyph in segment.run().glyphs() {
-        // A control character shapes to a `.notdef` tofu; suppress the visible
-        // glyph but keep advancing the pen so positions and caret offsets hold.
-        let suppressed = content
-            .get(glyph.cluster()..)
-            .and_then(|rest| rest.chars().next())
-            .is_some_and(char::is_control);
+    let run_glyphs = segment.run().glyphs();
+    let mut glyphs: Vec<PositionedGlyph> = Vec::with_capacity(run_glyphs.len());
+    // Asked once for the paragraph rather than once per glyph. A control
+    // character shapes to a `.notdef` tofu and has to be suppressed, but running
+    // text has none at all, and the check below sliced the string and decoded a
+    // `char` for every glyph on screen to establish that.
+    let any_control = content.chars().any(char::is_control);
+    for glyph in run_glyphs {
+        // Suppress the visible glyph but keep advancing the pen, so positions
+        // and caret offsets hold.
+        let suppressed = any_control
+            && content
+                .get(glyph.cluster()..)
+                .and_then(|rest| rest.chars().next())
+                .is_some_and(char::is_control);
         if !suppressed {
             glyphs.push(PositionedGlyph::new(
                 glyph.glyph_id(),

@@ -482,7 +482,11 @@ impl ApplicationHandler for ShowcaseWindow {
                 // Real domain path: winit → `PointerConverter::moved` →
                 // `handle_pointer` → hit-test → hover / drag-selection.
                 self.cursor = (position.x, position.y);
-                let moved = PointerConverter::new().moved(PointerId::MOUSE, position);
+                let moved = PointerConverter::new().moved(
+                    PointerId::MOUSE,
+                    position,
+                    obscur_kit::interaction::pointer::PointerButtons::new(),
+                );
                 self.runtime.handle_pointer(moved);
                 // In-window inspector: print the hovered element's readout once per
                 // hover change so the console names what the highlight is tracing.

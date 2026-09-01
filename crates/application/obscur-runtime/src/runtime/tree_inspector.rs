@@ -1,8 +1,6 @@
 #![doc = include_str!("tree_inspector.doc/_module.md")]
 
-use std::collections::HashMap;
-
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_scene::command::DisplayList;
 use obscur_style::property::PropertyId;
 use obscur_tree::node::NodeKind;
@@ -87,7 +85,7 @@ impl TreeInspector {
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
-        generated_content: &HashMap<NodeId, GeneratedContent>,
+        generated_content: &FastMap<NodeId, GeneratedContent>,
         scroll: &ScrollOffsets,
     ) -> TreeInspection {
         let mut nodes = Vec::new();
@@ -130,7 +128,7 @@ impl TreeInspector {
     #[doc = include_str!("tree_inspector.doc/collect_synthetic_placeholder_parts.md")]
     fn collect_synthetic_placeholder_parts(
         boxes: &LayoutBoxes,
-        generated_content: &HashMap<NodeId, GeneratedContent>,
+        generated_content: &FastMap<NodeId, GeneratedContent>,
         out: &mut Vec<NodeInspection>,
     ) {
         for (&field, content) in generated_content {
@@ -269,6 +267,8 @@ impl TreeInspector {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[test]
@@ -286,7 +286,7 @@ mod tests {
     fn an_overlay_that_is_off_returns_the_display_list_untouched() {
         let inspector = TreeInspector::new();
         let list = DisplayList::from_commands(Vec::new());
-        let boxes = LayoutBoxes::new();
+        let boxes = LayoutBoxes::default();
         assert!(
             inspector
                 .apply_overlay(&boxes, None, list)
@@ -299,9 +299,9 @@ mod tests {
     fn an_empty_tree_projects_no_nodes_at_all() {
         let snapshot = TreeInspector::snapshot(
             &RetainedTree::new(),
-            &ComputedStyles::new(),
-            &LayoutBoxes::new(),
-            &HashMap::new(),
+            &ComputedStyles::default(),
+            &LayoutBoxes::default(),
+            &HashMap::default(),
             &ScrollOffsets::new(),
         );
         assert!(snapshot.nodes.is_empty());

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::InternedSymbol;
+use obscur_identity::{FastMap, InternedSymbol};
 
 use crate::command::{Command, CommandState};
 
@@ -10,7 +10,7 @@ use crate::command::{Command, CommandState};
 #[derive(Debug, Clone, Default)]
 pub struct CommandRegistry {
     #[doc = include_str!("command_registry.doc/entries.md")]
-    entries: HashMap<InternedSymbol, (Command, CommandState)>,
+    entries: FastMap<InternedSymbol, (Command, CommandState)>,
 }
 
 impl CommandRegistry {
@@ -18,7 +18,7 @@ impl CommandRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: HashMap::default(),
         }
     }
 

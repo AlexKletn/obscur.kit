@@ -1,8 +1,6 @@
 #![doc = include_str!("tree_snapshot.doc/_module.md")]
 
-use std::collections::HashMap;
-
-use obscur_identity::{NodeId, VersionStamp};
+use obscur_identity::{FastMap, NodeId, VersionStamp};
 
 use crate::node::RetainedNode;
 
@@ -12,7 +10,7 @@ use super::RetainedTree;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TreeSnapshot {
     #[doc = include_str!("tree_snapshot.doc/nodes.md")]
-    nodes: HashMap<NodeId, RetainedNode>,
+    nodes: FastMap<NodeId, RetainedNode>,
     #[doc = include_str!("tree_snapshot.doc/root.md")]
     root: Option<NodeId>,
     #[doc = include_str!("tree_snapshot.doc/version.md")]

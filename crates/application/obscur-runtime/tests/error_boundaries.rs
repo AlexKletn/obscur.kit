@@ -93,6 +93,31 @@ fn a_failed_render_is_reported_with_every_field_1_6_asks_for() {
 }
 
 #[test]
+fn the_report_names_the_property_in_words_not_only_by_number() {
+    // Audit 1-B. `InternedSymbol` is an FNV hash with no reverse table, so a
+    // message carrying only the symbol read `property #2147483911 could not be
+    // read as u32` — true, anchored, severity-correct, and of no use whatever
+    // to the author of the component that refused. The name reaches here as a
+    // literal from `#[derive(Contract)]`, which is the last place it exists.
+    //
+    // The number stays alongside it: it is what every other report about this
+    // property prints, and the two must correlate.
+    let (mut runtime, diagnostics) = guarded_runtime(ErrorBoundaryPolicy::default(), None);
+    runtime.render_now(&GuardedComponent::view(ViewValue::Text("2".into())), &[]);
+
+    let recorded = diagnostics.0.borrow();
+    let message = &recorded[0].message;
+    assert!(
+        message.contains("`step`"),
+        "the failing property is named: {message}"
+    );
+    assert!(
+        message.contains("u32"),
+        "and so is the type it wanted: {message}"
+    );
+}
+
+#[test]
 fn an_exhausted_boundary_replaces_the_subtree_with_the_authors_fallback() {
     let (mut runtime, diagnostics) = guarded_runtime(
         ErrorBoundaryPolicy::default(),

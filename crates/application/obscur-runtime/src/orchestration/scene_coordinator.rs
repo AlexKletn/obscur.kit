@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use obscur_geometry::CornerRadii;
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::paint::{Brush, SceneImage, SceneVector, Stroke};
@@ -33,7 +33,7 @@ use super::paint_transform::resolved_transform;
 use super::paragraph_shaping::ParagraphShaping;
 use super::replaced_content::{element_image_of, emit_vector, object_fit_tile};
 use super::scroll_container_paint::overflow_clips;
-use super::stacking::{PaintLayer, PaintUnit, effective_paint_layer, effective_stacking_z};
+use super::stacking::{PaintLayer, PaintUnit, effective_stacking};
 use super::subtree_brackets::SubtreeBrackets;
 use super::text_painter::{emit_generated_run, paint_text_node};
 use super::{ComputedStyles, EditingView, GeneratedContent, LayoutBoxes, ScrollPaint};
@@ -106,7 +106,7 @@ impl SceneCoordinator {
     ) -> DisplayList {
         // The image-free path: no `background-image: url(...)` resolves to a
         // painted image, so this is byte-identical to before image backgrounds.
-        self.compose_with_images(tree, computed, boxes, editing, &HashMap::new())
+        self.compose_with_images(tree, computed, boxes, editing, &HashMap::default())
     }
 
     #[doc = include_str!("scene_coordinator.doc/compose_with_images.md")]
@@ -126,10 +126,10 @@ impl SceneCoordinator {
             boxes,
             editing,
             images,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
+            &HashMap::default(),
+            &HashMap::default(),
+            &HashMap::default(),
+            &HashMap::default(),
         )
     }
 
@@ -143,24 +143,22 @@ impl SceneCoordinator {
         editing: Option<EditingView<'_>>,
         images: &HashMap<Box<str>, SceneImage>,
         vectors: &HashMap<Box<str>, SceneVector>,
-        scroll: &HashMap<NodeId, ScrollPaint>,
-        generated: &HashMap<NodeId, GeneratedContent>,
-        canvases: &HashMap<NodeId, Vec<PaintCommand>>,
+        scroll: &FastMap<NodeId, ScrollPaint>,
+        generated: &FastMap<NodeId, GeneratedContent>,
+        canvases: &FastMap<NodeId, Vec<PaintCommand>>,
     ) -> DisplayList {
         let Some(root) = tree.root() else {
             return DisplayListBuilder::new().build();
         };
 
-        // Each node's effective stacking z (a positioned element's numeric
-        // `z-index`, else its nearest z-index ancestor's, root = 0). Computed once
-        // up front so the emission walk can key each paint unit by it.
-        let zmap = effective_stacking_z(tree, computed);
-        // Each node's CSS 2.1 §9.9 paint-layer rank, keyed like `zmap`. Sorted
-        // between `z` and `tree_index`, it lifts a positioned `z:auto`/`0` box (and
-        // its inherited subtree) above non-positioned siblings within the same z
-        // bucket (catalog bug B2). Uniform (`NonPositioned`) when nothing is
-        // positioned, so the sort then reduces to the pre-fix `(z, tree_index)`.
-        let layermap = effective_paint_layer(tree, computed);
+        // Each node's effective stacking z and its CSS 2.1 §9.9 paint-layer rank,
+        // in one walk. The z keys each paint unit; the layer, sorted between `z`
+        // and `tree_index`, lifts a positioned `z:auto`/`0` box and its inherited
+        // subtree above non-positioned siblings within the same z bucket (catalog
+        // bug B2), and is uniform when nothing is positioned, so the sort then
+        // reduces to the pre-fix `(z, tree_index)`.
+        let stacking = effective_stacking(tree, computed);
+        let (zmap, layermap) = (stacking.z, stacking.layer);
 
         // Pre-order walk (parent before children). Children are pushed reversed
         // so the leftmost child is popped first, preserving left-to-right paint
@@ -173,7 +171,7 @@ impl SceneCoordinator {
         // so higher-z positioned elements paint last (on top) while equal-z units
         // keep tree order. When no `z-index` is authored every z is 0 and the sort
         // reproduces the exact pre-order sequence (the regression guard).
-        let mut visited: HashSet<NodeId> = HashSet::new();
+        let mut visited: FastSet<NodeId> = HashSet::default();
         // Each stack entry carries the node's parent and its tree depth, so a
         // `border-radius` element can bracket its subtree with a clip whose
         // `PopClip` sorts after the last descendant (see `SubtreeBrackets`).
@@ -801,11 +799,11 @@ mod tests {
                 StyleStop::new(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
             ],
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, with_background_gradient(gradient));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -854,11 +852,11 @@ mod tests {
             ],
             Length::px(8.0),
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, with_background_gradient(gradient));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -940,19 +938,19 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_image(PropertyValue::BackgroundImageUrl("x.png".into())),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let node_box = box_at(5.0, 7.0, 100.0, 50.0);
         boxes.insert(a, node_box);
 
         // Without the URL in the map: no DrawImage (regression-safe).
-        let empty = HashMap::new();
+        let empty = HashMap::default();
         let bare =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
         assert!(
@@ -965,7 +963,7 @@ mod tests {
         // repeat, the CSS initials apply (auto size = the intrinsic 2×2 tile at the
         // box's top-left, repeat both axes) — the CSS-correct default, NOT a
         // full-box stretch. The region is the node's border box.
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -991,7 +989,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
@@ -1002,10 +1000,10 @@ mod tests {
                 BackgroundRepeat::NoRepeat,
             ),
         );
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1029,7 +1027,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
@@ -1040,10 +1038,10 @@ mod tests {
                 BackgroundRepeat::NoRepeat,
             ),
         );
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1086,17 +1084,17 @@ mod tests {
         let img = add_child(&mut tree, root, 10);
         set_image_src(&mut tree, img, "logo");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         // Default object-fit (fill): no ObjectFit set → stretch to the box.
         computed.insert(img, ComputedStyle::new());
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let node_box = box_at(0.0, 0.0, 10.0, 10.0);
         boxes.insert(img, node_box);
 
         // Absent from the map: no DrawImage, no panic (honest skip).
-        let empty = HashMap::new();
+        let empty = HashMap::default();
         let bare =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
         assert!(
@@ -1106,7 +1104,7 @@ mod tests {
         assert!(bare.is_balanced());
 
         // Resolved: one DrawImage over the box; default `fill` stretches to the box.
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("logo"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1130,14 +1128,14 @@ mod tests {
         let img = add_child(&mut tree, root, 10);
         set_image_src(&mut tree, img, "logo");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(img, with_object_fit(ObjectFit::None));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(img, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("logo"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1165,12 +1163,12 @@ mod tests {
 
         // contain: min-scale fit of a 2×2 image into 20×10 → scale 5 → 10×10,
         // centered horizontally at x=(20−10)/2=5, y=0.
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(img, with_object_fit(ObjectFit::Contain));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(img, node_box);
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("logo"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1199,7 +1197,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
@@ -1211,10 +1209,10 @@ mod tests {
                 BackgroundRepeat::NoRepeat,
             ),
         );
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1236,7 +1234,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
@@ -1247,10 +1245,10 @@ mod tests {
                 BackgroundRepeat::Repeat,
             ),
         );
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1271,14 +1269,14 @@ mod tests {
             PropertyId::BackgroundColor,
             ComputedValue::color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 20.0));
 
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1328,14 +1326,14 @@ mod tests {
             PropertyId::BackgroundColor,
             ComputedValue::color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)),
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
 
-        let mut images = HashMap::new();
+        let mut images = HashMap::default();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
@@ -1409,14 +1407,14 @@ mod tests {
                 StyleStop::new(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
             ],
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_image(PropertyValue::RadialGradient(gradient)),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1459,14 +1457,14 @@ mod tests {
                 StyleStop::new(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
             ],
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_image(PropertyValue::ConicGradient(gradient)),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1508,7 +1506,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         // `transform: translate(10px, 0)` over a background box.
         computed.insert(
@@ -1519,7 +1517,7 @@ mod tests {
             ),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 40.0, 20.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1553,11 +1551,11 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1578,7 +1576,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
@@ -1588,7 +1586,7 @@ mod tests {
             ),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1610,11 +1608,11 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1669,14 +1667,14 @@ mod tests {
             Some(StyleColor::BLACK),
             false,
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_and_shadow(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1732,11 +1730,11 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1773,14 +1771,14 @@ mod tests {
             Some(StyleColor::BLACK),
             false,
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_and_filter(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1836,11 +1834,11 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1882,11 +1880,11 @@ mod tests {
             .expect("a filter op list is a concrete computed value"),
         );
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -1930,14 +1928,14 @@ mod tests {
             Some(StyleColor::BLACK),
             true,
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_and_shadow(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let bounds = box_at(0.0, 0.0, 20.0, 10.0);
         boxes.insert(a, bounds);
 
@@ -2008,14 +2006,14 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_and_blur(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), 6.0),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let bounds = box_at(0.0, 0.0, 20.0, 10.0);
         boxes.insert(a, bounds);
 
@@ -2086,14 +2084,14 @@ mod tests {
             Some(StyleColor::BLACK),
             false,
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_and_filter(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2127,7 +2125,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
@@ -2137,7 +2135,7 @@ mod tests {
             ),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let bounds = box_at(0.0, 0.0, 20.0, 10.0);
         boxes.insert(a, bounds);
 
@@ -2185,7 +2183,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
@@ -2195,7 +2193,7 @@ mod tests {
             ),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2227,7 +2225,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         let mut style = ComputedStyle::new();
         style.set(
@@ -2236,7 +2234,7 @@ mod tests {
         );
         computed.insert(a, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2274,14 +2272,14 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             a,
             with_background_and_backdrop(StyleColor::rgba(1.0, 1.0, 1.0, 0.3), 12.0),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let bounds = box_at(2.0, 3.0, 20.0, 10.0);
         boxes.insert(a, bounds);
 
@@ -2330,7 +2328,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         let mut style = ComputedStyle::new();
         style.set(
@@ -2339,7 +2337,7 @@ mod tests {
         );
         computed.insert(a, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2379,7 +2377,7 @@ mod tests {
         let b = add_child(&mut tree, root, 11);
         let c = add_child(&mut tree, root, 12);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new()); // root: no background.
         computed.insert(
             a,
@@ -2391,7 +2389,7 @@ mod tests {
             positioned_bg(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), Some(-1.0)),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
         boxes.insert(b, box_at(1.0, 1.0, 10.0, 10.0));
         boxes.insert(c, box_at(2.0, 2.0, 10.0, 10.0));
@@ -2426,13 +2424,13 @@ mod tests {
         let b = add_child(&mut tree, root, 11);
         let c = add_child(&mut tree, root, 12);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), None));
         computed.insert(b, positioned_bg(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), None));
         computed.insert(c, positioned_bg(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), None));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
         boxes.insert(b, box_at(1.0, 1.0, 10.0, 10.0));
         boxes.insert(c, box_at(2.0, 2.0, 10.0, 10.0));
@@ -2462,7 +2460,7 @@ mod tests {
         let panel = add_child(&mut tree, root, 21);
         let text = add_text_child(&mut tree, panel, "hi");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             sib,
@@ -2474,7 +2472,7 @@ mod tests {
         );
         computed.insert(text, ComputedStyle::new());
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(sib, box_at(0.0, 0.0, 20.0, 20.0));
         boxes.insert(panel, box_at(5.0, 5.0, 20.0, 20.0));
         boxes.insert(text, box_at(6.0, 6.0, 20.0, 16.0));
@@ -2514,8 +2512,8 @@ mod tests {
     fn empty_tree_composes_empty_balanced_list() {
         let coordinator = SceneCoordinator::new();
         let tree = RetainedTree::new();
-        let computed = ComputedStyles::new();
-        let boxes = LayoutBoxes::new();
+        let computed = ComputedStyles::default();
+        let boxes = LayoutBoxes::default();
 
         let list = coordinator.compose(&tree, &computed, &boxes, None);
         assert!(list.is_empty());
@@ -2534,13 +2532,13 @@ mod tests {
         let root_bg = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
         let child_a_bg = StyleColor::rgba(0.0, 1.0, 0.0, 1.0);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_background(root_bg));
         computed.insert(child_a, with_background(child_a_bg));
         // child_b has a style but no background-color.
         computed.insert(child_b, ComputedStyle::new());
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
         boxes.insert(child_a, box_at(0.0, 0.0, 100.0, 50.0));
         boxes.insert(child_b, box_at(0.0, 50.0, 100.0, 50.0));
@@ -2581,10 +2579,10 @@ mod tests {
         tree.set_root(root);
 
         let transparent = StyleColor::rgba(1.0, 0.0, 0.0, 0.0);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_background(transparent));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 10.0, 10.0));
 
         let coordinator = SceneCoordinator::new();
@@ -2600,11 +2598,11 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_background(StyleColor::rgba(0.0, 0.0, 1.0, 1.0)));
 
         // No arranged box supplied for the root.
-        let boxes = LayoutBoxes::new();
+        let boxes = LayoutBoxes::default();
 
         let coordinator = SceneCoordinator::new();
         let list = coordinator.compose(&tree, &computed, &boxes, None);
@@ -2619,12 +2617,12 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "hello");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
         // Text node has no computed color property.
         computed.insert(text, ComputedStyle::new());
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
         // Box wide enough for all five 9.6px glyphs (48px) so the default `clip`
         // policy has nothing to truncate — this test exercises shaping, not overflow.
@@ -2657,9 +2655,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "abcd");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2689,9 +2687,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "hi");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2713,9 +2711,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "Count: 7");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(2.0, 3.0, 80.0, 16.0));
 
         let coordinator = SceneCoordinator::new();
@@ -2732,11 +2730,11 @@ mod tests {
         let text = add_text_child(&mut tree, root, "tinted");
 
         let color = StyleColor::rgba(0.1, 0.2, 0.3, 1.0);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(text, with_color(color));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(1.0, 2.0, 10.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2753,10 +2751,10 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "z");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(3.0, 4.0, 0.0, 0.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2775,11 +2773,11 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "orphan");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
 
         // No arranged box for the text node.
-        let boxes = LayoutBoxes::new();
+        let boxes = LayoutBoxes::default();
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(text_runs(&list).is_empty());
@@ -2797,10 +2795,10 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "aaaa bbbb cccc");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         // Box as the layout phase would size it: 50px wide, 3·16 = 48 tall.
         boxes.insert(text, box_at(10.0, 20.0, 50.0, 48.0));
 
@@ -2844,10 +2842,10 @@ mod tests {
 
         let mut style = ComputedStyle::new();
         style.set(PropertyId::LineHeight, ComputedValue::number(2.0));
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         // Box as layout sizes it under line-height:2 — 50px wide, 3·32 = 96 tall.
         boxes.insert(text, box_at(10.0, 20.0, 50.0, 96.0));
 
@@ -2879,14 +2877,14 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "ab\ncd");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut style = ComputedStyle::new();
         style.set(
             PropertyId::WhiteSpace,
             ComputedValue::keyword(obscur_style::property::layout_keyword::WHITE_SPACE_PRE_LINE),
         );
         computed.insert(text, style);
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 1000.0, 32.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2908,9 +2906,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "ab\ncd");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 1000.0, 32.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -2928,9 +2926,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(3.0, 4.0, 0.0, 16.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3036,10 +3034,10 @@ mod tests {
         tree.set_root(root);
 
         let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_border(2.0, red));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3194,9 +3192,9 @@ mod tests {
             let mut tree = RetainedTree::new();
             let root = tree.alloc(NodeKind::Root);
             tree.set_root(root);
-            let mut computed = ComputedStyles::new();
+            let mut computed = ComputedStyles::default();
             computed.insert(root, triangle_border(widths, colors));
-            let mut boxes = LayoutBoxes::new();
+            let mut boxes = LayoutBoxes::default();
             boxes.insert(root, box_at(0.0, 0.0, bw, bh));
 
             let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3233,12 +3231,12 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         // Top transparent; right/bottom/left opaque blue.
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             triangle_border([2.0, 2.0, 2.0, 2.0], [clear, opaque, opaque, opaque]),
         );
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 40.0, 30.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3294,10 +3292,10 @@ mod tests {
         tree.set_root(root);
 
         let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_dashed_border(2.0, red));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3341,10 +3339,10 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_border(2.0, StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3387,13 +3385,13 @@ mod tests {
         tree.set_root(root);
 
         let teal = StyleColor::rgba(0.17, 0.16, 0.15, 1.0);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             with_outline(2.0, 3.0, layout_keyword::BORDER_STYLE_DASHED, teal),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3428,12 +3426,12 @@ mod tests {
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 40.0, 40.0));
         let color = StyleColor::rgba(0.1, 0.2, 0.9, 1.0);
 
         // Solid outline → one non-dashed stroke.
-        let mut solid = ComputedStyles::new();
+        let mut solid = ComputedStyles::default();
         solid.insert(
             root,
             with_outline(2.0, 0.0, layout_keyword::BORDER_STYLE_SOLID, color),
@@ -3444,7 +3442,7 @@ mod tests {
         assert!(!strokes[0].1.is_dashed(), "solid outline is not dashed");
 
         // `outline-style: none` → no outline paint at all.
-        let mut none = ComputedStyles::new();
+        let mut none = ComputedStyles::default();
         none.insert(
             root,
             with_outline(2.0, 0.0, layout_keyword::BORDER_STYLE_NONE, color),
@@ -3467,9 +3465,9 @@ mod tests {
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3501,9 +3499,9 @@ mod tests {
         ] {
             style.set(id, ComputedValue::length(Length::px(8.0)));
         }
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, style);
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3537,10 +3535,10 @@ mod tests {
             PropertyId::BackgroundColor,
             ComputedValue::color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)),
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 20.0, 20.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3566,10 +3564,10 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3606,10 +3604,10 @@ mod tests {
                 ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID),
             );
         }
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 40.0, 40.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3638,10 +3636,10 @@ mod tests {
             ComputedValue::length(Length::px(4.0)),
         );
         // No border-top-style ⇒ treated as `none`.
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 10.0, 10.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3674,10 +3672,10 @@ mod tests {
         tree.set_root(root);
 
         let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_border_and_radius(5.0, red, 14.0));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3727,10 +3725,10 @@ mod tests {
         let blue = StyleColor::rgba(0.0, 0.0, 1.0, 1.0);
         let mut style = with_border_and_radius(5.0, red, 14.0);
         style.set(PropertyId::BorderTopColor, ComputedValue::color(blue));
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3805,13 +3803,13 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             with_background_and_percent_radius(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 50.0),
         );
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 200.0, 100.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3863,7 +3861,7 @@ mod tests {
         // The resolution half of the rule above, isolated from the path builder:
         // `50%` on a 200×100 box is (100, 50) per corner — width for x, height for y
         // — and NOT the same number twice.
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let node = NodeId::from_raw(1);
         computed.insert(
             node,
@@ -3896,14 +3894,14 @@ mod tests {
         tree.set_root(root);
         let child = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             with_background_and_radius(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 8.0),
         );
         computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
         boxes.insert(child, box_at(10.0, 10.0, 20.0, 20.0));
 
@@ -3953,10 +3951,10 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -3990,7 +3988,7 @@ mod tests {
         overflow: obscur_identity::InternedSymbol,
     ) -> ComputedStyle {
         let mut style = with_background(color);
-        style.set(PropertyId::Overflow, ComputedValue::keyword(overflow));
+        style.set(PropertyId::OverflowY, ComputedValue::keyword(overflow));
         style
     }
 
@@ -4001,7 +3999,7 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let child = add_child(&mut tree, root, 10);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             with_background_and_overflow(
@@ -4010,7 +4008,7 @@ mod tests {
             ),
         );
         computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
         boxes.insert(child, box_at(0.0, 0.0, 100.0, 120.0)); // content overflows (120 > 60)
         (tree, computed, boxes, root, child)
@@ -4028,11 +4026,11 @@ mod tests {
             &computed,
             &boxes,
             None,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
+            &HashMap::default(),
+            &HashMap::default(),
+            &HashMap::default(),
+            &HashMap::default(),
+            &HashMap::default(),
         );
         assert_eq!(
             plain.commands(),
@@ -4047,7 +4045,7 @@ mod tests {
         // translate(0,-80) nested INSIDE the overflow clip, and paints a scrollbar
         // (track + thumb) AFTER the clip closes (on top, unscrolled).
         let (tree, computed, boxes, root, _child) = scroll_fixture();
-        let mut scroll = HashMap::new();
+        let mut scroll = HashMap::default();
         scroll.insert(
             root,
             ScrollPaint {
@@ -4061,11 +4059,11 @@ mod tests {
             &computed,
             &boxes,
             None,
-            &HashMap::new(),
-            &HashMap::new(),
+            &HashMap::default(),
+            &HashMap::default(),
             &scroll,
-            &HashMap::new(),
-            &HashMap::new(),
+            &HashMap::default(),
+            &HashMap::default(),
         );
         let cmds = list.commands();
         assert!(list.is_balanced(), "scroll + clip brackets stay balanced");
@@ -4118,7 +4116,7 @@ mod tests {
         tree.set_root(root);
         let child = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             with_background_and_overflow(
@@ -4128,7 +4126,7 @@ mod tests {
         );
         computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
         // The child extends past the root's right/bottom edges.
         boxes.insert(child, box_at(80.0, 40.0, 60.0, 60.0));
@@ -4166,7 +4164,7 @@ mod tests {
         tree.set_root(root);
         let child = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             with_background_and_overflow(
@@ -4176,7 +4174,7 @@ mod tests {
         );
         computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
         boxes.insert(child, box_at(80.0, 40.0, 60.0, 60.0));
 
@@ -4201,14 +4199,14 @@ mod tests {
 
         let mut root_style = with_background_and_radius(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 8.0);
         root_style.set(
-            PropertyId::Overflow,
+            PropertyId::OverflowY,
             ComputedValue::keyword(layout_keyword::OVERFLOW_HIDDEN),
         );
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, root_style);
         computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
         boxes.insert(child, box_at(80.0, 40.0, 60.0, 60.0));
 
@@ -4245,14 +4243,14 @@ mod tests {
         tree.set_root(root);
         let child = add_child(&mut tree, root, 10);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             root,
             with_background_and_opacity(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 0.5),
         );
         computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
         boxes.insert(child, box_at(10.0, 10.0, 20.0, 20.0));
 
@@ -4294,14 +4292,14 @@ mod tests {
             let root = tree.alloc(NodeKind::Root);
             tree.set_root(root);
 
-            let mut computed = ComputedStyles::new();
+            let mut computed = ComputedStyles::default();
             let style = match opacity {
                 Some(a) => with_background_and_opacity(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), a),
                 None => with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
             };
             computed.insert(root, style);
 
-            let mut boxes = LayoutBoxes::new();
+            let mut boxes = LayoutBoxes::default();
             boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
 
             let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -4340,10 +4338,10 @@ mod tests {
         );
         style.set(PropertyId::Opacity, ComputedValue::number(0.5));
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, style);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -4428,9 +4426,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "ab");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
 
         // Default mock shaper: glyph ids are the Unicode scalars, one segment on
@@ -4505,9 +4503,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "abВГ");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         // Wide box, one line tall (line_height 16 at the default 16px font size).
         boxes.insert(text, box_at(3.0, 4.0, 200.0, 16.0));
 
@@ -4568,9 +4566,9 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "hyphenation");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(text, ComputedStyle::new());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 60.0, 16.0));
 
         let mut coordinator = SceneCoordinator::new();
@@ -4625,10 +4623,10 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, content);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(text, with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 200.0, 16.0));
         (tree, computed, boxes, text)
     }
@@ -4728,10 +4726,10 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, content);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(text, with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, w, h));
         (tree, computed, boxes, text)
     }
@@ -4792,7 +4790,7 @@ mod tests {
         let layout = coordinator.text().shape_text_lines(
             &tree,
             &computed,
-            &LayoutBoxes::new(),
+            &LayoutBoxes::default(),
             text,
             "aaaa bbbb cccc",
             50.0,
@@ -4843,7 +4841,7 @@ mod tests {
         let layout = coordinator.text().shape_text_lines(
             &tree,
             &computed,
-            &LayoutBoxes::new(),
+            &LayoutBoxes::default(),
             text,
             "aaaa bbbb cccc",
             50.0,
@@ -4965,14 +4963,14 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "ab\ncd");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut style = ComputedStyle::new();
         style.set(
             PropertyId::WhiteSpace,
             ComputedValue::keyword(obscur_style::property::layout_keyword::WHITE_SPACE_PRE_LINE),
         );
         computed.insert(text, style);
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, 1000.0, 32.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
@@ -5003,12 +5001,12 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, content);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         let mut style = with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
         mutate(&mut style);
         computed.insert(text, style);
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(text, box_at(0.0, 0.0, box_w, 16.0));
         (tree, computed, boxes, text)
     }
@@ -5080,7 +5078,7 @@ mod tests {
             coordinator.text(),
             &tree,
             &computed,
-            &LayoutBoxes::new(),
+            &LayoutBoxes::default(),
             text,
             "abcd",
             200.0,
@@ -5107,7 +5105,7 @@ mod tests {
                 coordinator.text(),
                 &tree2,
                 &computed2,
-                &LayoutBoxes::new(),
+                &LayoutBoxes::default(),
                 text2,
                 "abcd",
                 200.0,
@@ -5149,7 +5147,7 @@ mod tests {
                 coordinator.text(),
                 &tree,
                 &computed,
-                &LayoutBoxes::new(),
+                &LayoutBoxes::default(),
                 text,
                 "abcd",
                 box_w,
@@ -5179,7 +5177,7 @@ mod tests {
                 coordinator.text(),
                 &t1,
                 &c1,
-                &LayoutBoxes::new(),
+                &LayoutBoxes::default(),
                 n1,
                 "abcd",
                 box_w,
@@ -5221,7 +5219,7 @@ mod tests {
                 coordinator.text(),
                 &tree,
                 &computed,
-                &LayoutBoxes::new(),
+                &LayoutBoxes::default(),
                 text,
                 "abcd",
                 box_w,
@@ -5257,7 +5255,7 @@ mod tests {
                     coordinator.text(),
                     &tree,
                     &computed,
-                    &LayoutBoxes::new(),
+                    &LayoutBoxes::default(),
                     text,
                     "abcd",
                     200.0,
@@ -5316,14 +5314,14 @@ mod tests {
         let editing_text = add_text_child(&mut tree, root, "hi");
         let other_text = add_text_child(&mut tree, root, "yo");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(
             editing_text,
             with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
         );
         computed.insert(other_text, with_color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(editing_text, box_at(0.0, 0.0, 200.0, 16.0));
         boxes.insert(other_text, box_at(0.0, 20.0, 200.0, 16.0));
 
@@ -5366,12 +5364,12 @@ mod tests {
         let overlay = add_child(&mut tree, field, 701);
         set_class(&mut tree, overlay, "placeholder");
         let hint_text = add_text_child(&mut tree, overlay, hint);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(field, with_color(ink));
         computed.insert(overlay, with_color(placeholder));
         computed.insert(hint_text, with_color(placeholder));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(field, box_at(0.0, 0.0, 200.0, 16.0));
         boxes.insert(overlay, box_at(0.0, 0.0, 200.0, 16.0));
         boxes.insert(hint_text, box_at(0.0, 0.0, 200.0, 16.0));
@@ -5574,18 +5572,18 @@ mod tests {
                     ViewValue::Text(SRC_KEY.into()),
                 )]));
             }
-            let mut computed = ComputedStyles::new();
+            let mut computed = ComputedStyles::default();
             let mut style = ComputedStyle::new();
             style.set(PropertyId::Color, ComputedValue::color(color));
             computed.insert(child, style);
-            let mut boxes = LayoutBoxes::new();
+            let mut boxes = LayoutBoxes::default();
             boxes.insert(root, box_at(0.0, 0.0, 40.0, 40.0));
             boxes.insert(child, box_at(0.0, 0.0, 20.0, 20.0));
             (tree, computed, boxes, child)
         }
 
         fn vectors() -> HashMap<Box<str>, SceneVector> {
-            let mut map = HashMap::new();
+            let mut map = HashMap::default();
             map.insert(Box::<str>::from(SRC_KEY), icon());
             map
         }
@@ -5611,11 +5609,11 @@ mod tests {
                 &computed,
                 &boxes,
                 None,
-                &HashMap::new(),
+                &HashMap::default(),
                 &vectors(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                &HashMap::default(),
+                &HashMap::default(),
+                &HashMap::default(),
             )
         }
 
@@ -5685,11 +5683,11 @@ mod tests {
                 &computed,
                 &boxes,
                 None,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
+                &HashMap::default(),
+                &HashMap::default(),
+                &HashMap::default(),
+                &HashMap::default(),
+                &HashMap::default(),
             );
             assert!(drawn_fills(&list).is_empty(), "no document, no paint");
         }

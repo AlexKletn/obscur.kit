@@ -1,0 +1,290 @@
+#![doc = include_str!("gtk_appearance_provider.doc/_module.md")]
+
+use std::process::Command;
+
+use obscur_capability::SupportLevel;
+use obscur_scene::color::Color;
+use obscur_system::appearance::{
+    AppearanceCallback, AppearanceProvider, AppearanceWatch, ColorScheme, SystemAppearance,
+    SystemFont,
+};
+
+use super::monitor_watch::MonitorWatch;
+
+#[doc = include_str!("gtk_appearance_provider.doc/SCHEMA.md")]
+const SCHEMA: &str = "org.gnome.desktop.interface";
+
+#[doc = include_str!("gtk_appearance_provider.doc/GtkAppearanceProvider.md")]
+#[derive(Debug, Clone)]
+pub struct GtkAppearanceProvider {
+    tool: Box<str>,
+}
+
+impl GtkAppearanceProvider {
+    #[doc = include_str!("gtk_appearance_provider.doc/new.md")]
+    #[must_use]
+    pub fn new() -> Self {
+        Self::with_tool("gsettings")
+    }
+
+    #[doc = include_str!("gtk_appearance_provider.doc/with_tool.md")]
+    #[must_use]
+    pub fn with_tool(tool: impl Into<Box<str>>) -> Self {
+        Self { tool: tool.into() }
+    }
+
+    #[doc = include_str!("gtk_appearance_provider.doc/tool.md")]
+    #[must_use]
+    pub fn tool(&self) -> &str {
+        &self.tool
+    }
+
+    #[doc = include_str!("gtk_appearance_provider.doc/read.md")]
+    fn read(&self, key: &str) -> Option<String> {
+        let output = Command::new(&*self.tool)
+            .args(["get", SCHEMA, key])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8(output.stdout).ok()?;
+        let value = unquote(text.trim());
+        (!value.is_empty()).then(|| value.to_owned())
+    }
+}
+
+impl Default for GtkAppearanceProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AppearanceProvider for GtkAppearanceProvider {
+    fn appearance(&self) -> SystemAppearance {
+        SystemAppearance {
+            color_scheme: self.read("color-scheme").and_then(|v| parse_scheme(&v)),
+            contrast: None,
+            accent: self.read("accent-color").and_then(|v| accent_hex(&v)),
+            // Deliberately empty, and the single most important honest answer in
+            // this file: `gsettings` names the theme, and the theme's colours
+            // live inside GTK. Reading them means linking GTK, which this
+            // adapter does not do, so it says nothing rather than guessing.
+            palette: obscur_system::appearance::SystemPalette::default(),
+            font: self.read("font-name").and_then(|v| parse_font(&v)),
+            monospace_font: self
+                .read("monospace-font-name")
+                .and_then(|v| parse_font(&v)),
+            text_scale: self
+                .read("text-scaling-factor")
+                .and_then(|v| v.parse::<f32>().ok())
+                .filter(|scale| *scale > 0.0),
+            cursor_size: self.read("cursor-size").and_then(|v| v.parse::<u32>().ok()),
+            icon_theme: self.read("icon-theme").map(Into::into),
+            reduced_motion: self
+                .read("enable-animations")
+                .and_then(|v| v.parse::<bool>().ok())
+                .map(|enabled| !enabled),
+        }
+    }
+
+    fn support(&self) -> SupportLevel {
+        if !tool_available(&self.tool) {
+            return SupportLevel::Unavailable;
+        }
+        // Limited, always, and it is not modesty: this source cannot state a
+        // palette at any version, so a caller that reads `Native` here and then
+        // finds no colours would have been misled.
+        SupportLevel::Limited
+    }
+
+    #[doc = include_str!("gtk_appearance_provider.doc/watch_support.md")]
+    fn watch_support(&self) -> SupportLevel {
+        if tool_available(&self.tool) {
+            // `gsettings monitor` streams a line per changed key for the whole
+            // schema, which covers every setting this source reads.
+            SupportLevel::Native
+        } else {
+            SupportLevel::Unavailable
+        }
+    }
+
+    #[doc = include_str!("gtk_appearance_provider.doc/watch.md")]
+    fn watch(&self, on_change: AppearanceCallback) -> Option<AppearanceWatch> {
+        // Every line the monitor prints for this schema is a change to a setting
+        // this source reads, so the marker is the schema itself.
+        MonitorWatch::spawn(&self.tool, &["monitor", SCHEMA], SCHEMA, on_change)
+    }
+}
+
+#[doc = include_str!("gtk_appearance_provider.doc/unquote.md")]
+fn unquote(value: &str) -> &str {
+    value
+        .strip_prefix('\'')
+        .and_then(|v| v.strip_suffix('\''))
+        .or_else(|| value.strip_prefix('"').and_then(|v| v.strip_suffix('"')))
+        .unwrap_or(value)
+}
+
+#[doc = include_str!("gtk_appearance_provider.doc/parse_scheme.md")]
+fn parse_scheme(value: &str) -> Option<ColorScheme> {
+    match value {
+        "prefer-dark" => Some(ColorScheme::Dark),
+        "prefer-light" => Some(ColorScheme::Light),
+        // `default` is GNOME saying the user expressed no preference, which is
+        // the absence of an answer and not a light one.
+        _ => None,
+    }
+}
+
+#[doc = include_str!("gtk_appearance_provider.doc/parse_font.md")]
+fn parse_font(value: &str) -> Option<SystemFont> {
+    // Pango writes "Family Style Size", and only the trailing size is
+    // unambiguous: everything before it is the family and its style words,
+    // which this does not try to separate.
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    match value.rsplit_once(' ') {
+        Some((family, size)) => match size.parse::<f32>() {
+            Ok(size) if size > 0.0 => Some(SystemFont::new(family.trim(), Some(size))),
+            _ => Some(SystemFont::new(value, None)),
+        },
+        None => Some(SystemFont::new(value, None)),
+    }
+}
+
+#[doc = include_str!("gtk_appearance_provider.doc/accent_hex.md")]
+fn accent_hex(name: &str) -> Option<Color> {
+    // GNOME 47 states the accent as one of nine NAMES, not as a colour. These
+    // are the values Adwaita publishes for them, so this is a lookup of the
+    // desktop's own palette rather than a choice made here — and a name that is
+    // not on the list answers nothing rather than the nearest guess.
+    let hex = match name {
+        "blue" => 0x35_84_E4,
+        "teal" => 0x21_90_A4,
+        "green" => 0x3A_94_4A,
+        "yellow" => 0xC8_88_00,
+        "orange" => 0xED_5B_00,
+        "red" => 0xE6_2D_42,
+        "pink" => 0xD5_61_99,
+        "purple" => 0x91_41_AC,
+        "slate" => 0x6F_83_96,
+        _ => return None,
+    };
+    Some(from_hex(hex))
+}
+
+#[doc = include_str!("gtk_appearance_provider.doc/from_hex.md")]
+fn from_hex(hex: u32) -> Color {
+    #[allow(clippy::cast_precision_loss)]
+    Color::rgb(
+        ((hex >> 16) & 0xFF) as f32 / 255.0,
+        ((hex >> 8) & 0xFF) as f32 / 255.0,
+        (hex & 0xFF) as f32 / 255.0,
+    )
+}
+
+#[doc = include_str!("gtk_appearance_provider.doc/tool_available.md")]
+fn tool_available(tool: &str) -> bool {
+    Command::new("sh")
+        .args(["-c", &format!("command -v {tool}")])
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_tool_is_gsettings() {
+        assert_eq!(GtkAppearanceProvider::new().tool(), "gsettings");
+    }
+
+    #[test]
+    fn a_missing_tool_answers_nothing_and_says_so() {
+        let provider = GtkAppearanceProvider::with_tool("obscur-no-such-tool");
+        assert_eq!(provider.support(), SupportLevel::Unavailable);
+        assert!(!provider.answers());
+        assert!(provider.appearance().is_empty());
+    }
+
+    #[test]
+    fn gsettings_quoting_is_removed() {
+        assert_eq!(unquote("'prefer-dark'"), "prefer-dark");
+        assert_eq!(unquote("\"Adwaita\""), "Adwaita");
+        assert_eq!(unquote("24"), "24", "an unquoted value is left alone");
+    }
+
+    #[test]
+    fn no_preference_is_no_answer_rather_than_light() {
+        // GNOME's `default` means the user did not choose, and answering Light
+        // for it would put a light interface on a user who set none.
+        assert_eq!(parse_scheme("prefer-dark"), Some(ColorScheme::Dark));
+        assert_eq!(parse_scheme("prefer-light"), Some(ColorScheme::Light));
+        assert_eq!(parse_scheme("default"), None);
+        assert_eq!(parse_scheme(""), None);
+    }
+
+    #[test]
+    fn a_pango_description_splits_at_its_trailing_size() {
+        let font = parse_font("Cantarell 11").expect("a font");
+        assert_eq!(&*font.family, "Cantarell");
+        assert_eq!(font.size_pt, Some(11.0));
+    }
+
+    #[test]
+    fn a_multi_word_family_keeps_its_words() {
+        let font = parse_font("Noto Sans Mono 10").expect("a font");
+        assert_eq!(&*font.family, "Noto Sans Mono");
+        assert_eq!(font.size_pt, Some(10.0));
+    }
+
+    #[test]
+    fn a_family_with_no_size_is_still_a_family() {
+        // Nothing to split on, and inventing 10pt would be indistinguishable
+        // from the user having chosen it.
+        let font = parse_font("Cantarell").expect("a font");
+        assert_eq!(&*font.family, "Cantarell");
+        assert_eq!(font.size_pt, None);
+        assert_eq!(parse_font("   "), None);
+    }
+
+    #[test]
+    fn a_style_word_before_the_size_stays_with_the_family() {
+        // Pango puts style words in the same string, and separating them needs
+        // Pango's own table. Keeping them is honest; guessing is not.
+        let font = parse_font("Cantarell Bold 11").expect("a font");
+        assert_eq!(&*font.family, "Cantarell Bold");
+    }
+
+    #[test]
+    fn every_gnome_accent_name_resolves_and_nothing_else_does() {
+        for name in [
+            "blue", "teal", "green", "yellow", "orange", "red", "pink", "purple", "slate",
+        ] {
+            assert!(accent_hex(name).is_some(), "{name} is a GNOME accent");
+        }
+        assert_eq!(accent_hex("chartreuse"), None);
+        assert_eq!(accent_hex("#3584e4"), None, "a hex string is not a name");
+    }
+
+    #[test]
+    fn the_blue_accent_is_adwaitas_blue() {
+        let blue = accent_hex("blue").expect("blue");
+        assert!((blue.r - 0.208).abs() < 0.01, "{blue:?}");
+        assert!((blue.g - 0.518).abs() < 0.01, "{blue:?}");
+        assert!((blue.b - 0.894).abs() < 0.01, "{blue:?}");
+    }
+
+    #[test]
+    fn this_source_never_claims_a_palette() {
+        // The claim the whole file turns on. If this ever starts answering
+        // colours, `support` must stop saying `Limited`.
+        let provider = GtkAppearanceProvider::new();
+        assert!(provider.appearance().palette.is_empty());
+        assert_ne!(provider.support(), SupportLevel::Native);
+    }
+}

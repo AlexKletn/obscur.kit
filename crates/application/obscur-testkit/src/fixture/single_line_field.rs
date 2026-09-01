@@ -47,7 +47,11 @@ impl SingleLineField {
                             PropertyValue::Keyword(layout_keyword::WHITE_SPACE_NOWRAP),
                         ),
                         BlockDeclaration::normal(
-                            PropertyId::Overflow,
+                            PropertyId::OverflowX,
+                            PropertyValue::Keyword(layout_keyword::OVERFLOW_HIDDEN),
+                        ),
+                        BlockDeclaration::normal(
+                            PropertyId::OverflowY,
                             PropertyValue::Keyword(layout_keyword::OVERFLOW_HIDDEN),
                         ),
                     ])

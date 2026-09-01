@@ -1,4 +1,5 @@
 #![doc = include_str!("cascade.doc/_module.md")]
+use obscur_identity::FastMap;
 
 use crate::cascade::{CascadePriority, Declaration, ResolvedDeclarations};
 use crate::property::PropertyId;
@@ -20,7 +21,7 @@ impl Cascade {
     pub fn resolve(&self, declarations: &[Declaration]) -> ResolvedDeclarations {
         // For each property, remember the winning declaration's priority so we
         // can compare later candidates against it in a single pass.
-        let mut winners: HashMap<PropertyId, (CascadePriority, &Declaration)> = HashMap::new();
+        let mut winners: FastMap<PropertyId, (CascadePriority, &Declaration)> = HashMap::default();
 
         for declaration in declarations {
             let priority = declaration.priority();

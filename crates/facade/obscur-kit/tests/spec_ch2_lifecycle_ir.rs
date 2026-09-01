@@ -345,10 +345,7 @@ impl FromProps for SiblingProps {
             .iter()
             .any(|p| p.name() == FAIL && *p.value() == ViewValue::Bool(true));
         if failing {
-            Err(PropsError::Type {
-                name: FAIL,
-                expected: "a renderable sibling",
-            })
+            Err(PropsError::wrong_type(FAIL, "fail", "a renderable sibling"))
         } else {
             Ok(Self)
         }

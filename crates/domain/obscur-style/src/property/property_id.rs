@@ -280,9 +280,16 @@ pub enum PropertyId {
     #[doc = include_str!("property_id.doc/TabSize.md")]
     TabSize,
 
-    // ---- Overflow (Keyword-valued; NOT inherited; pure paint/clip) ----
-    #[doc = include_str!("property_id.doc/Overflow.md")]
-    Overflow,
+    // ---- Overflow (Keyword-valued; NOT inherited) ----
+    //
+    // The two axis longhands ARE the storage: `overflow` is a shorthand that the
+    // CSS compiler expands into the pair, exactly as `place-content` expands. An
+    // author who states one axis therefore reaches the same place as one who
+    // states both, and the cascade orders the two declarations for free.
+    #[doc = include_str!("property_id.doc/OverflowX.md")]
+    OverflowX,
+    #[doc = include_str!("property_id.doc/OverflowY.md")]
+    OverflowY,
 
     #[doc = include_str!("property_id.doc/Content.md")]
     Content,
@@ -422,7 +429,8 @@ impl PropertyId {
             Self::OverflowWrap => "overflow-wrap",
             Self::WordBreak => "word-break",
             Self::TabSize => "tab-size",
-            Self::Overflow => "overflow",
+            Self::OverflowX => "overflow-x",
+            Self::OverflowY => "overflow-y",
             Self::Content => "content",
             Self::PointerEvents => "pointer-events",
         }
@@ -566,8 +574,10 @@ impl PropertyId {
             // `text-overflow` does not inherit (unlike the other typography
             // properties, which do).
             | Self::TextOverflow
-            // `overflow` is a box / paint property and resets per element.
-            | Self::Overflow
+            // The `overflow` axis longhands are box / paint properties and reset
+            // per element.
+            | Self::OverflowX
+            | Self::OverflowY
             // `content` selects generated text on a pseudo-element; it does not
             // inherit (CSS Content 3).
             | Self::Content
@@ -770,10 +780,14 @@ mod tests {
     }
 
     #[test]
-    fn overflow_name_and_not_inherited() {
-        assert_eq!(PropertyId::Overflow.name(), "overflow");
-        // Like the other box / paint properties, `overflow` resets per element.
-        assert!(!PropertyId::Overflow.default_inheritance().is_inherited());
+    fn overflow_axis_names_and_not_inherited() {
+        // `overflow` itself is a shorthand and has no id; the two axes are the
+        // storage, and each names itself.
+        assert_eq!(PropertyId::OverflowX.name(), "overflow-x");
+        assert_eq!(PropertyId::OverflowY.name(), "overflow-y");
+        // Like the other box / paint properties, they reset per element.
+        assert!(!PropertyId::OverflowX.default_inheritance().is_inherited());
+        assert!(!PropertyId::OverflowY.default_inheritance().is_inherited());
     }
 
     #[test]

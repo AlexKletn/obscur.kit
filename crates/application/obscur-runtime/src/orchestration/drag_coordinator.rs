@@ -1,10 +1,8 @@
 #![doc = include_str!("drag_coordinator.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_data_transfer::drag::{DragEffect, DragPhase, DragSession, DragSource, DropTarget};
 use obscur_geometry::Point;
-use obscur_identity::{NodeId, VersionStamp};
+use obscur_identity::{FastMap, NodeId, VersionStamp};
 
 use crate::transaction::{
     ProvisionalTransaction, TransactionCommit, TransactionValidator, UiOperation,
@@ -32,7 +30,7 @@ pub struct DragCoordinator {
     #[doc = include_str!("drag_coordinator.doc/session.md")]
     session: Option<DragSession>,
     #[doc = include_str!("drag_coordinator.doc/targets.md")]
-    targets: HashMap<NodeId, DropTarget>,
+    targets: FastMap<NodeId, DropTarget>,
     #[doc = include_str!("drag_coordinator.doc/provisional.md")]
     provisional: ProvisionalTransaction,
 }

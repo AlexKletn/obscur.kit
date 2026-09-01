@@ -14,3 +14,6 @@ workspace = true
 obscur-identity = { workspace = true }
 obscur-geometry = { workspace = true }
 obscur-capability = { workspace = true }
+# `Color` — the kit's own colour vocabulary, so a palette read off the desktop
+# arrives in the same type a stylesheet and a theme token already speak.
+obscur-scene = { workspace = true }

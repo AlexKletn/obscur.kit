@@ -1,9 +1,7 @@
 #![doc = include_str!("pointer_landing.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_geometry::Point;
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_interaction::pointer::{PointerEvent, PointerId};
 use obscur_tree::tree::RetainedTree;
 
@@ -65,7 +63,7 @@ impl<'a> PointerLandingResolver<'a> {
     ) -> PointerLanding {
         let screen = self.surface.to_content_point(event.position());
         let targets = ScrollTargets::new(self.tree, self.computed, self.boxes, self.scroll);
-        let scrolls: HashMap<NodeId, f32> = targets
+        let scrolls: FastMap<NodeId, f32> = targets
             .paint(self.computed)
             .into_iter()
             .map(|(node, paint)| (node, paint.scroll_top))
@@ -117,8 +115,8 @@ mod tests {
     ) {
         (
             RetainedTree::new(),
-            ComputedStyles::new(),
-            LayoutBoxes::new(),
+            ComputedStyles::default(),
+            LayoutBoxes::default(),
             ScrollOffsets::new(),
             HitTesting::new(),
         )
@@ -202,7 +200,7 @@ mod tests {
         let item = kid(&mut tree, scroller);
         let toolbar = kid(&mut tree, root);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let at = |w: f32, h: f32| {
             LayoutBox::new(obscur_geometry::Rect::new(
                 Point::new(0.0, 0.0),
@@ -218,10 +216,10 @@ mod tests {
             style.set(id, ComputedValue::keyword(sym));
             style
         };
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             scroller,
-            keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_SCROLL),
+            keyword(PropertyId::OverflowY, layout_keyword::OVERFLOW_SCROLL),
         );
         computed.insert(item, ComputedStyle::new());
         computed.insert(

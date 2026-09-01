@@ -77,7 +77,7 @@ mod tests {
         // No text leaf and no style: the unknown answers conservatively, so a
         // session on a node this frame dropped takes the full frame.
         let tree = RetainedTree::new();
-        let computed = ComputedStyles::new();
+        let computed = ComputedStyles::default();
         assert!(!ComposeOnlyEdit::new(&tree, &computed).is_box_stable(NodeId::from_raw(3)));
     }
 

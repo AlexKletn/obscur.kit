@@ -1,5 +1,7 @@
 #![doc = include_str!("kit_bootstrap.doc/_module.md")]
 
+use obscur_diagnostics::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
+
 #[cfg(feature = "cache-fs")]
 use std::path::PathBuf;
 
@@ -11,6 +13,8 @@ pub struct KitBootstrap {
     renderer_id: u64,
     #[cfg(feature = "cache-fs")]
     cache_root: Option<PathBuf>,
+    #[doc = include_str!("kit_bootstrap.doc/fonts.md")]
+    fonts: super::FontSet,
     // Spelled as the OPT-OUT rather than as `builtin_components: bool`, so the
     // `Default` this type derives is the defaults-on answer without a hand-written
     // `impl Default` that a later field could quietly diverge from.
@@ -47,6 +51,28 @@ impl KitBootstrap {
         self
     }
 
+    #[doc = include_str!("kit_bootstrap.doc/with_font.md")]
+    #[must_use]
+    pub fn with_font(mut self, face: super::FontFaceBytes) -> Self {
+        self.fonts.push(face);
+        self
+    }
+
+    #[doc = include_str!("kit_bootstrap.doc/font_set.md")]
+    #[must_use]
+    pub fn font_set(&self) -> super::FontSet {
+        // The application's own faces first: within one family the registry
+        // keeps the first face on an attribute tie, so a face an application
+        // shipped deliberately outranks a same-named one the machine happens to
+        // have.
+        let mut set = self.fonts.clone();
+        #[cfg(feature = "font-fontconfig")]
+        for face in self.system_font_set().unwrap_or_default().faces() {
+            set.push(face.clone());
+        }
+        set
+    }
+
     #[doc = include_str!("kit_bootstrap.doc/headless_host.md")]
     #[must_use]
     pub fn headless_host(&self) -> crate::headless::HeadlessHost {
@@ -61,7 +87,86 @@ impl KitBootstrap {
 
     #[doc = include_str!("kit_bootstrap.doc/install_default_stylesheet.md")]
     pub fn install_default_stylesheet(&self, runtime: &mut crate::runtime::UiRuntime) {
+        super::css_pipeline::install_custom_value_parser(runtime);
         runtime.set_default_stylesheet(self.ua_stylesheet());
+    }
+
+    #[doc = include_str!("kit_bootstrap.doc/install_system_theme_from.md")]
+    pub fn install_system_theme_from(
+        &self,
+        runtime: &mut crate::runtime::UiRuntime,
+        provider: &dyn obscur_system::appearance::AppearanceProvider,
+    ) -> crate::system_theme::ThemeVars {
+        // Absence is not a failure — a machine with no portal, no `gsettings`
+        // and no `kdeglobals` is a machine with no desktop preferences, and an
+        // application's own stylesheet is then simply the whole answer. It is
+        // still worth one line, because "my colours did not follow the system"
+        // is otherwise indistinguishable from a bug in the application.
+        if !provider.answers() {
+            report(
+                runtime,
+                "platform.appearance.no_source",
+                DiagnosticSeverity::Warning,
+                "no desktop appearance source: no portal, no gsettings, no kdeglobals.                  No `--obscur-sys-*` variable is defined and the application's own                  stylesheet stands unaided.",
+            );
+        }
+        let appearance = provider.appearance();
+        // Partial by construction on some desktops — GNOME states no colours at
+        // all — so this is a note rather than a complaint, below the default
+        // stderr floor. It is what tells an author why a palette variable they
+        // expected is missing.
+        if !appearance.is_empty() && appearance.palette.is_empty() {
+            report(
+                runtime,
+                "platform.appearance.no_palette",
+                DiagnosticSeverity::Info,
+                "the desktop stated no colours, so no `--obscur-sys-window-bg` and                  friends are defined. Expected on GNOME, whose settings name a theme                  and not its palette.",
+            );
+        }
+        self.install_system_theme(runtime, &appearance)
+    }
+
+    #[doc = include_str!("kit_bootstrap.doc/install_system_theme.md")]
+    pub fn install_system_theme(
+        &self,
+        runtime: &mut crate::runtime::UiRuntime,
+        appearance: &obscur_system::appearance::SystemAppearance,
+    ) -> crate::system_theme::ThemeVars {
+        if appearance.is_empty() {
+            report(
+                runtime,
+                "platform.appearance.empty",
+                DiagnosticSeverity::Warning,
+                "the desktop appearance is empty: no `--obscur-sys-*` variable is                  defined, and a stylesheet reading one gets nothing.",
+            );
+        }
+        // The kit is about to write `var()`-readable CSS into this runtime, so it
+        // owes the runtime the grammar that reads one back. Guarded inside, so a
+        // host that already installed a pipeline keeps its own lowering.
+        super::css_pipeline::install_custom_value_parser(runtime);
+        let vars = crate::system_theme::ThemeVars::from_appearance(appearance);
+        // Compiled together with the UA sheet and installed in its place, at
+        // the system-default origin. That origin is the point: the desktop's
+        // answer is a suggestion the author outranks by writing anything at
+        // all, which is the relationship a system theme should have.
+        //
+        // Together rather than as a second sheet because the runtime holds one
+        // default: replacing it with UA-plus-variables keeps a single source of
+        // truth for that slot instead of two that can disagree about which was
+        // installed last.
+        let css = format!(
+            "{}\n{}",
+            crate::default_stylesheet::ua_css(),
+            vars.stylesheet()
+        );
+        let source = crate::css::source::CssSource::anonymous(css.as_str());
+        let parsed = crate::css::parser::StylesheetParser::new(&source).parse();
+        let sheet = crate::css::compiler::StylesheetCompiler::new()
+            .with_origin(crate::style::cascade::CascadeOrigin::SystemDefault)
+            .compile(&parsed)
+            .matchable;
+        runtime.set_default_stylesheet(sheet);
+        vars
     }
 
     #[doc = include_str!("kit_bootstrap.doc/without_builtin_components.md")]
@@ -332,9 +437,153 @@ impl KitBootstrap {
     }
 }
 
+#[doc = include_str!("kit_bootstrap.doc/report.md")]
+fn report(
+    runtime: &mut crate::runtime::UiRuntime,
+    code: &'static str,
+    severity: DiagnosticSeverity,
+    message: &'static str,
+) {
+    runtime.report_diagnostic(&Diagnostic::new(
+        DiagnosticCode::new(code),
+        severity,
+        DiagnosticSubsystem::Platform,
+        message,
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::KitBootstrap;
+
+    use crate::css::compiler::StylesheetCompiler;
+    use crate::css::parser::StylesheetParser;
+    use crate::css::source::CssSource;
+    use crate::geometry::Size;
+    use crate::identity::{ComponentId, RuntimeId};
+    use crate::runtime::UiRuntime;
+    use crate::scene::color::Color;
+    use crate::style::matching::Stylesheet;
+    use crate::style::property::StyleColor;
+    use crate::system::appearance::{SystemAppearance, SystemPalette};
+    use crate::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+
+    /// One palette entry, so `--obscur-sys-window-bg` is defined and everything
+    /// else stays absent — the narrowest appearance that still exercises the
+    /// variable the kit writes.
+    fn appearance_saying(background: Color) -> SystemAppearance {
+        SystemAppearance {
+            palette: SystemPalette {
+                window_background: Some(background),
+                ..SystemPalette::default()
+            },
+            ..SystemAppearance::default()
+        }
+    }
+
+    /// A host's own sheet, compiled by hand. Deliberately not through
+    /// [`crate::bootstrap::CssPipeline`]: that call is the one whose absence
+    /// these tests are about.
+    fn hand_compiled(css: &str) -> Stylesheet {
+        let source = CssSource::anonymous(css);
+        let parsed = StylesheetParser::new(&source).parse();
+        StylesheetCompiler::new().compile(&parsed).matchable
+    }
+
+    /// A `.page > .box` screen, the smallest tree with a root for `:root` to
+    /// select and a child for the author sheet to reach.
+    fn page_with_a_box() -> View {
+        let el = |class: &str| {
+            ViewNode::element(ComponentId::from_raw(80))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+        };
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            el("page").with_children(ViewFragment::from_nodes(vec![el("box")])),
+        ]))
+    }
+
+    /// A runtime, a hand-compiled author sheet and the computed background of
+    /// `.box` — the whole path a host walks when it installs the system theme
+    /// and nothing else. Deliberately no [`crate::bootstrap::CssPipeline`]:
+    /// that is the call whose absence this exercises.
+    fn window_bg_of_a_var_reader(css: &str) -> StyleColor {
+        use crate::style::computed::ComputedValue;
+        use crate::style::property::PropertyId;
+
+        let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0));
+        KitBootstrap::new()
+            .install_system_theme(&mut runtime, &appearance_saying(Color::rgb(1.0, 0.0, 0.0)));
+        runtime.render_now(&page_with_a_box(), &[hand_compiled(css)]);
+
+        let nodes = runtime.inspect_snapshot().nodes;
+        let node = nodes
+            .iter()
+            .find(|node| node.classes.iter().any(|name| name == "box"))
+            .expect("the .box node is in the tree");
+        runtime
+            .computed_style(node.node)
+            .expect(".box computed a style")
+            .get(PropertyId::BackgroundColor)
+            .and_then(ComputedValue::as_color)
+            .expect(".box computed a background colour")
+    }
+
+    /// The regression in one assertion: `install_system_theme` writes
+    /// `--obscur-sys-window-bg: #ff0000` into the runtime's default sheet, and a
+    /// host that reads it with `var()` used to get red without ever naming the
+    /// CSS pipeline. Once a custom property kept its raw tokens, resolving one
+    /// needed a substitution-time parser — so the value the kit itself wrote
+    /// computed to `unset` (transparent) unless the host happened to call
+    /// `CssPipeline::install`. The bootstrap installs the parser it needs.
+    #[test]
+    fn a_system_theme_var_resolves_for_a_host_that_never_touched_the_css_pipeline() {
+        assert_eq!(
+            window_bg_of_a_var_reader(".box { background-color: var(--obscur-sys-window-bg) }"),
+            StyleColor::rgba(1.0, 0.0, 0.0, 1.0),
+        );
+    }
+
+    /// The control for the assertion above: the same sheet, the same path, a
+    /// literal instead of a `var()`. If this one ever fails, the failure is in
+    /// the fixture rather than in variable substitution.
+    #[test]
+    fn the_same_path_without_a_var_was_never_in_question() {
+        assert_eq!(
+            window_bg_of_a_var_reader(".box { background-color: #ff0000 }"),
+            StyleColor::rgba(1.0, 0.0, 0.0, 1.0),
+        );
+    }
+
+    /// A host that chose its own lowering keeps it. The bootstrap fills an empty
+    /// slot; it never overwrites one, or installing a theme would silently undo
+    /// a `CssPipeline::install` that ran first.
+    #[test]
+    fn a_parser_the_host_installed_first_is_left_alone() {
+        use crate::style::property::{PropertyId, PropertyValue};
+
+        let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0));
+        let called = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = std::rc::Rc::clone(&called);
+        runtime.set_custom_value_parser(std::rc::Rc::new(
+            move |property: PropertyId, text: &str| -> Option<PropertyValue> {
+                flag.set(true);
+                obscur_css::compiler::lower_custom_value(property, text)
+            },
+        ));
+        KitBootstrap::new()
+            .install_system_theme(&mut runtime, &appearance_saying(Color::rgb(0.0, 0.0, 1.0)));
+        runtime.render_now(
+            &page_with_a_box(),
+            &[hand_compiled(
+                ".box { background-color: var(--obscur-sys-window-bg) }",
+            )],
+        );
+
+        assert!(
+            called.get(),
+            "the host's own parser is the one that ran, not a bootstrap replacement"
+        );
+    }
 
     #[test]
     fn builds_headless_host() {

@@ -55,7 +55,11 @@ impl TextArea {
                 PropertyValue::Length(Length::px(Self::SCROLLPORT_HEIGHT)),
             ),
             BlockDeclaration::normal(
-                PropertyId::Overflow,
+                PropertyId::OverflowX,
+                PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO),
+            ),
+            BlockDeclaration::normal(
+                PropertyId::OverflowY,
                 PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO),
             ),
         ]))

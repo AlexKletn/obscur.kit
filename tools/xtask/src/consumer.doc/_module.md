@@ -1,12 +1,8 @@
-The out-of-workspace consumer check: does the toolkit work from the far side
-of the facade?
+The consumer guard: does a crate on the far side of the facade build?
 
-`checks/facade-consumer` is a crate whose only dependency is `obscur-kit`, so
-its extern prelude holds `obscur_kit` and nothing else. That is the one place
-a defect in what the *authoring surfaces emit* can be seen: an `okui!`
-expansion naming `::obscur_view` compiles in every crate of this workspace and
-in no application anywhere (audit finding 1-A).
-
-It cannot be a workspace member — the facade-dependency rule forbids that, and
-membership would put the internal crates back in the graph — so `cargo test
---workspace` does not reach it and this command exists to.
+Two profiles, because one was not enough. `checks/facade-consumer` stands
+outside the facade and opens a **window**; `checks/layer-consumer` stands
+outside it and opens a **desktop surface**, in a feature set with no windowing
+backend at all. The two runners diverge after `AppParts::boot`, and each profile
+covers a half the other never reaches — `docs/layer-consumer-audit.md` is what
+turned up the first time anything covered the second one.

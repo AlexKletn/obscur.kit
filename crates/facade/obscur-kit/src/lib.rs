@@ -2,10 +2,12 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-// The one-call standalone windowed entry point (spec §1.4). It owns a window and
-// the event loop, so it exists only on the full windowed feature set (`window-winit`
-// + `render-vello`) and is entirely absent from the headless `default` build.
-#[cfg(all(feature = "window-winit", feature = "render-vello"))]
+// The one-call standalone entry point (spec §1.4). It owns a surface and the event
+// loop, so it needs a renderer and at least one surface backend to talk to — either
+// an ordinary window (`window-winit`) or a desktop layer surface (`shell-layer`),
+// with `App::layer` choosing between them. Entirely absent from the headless
+// `default` build, which has neither.
+#[cfg(all(feature = "render-vello", feature = "surface"))]
 pub mod app;
 pub mod bootstrap;
 // Live control of a running runtime (§2.6 positional commands, §2.3 listeners,
@@ -14,16 +16,18 @@ pub mod bootstrap;
 // host that embeds a `UiRuntime` itself uses the same types.
 pub mod control;
 pub mod default_stylesheet;
-#[cfg(all(feature = "shell-layer", feature = "render-vello"))]
-pub mod layer;
 pub mod prelude;
 pub mod screen;
+pub mod system_theme;
 
-#[cfg(all(feature = "window-winit", feature = "render-vello"))]
+#[cfg(all(feature = "render-vello", feature = "shell-layer"))]
+pub use app::LayerControl;
+#[cfg(all(feature = "render-vello", feature = "surface"))]
 pub use app::{App, AppError, FrameInfo};
 pub use control::AppControl;
 pub use default_stylesheet::{ua_css, ua_stylesheet};
 pub use screen::{OkuiScreen, ScreenData, ScreenError};
+pub use system_theme::ThemeVars;
 
 // --- foundation ---
 pub use obscur_capability as capability;

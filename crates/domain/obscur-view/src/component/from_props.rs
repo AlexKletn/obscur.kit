@@ -24,10 +24,11 @@ pub fn prop_value(props: &[ViewProperty], name: InternedSymbol) -> Option<&ViewV
 pub fn decode_required<T: FromViewValue>(
     props: &[ViewProperty],
     name: InternedSymbol,
+    label: &'static str,
 ) -> Result<T, PropsError> {
     match prop_value(props, name) {
-        None | Some(ViewValue::Null) => Err(PropsError::Missing { name }),
-        Some(value) => decode_value(value, name),
+        None | Some(ViewValue::Null) => Err(PropsError::missing(name, label)),
+        Some(value) => decode_value(value, name, label),
     }
 }
 
@@ -35,10 +36,11 @@ pub fn decode_required<T: FromViewValue>(
 pub fn decode_optional<T: FromViewValue>(
     props: &[ViewProperty],
     name: InternedSymbol,
+    label: &'static str,
 ) -> Result<Option<T>, PropsError> {
     match prop_value(props, name) {
         None | Some(ViewValue::Null) => Ok(None),
-        Some(value) => decode_value(value, name).map(Some),
+        Some(value) => decode_value(value, name, label).map(Some),
     }
 }
 
@@ -46,11 +48,9 @@ pub fn decode_optional<T: FromViewValue>(
 pub fn decode_value<T: FromViewValue>(
     value: &ViewValue,
     name: InternedSymbol,
+    label: &'static str,
 ) -> Result<T, PropsError> {
-    T::from_view_value(value).ok_or(PropsError::Type {
-        name,
-        expected: T::TYPE_NAME,
-    })
+    T::from_view_value(value).ok_or(PropsError::wrong_type(name, label, T::TYPE_NAME))
 }
 
 #[cfg(test)]
@@ -81,10 +81,10 @@ mod tests {
 
     #[test]
     fn a_required_prop_decodes_or_reports_missing() {
-        assert_eq!(decode_required::<bool>(&props(), sym(2)), Ok(true));
+        assert_eq!(decode_required::<bool>(&props(), sym(2), ""), Ok(true));
         assert_eq!(
-            decode_required::<bool>(&props(), sym(99)),
-            Err(PropsError::Missing { name: sym(99) })
+            decode_required::<bool>(&props(), sym(99), ""),
+            Err(PropsError::missing(sym(99), ""))
         );
     }
 
@@ -92,34 +92,28 @@ mod tests {
     fn null_counts_as_absent_for_required_and_optional_alike() {
         // `Null` IS absence of a value, so it must not decode as "present".
         assert_eq!(
-            decode_required::<bool>(&props(), sym(3)),
-            Err(PropsError::Missing { name: sym(3) })
+            decode_required::<bool>(&props(), sym(3), ""),
+            Err(PropsError::missing(sym(3), ""))
         );
-        assert_eq!(decode_optional::<bool>(&props(), sym(3)), Ok(None));
+        assert_eq!(decode_optional::<bool>(&props(), sym(3), ""), Ok(None));
     }
 
     #[test]
     fn an_optional_prop_is_none_when_absent_but_still_errors_on_a_bad_type() {
-        assert_eq!(decode_optional::<String>(&props(), sym(99)), Ok(None));
+        assert_eq!(decode_optional::<String>(&props(), sym(99), ""), Ok(None));
         // The important half: a wrongly-typed value must NOT degrade to `None`,
         // or an authored mistake would look like "not supplied".
         assert_eq!(
-            decode_optional::<bool>(&props(), sym(1)),
-            Err(PropsError::Type {
-                name: sym(1),
-                expected: "bool"
-            })
+            decode_optional::<bool>(&props(), sym(1), ""),
+            Err(PropsError::wrong_type(sym(1), "", "bool"))
         );
     }
 
     #[test]
     fn a_wrong_type_names_the_wanted_type() {
         assert_eq!(
-            decode_required::<bool>(&props(), sym(1)),
-            Err(PropsError::Type {
-                name: sym(1),
-                expected: "bool"
-            })
+            decode_required::<bool>(&props(), sym(1), ""),
+            Err(PropsError::wrong_type(sym(1), "", "bool"))
         );
     }
 
@@ -133,8 +127,8 @@ mod tests {
     impl FromProps for Probe {
         fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
             Ok(Self {
-                label: decode_required(props, sym(1))?,
-                enabled: decode_optional(props, sym(2))?,
+                label: decode_required(props, sym(1), "label")?,
+                enabled: decode_optional(props, sym(2), "enabled")?,
             })
         }
     }
@@ -151,7 +145,7 @@ mod tests {
         // Missing the required field fails the whole decode.
         assert_eq!(
             Probe::from_props(&[]),
-            Err(PropsError::Missing { name: sym(1) })
+            Err(PropsError::missing(sym(1), "label"))
         );
     }
 }

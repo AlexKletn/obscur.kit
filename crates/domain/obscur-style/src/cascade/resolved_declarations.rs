@@ -1,4 +1,5 @@
 #![doc = include_str!("resolved_declarations.doc/_module.md")]
+use obscur_identity::FastMap;
 
 use crate::cascade::CascadePriority;
 use crate::property::{PropertyId, PropertyValue};
@@ -8,9 +9,11 @@ use std::collections::hash_map::Iter;
 #[doc = include_str!("resolved_declarations.doc/ResolvedDeclarations.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResolvedDeclarations {
-    values: HashMap<PropertyId, PropertyValue>,
+    values: FastMap<PropertyId, PropertyValue>,
+    #[doc = include_str!("resolved_declarations.doc/logical.md")]
+    logical: bool,
     #[doc = include_str!("resolved_declarations.doc/priorities.md")]
-    priorities: HashMap<PropertyId, CascadePriority>,
+    priorities: FastMap<PropertyId, CascadePriority>,
 }
 
 impl ResolvedDeclarations {
@@ -18,21 +21,23 @@ impl ResolvedDeclarations {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            values: HashMap::new(),
-            priorities: HashMap::new(),
+            values: HashMap::default(),
+            logical: false,
+            priorities: HashMap::default(),
         }
     }
 
     #[doc = include_str!("resolved_declarations.doc/from_map.md")]
     #[must_use]
-    pub fn from_map(values: HashMap<PropertyId, PropertyValue>) -> Self {
+    pub fn from_map(values: FastMap<PropertyId, PropertyValue>) -> Self {
         // No priorities: a map handed in directly did not come from a cascade, so
         // there is no ordering to record. `priority_of` answers `None`, and the
         // logical/physical comparison falls back to preferring the physical — the
         // only honest answer when nothing states which was declared later.
         Self {
+            logical: values.keys().any(|property| property.is_logical()),
             values,
-            priorities: HashMap::new(),
+            priorities: HashMap::default(),
         }
     }
 
@@ -43,6 +48,7 @@ impl ResolvedDeclarations {
         value: PropertyValue,
         priority: CascadePriority,
     ) -> Option<PropertyValue> {
+        self.logical |= property.is_logical();
         self.priorities.insert(property, priority);
         self.values.insert(property, value)
     }
@@ -55,7 +61,14 @@ impl ResolvedDeclarations {
 
     #[doc = include_str!("resolved_declarations.doc/insert.md")]
     pub fn insert(&mut self, property: PropertyId, value: PropertyValue) -> Option<PropertyValue> {
+        self.logical |= property.is_logical();
         self.values.insert(property, value)
+    }
+
+    #[doc = include_str!("resolved_declarations.doc/has_logical.md")]
+    #[must_use]
+    pub const fn has_logical(&self) -> bool {
+        self.logical
     }
 
     #[doc = include_str!("resolved_declarations.doc/get.md")]

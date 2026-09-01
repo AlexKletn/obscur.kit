@@ -118,15 +118,16 @@ impl BrushConverter {
         )));
         for pair in stops.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
+            // Converted ONCE per authored pair rather than once per sample. Each
+            // conversion is three `powf(2.4)` and three `cbrt`, and both ends are
+            // invariant across the fifteen interior samples below.
+            let (from, to) = (premul_oklab(a.color()), premul_oklab(b.color()));
             // Interior Oklab-interpolated stops for this pair.
             for k in 1..DENSIFY_SEGMENTS {
                 let t = k as f64 / DENSIFY_SEGMENTS as f64;
                 #[allow(clippy::cast_possible_truncation)]
                 let offset = a.offset() + (b.offset() - a.offset()) * t as f32;
-                out.push(peniko::ColorStop::from((
-                    offset,
-                    oklab_lerp(a.color(), b.color(), t),
-                )));
+                out.push(peniko::ColorStop::from((offset, oklab_lerp(from, to, t))));
             }
             // Exact authored end stop of this pair.
             out.push(peniko::ColorStop::from((
@@ -138,19 +139,19 @@ impl BrushConverter {
     }
 }
 
+#[doc = include_str!("brush_converter.doc/premul_oklab.md")]
+fn premul_oklab(color: Color) -> [f64; 4] {
+    let alpha = f64::from(color.a).clamp(0.0, 1.0);
+    let lin = |channel: f32| srgb_decode(f64::from(channel).clamp(0.0, 1.0));
+    let [l, a, b] = linear_srgb_to_oklab(lin(color.r), lin(color.g), lin(color.b));
+    [l * alpha, a * alpha, b * alpha, alpha]
+}
+
 #[doc = include_str!("brush_converter.doc/oklab_lerp.md")]
 // The Oklab component names (L/a/b) are the canonical single-letter names from
 // CSS Color 4 §9; renaming them would obscure the 1:1 mapping to the spec.
 #[allow(clippy::many_single_char_names)]
-fn oklab_lerp(a: Color, b: Color, t: f64) -> peniko::Color {
-    let to_premul_oklab = |c: Color| -> [f64; 4] {
-        let alpha = f64::from(c.a).clamp(0.0, 1.0);
-        let lin = |ch: f32| srgb_decode(f64::from(ch).clamp(0.0, 1.0));
-        let [l, aa, bb] = linear_srgb_to_oklab(lin(c.r), lin(c.g), lin(c.b));
-        [l * alpha, aa * alpha, bb * alpha, alpha]
-    };
-    let pa = to_premul_oklab(a);
-    let pb = to_premul_oklab(b);
+fn oklab_lerp(pa: [f64; 4], pb: [f64; 4], t: f64) -> peniko::Color {
     let lerp = |x: f64, y: f64| x + (y - x) * t;
     let l = lerp(pa[0], pb[0]);
     let aa = lerp(pa[1], pb[1]);
@@ -345,8 +346,8 @@ mod tests {
         // vivid warm orange (≈ (166, 105, 0)); the correctness win is the higher
         // green channel and higher total luminance, not a hue flip.
         let mid = oklab_lerp(
-            Color::rgba(1.0, 0.0, 0.0, 1.0),
-            Color::rgba(0.0, 0.501_960_8, 0.0, 1.0),
+            premul_oklab(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            premul_oklab(Color::rgba(0.0, 0.501_960_8, 0.0, 1.0)),
             0.5,
         );
         let rgba8 = mid.to_rgba8();

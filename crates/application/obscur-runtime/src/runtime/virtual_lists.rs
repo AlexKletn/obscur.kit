@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use obscur_identity::{InternedSymbol, NodeId};
+use obscur_identity::{FastMap, InternedSymbol, NodeId};
 use obscur_layout::model::Dimension;
 use obscur_layout::virtualization::{OverscanPolicy, SizeEstimator, VirtualLayout};
 use obscur_tree::tree::RetainedTree;
@@ -25,32 +25,32 @@ const ASSUMED_VIRTUAL_ITEM_COUNT: usize = 1_000_000;
 #[doc = include_str!("virtual_lists.doc/VirtualLists.md")]
 pub(crate) struct VirtualLists {
     #[doc = include_str!("virtual_lists.doc/builders.md")]
-    builders: HashMap<InternedSymbol, Box<dyn FnMut(usize) -> ViewNode>>,
+    builders: FastMap<InternedSymbol, Box<dyn FnMut(usize) -> ViewNode>>,
     #[doc = include_str!("virtual_lists.doc/containers.md")]
-    containers: HashMap<InternedSymbol, NodeId>,
+    containers: FastMap<InternedSymbol, NodeId>,
     #[doc = include_str!("virtual_lists.doc/windows.md")]
-    windows: HashMap<InternedSymbol, core::ops::Range<usize>>,
+    windows: FastMap<InternedSymbol, core::ops::Range<usize>>,
     #[doc = include_str!("virtual_lists.doc/row_extents.md")]
-    row_extents: HashMap<InternedSymbol, f32>,
+    row_extents: FastMap<InternedSymbol, f32>,
     #[doc = include_str!("virtual_lists.doc/scroll_reset_seen.md")]
-    scroll_reset_seen: HashMap<InternedSymbol, u64>,
+    scroll_reset_seen: FastMap<InternedSymbol, u64>,
     #[doc = include_str!("virtual_lists.doc/row_click_handlers.md")]
-    row_click_handlers: HashMap<InternedSymbol, Box<dyn FnMut(usize, u32)>>,
+    row_click_handlers: FastMap<InternedSymbol, Box<dyn FnMut(usize, u32)>>,
     #[doc = include_str!("virtual_lists.doc/row_hold_handlers.md")]
-    row_hold_handlers: HashMap<InternedSymbol, Box<dyn FnMut(usize)>>,
+    row_hold_handlers: FastMap<InternedSymbol, Box<dyn FnMut(usize)>>,
 }
 
 impl VirtualLists {
     #[doc = include_str!("virtual_lists.doc/new.md")]
     pub(crate) fn new() -> Self {
         Self {
-            builders: HashMap::new(),
-            containers: HashMap::new(),
-            windows: HashMap::new(),
-            row_extents: HashMap::new(),
-            scroll_reset_seen: HashMap::new(),
-            row_click_handlers: HashMap::new(),
-            row_hold_handlers: HashMap::new(),
+            builders: HashMap::default(),
+            containers: HashMap::default(),
+            windows: HashMap::default(),
+            row_extents: HashMap::default(),
+            scroll_reset_seen: HashMap::default(),
+            row_click_handlers: HashMap::default(),
+            row_hold_handlers: HashMap::default(),
         }
     }
 
@@ -189,15 +189,15 @@ impl VirtualLists {
         // extent stays the full `count * extent`. That is the half an app cannot
         // state for itself.
         let mut builders = std::mem::take(&mut self.builders);
-        let scrolls: HashMap<InternedSymbol, f32> = self
+        let scrolls: FastMap<InternedSymbol, f32> = self
             .containers
             .iter()
             .map(|(&id, &node)| (id, scroll.stored(node)))
             .collect();
-        let mut chosen: HashMap<InternedSymbol, core::ops::Range<usize>> = HashMap::new();
+        let mut chosen: FastMap<InternedSymbol, core::ops::Range<usize>> = HashMap::default();
         // The row extent each list realizes against, captured here so a later click
         // on a row can be resolved to a model index.
-        let mut extents: HashMap<InternedSymbol, f32> = HashMap::new();
+        let mut extents: FastMap<InternedSymbol, f32> = HashMap::default();
         let with_lists = if builders.is_empty() {
             view.clone()
         } else {
@@ -385,7 +385,7 @@ mod tests {
 
     /// The container's on-screen box: 100px of scrollport at y = 100.
     fn boxes_at(container: NodeId) -> LayoutBoxes {
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(
             container,
             LayoutBox::new(Rect::new(
@@ -567,7 +567,7 @@ mod tests {
         // Without this the container measures only the window, and the scrollbar
         // claims a million-row list is a screenful long.
         let (tree, container, spacer) = realized_tree();
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(container, LayoutStyle::default());
         styles.insert(spacer, LayoutStyle::default());
         VirtualLists::size_spacers(&tree, &mut styles);

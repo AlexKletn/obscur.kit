@@ -128,7 +128,7 @@ impl<'a> ReconcilePhase<'a> {
         // 1c. Render every mounted component and reconcile its output into
         //     its own children, so a component-backed node's subtree exists
         //     before style/layout read the tree.
-        let rendered = ComponentRenderPass::new(
+        let component_roots = ComponentRenderPass::new(
             self.tree,
             self.components,
             self.reconciler,
@@ -137,11 +137,22 @@ impl<'a> ReconcilePhase<'a> {
             self.diagnostics,
         )
         .run();
-        // A component sub-reconcile edits the tree through its own plan, which
-        // this frame never sees, so its roots are unknowable here: widen.
-        if rendered {
-            roots = None;
-        }
+        // A component sub-reconcile edits the tree through its own plan. That
+        // plan used to be invisible from here, so the only correct answer was to
+        // widen to the whole tree — and in an application built out of
+        // components, a pressed key re-renders one of them and every interactive
+        // frame paid a full restyle. The pass hands the roots back now; `None`
+        // from either side is still the unbounded case.
+        let rendered = component_roots
+            .as_ref()
+            .is_none_or(|from_components| !from_components.is_empty());
+        roots = match (roots, component_roots) {
+            (Some(mut from_reconcile), Some(from_components)) => {
+                from_reconcile.extend(from_components);
+                Some(from_reconcile)
+            }
+            _ => None,
+        };
         let changed = changed || rendered;
         // Telemetry: mark the reconcile phase and count the resulting nodes,
         // budgeting the retained-tree size (spec §7.9).

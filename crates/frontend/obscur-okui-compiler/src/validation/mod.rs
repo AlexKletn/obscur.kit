@@ -25,8 +25,8 @@ mod contract_validator;
 pub use contract_validator::{ComponentContract, ContractValidator};
 mod expression_validator;
 pub use expression_validator::{
-    ExpressionValidator, FORBIDDEN_FREE_CALL, FORBIDDEN_MESSAGE, SERVICE_ACCESS_MESSAGE,
-    ValidationDiagnostic, check_expression, check_expression_in,
+    ExpressionValidator, FORBIDDEN_FREE_CALL, FORBIDDEN_MESSAGE, ValidationDiagnostic,
+    check_expression, check_expression_in,
 };
 pub mod outlet_rule;
 pub use outlet_rule::{

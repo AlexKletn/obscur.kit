@@ -185,11 +185,11 @@ mod tests {
     #[test]
     fn named_columns_resolve_to_line_placement() {
         let (tree, parent, child) = tree_with_child();
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(parent, container_with_named_columns());
         computed.insert(child, item_with_named_columns("b", "c"));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(parent, LayoutStyle::default());
         styles.insert(child, LayoutStyle::default());
 
@@ -206,11 +206,11 @@ mod tests {
     #[test]
     fn unknown_line_name_leaves_auto_placement() {
         let (tree, parent, child) = tree_with_child();
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(parent, container_with_named_columns());
         computed.insert(child, item_with_named_columns("nope", "c"));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(child, LayoutStyle::default());
 
         resolve_named_grid_lines(&mut styles, &tree, &computed);
@@ -224,11 +224,11 @@ mod tests {
     #[test]
     fn item_without_named_edge_is_untouched() {
         let (tree, parent, child) = tree_with_child();
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(parent, container_with_named_columns());
         computed.insert(child, ComputedStyle::new());
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(child, LayoutStyle::default());
 
         resolve_named_grid_lines(&mut styles, &tree, &computed);

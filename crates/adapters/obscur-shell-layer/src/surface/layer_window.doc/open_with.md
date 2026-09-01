@@ -1,6 +1,5 @@
-[`open`](Self::open), plus a [`LayerWaker`] the loop will answer to.
+[`open`](Self::open), plus a waker that can turn the loop from another thread.
 
 # Errors
 
-The same as [`open`](Self::open), plus [`LayerShellError::Dispatch`] if
-the waker's source cannot be inserted into the loop.
+The same as [`open`](Self::open).

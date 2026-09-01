@@ -1,9 +1,7 @@
 #![doc = include_str!("layout_coordinator.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_layout::model::{Dimension, LayoutBox, LayoutStyle};
 use obscur_text::layout::Hyphenator;
@@ -21,10 +19,10 @@ use super::{
 };
 
 #[doc = include_str!("layout_coordinator.doc/LayoutBoxes.md")]
-pub type LayoutBoxes = HashMap<NodeId, LayoutBox>;
+pub type LayoutBoxes = FastMap<NodeId, LayoutBox>;
 
 #[doc = include_str!("layout_coordinator.doc/LayoutStyles.md")]
-pub type LayoutStyles = HashMap<NodeId, LayoutStyle>;
+pub type LayoutStyles = FastMap<NodeId, LayoutStyle>;
 
 #[doc = include_str!("layout_coordinator.doc/MAX_DEPTH.md")]
 pub(super) const MAX_DEPTH: u32 = 256;
@@ -256,7 +254,7 @@ impl LayoutCoordinator {
         cache: &MeasureCache,
         arrange_cache: &ArrangeCache,
     ) -> LayoutBoxes {
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let Some(root) = tree.root() else {
             return boxes;
         };
@@ -410,12 +408,12 @@ mod tests {
     fn empty_tree_lays_out_to_empty_boxes() {
         let coordinator = LayoutCoordinator::new();
         let tree = RetainedTree::new();
-        let styles = LayoutStyles::new();
+        let styles = LayoutStyles::default();
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(800.0, 600.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -426,7 +424,7 @@ mod tests {
     #[test]
     fn layout_styles_from_maps_every_node() {
         let coordinator = LayoutCoordinator::new();
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut a = ComputedStyle::new();
         a.set(PropertyId::Width, ComputedValue::length(Length::px(10.0)));
         computed.insert(NodeId::from_raw(1), a);
@@ -453,7 +451,7 @@ mod tests {
         let child_a = add_child(&mut tree, root, 10);
         let child_b = add_child(&mut tree, root, 11);
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(200.0, 100.0));
         styles.insert(child_a, block(200.0, 50.0));
         styles.insert(child_b, block(200.0, 50.0));
@@ -462,8 +460,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(200.0, 100.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -496,7 +494,7 @@ mod tests {
             ..flex_item
         };
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(
             root,
             LayoutStyle {
@@ -513,8 +511,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(200.0, 100.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -545,7 +543,7 @@ mod tests {
         container_style.padding = obscur_geometry::Insets::uniform(5.0);
         let leaf_style = block(50.0, 50.0);
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, root_style);
         styles.insert(container, container_style);
         styles.insert(leaf, leaf_style);
@@ -554,8 +552,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(200.0, 200.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -589,7 +587,7 @@ mod tests {
                 Dimension::Px(5.0),
             ));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(200.0, 200.0));
         styles.insert(a, a_relative);
         styles.insert(b, block(200.0, 50.0));
@@ -599,8 +597,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(200.0, 200.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -637,7 +635,7 @@ mod tests {
                 Dimension::Auto,
             ));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(200.0, 1000.0));
         styles.insert(spacer, block(200.0, 50.0));
         styles.insert(a, a_sticky);
@@ -652,8 +650,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             viewport,
             (0.0, 0.0),
             &test_paragraph(),
@@ -676,8 +674,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             viewport,
             (0.0, 100.0),
             &test_paragraph(),
@@ -702,8 +700,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             viewport,
             (0.0, 5000.0),
             &test_paragraph(),
@@ -739,7 +737,7 @@ mod tests {
                 Dimension::Auto,
             ));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(200.0, 200.0));
         styles.insert(a, block(200.0, 50.0));
         styles.insert(b, b_relative);
@@ -748,8 +746,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(200.0, 200.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -791,7 +789,7 @@ mod tests {
                 Dimension::Px(20.0),
             ));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(300.0, 300.0));
         // Container is auto-height so its content height is observable.
         styles.insert(container, auto_height_block(300.0));
@@ -802,8 +800,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(300.0, 300.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -848,7 +846,7 @@ mod tests {
                 Dimension::Auto,
             ));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(400.0, 400.0));
         styles.insert(rel, rel_style);
         styles.insert(abs, abs_style);
@@ -857,8 +855,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(400.0, 400.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -890,7 +888,7 @@ mod tests {
                 Dimension::Px(10.0),
             ));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(300.0, 300.0));
         styles.insert(abs, abs_style);
 
@@ -898,8 +896,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(300.0, 300.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -939,7 +937,7 @@ mod tests {
                 Dimension::Px(0.0),
             ));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(root, block(400.0, 400.0));
         styles.insert(rel, rel_style);
         styles.insert(fixed, fixed_style);
@@ -948,8 +946,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(400.0, 400.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -973,7 +971,7 @@ mod tests {
         let child_a = add_child(&mut tree, root, 40);
         let child_b = add_child(&mut tree, root, 41);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
 
         let mut root_style = ComputedStyle::new();
         root_style.set(
@@ -1007,7 +1005,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(200.0, 100.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1033,7 +1031,7 @@ mod tests {
         let child_a = add_child(&mut tree, root, 50);
         let child_b = add_child(&mut tree, root, 51);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut root_style = ComputedStyle::new();
         root_style.set(
             PropertyId::Display,
@@ -1094,7 +1092,7 @@ mod tests {
         let item = add_child(&mut tree, root, 70);
         let grandchild = add_child(&mut tree, item, 71);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut shell = ComputedStyle::new();
         shell.set(
             PropertyId::Display,
@@ -1225,7 +1223,7 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, content);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut root_style = ComputedStyle::new();
         root_style.set(PropertyId::Width, ComputedValue::length(Length::px(width)));
         root_style.set(
@@ -1240,7 +1238,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(width, height),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1261,7 +1259,7 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, content);
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut root_style = ComputedStyle::new();
         root_style.set(PropertyId::Width, ComputedValue::length(Length::px(width)));
         root_style.set(
@@ -1276,7 +1274,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(width, height),
             (0.0, 0.0),
             paragraph,
@@ -1330,7 +1328,7 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "aaaa bbbb cccc");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut root_style = ComputedStyle::new();
         root_style.set(PropertyId::Width, ComputedValue::length(Length::px(50.0)));
         root_style.set(PropertyId::Height, ComputedValue::length(Length::px(300.0)));
@@ -1345,7 +1343,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(50.0, 300.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1399,7 +1397,7 @@ mod tests {
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "abcd");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut root_style = ComputedStyle::new();
         root_style.set(PropertyId::Width, ComputedValue::length(Length::px(1000.0)));
         root_style.set(PropertyId::Height, ComputedValue::length(Length::px(200.0)));
@@ -1418,7 +1416,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(1000.0, 200.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1439,7 +1437,7 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(
             root,
             LayoutStyle::default().with_display(LayoutDisplay::None),
@@ -1449,8 +1447,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(100.0, 100.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1498,7 +1496,7 @@ mod tests {
             .with_display(LayoutDisplay::Block)
             .with_height(Dimension::Px(14.0));
 
-        let mut styles = LayoutStyles::new();
+        let mut styles = LayoutStyles::default();
         styles.insert(
             root,
             LayoutStyle::default().with_display(LayoutDisplay::Block),
@@ -1513,8 +1511,8 @@ mod tests {
         let boxes = coordinator.layout(
             &tree,
             &styles,
-            &ComputedStyles::new(),
-            &GridTemplates::new(),
+            &ComputedStyles::default(),
+            &GridTemplates::default(),
             Size::new(1200.0, 4160.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1561,7 +1559,7 @@ mod tests {
                 }
             }
             let hint = add_text_child(&mut tree, overlay, "x"); // a 1-char muted hint
-            let mut computed = ComputedStyles::new();
+            let mut computed = ComputedStyles::default();
             computed.insert(root, ComputedStyle::new());
             computed.insert(field, ComputedStyle::new());
             computed.insert(overlay, ComputedStyle::new());
@@ -1578,7 +1576,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(400.0, 200.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1598,7 +1596,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(400.0, 200.0),
             (0.0, 0.0),
             &test_paragraph(),
@@ -1645,7 +1643,7 @@ mod tests {
             );
             style
         };
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, sized(400.0, 300.0));
         computed.insert(
             wrapper,
@@ -1697,7 +1695,7 @@ mod tests {
             tree,
             &styles,
             computed,
-            &GridTemplates::new(),
+            &GridTemplates::default(),
             Size::new(400.0, 300.0),
             scroll,
             paragraph,
@@ -1904,7 +1902,7 @@ mod tests {
         // hyphenator; the hyphenator proposes nothing, so the boxes are unchanged.
         let text = add_text_child(&mut tree, root, "supercalifragilisticexpialidocious");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         let mut root_style = ComputedStyle::new();
         root_style.set(PropertyId::Width, ComputedValue::length(Length::px(100.0)));
         root_style.set(PropertyId::Height, ComputedValue::length(Length::px(200.0)));
@@ -1920,7 +1918,7 @@ mod tests {
                 &tree,
                 &styles,
                 &computed,
-                &GridTemplates::new(),
+                &GridTemplates::default(),
                 Size::new(100.0, 200.0),
                 (0.0, 0.0),
                 &paragraph,
@@ -2217,7 +2215,7 @@ mod tests {
             );
             style
         };
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, sized(400.0, 300.0));
         let mut flex_style = sized(400.0, 100.0);
         flex_style.set(

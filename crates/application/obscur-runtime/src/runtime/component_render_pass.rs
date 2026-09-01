@@ -6,14 +6,14 @@ use obscur_diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSink, DiagnosticSubsystem,
     RecoveryAction,
 };
-use obscur_identity::NodeId;
+use obscur_identity::{FastSet, NodeId};
 use obscur_tree::node::{NodeKind, RetainedNode};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::view::{SlotMismatch, View, project_slots};
 
-use super::FrameTelemetry;
+use super::{FrameTelemetry, RestylePhase};
 use crate::component::{ComponentStore, GuardedRender};
 use crate::recovery::RecoveryResult;
 use crate::transaction::ReconcileEnactor;
@@ -58,13 +58,19 @@ impl<'a> ComponentRenderPass<'a> {
     }
 
     #[doc = include_str!("component_render_pass.doc/run.md")]
-    pub(crate) fn run(&mut self) -> bool {
+    pub(crate) fn run(&mut self) -> Option<Vec<NodeId>> {
         // The common case by far: no host registrations, nothing mounted.
         if self.components.is_empty() {
-            return false;
+            return Some(Vec::new());
         }
+        // The restyle roots every sub-reconcile below implies. This used to be
+        // thrown away and answered as "unknowable", which made the style phase
+        // restyle the whole tree on any frame where a single component
+        // re-rendered — and in an application built out of components, that is
+        // every interactive frame. The plans are right here; they are knowable.
+        let mut roots: Option<Vec<NodeId>> = Some(Vec::new());
         let mut pending: Vec<NodeId> = self.components.stale_nodes();
-        let mut done: HashSet<NodeId> = HashSet::new();
+        let mut done: FastSet<NodeId> = HashSet::default();
         let mut changed = false;
         let mut errors: u64 = 0;
         let mut rendered: u64 = 0;
@@ -150,6 +156,25 @@ impl<'a> ComponentRenderPass<'a> {
                     .commit_subtree(self.reconciler, self.tree, host, view.root())
                     .expect("a component rerender is a single, structurally-valid Rerender");
                 changed |= !plan.is_empty();
+                // A component whose output matched what was already retained
+                // edited nothing, and so dirties nothing — that is the whole
+                // saving, and it is the common case in a tree of components
+                // where one of them was pressed.
+                if !plan.is_empty()
+                    && let Some(collected) = roots.as_mut()
+                {
+                    // The host as well as the plan's own roots: the component's
+                    // output decides the host's children and its `:empty`, and a
+                    // root is a subtree, so this bounds the restyle to the key
+                    // that changed rather than to the keyboard.
+                    collected.push(host);
+                    match RestylePhase::roots_of(self.tree, &plan) {
+                        Some(from_plan) => collected.extend(from_plan),
+                        // A sub-plan that cannot be bounded widens the whole
+                        // frame, exactly as an unboundable root reconcile does.
+                        None => roots = None,
+                    }
+                }
                 self.components.sync(self.tree, &plan);
                 // Only newly inserted nodes can have minted new instances.
                 let fresh: Vec<NodeId> = plan
@@ -169,7 +194,15 @@ impl<'a> ComponentRenderPass<'a> {
             self.telemetry
                 .count(DiagnosticSubsystem::Tree, "component.props_errors", errors);
         }
-        changed
+        // `changed` and the roots agree by construction: a plan that edited
+        // nothing contributes no root, and `roots.is_none()` is the unbounded
+        // case, which is a change by definition.
+        debug_assert_eq!(
+            changed,
+            roots.as_ref().is_none_or(|collected| !collected.is_empty()),
+            "a component pass that changed the tree must name at least one root"
+        );
+        roots
     }
 
     #[doc = include_str!("component_render_pass.doc/report_slot_mismatches.md")]
@@ -288,6 +321,11 @@ mod tests {
             &mut telemetry,
             &sink,
         );
-        assert!(!pass.run());
+        assert_eq!(
+            pass.run(),
+            Some(Vec::new()),
+            "nothing mounted names no restyle root — not `None`, which would \
+             widen every frame of a component-free application to a full restyle"
+        );
     }
 }

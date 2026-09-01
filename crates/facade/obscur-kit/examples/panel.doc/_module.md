@@ -1,5 +1,4 @@
-**A desktop panel** — a `wlr-layer-shell` bar across the top of the screen
-(spec §6.5).
+**A desktop panel** — a `wlr-layer-shell` bar across the top of the screen.
 
 This is the same toolkit as every other example: the same `View`, the same
 CSS, the same runtime, the same touch handling. The only thing that differs

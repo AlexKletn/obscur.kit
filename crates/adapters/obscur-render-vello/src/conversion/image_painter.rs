@@ -4,7 +4,9 @@ use obscur_scene::color::AlphaMode;
 use obscur_scene::paint::SceneImage;
 use vello::Scene;
 use vello::kurbo::{Affine, Rect as KurboRect};
-use vello::peniko::{self, Blob, ImageAlphaType, ImageData, ImageFormat};
+use vello::peniko::{self, ImageAlphaType};
+
+use super::image_blobs::ImageBlobs;
 
 #[doc = include_str!("image_painter.doc/MAX_TILES_PER_AXIS.md")]
 const MAX_TILES_PER_AXIS: i32 = 8192;
@@ -22,6 +24,7 @@ pub(super) fn draw_image(
     repeat_x: bool,
     repeat_y: bool,
     transform: Affine,
+    blobs: &ImageBlobs,
 ) {
     let (iw, ih) = (image.width(), image.height());
     if iw == 0
@@ -41,16 +44,10 @@ pub(super) fn draw_image(
         AlphaMode::Straight => ImageAlphaType::Alpha,
         AlphaMode::Premultiplied => ImageAlphaType::AlphaPremultiplied,
     };
-    let data = ImageData {
-        // Zero-copy: `SharedPixels` is `Sized + AsRef<[u8]>`, so it coerces to
-        // the `Arc<dyn AsRef<[u8]>>` a `Blob` holds — only a refcount bump,
-        // never a pixel copy, whichever shape the bytes arrived in.
-        data: Blob::new(std::sync::Arc::new(image.shared_pixels())),
-        format: ImageFormat::Rgba8,
-        alpha_type,
-        width: iw,
-        height: ih,
-    };
+    // From the cache, so vello's atlas sees the id it already has. A fresh
+    // `Blob` every frame is a fresh id, and a fresh id is a guaranteed atlas miss
+    // and a full re-upload of the pixels.
+    let data = blobs.data_for(image, alpha_type);
 
     // Confine drawing to `region` unless a single tile already sits inside it.
     let contained = !repeat_x

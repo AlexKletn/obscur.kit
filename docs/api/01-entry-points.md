@@ -1,22 +1,25 @@
 # 01 — Entry points
 
-Four ways in, in increasing order of how much you own yourself.
+Three ways in, in increasing order of how much you own yourself.
 
 | | You supply | You own | Feature |
 |---|---|---|---|
-| [`App`](#app) | a view builder and handlers | nothing | `window-winit` + `render-vello` |
-| [`LayerApp`](#layerapp) | the same, plus where the surface sits | nothing | `shell-layer` + `render-vello` |
-| [`UiRuntime`](#embedding-a-uiruntime) | the window and the loop | everything around a frame | any |
+| [`App`](#app) | a view builder and handlers | nothing | `render-vello` + `window-winit` and/or `shell-layer` |
+| [`UiRuntime`](#embedding-a-uiruntime) | the surface and the loop | everything around a frame | any |
 | [`HeadlessHost`](#headless) | nothing | a deterministic driver | any |
+
+`App` covers both an ordinary window and a **desktop surface** — a panel, dock,
+bar or overlay. One call chooses:
+[`App::layer(settings)`](#opening-a-desktop-surface-instead-of-a-window).
 
 ---
 
 ## `App`
 
-`obscur_kit::App` — the one-call windowed entry (`src/app/app.rs`). It owns the
-window, the GPU surface, the event loop, the text stack and the frame pipeline.
-It exists only under `--features full` (or `window-winit` + `render-vello`) and
-is absent from the headless default build.
+`obscur_kit::App` — the one-call entry (`src/app/app.rs`). It owns the surface,
+the GPU swapchain, the event loop, the text stack and the frame pipeline. It
+needs `render-vello` plus at least one surface backend — `window-winit`,
+`shell-layer`, or both — and is absent from the headless default build.
 
 ```rust
 use obscur_kit::App;
@@ -135,66 +138,97 @@ Two environment variables it reads:
 
 ---
 
-## `LayerApp`
+## Opening a desktop surface instead of a window
 
-`obscur_kit::layer::LayerApp` — the same one-call entry, for a surface that is
-part of the **desktop** rather than an application window: a panel, a dock, a
-wallpaper, a notification, an on-screen keyboard. It has no title, no
-decorations and no place in the window stack; it is anchored to screen edges,
-sits in one of four depth bands, and can reserve space that maximised windows
-then keep clear of.
+One call. `App::layer(settings)` puts the same application on the **desktop**
+rather than in the window stack: a panel, a dock, a bar, a wallpaper, a
+notification, an on-screen keyboard. No title, no decorations, no place among
+the windows — anchored to screen edges, in one of four depth bands, optionally
+reserving space that maximised windows then keep clear of.
 
 ```rust
-use obscur_kit::layer::LayerApp;
+use obscur_kit::App;
+use obscur_kit::windowing::layer::LayerSettings;
 
-LayerApp::top_bar("panel", 36)
+App::new("status bar")
+    .app_id("com.example.bar")
+    .layer(LayerSettings::top_bar(36))
     .stylesheet(CSS)
     .view(|| bar(&state.borrow()))
     .run()?
 ```
 
-Everything above the surface is the toolkit you already know — same `View`, same
-CSS, same runtime, same touch and gesture handling.
+**That method is the whole of the difference.** Everything else is the `App` you
+already know — the same `View`, the same CSS, the same commands, virtual lists,
+row clicks, touch and gesture handling, the same runtime underneath. The
+application's `app_id` becomes the surface's identity to the desktop; there is
+no second name to set.
 
-| Method | |
+One method does not carry over: `view_with` is a windowed root, and using it
+with `layer` returns `AppError::FrameAwareLayerRoot`. A desktop surface is sized
+by the platform *before* its first frame, so there is nothing a frame-aware
+builder would learn that `view` does not already have.
+
+### The settings
+
+`obscur_kit::windowing::layer::LayerSettings` — platform-neutral by
+construction. No protocol vocabulary, no wire encoding, no sentinel values.
+
+| | |
 |---|---|
-| `top_bar(namespace, height)` / `bottom_bar(…)` | a bar reserving exactly its own height |
-| `overlay(namespace)` | full-output, above everything, reserving nothing |
-| `new(LayerSurfaceConfig)` | anything the named constructors do not cover |
-| `layer(LayerKind)` | `Background` · `Bottom` · `Top` · `Overlay` |
-| `anchor(LayerAnchor)` | anchoring both edges of an axis **stretches** and overrides the size on it |
-| `exclusive_zone(LayerExclusiveZone)` | `None` · `Reserve(px)` · `Ignore` |
-| `margin(Margins)` · `output(LayerOutput)` · `keyboard(LayerKeyboardInteractivity)` | |
-| `stylesheet` · `view` · `on_command` | as on `App` |
-| `handle(LayerHandle)` · `waker(LayerWaker)` | see below |
-| `run()` | `Result<(), LayerAppError>` |
+| `top_bar(h)` / `bottom_bar(h)` / `left_bar(w)` / `right_bar(w)` | a bar reserving exactly its own thickness |
+| `overlay()` | whole-screen, above everything, reserving nothing and ignoring what others reserved |
+| `new()` | a floating surface in the panel band, anchored to nothing |
+| `with_band(LayerBand)` | `Background` · `Bottom` · `Top` · `Overlay` |
+| `with_anchor(LayerAnchor)` | anchoring both edges of an axis **stretches**, and overrides the size on it |
+| `with_reservation(LayerReservation)` | `None` · `Reserve(px)` · `Ignore` |
+| `with_margin(LayerMargins)` · `with_focus(LayerFocusPolicy)` · `with_display(DisplayId)` | |
+| `with_pointer(LayerPointerPolicy)` | `Interactive` (the default) or `Transparent` — a surface that only *shows* something lets clicks through to whatever is behind it |
+| `with_size(w, h)` | an axis you leave unset is the platform's to choose — `None`, never a zero |
+
+A display is chosen by `DisplayId` — the same id
+[`WindowBackend::displays`](#embedding-a-uiruntime) hands out — rather than by a
+connector name, because a name that identifies a monitor on one platform
+identifies nothing on the next.
+
+### What the platform can actually do
+
+Desktop platforms diverge here more than they do over windows, so the port says
+so rather than accepting a setting and dropping it.
+`obscur_windowing::port::LayerBackend::supports` answers a `SupportLevel` for
+each `LayerFeature`: `Bands`, `Reservation`, `FreeAnchor`, `ExclusiveKeyboard`,
+`DisplaySelection`, `NegativeMargin`, `FractionalScale`, `InputTransparency`.
+
+The one that most often comes back short is `Reservation` — taking space from
+the desktop is an ordinary request on some platforms and has no public API at
+all on others.
 
 ### Reconfiguring a running surface
 
 The loop owns the surface and your handlers run inside it, so they cannot hold a
-reference to it. A `LayerHandle` is how they reach it: a handler leaves a
+reference to it. `App::layer_control()` is how they reach it: a handler leaves a
 request, the loop applies it at a defined point in the frame.
 
 ```rust
-let handle = LayerHandle::new();
-let mine = handle.clone();
-LayerApp::top_bar("panel", 36)
-    .on_command(FLOAT, move || mine.reconfigure(floating_config()))
-    .handle(handle)
+let app = App::new("bar").app_id("com.example.bar").layer(LayerSettings::top_bar(36));
+let control = app.layer_control();
+app.on_command(FLOAT, move || control.reconfigure(floating_settings()))
     .run()?
 ```
 
-It also reports the surface's real `size()`, `scale()` and
-`state()` (`Configuring` → `Ready` → `Closed`).
+It also reports the surface's real `size()`, `scale()` and `state()`
+(`Configuring` → `Ready` → `Closed`), and `close()` takes it down.
 
-**No placement change needs a new surface.** Band, anchor, exclusive zone,
-margin and size are all live requests, which is why there is no "recreate".
+**No placement change needs a new surface.** Band, anchor, reservation, margin
+and size are all live requests, which is why there is no "recreate". The one
+exception is the display: an output is chosen when the surface is created, so
+moving it comes back `conditional()` rather than `native()`.
 
 ### Waking the loop from outside
 
-The loop sleeps on the compositor's socket. Nothing else can make it turn — not
-a worker thread, not a timer, not a second Wayland connection belonging to some
-other protocol. A `LayerWaker` is the way in, and it is `Send`:
+The loop sleeps until the platform has something to say. Nothing else makes it
+turn — not a worker thread, not a timer. `App::waker(…)` takes the handle that
+does, and it is `Send`:
 
 ```rust
 let waker = LayerWaker::new()?;
@@ -204,26 +238,33 @@ std::thread::spawn(move || loop {
     update_shared_state();
     ticker.wake();          // the loop turns and rebuilds the view
 });
+
+App::new("bar").layer(LayerSettings::top_bar(36)).waker(waker).view(bar).run()?
 ```
 
 A wake means "reconsider the interface" and nothing finer — the waker does not
-know why it was rung.
-
-For sources that belong on the same loop — timers, other file descriptors —
-`LayerWindow::loop_handle()` hands out the calloop handle directly.
+know why it was rung. A worker that needs to say *what* changed puts that in the
+state the view reads, where the view will actually see it.
 
 ### Where it runs
 
-`wlr-layer-shell` is implemented by wlroots compositors (Sway, Hyprland, river,
-Wayfire) and KDE. **GNOME has declined it**, and there `run` returns
-`LayerAppError::Unsupported` — a capability answer to branch on, not a crash.
+Today one backend implements the port: `wlr-layer-shell`, which wlroots
+compositors (Sway, Hyprland, river, Wayfire) and KDE implement. **GNOME has
+declined the protocol**, and there `run` returns `AppError::LayerUnsupported` —
+a capability answer to branch on, not a crash. The fallback is an ordinary
+window, reached by not calling `layer`.
+
+The settings and the port are written to outlive that backend: nothing in
+either names Wayland, and an appbar or an `NSWindow`-level backend would
+implement the same `LayerBackend` and answer the same `LayerFeature` roster.
 
 ### Scale
 
 Fractional scaling is used where the compositor offers `wp_fractional_scale_v1`
 and `wp_viewporter`: the buffer is rendered at the true scale (1.6, not 2) and a
 viewport maps it onto the logical size. Without both, the integer path applies
-and a fractional output rounds up.
+and a fractional output rounds up — which is what
+`LayerFeature::FractionalScale` answers `Emulated` for.
 
 ---
 

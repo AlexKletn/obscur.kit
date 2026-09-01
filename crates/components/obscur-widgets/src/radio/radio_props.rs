@@ -42,7 +42,7 @@ impl RadioProps {
 impl FromProps for RadioProps {
     #[doc = include_str!("radio_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
-        let label: String = decode_required(props, Self::LABEL)?;
+        let label: String = decode_required(props, Self::LABEL, "label")?;
         let selected = match prop_value(props, Radio::PROP_SELECTED) {
             Some(&ViewValue::Bool(flag)) => flag,
             // No widget prop: this node came from markup, where the reserved
@@ -72,9 +72,7 @@ mod tests {
         // mount silently, it reports.
         assert_eq!(
             RadioProps::from_props(&[]),
-            Err(PropsError::Missing {
-                name: RadioProps::LABEL
-            })
+            Err(PropsError::missing(RadioProps::LABEL, "label"))
         );
     }
 

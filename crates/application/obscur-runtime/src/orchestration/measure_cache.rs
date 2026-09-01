@@ -1,9 +1,9 @@
 #![doc = include_str!("measure_cache.doc/_module.md")]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use obscur_geometry::{BoxConstraints, Size};
-use obscur_identity::NodeId;
+use obscur_identity::{FastSet, NodeId};
 
 #[doc = include_str!("measure_cache.doc/MeasureCache.md")]
 #[derive(Debug, Default)]
@@ -47,7 +47,7 @@ impl MeasureCache {
     }
 
     #[doc = include_str!("measure_cache.doc/evict.md")]
-    pub fn evict(&self, nodes: &HashSet<NodeId>) {
+    pub fn evict(&self, nodes: &FastSet<NodeId>) {
         self.entries
             .borrow_mut()
             .retain(|&(node, ..), _| !nodes.contains(&node));

@@ -7,7 +7,7 @@ use super::gradient_lowering::{
 };
 use super::property_compiler::{CompiledDeclaration, narrow_f32, value_unsupported_kind};
 use super::stylesheet_compiler::CssSymbolInterner;
-use super::value_lowering::dimension_length;
+use super::value_lowering::{dimension_length, sole_custom_ref};
 use crate::error::UnsupportedCssFeature;
 use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
@@ -42,6 +42,16 @@ pub(super) fn expand_background(
             selector,
         ))]
     };
+    // `background: var(--face)` reaches `background-color`. The shorthand's
+    // other longhands are left alone — this expander never reset them anyway —
+    // and the colour is the only one of them a custom property can carry: a
+    // gradient does not lower into a custom property's value at all. Before
+    // this, the reference matched neither the image grammar nor the colour one
+    // and the declaration was discarded, which is how a keyboard's every hover
+    // and press rule compiled to an empty block.
+    if let Some(reference) = sole_custom_ref(&decl.value) {
+        return standard(PropertyId::BackgroundColor, reference);
+    }
     if let Some(value) = lower_background_image(&decl.value) {
         return standard(PropertyId::BackgroundImage, value);
     }

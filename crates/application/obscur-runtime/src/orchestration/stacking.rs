@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_scene::command::PaintCommand;
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{PropertyId, PropertyValue, layout_keyword};
@@ -79,91 +79,77 @@ pub(crate) enum PaintLayer {
     PositionedZeroOrAuto,
 }
 
-#[doc = include_str!("stacking.doc/effective_paint_layer.md")]
+#[doc = include_str!("stacking.doc/EffectiveStacking.md")]
+pub(crate) struct EffectiveStacking {
+    #[doc = include_str!("stacking.doc/z.md")]
+    pub(crate) z: FastMap<NodeId, i32>,
+    #[doc = include_str!("stacking.doc/layer.md")]
+    pub(crate) layer: FastMap<NodeId, PaintLayer>,
+}
+
+#[doc = include_str!("stacking.doc/effective_stacking.md")]
 #[must_use]
-pub(crate) fn effective_paint_layer(
+pub(crate) fn effective_stacking(
     tree: &RetainedTree,
     computed: &ComputedStyles,
-) -> HashMap<NodeId, PaintLayer> {
-    let mut map: HashMap<NodeId, PaintLayer> = HashMap::new();
-    let Some(root) = tree.root() else {
-        return map;
+) -> EffectiveStacking {
+    // One walk, two answers. These were two functions with byte-identical
+    // traversals — same stack, same visited set, same inheritance rule — run back
+    // to back on every composed frame and again on every pointer event, each
+    // asking the same node for the same `position` and `z-index`. The two
+    // quantities are read off one `ComputedStyle` lookup.
+    let mut out = EffectiveStacking {
+        z: HashMap::default(),
+        layer: HashMap::default(),
     };
-    let mut visited: HashSet<NodeId> = HashSet::new();
-    let mut stack: Vec<(NodeId, PaintLayer)> = vec![(root, PaintLayer::NonPositioned)];
-    while let Some((node, inherited)) = stack.pop() {
+    let Some(root) = tree.root() else {
+        return out;
+    };
+    let mut visited: FastSet<NodeId> = HashSet::default();
+    let mut stack: Vec<(NodeId, i32, PaintLayer)> = vec![(root, 0, PaintLayer::NonPositioned)];
+    while let Some((node, inherited_z, inherited_layer)) = stack.pop() {
         if !visited.insert(node) {
             continue;
         }
-        let layer = own_paint_layer(computed, node).unwrap_or(inherited);
-        map.insert(node, layer);
+        let own = own_stacking(computed, node);
+        let z = own.and_then(|(z, _)| z).unwrap_or(inherited_z);
+        let layer = own.map_or(inherited_layer, |(_, layer)| layer);
+        out.z.insert(node, z);
+        out.layer.insert(node, layer);
         if let Some(retained) = tree.get(node) {
+            // Children inherit this node's effective values (reversed push keeps
+            // the left-to-right pre-order the emission walk relies on).
             for &child in retained.child_nodes().iter().rev() {
                 if !visited.contains(&child) {
-                    stack.push((child, layer));
+                    stack.push((child, z, layer));
                 }
             }
         }
     }
-    map
+    out
 }
 
-#[doc = include_str!("stacking.doc/own_paint_layer.md")]
-fn own_paint_layer(computed: &ComputedStyles, node: NodeId) -> Option<PaintLayer> {
+#[doc = include_str!("stacking.doc/own_stacking.md")]
+fn own_stacking(computed: &ComputedStyles, node: NodeId) -> Option<(Option<i32>, PaintLayer)> {
     let style = computed.get(&node)?;
     if !is_positioned(style) {
         return None;
     }
     match style.get(PropertyId::ZIndex).map(ComputedValue::value) {
-        // A non-zero integer z-index is isolated by the primary `z` key.
-        Some(&PropertyValue::Number(n)) if z_index_to_i32(n) != 0 => {
-            Some(PaintLayer::NonPositioned)
+        Some(&PropertyValue::Number(n)) => {
+            let z = z_index_to_i32(n);
+            // A non-zero integer z-index is isolated by the primary `z` key, so
+            // it needs no lift from the layer rank.
+            let layer = if z == 0 {
+                PaintLayer::PositionedZeroOrAuto
+            } else {
+                PaintLayer::NonPositioned
+            };
+            Some((Some(z), layer))
         }
-        // `auto` (absent / non-numeric) or an explicit `0`: §9.9 layer 6.
-        _ => Some(PaintLayer::PositionedZeroOrAuto),
-    }
-}
-
-#[doc = include_str!("stacking.doc/effective_stacking_z.md")]
-#[must_use]
-pub(crate) fn effective_stacking_z(
-    tree: &RetainedTree,
-    computed: &ComputedStyles,
-) -> HashMap<NodeId, i32> {
-    let mut zmap: HashMap<NodeId, i32> = HashMap::new();
-    let Some(root) = tree.root() else {
-        return zmap;
-    };
-    let mut visited: HashSet<NodeId> = HashSet::new();
-    let mut stack: Vec<(NodeId, i32)> = vec![(root, 0)];
-    while let Some((node, inherited)) = stack.pop() {
-        if !visited.insert(node) {
-            continue;
-        }
-        let z = own_stacking_z(computed, node).unwrap_or(inherited);
-        zmap.insert(node, z);
-        if let Some(retained) = tree.get(node) {
-            // Children inherit this node's effective z (reversed push keeps the
-            // left-to-right pre-order the emission walk relies on).
-            for &child in retained.child_nodes().iter().rev() {
-                if !visited.contains(&child) {
-                    stack.push((child, z));
-                }
-            }
-        }
-    }
-    zmap
-}
-
-#[doc = include_str!("stacking.doc/own_stacking_z.md")]
-fn own_stacking_z(computed: &ComputedStyles, node: NodeId) -> Option<i32> {
-    let style = computed.get(&node)?;
-    if !is_positioned(style) {
-        return None;
-    }
-    match style.get(PropertyId::ZIndex).map(ComputedValue::value) {
-        Some(&PropertyValue::Number(n)) => Some(z_index_to_i32(n)),
-        _ => None,
+        // `auto` (absent / non-numeric) or an explicit `0`: CSS 2.1 §9.9 layer 6,
+        // and no own `z` — the nearest z-index ancestor's is inherited.
+        _ => Some((None, PaintLayer::PositionedZeroOrAuto)),
     }
 }
 
@@ -196,6 +182,23 @@ fn z_index_to_i32(n: f32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    /// The two projections of [`effective_stacking`], so every assertion in
+    /// this module still reads as the question it is asking. Both call the real
+    /// walk — nothing here reimplements it.
+    fn effective_stacking_z(
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+    ) -> FastMap<NodeId, i32> {
+        effective_stacking(tree, computed).z
+    }
+
+    fn effective_paint_layer(
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+    ) -> FastMap<NodeId, PaintLayer> {
+        effective_stacking(tree, computed).layer
+    }
+
     use super::*;
     use obscur_identity::ComponentId;
     use obscur_tree::node::{LogicalParent, NodeKind};
@@ -229,7 +232,7 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let a = add_child(&mut tree, root, 1);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, ComputedStyle::new());
 
@@ -244,7 +247,7 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let a = add_child(&mut tree, root, 1);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, positioned_with_z(5.0));
 
@@ -260,7 +263,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 1);
         let b = add_child(&mut tree, a, 2);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, positioned_with_z(3.0));
         computed.insert(b, ComputedStyle::new());
@@ -281,7 +284,7 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let a = add_child(&mut tree, root, 1);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         let mut style = ComputedStyle::new();
         style.set(PropertyId::ZIndex, ComputedValue::number(9.0));
@@ -297,7 +300,7 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let a = add_child(&mut tree, root, 1);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, positioned_with_z(-2.0));
 
@@ -327,7 +330,7 @@ mod tests {
         tree.set_root(root);
         let a = add_child(&mut tree, root, 1);
         let b = add_child(&mut tree, a, 2);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(a, ComputedStyle::new());
         computed.insert(b, ComputedStyle::new());
@@ -348,7 +351,7 @@ mod tests {
         let auto = add_child(&mut tree, root, 1);
         let zero = add_child(&mut tree, root, 2);
         let static_block = add_child(&mut tree, root, 3);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(auto, positioned_auto());
         computed.insert(zero, positioned_with_z(0.0));
@@ -377,7 +380,7 @@ mod tests {
         tree.set_root(root);
         let pos = add_child(&mut tree, root, 1);
         let child = add_child(&mut tree, pos, 2);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(pos, positioned_auto());
         computed.insert(child, ComputedStyle::new());
@@ -401,7 +404,7 @@ mod tests {
         tree.set_root(root);
         let up = add_child(&mut tree, root, 1);
         let down = add_child(&mut tree, root, 2);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(root, ComputedStyle::new());
         computed.insert(up, positioned_with_z(5.0));
         computed.insert(down, positioned_with_z(-2.0));

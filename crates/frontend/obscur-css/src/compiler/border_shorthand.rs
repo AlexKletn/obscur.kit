@@ -3,7 +3,7 @@
 use super::color_lowering::{color_from_function, named_color, parse_hex_color};
 use super::property_compiler::{CompiledDeclaration, value_unsupported_kind};
 use super::stylesheet_compiler::CssSymbolInterner;
-use super::value_lowering::dimension_length;
+use super::value_lowering::{custom_ref, dimension_length};
 use crate::error::UnsupportedCssFeature;
 use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
@@ -123,6 +123,13 @@ fn border_color_component(
     value: &ParsedValue,
     _interner: &mut CssSymbolInterner,
 ) -> Option<PropertyValue> {
+    // A `var()` is taken as the COLOUR component. It is the only slot of the
+    // border grammar a custom property can plausibly fill, and reading it here
+    // is what keeps `border: 1px solid var(--line)` from losing its width and
+    // its style along with the colour it could not resolve yet.
+    if let Some(reference) = custom_ref(value) {
+        return Some(reference);
+    }
     match value {
         ParsedValue::Hash(hex) => parse_hex_color(hex).map(PropertyValue::Color),
         ParsedValue::Keyword(keyword) => named_color(keyword).map(PropertyValue::Color),
@@ -279,6 +286,10 @@ pub(super) fn expand_border_style(
     ];
     let mut components = Vec::new();
     for value in &decl.value {
+        if let Some(reference) = custom_ref(value) {
+            components.push(reference);
+            continue;
+        }
         match value {
             ParsedValue::Keyword(keyword) => {
                 match layout_keyword::border_style_from_name(keyword) {
@@ -350,7 +361,36 @@ mod tests {
     use super::super::longhand_catalog::property_id_from_name;
     use super::super::property_compiler::tests::{compile_all, pairs, value_of};
 
+    use obscur_identity::InternedSymbol;
     use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor, layout_keyword};
+
+    #[test]
+    fn a_var_in_the_colour_slot_does_not_take_the_width_and_style_with_it() {
+        // Consumer audit 2-C: the colour is the one component a custom property
+        // fills in practice, and it used to sink the whole shorthand, so a
+        // themed border drew nothing at all rather than a black one.
+        let line = PropertyValue::CustomRef(InternedSymbol::named("--k-line"));
+        assert_eq!(
+            pairs(&compile_all("border-bottom: 1px solid var(--k-line)")),
+            vec![
+                (
+                    PropertyId::BorderBottomWidth,
+                    PropertyValue::Length(Length::px(1.0))
+                ),
+                (
+                    PropertyId::BorderBottomStyle,
+                    PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
+                ),
+                (PropertyId::BorderBottomColor, line.clone()),
+            ]
+        );
+        // The whole shorthand as one reference reads as the colour, which is the
+        // only slot of the grammar a custom property's value model can carry.
+        assert_eq!(
+            pairs(&compile_all("outline: var(--k-line)")),
+            vec![(PropertyId::OutlineColor, line)]
+        );
+    }
 
     #[test]
     fn border_shorthand_sets_width_style_color_on_all_four_sides() {

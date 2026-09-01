@@ -4,14 +4,14 @@ use crate::computed::StyleDiff;
 use crate::invalidation::StyleInvalidationReason;
 use crate::property::InheritedProperty;
 use crate::selector::PseudoState;
-use obscur_identity::InternedSymbol;
+use obscur_identity::{FastSet, InternedSymbol};
 use std::collections::HashSet;
 
 #[doc = include_str!("style_dependency.doc/StyleDependency.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleDependency {
     inherits_from_parent: bool,
-    custom_properties: HashSet<InternedSymbol>,
+    custom_properties: FastSet<InternedSymbol>,
     pseudo_states: PseudoState,
 }
 
@@ -21,7 +21,7 @@ impl StyleDependency {
     pub fn new() -> Self {
         Self {
             inherits_from_parent: false,
-            custom_properties: HashSet::new(),
+            custom_properties: HashSet::default(),
             pseudo_states: PseudoState::empty(),
         }
     }
@@ -70,7 +70,7 @@ impl StyleDependency {
 
     #[doc = include_str!("style_dependency.doc/custom_properties.md")]
     #[must_use]
-    pub fn custom_properties(&self) -> &HashSet<InternedSymbol> {
+    pub fn custom_properties(&self) -> &FastSet<InternedSymbol> {
         &self.custom_properties
     }
 

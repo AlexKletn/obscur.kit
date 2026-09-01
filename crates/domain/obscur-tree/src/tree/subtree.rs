@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use obscur_identity::NodeId;
+use obscur_identity::{FastSet, NodeId};
 
 use super::RetainedTree;
 
@@ -29,7 +29,7 @@ impl Subtree {
     #[must_use]
     pub fn descendants(&self, tree: &RetainedTree) -> Vec<NodeId> {
         let mut order = Vec::new();
-        let mut visited: HashSet<NodeId> = HashSet::new();
+        let mut visited: FastSet<NodeId> = HashSet::default();
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
             if !visited.insert(id) {

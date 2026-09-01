@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 
 #[doc = include_str!("secondary_map.doc/SecondaryMap.md")]
 #[derive(Debug, Clone)]
 pub struct SecondaryMap<V> {
-    entries: HashMap<NodeId, V>,
+    entries: FastMap<NodeId, V>,
 }
 
 impl<V> SecondaryMap<V> {
@@ -15,7 +15,7 @@ impl<V> SecondaryMap<V> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: HashMap::default(),
         }
     }
 

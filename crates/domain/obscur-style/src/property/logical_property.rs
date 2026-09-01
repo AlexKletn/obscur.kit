@@ -138,6 +138,35 @@ impl PropertyId {
     }
 
     #[doc = include_str!("logical_property.doc/LOGICAL.md")]
+    #[doc = include_str!("logical_property.doc/is_logical_target.md")]
+    #[must_use]
+    pub const fn is_logical_target(self) -> bool {
+        matches!(
+            self,
+            Self::MarginTop
+                | Self::MarginRight
+                | Self::MarginBottom
+                | Self::MarginLeft
+                | Self::PaddingTop
+                | Self::PaddingRight
+                | Self::PaddingBottom
+                | Self::PaddingLeft
+                | Self::Top
+                | Self::Right
+                | Self::Bottom
+                | Self::Left
+                | Self::BorderTopWidth
+                | Self::BorderRightWidth
+                | Self::BorderBottomWidth
+                | Self::BorderLeftWidth
+                | Self::BorderTopStyle
+                | Self::BorderRightStyle
+                | Self::BorderBottomStyle
+                | Self::BorderLeftStyle
+        )
+    }
+
+    #[doc = include_str!("logical_property.doc/LOGICAL.md")]
     pub const LOGICAL: [Self; 20] = [
         Self::MarginInlineStart,
         Self::MarginInlineEnd,

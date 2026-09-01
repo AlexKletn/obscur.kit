@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::{InternedSymbol, NodeId};
+use obscur_identity::{FastMap, InternedSymbol, NodeId};
 use obscur_interaction::command::{
     Command, CommandRegistry, CommandRouter, CommandState, Shortcut,
 };
@@ -12,16 +12,16 @@ use obscur_interaction::focus::{FocusRestore, FocusScope, FocusScopeId};
 use super::{AppCommands, CommandHandler, CommandTarget, EventListener, IntoCommandHandler};
 
 #[doc = include_str!("handler_registry.doc/TextHandlers.md")]
-type TextHandlers = HashMap<InternedSymbol, Box<dyn FnMut(&str)>>;
+type TextHandlers = FastMap<InternedSymbol, Box<dyn FnMut(&str)>>;
 
 #[doc = include_str!("handler_registry.doc/HandlerRegistry.md")]
 pub(crate) struct HandlerRegistry {
     #[doc = include_str!("handler_registry.doc/handlers.md")]
-    handlers: HashMap<InternedSymbol, CommandHandler>,
+    handlers: FastMap<InternedSymbol, CommandHandler>,
     #[doc = include_str!("handler_registry.doc/node_handlers.md")]
-    node_handlers: HashMap<(NodeId, InternedSymbol), CommandHandler>,
+    node_handlers: FastMap<(NodeId, InternedSymbol), CommandHandler>,
     #[doc = include_str!("handler_registry.doc/listeners.md")]
-    listeners: HashMap<(NodeId, InternedSymbol), Vec<EventListener>>,
+    listeners: FastMap<(NodeId, InternedSymbol), Vec<EventListener>>,
     #[doc = include_str!("handler_registry.doc/scopes.md")]
     scopes: Vec<FocusScope>,
     #[doc = include_str!("handler_registry.doc/focus_restore.md")]
@@ -37,7 +37,7 @@ pub(crate) struct HandlerRegistry {
     #[doc = include_str!("handler_registry.doc/change_handlers.md")]
     change_handlers: TextHandlers,
     #[doc = include_str!("handler_registry.doc/value_handlers.md")]
-    value_handlers: HashMap<InternedSymbol, Box<dyn FnMut(f32, f32)>>,
+    value_handlers: FastMap<InternedSymbol, Box<dyn FnMut(f32, f32)>>,
     #[doc = include_str!("handler_registry.doc/commands.md")]
     commands: CommandRouter,
     #[doc = include_str!("handler_registry.doc/command_registry.md")]
@@ -48,17 +48,17 @@ impl HandlerRegistry {
     #[doc = include_str!("handler_registry.doc/new.md")]
     pub(crate) fn new() -> Self {
         Self {
-            handlers: HashMap::new(),
-            node_handlers: HashMap::new(),
-            listeners: HashMap::new(),
+            handlers: HashMap::default(),
+            node_handlers: HashMap::default(),
+            listeners: HashMap::default(),
             scopes: Vec::new(),
             focus_restore: FocusRestore::new(),
             declared_traps: Vec::new(),
-            scope_handlers: HashMap::new(),
+            scope_handlers: HashMap::default(),
             app_commands: AppCommands::new(),
-            text_input_handlers: TextHandlers::new(),
-            change_handlers: TextHandlers::new(),
-            value_handlers: HashMap::new(),
+            text_input_handlers: TextHandlers::default(),
+            change_handlers: TextHandlers::default(),
+            value_handlers: HashMap::default(),
             commands: CommandRouter::new(),
             command_registry: CommandRegistry::new(),
         }

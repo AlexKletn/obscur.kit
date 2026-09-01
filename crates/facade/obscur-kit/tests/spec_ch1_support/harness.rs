@@ -241,10 +241,11 @@ impl FromProps for ScriptProps {
             if property.name() == P_FAIL
                 && matches!(property.value(), ViewValue::Text(t) if &**t == "yes")
             {
-                return Err(PropsError::Type {
-                    name: P_FAIL,
-                    expected: "a component that can render",
-                });
+                return Err(PropsError::wrong_type(
+                    P_FAIL,
+                    "fail",
+                    "a component that can render",
+                ));
             }
         }
         let text_of = |name: InternedSymbol| {

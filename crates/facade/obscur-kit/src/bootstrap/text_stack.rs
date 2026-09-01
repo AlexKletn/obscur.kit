@@ -139,6 +139,19 @@ impl InstalledFonts {
         })
     }
 
+    #[doc = include_str!("text_stack.doc/take_discovered.md")]
+    #[cfg(not(all(feature = "text-harfrust", feature = "text-unicode")))]
+    #[must_use]
+    pub fn take_discovered(&self) -> Vec<(u32, Arc<[u8]>)> {
+        // Nothing discovers a face without the real text stack, and the method
+        // exists in this configuration anyway: both runners call it once a
+        // frame, so a shape that is missing here does not fail at the call —
+        // it fails the whole of `App` for a feature set the runner has no other
+        // quarrel with. A surface that draws no text is a real configuration
+        // (a plaque, a wallpaper, an indicator), and this is what it costs.
+        Vec::new()
+    }
+
     #[doc = include_str!("text_stack.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (u32, &Arc<[u8]>)> {
         self.faces.iter().map(|(handle, bytes)| (*handle, bytes))

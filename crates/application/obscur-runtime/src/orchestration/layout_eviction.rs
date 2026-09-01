@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_tree::tree::RetainedTree;
 
@@ -11,9 +11,9 @@ use super::layout_coordinator::MAX_DEPTH;
 #[doc = include_str!("layout_eviction.doc/LayoutEviction.md")]
 pub(super) struct LayoutEviction {
     #[doc = include_str!("layout_eviction.doc/measures.md")]
-    pub(super) measures: HashSet<NodeId>,
+    pub(super) measures: FastSet<NodeId>,
     #[doc = include_str!("layout_eviction.doc/arranges.md")]
-    pub(super) arranges: HashSet<NodeId>,
+    pub(super) arranges: FastSet<NodeId>,
 }
 
 #[doc = include_str!("layout_eviction.doc/invalidated_layout.md")]
@@ -23,8 +23,8 @@ pub(super) fn invalidated_layout(
 ) -> Option<LayoutEviction> {
     if dirty.is_empty() {
         return Some(LayoutEviction {
-            measures: HashSet::new(),
-            arranges: HashSet::new(),
+            measures: HashSet::default(),
+            arranges: HashSet::default(),
         });
     }
     // No root: nothing was arranged, so nothing retained can be trusted.
@@ -42,8 +42,8 @@ pub(super) fn invalidated_layout(
     // and `Portal::apply` moves only the VISUAL parent, so today they agree; this
     // walk simply does not need them to.) Cycle-safe: `visited` emits each node
     // once.
-    let mut parent_of: HashMap<NodeId, NodeId> = HashMap::new();
-    let mut visited: HashSet<NodeId> = HashSet::new();
+    let mut parent_of: FastMap<NodeId, NodeId> = HashMap::default();
+    let mut visited: FastSet<NodeId> = HashSet::default();
     let mut order: Vec<NodeId> = Vec::new();
     let mut stack: Vec<NodeId> = vec![root];
     while let Some(node) = stack.pop() {
@@ -67,7 +67,7 @@ pub(super) fn invalidated_layout(
         return None;
     }
 
-    let mut evict: HashSet<NodeId> = HashSet::new();
+    let mut evict: FastSet<NodeId> = HashSet::default();
     for (&node, _) in dirty.iter() {
         evict.insert(node);
         // Upward: every context that measured *through* this node.
@@ -96,7 +96,7 @@ pub(super) fn invalidated_layout(
     // ANYTHING in that subtree can have changed: the upward closure of `measures`
     // (see [`LayoutEviction::arranges`]). Same walk, same parent links, same
     // `MAX_DEPTH` bound as the upward pass above.
-    let mut arranges: HashSet<NodeId> = HashSet::new();
+    let mut arranges: FastSet<NodeId> = HashSet::default();
     for &node in &evict {
         arranges.insert(node);
         let mut current = node;

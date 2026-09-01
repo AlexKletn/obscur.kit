@@ -2,13 +2,13 @@
 
 use crate::context::LayoutContext;
 use crate::invalidation::{LayoutInvalidationReason, PropagationResult};
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use std::collections::HashMap;
 
 #[doc = include_str!("layout_invalidation.doc/LayoutInvalidation.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LayoutInvalidation {
-    pending: HashMap<NodeId, LayoutInvalidationReason>,
+    pending: FastMap<NodeId, LayoutInvalidationReason>,
 }
 
 impl LayoutInvalidation {
@@ -16,7 +16,7 @@ impl LayoutInvalidation {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            pending: HashMap::new(),
+            pending: HashMap::default(),
         }
     }
 
@@ -56,13 +56,13 @@ impl LayoutInvalidation {
 
     #[doc = include_str!("layout_invalidation.doc/take.md")]
     #[must_use]
-    pub fn take(&mut self) -> HashMap<NodeId, LayoutInvalidationReason> {
+    pub fn take(&mut self) -> FastMap<NodeId, LayoutInvalidationReason> {
         std::mem::take(&mut self.pending)
     }
 
     #[doc = include_str!("layout_invalidation.doc/drain.md")]
     #[must_use]
-    pub fn drain(&mut self) -> HashMap<NodeId, LayoutInvalidationReason> {
+    pub fn drain(&mut self) -> FastMap<NodeId, LayoutInvalidationReason> {
         self.take()
     }
 

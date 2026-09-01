@@ -29,6 +29,7 @@ pub use grid::{
     TrackSize,
 };
 mod grid_item_alignment;
+mod grid_item_margins;
 mod grid_item_placement;
 mod grid_layout;
 pub use grid_layout::GridLayout;

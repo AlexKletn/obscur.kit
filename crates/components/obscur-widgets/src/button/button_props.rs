@@ -41,7 +41,7 @@ impl ButtonProps {
 impl FromProps for ButtonProps {
     #[doc = include_str!("button_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
-        let label: Option<String> = decode_optional(props, Self::LABEL)?;
+        let label: Option<String> = decode_optional(props, Self::LABEL, "label")?;
         Ok(Self {
             label: label.unwrap_or_default(),
         })

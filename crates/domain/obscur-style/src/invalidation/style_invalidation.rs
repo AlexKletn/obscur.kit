@@ -3,14 +3,14 @@
 use crate::computed::StyleDiff;
 use crate::invalidation::{StyleDependency, StyleInvalidationReason};
 use crate::selector::PseudoState;
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use std::collections::HashMap;
 use std::collections::hash_map::Iter;
 
 #[doc = include_str!("style_invalidation.doc/StyleInvalidation.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleInvalidation {
-    pending: HashMap<NodeId, StyleInvalidationReason>,
+    pending: FastMap<NodeId, StyleInvalidationReason>,
 }
 
 impl StyleInvalidation {
@@ -18,7 +18,7 @@ impl StyleInvalidation {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            pending: HashMap::new(),
+            pending: HashMap::default(),
         }
     }
 
@@ -59,13 +59,13 @@ impl StyleInvalidation {
 
     #[doc = include_str!("style_invalidation.doc/take.md")]
     #[must_use]
-    pub fn take(&mut self) -> HashMap<NodeId, StyleInvalidationReason> {
+    pub fn take(&mut self) -> FastMap<NodeId, StyleInvalidationReason> {
         std::mem::take(&mut self.pending)
     }
 
     #[doc = include_str!("style_invalidation.doc/drain.md")]
     #[must_use]
-    pub fn drain(&mut self) -> HashMap<NodeId, StyleInvalidationReason> {
+    pub fn drain(&mut self) -> FastMap<NodeId, StyleInvalidationReason> {
         self.take()
     }
 

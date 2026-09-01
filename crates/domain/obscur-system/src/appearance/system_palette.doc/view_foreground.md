@@ -1,0 +1,1 @@
+Text inside a view.

@@ -332,7 +332,14 @@ impl ApplicationHandler<UserEvent> for WindowedCounter {
                 // hover change schedules an `Input` frame inside the runtime; we
                 // still ask winit to redraw so that frame is actually drained.
                 self.cursor = (position.x, position.y);
-                let moved = PointerConverter::new().moved(PointerId::MOUSE, position);
+                // No held-button set is tracked here: this example's moves only
+                // drive hover, and a drag would need the press to be threaded
+                // through, which the counter has no use for.
+                let moved = PointerConverter::new().moved(
+                    PointerId::MOUSE,
+                    position,
+                    obscur_kit::interaction::pointer::PointerButtons::new(),
+                );
                 self.runtime.handle_pointer(moved);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();

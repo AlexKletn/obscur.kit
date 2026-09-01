@@ -13,6 +13,11 @@ Two kinds of value are resolved *before* computed values are produced:
   (`var(--name)`), which is substituted during custom-property resolution
   (§4.14) before computed-value resolution runs.
 
+One variant is not a typed value at all: [`PropertyValue::RawTokens`] is the
+text a custom property was declared with, which has no grammar until the
+substitution above puts it on a property. It reaches no other property, and no
+computed value is ever one.
+
 `calc()` / `min()` / `max()` / `clamp()` and relative/viewport units are
 modelled: a plain relative unit is a [`PropertyValue::Length`] carrying the
 relevant [`Length`] variant, and a math function is a

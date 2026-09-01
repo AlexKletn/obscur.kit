@@ -42,7 +42,7 @@ impl CheckboxProps {
 impl FromProps for CheckboxProps {
     #[doc = include_str!("checkbox_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
-        let label: String = decode_required(props, Self::LABEL)?;
+        let label: String = decode_required(props, Self::LABEL, "label")?;
         let checked = match prop_value(props, Checkbox::PROP_CHECKED) {
             Some(&ViewValue::Int(-1)) => None,
             Some(&ViewValue::Int(state)) => Some(state != 0),
@@ -73,9 +73,7 @@ mod tests {
         // mount silently, it reports.
         assert_eq!(
             CheckboxProps::from_props(&[]),
-            Err(PropsError::Missing {
-                name: CheckboxProps::LABEL
-            })
+            Err(PropsError::missing(CheckboxProps::LABEL, "label"))
         );
     }
 

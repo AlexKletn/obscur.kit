@@ -2,7 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use obscur_identity::NodeId;
+use super::PresentationUndo;
+use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
 use obscur_motion::track::{Keyframe, KeyframeTrack};
@@ -30,15 +31,15 @@ pub(crate) struct MotionDriver {
     #[doc = include_str!("motion_driver.doc/next_timeline.md")]
     next_timeline: TimelineId,
     #[doc = include_str!("motion_driver.doc/settled_progress.md")]
-    settled_progress: HashMap<TimelineId, f32>,
+    settled_progress: FastMap<TimelineId, f32>,
     #[doc = include_str!("motion_driver.doc/css_motion.md")]
     css_motion: CssMotionRules,
     #[doc = include_str!("motion_driver.doc/transition_targets.md")]
-    transition_targets: HashMap<(NodeId, PropertyId), MotionValue>,
+    transition_targets: FastMap<(NodeId, PropertyId), MotionValue>,
     #[doc = include_str!("motion_driver.doc/transition_runs.md")]
-    transition_runs: HashMap<(NodeId, PropertyId), TransitionRun>,
+    transition_runs: FastMap<(NodeId, PropertyId), TransitionRun>,
     #[doc = include_str!("motion_driver.doc/css_animations_started.md")]
-    css_animations_started: HashSet<(NodeId, PropertyId)>,
+    css_animations_started: FastSet<(NodeId, PropertyId)>,
 }
 
 impl MotionDriver {
@@ -49,11 +50,11 @@ impl MotionDriver {
             animations: Vec::new(),
             presentation_overlays: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
-            settled_progress: HashMap::new(),
+            settled_progress: HashMap::default(),
             css_motion: CssMotionRules::new(),
-            transition_targets: HashMap::new(),
-            transition_runs: HashMap::new(),
-            css_animations_started: HashSet::new(),
+            transition_targets: HashMap::default(),
+            transition_runs: HashMap::default(),
+            css_animations_started: HashSet::default(),
         }
     }
 
@@ -117,7 +118,7 @@ impl MotionDriver {
         });
         // Reachable only through a surviving binding's `timeline()`, so the
         // bindings that just survived are the whole of what can still be read.
-        let live: HashSet<TimelineId> = self
+        let live: FastSet<TimelineId> = self
             .animations
             .iter()
             .map(AnimationBinding::timeline)
@@ -295,21 +296,44 @@ impl MotionDriver {
         self.presentation_overlays = presentation;
     }
 
-    #[doc = include_str!("motion_driver.doc/presentation_styles.md")]
-    pub(crate) fn presentation_styles(&self, computed: &ComputedStyles) -> Option<ComputedStyles> {
-        if self.presentation_overlays.is_empty() {
-            return None;
-        }
-        let mut styles = computed.clone();
+    #[doc = include_str!("motion_driver.doc/apply_presentation.md")]
+    pub(crate) fn apply_presentation(&self, computed: &mut ComputedStyles) -> PresentationUndo {
+        // The map is NOT cloned. It used to be, and one live transition anywhere
+        // in the tree was enough to deep-copy every node's style — two hash maps
+        // per node, each owning heap for font stacks, gradient stops, shadows and
+        // filters — on every frame of the animation, to record a handful of
+        // samples. What is written here is exactly what the overlays name, and
+        // `undo` carries precisely enough to put it back.
+        let mut undo = PresentationUndo::default();
         for (node, property, value) in &self.presentation_overlays {
-            if let Some(computed_value) = ComputedValue::from_concrete(value.clone()) {
-                styles
-                    .entry(*node)
-                    .or_default()
-                    .set(*property, computed_value);
-            }
+            let Some(sampled) = ComputedValue::from_concrete(value.clone()) else {
+                continue;
+            };
+            let fresh = !computed.contains_key(node);
+            let style = computed.entry(*node).or_default();
+            let previous = style.set(*property, sampled);
+            undo.entries.push((*node, *property, previous, fresh));
         }
-        Some(styles)
+        undo
+    }
+
+    #[doc = include_str!("motion_driver.doc/restore_presentation.md")]
+    pub(crate) fn restore_presentation(computed: &mut ComputedStyles, undo: PresentationUndo) {
+        // Reverse order, because two overlays on the same property would
+        // otherwise restore the older value over the newer one.
+        for (node, property, previous, fresh) in undo.entries.into_iter().rev() {
+            if fresh {
+                computed.remove(&node);
+                continue;
+            }
+            let Some(style) = computed.get_mut(&node) else {
+                continue;
+            };
+            match previous {
+                Some(value) => style.set(property, value),
+                None => style.remove(property),
+            };
+        }
     }
 
     #[doc = include_str!("motion_driver.doc/drive_css.md")]
@@ -338,15 +362,21 @@ impl MotionDriver {
         let mut transitions_to_start: Vec<TransitionStart> = Vec::new();
         let mut animations_to_start: Vec<AnimationStart> = Vec::new();
 
-        for rule in self.css_motion.transitions() {
-            let Some(kind) = animated_kind_for(rule.property()) else {
+        // Node outer, rule inner. `TreeElement::with_pseudo` walks to build the
+        // element a selector is matched against, and with the loops the other way
+        // round it was rebuilt once per (rule, node) pair — and a single
+        // `transition: a .1s, b .1s, c .1s` is three rules, because a
+        // `CssTransitionRule` carries one property. Now it is built once per node,
+        // whatever the sheet declares.
+        for (id, node) in tree.iter() {
+            if !node.kind().is_element() {
                 continue;
-            };
-            for (id, node) in tree.iter() {
-                if !node.kind().is_element() {
+            }
+            let element = TreeElement::with_pseudo(tree, id, pseudo);
+            for rule in self.css_motion.transitions() {
+                let Some(kind) = animated_kind_for(rule.property()) else {
                     continue;
-                }
-                let element = TreeElement::with_pseudo(tree, id, pseudo);
+                };
                 if SelectorMatcher::matches_list(rule.selectors(), &element).is_none() {
                     continue;
                 }
@@ -388,14 +418,8 @@ impl MotionDriver {
                     None => target_updates.push((key, new_value)),
                 }
             }
-        }
 
-        for rule in self.css_motion.keyframes() {
-            for (id, node) in tree.iter() {
-                if !node.kind().is_element() {
-                    continue;
-                }
-                let element = TreeElement::with_pseudo(tree, id, pseudo);
+            for rule in self.css_motion.keyframes() {
                 if SelectorMatcher::matches_list(rule.selectors(), &element).is_none() {
                     continue;
                 }
@@ -743,9 +767,9 @@ mod tests {
         driver.advance(2.0);
         assert_eq!(driver.active_animations(), 0, "finished and pruned");
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(node, obscur_style::computed::ComputedStyle::default());
-        let mut overlaid = ComputedStyles::new();
+        let mut overlaid = ComputedStyles::default();
         driver.apply_overlay(&mut computed, &mut overlaid);
         // The endpoint keeps being applied, and the pre-motion cascade value was
         // stashed for the style phase to put back.
@@ -782,7 +806,7 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let mut driver = MotionDriver::new();
-        let empty = ComputedStyles::new();
+        let empty = ComputedStyles::default();
         let pseudo = PseudoStates::new();
 
         for _ in 0..50 {
@@ -835,7 +859,7 @@ mod tests {
 
         let mut style = ComputedStyle::default();
         number(&mut style, PropertyId::FlexGrow, 0.0);
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(node, style.clone());
         // First observation records the baseline and starts the keyframe animation.
         driver.drive_css(&computed, &tree, &pseudo);
@@ -868,7 +892,7 @@ mod tests {
         let mut driver = MotionDriver::new();
         // Nothing installed: the driver reports no CSS motion to drive at all.
         assert!(!driver.drive_css(
-            &ComputedStyles::new(),
+            &ComputedStyles::default(),
             &obscur_tree::tree::RetainedTree::new(),
             &crate::orchestration::PseudoStates::new(),
         ));

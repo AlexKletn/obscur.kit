@@ -237,12 +237,6 @@ impl LayoutAlgorithm for FlexLayout {
                     container_main
                 }
             };
-            if std::env::var_os("ZZ_FLEX").is_some() {
-                eprintln!(
-                    "[flex]   item {index}: base={base} grow={} basis={:?}",
-                    child.style.flex_grow, child.style.flex_basis
-                );
-            }
             let (min_main, max_main) = main_bounds(&child.style, is_row);
             let fb = base.max(0.0);
             let max_val = max_main.resolve(container_main).unwrap_or(f32::INFINITY);

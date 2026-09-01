@@ -357,7 +357,11 @@ impl ApplicationHandler for UiKitWindow {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
-                let moved = PointerConverter::new().moved(PointerId::MOUSE, position);
+                let moved = PointerConverter::new().moved(
+                    PointerId::MOUSE,
+                    position,
+                    obscur_kit::interaction::pointer::PointerButtons::new(),
+                );
                 self.runtime.handle_pointer(moved);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();

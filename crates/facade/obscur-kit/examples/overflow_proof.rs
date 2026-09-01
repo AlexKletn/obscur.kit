@@ -1,7 +1,6 @@
 #![doc = include_str!("overflow_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use obscur_kit::geometry::{Point, Rect, Size};
@@ -44,7 +43,7 @@ fn main() {
     let visible = element(&mut tree, root, 3);
     let visible_child = element(&mut tree, visible, 4);
 
-    let mut computed: ComputedStyles = HashMap::new();
+    let mut computed: ComputedStyles = ComputedStyles::default();
     computed.insert(root, background(white));
     computed.insert(
         hidden,
@@ -57,7 +56,7 @@ fn main() {
     );
     computed.insert(visible_child, background(green));
 
-    let mut boxes: LayoutBoxes = HashMap::new();
+    let mut boxes: LayoutBoxes = LayoutBoxes::default();
     boxes.insert(
         root,
         LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)),
@@ -136,7 +135,7 @@ fn background_overflow(
     overflow: obscur_kit::identity::InternedSymbol,
 ) -> ComputedStyle {
     let mut style = background(color);
-    style.set(PropertyId::Overflow, ComputedValue::keyword(overflow));
+    style.set(PropertyId::OverflowY, ComputedValue::keyword(overflow));
     style
 }
 

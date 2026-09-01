@@ -11,6 +11,8 @@ publish = false
 workspace = true
 
 [dependencies]
+# `SupportLevel` — the vocabulary the layer port answers `supports` in.
+obscur-capability = { workspace = true }
 obscur-geometry = { workspace = true }
 obscur-identity = { workspace = true }
 obscur-interaction = { workspace = true }

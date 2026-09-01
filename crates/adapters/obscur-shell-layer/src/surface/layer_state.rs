@@ -1,9 +1,11 @@
 #![doc = include_str!("layer_state.doc/_module.md")]
 
-use obscur_geometry::{Point, Size};
+use obscur_geometry::{Point, ScaleFactor, Size};
 use obscur_interaction::pointer::{
     PointerButton, PointerButtons, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
+use obscur_windowing::display::DisplayId;
+use obscur_windowing::layer::{LayerDisplay, LayerSurfaceEvent};
 use smithay_client_toolkit::compositor::CompositorHandler;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
@@ -26,11 +28,15 @@ use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1::{self, WpFractionalScaleV1},
 };
+use wayland_protocols::wp::presentation_time::client::{
+    wp_presentation::{self, WpPresentation},
+    wp_presentation_feedback::{self, WpPresentationFeedback},
+};
 use wayland_protocols::wp::viewporter::client::{
     wp_viewport::WpViewport, wp_viewporter::WpViewporter,
 };
 
-use crate::event::LayerEvent;
+use crate::event::{LayerInput, Presented};
 
 #[doc = include_str!("layer_state.doc/BTN_LEFT.md")]
 const BTN_LEFT: u32 = 0x110;
@@ -45,8 +51,10 @@ pub struct LayerState {
     pub(super) seat_state: SeatState,
     pub(super) output_state: OutputState,
     pub(super) layer: Option<LayerSurface>,
-    #[doc = include_str!("layer_state.doc/events.md")]
-    pub(super) events: Vec<LayerEvent>,
+    #[doc = include_str!("layer_state.doc/surface_events.md")]
+    pub(super) surface_events: Vec<LayerSurfaceEvent>,
+    #[doc = include_str!("layer_state.doc/input.md")]
+    pub(super) input: Vec<LayerInput>,
     #[doc = include_str!("layer_state.doc/size.md")]
     pub(super) size: Size,
     #[doc = include_str!("layer_state.doc/scale.md")]
@@ -67,6 +75,12 @@ pub struct LayerState {
     pub(super) fractional: Option<WpFractionalScaleV1>,
     #[doc = include_str!("layer_state.doc/viewport.md")]
     pub(super) viewport: Option<WpViewport>,
+    #[doc = include_str!("layer_state.doc/presentation.md")]
+    pub(super) presentation: Option<WpPresentation>,
+    #[doc = include_str!("layer_state.doc/presented.md")]
+    pub(super) presented: Vec<Presented>,
+    #[doc = include_str!("layer_state.doc/feedbacks_asked.md")]
+    pub(super) feedbacks_asked: u64,
 }
 
 impl LayerState {
@@ -81,7 +95,11 @@ impl LayerState {
             seat_state,
             output_state,
             layer: None,
-            events: Vec::new(),
+            surface_events: Vec::new(),
+            input: Vec::new(),
+            presentation: None,
+            presented: Vec::new(),
+            feedbacks_asked: 0,
             size,
             scale: 1.0,
             closed: false,
@@ -103,28 +121,41 @@ impl LayerState {
             .expect("a layer surface, created before the window was handed out")
     }
 
-    #[doc = include_str!("layer_state.doc/output_names.md")]
-    pub(super) fn output_names(&self) -> Vec<String> {
+    #[doc = include_str!("layer_state.doc/displays.md")]
+    pub(super) fn displays(&self) -> Vec<LayerDisplay> {
         self.output_state
             .outputs()
-            .filter_map(|output| self.output_state.info(&output))
-            .filter_map(|info| info.name)
+            .enumerate()
+            .map(|(index, output)| {
+                let name = self
+                    .output_state
+                    .info(&output)
+                    .and_then(|info| info.name)
+                    .unwrap_or_else(|| format!("output-{index}"));
+                LayerDisplay::new(Self::display_id(index), name)
+            })
             .collect()
     }
 
-    #[doc = include_str!("layer_state.doc/output_named.md")]
-    pub(super) fn output_named(&self, name: &str) -> Option<wl_output::WlOutput> {
-        self.output_state.outputs().find(|output| {
-            self.output_state
-                .info(output)
-                .and_then(|info| info.name)
-                .is_some_and(|connector| connector == name)
-        })
+    #[doc = include_str!("layer_state.doc/output_with_id.md")]
+    pub(super) fn output_with_id(&self, id: DisplayId) -> Option<wl_output::WlOutput> {
+        self.output_state
+            .outputs()
+            .enumerate()
+            .find(|(index, _)| Self::display_id(*index) == id)
+            .map(|(_, output)| output)
+    }
+
+    #[doc = include_str!("layer_state.doc/display_id.md")]
+    pub(super) fn display_id(index: usize) -> DisplayId {
+        // One past the index, so no display ever answers to the zero a caller
+        // reaches for when it means "unset".
+        DisplayId::from_raw(index as u64 + 1)
     }
 
     #[doc = include_str!("layer_state.doc/push_pointer.md")]
     fn push_pointer(&mut self, event: PointerEvent) {
-        self.events.push(LayerEvent::Pointer(event));
+        self.input.push(LayerInput::Pointer(event));
     }
 }
 
@@ -155,7 +186,10 @@ impl CompositorHandler for LayerState {
         #[allow(clippy::cast_precision_loss)]
         let scale = new_factor.max(1) as f32;
         self.scale = scale;
-        self.events.push(LayerEvent::ScaleChanged { scale });
+        self.surface_events
+            .push(LayerSurfaceEvent::ScaleFactorChanged(ScaleFactor::new(
+                scale,
+            )));
     }
 
     fn transform_changed(
@@ -208,7 +242,7 @@ impl OutputHandler for LayerState {
 impl LayerShellHandler for LayerState {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
         self.closed = true;
-        self.events.push(LayerEvent::Closed);
+        self.surface_events.push(LayerSurfaceEvent::CloseRequested);
     }
 
     fn configure(
@@ -235,9 +269,17 @@ impl LayerShellHandler for LayerState {
                 height as f32
             },
         );
+        // The first configure is what makes the surface drawable; every one
+        // after it is the compositor changing the geometry underneath a surface
+        // that was already up, and a host has reason to tell those apart.
+        let event = if self.configured {
+            LayerSurfaceEvent::Resized(size)
+        } else {
+            LayerSurfaceEvent::Configured(size)
+        };
         self.size = size;
         self.configured = true;
-        self.events.push(LayerEvent::Configured { size });
+        self.surface_events.push(event);
     }
 }
 
@@ -340,7 +382,7 @@ impl PointerHandler for LayerState {
                         vertical.absolute as f32
                     };
                     if delta != 0.0 {
-                        self.events.push(LayerEvent::Scroll {
+                        self.input.push(LayerInput::Scroll {
                             delta_y: delta * self.scale,
                             at: self.cursor,
                         });
@@ -486,7 +528,11 @@ impl Dispatch<WpFractionalScaleV1, ()> for LayerState {
             let scale = scale as f32 / FRACTIONAL_DENOMINATOR;
             if scale > 0.0 && (scale - state.scale).abs() > f32::EPSILON {
                 state.scale = scale;
-                state.events.push(LayerEvent::ScaleChanged { scale });
+                state
+                    .surface_events
+                    .push(LayerSurfaceEvent::ScaleFactorChanged(ScaleFactor::new(
+                        scale,
+                    )));
             }
         }
     }
@@ -502,6 +548,69 @@ impl Dispatch<WpFractionalScaleManagerV1, ()> for LayerState {
         _qh: &QueueHandle<Self>,
     ) {
         // The manager has no events.
+    }
+}
+
+impl Dispatch<WpPresentation, ()> for LayerState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpPresentation,
+        event: wp_presentation::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // `clock_id` is the one event it has, and it says which clock the
+        // timestamps below are in. Every Linux compositor answers
+        // `CLOCK_MONOTONIC`, which is the clock input events already carry, so
+        // nothing here converts anything — the two are directly comparable.
+        // A compositor that answered something else would make the numbers
+        // wrong rather than absent, so it is worth saying so out loud.
+        if let wp_presentation::Event::ClockId { clk_id } = event
+            && clk_id != 1
+        {
+            eprintln!(
+                "obscur-shell-layer: the compositor times presentation on clock {clk_id}, \
+                 not CLOCK_MONOTONIC; presentation times cannot be compared with input timestamps"
+            );
+        }
+    }
+}
+
+impl Dispatch<WpPresentationFeedback, u64> for LayerState {
+    fn event(
+        state: &mut Self,
+        _proxy: &WpPresentationFeedback,
+        event: wp_presentation_feedback::Event,
+        seq: &u64,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wp_presentation_feedback::Event::Presented {
+                tv_sec_hi,
+                tv_sec_lo,
+                tv_nsec,
+                refresh,
+                ..
+            } => {
+                let seconds = (u64::from(tv_sec_hi) << 32) | u64::from(tv_sec_lo);
+                state.presented.push(Presented {
+                    at_micros: seconds * 1_000_000 + u64::from(tv_nsec) / 1_000,
+                    refresh_nanos: refresh,
+                    seq: *seq,
+                });
+            }
+            // The frame was never shown — superseded by a later one, or the
+            // surface went off screen. Said out loud rather than counted by its
+            // absence: "no presentations at all" and "every presentation
+            // discarded" are different faults and were indistinguishable while
+            // this arm was empty.
+            wp_presentation_feedback::Event::Discarded => {
+                eprintln!("obscur-shell-layer: frame {seq} was never shown");
+            }
+            _ => {}
+        }
     }
 }
 

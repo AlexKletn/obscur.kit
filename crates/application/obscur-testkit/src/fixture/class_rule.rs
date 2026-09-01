@@ -70,10 +70,18 @@ impl ClassRule {
     #[doc = include_str!("class_rule.doc/scrollable.md")]
     #[must_use]
     pub fn scrollable(self) -> Self {
-        self.declaring(vec![BlockDeclaration::normal(
-            PropertyId::Overflow,
-            PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO),
-        )])
+        // What `overflow: auto` compiles to: the shorthand is expanded into the
+        // two axis longhands, and a fixture states what a sheet would.
+        self.declaring(vec![
+            BlockDeclaration::normal(
+                PropertyId::OverflowX,
+                PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO),
+            ),
+            BlockDeclaration::normal(
+                PropertyId::OverflowY,
+                PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO),
+            ),
+        ])
     }
 
     #[doc = include_str!("class_rule.doc/declaring.md")]

@@ -4,7 +4,7 @@ use crate::cascade::{Cascade, CascadePriority, Declaration, ImportantFlag, Resol
 use crate::matching::{MediaEnvironment, Stylesheet};
 use crate::property::PropertyValue;
 use crate::selector::{MatchElement, SelectorMatcher};
-use obscur_identity::InternedSymbol;
+use obscur_identity::{FastMap, InternedSymbol};
 use std::collections::HashMap;
 
 #[doc = include_str!("style_matcher.doc/StyleMatcher.md")]
@@ -77,8 +77,9 @@ impl StyleMatcher {
         sheets: &[Stylesheet],
         element: &E,
         environment: &MediaEnvironment,
-    ) -> HashMap<InternedSymbol, PropertyValue> {
-        let mut winners: HashMap<InternedSymbol, (CascadePriority, PropertyValue)> = HashMap::new();
+    ) -> FastMap<InternedSymbol, PropertyValue> {
+        let mut winners: FastMap<InternedSymbol, (CascadePriority, PropertyValue)> =
+            HashMap::default();
         let mut source_order: u32 = 0;
 
         for sheet in sheets {

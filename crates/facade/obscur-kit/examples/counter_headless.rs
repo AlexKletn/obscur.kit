@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use obscur_kit::bootstrap::KitBootstrap;
-use obscur_kit::css::compiler::{CompiledStylesheet, StylesheetCompiler};
+use obscur_kit::css::compiler::{CompiledStylesheet, StylesheetCompiler, lower_custom_value};
 use obscur_kit::css::error::UnsupportedCssFeature;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
@@ -62,6 +62,14 @@ fn main() {
     // `render_styled` runs reconcile -> selector match -> style -> layout ->
     // scene, so the `.counter` rule paints the tagged container.
     let mut host = KitBootstrap::new().with_runtime_id(1).headless_host();
+    // `--accent` reaches the runtime as the TEXT it was declared with, because a
+    // custom property has no grammar until a `var()` puts it on a property. This
+    // host wires its own sheets rather than going through `CssPipeline`, so it
+    // hands the runtime the grammar itself — without it `color: var(--accent)`
+    // is invalid at computed-value time and the value paints in the inherited
+    // colour.
+    host.runtime_mut()
+        .set_custom_value_parser(std::rc::Rc::new(lower_custom_value));
     let sheets = std::slice::from_ref(&compiled.matchable);
 
     let first = host.render_styled(&view, sheets);

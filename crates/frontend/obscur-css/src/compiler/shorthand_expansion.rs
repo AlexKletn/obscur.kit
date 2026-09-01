@@ -3,7 +3,7 @@
 use super::grid_placement::grid_line_edge;
 use super::property_compiler::{CompiledDeclaration, lower_for_property, value_unsupported_kind};
 use super::stylesheet_compiler::CssSymbolInterner;
-use super::value_lowering::{css_wide_keyword, lower_component};
+use super::value_lowering::{css_wide_keyword, custom_ref, lower_component};
 use crate::error::UnsupportedCssFeature;
 use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
@@ -124,6 +124,14 @@ pub(super) fn place_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyI
     } else {
         None
     }
+}
+
+#[doc = include_str!("shorthand_expansion.doc/axis_pair_shorthand_sides.md")]
+pub(super) fn axis_pair_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
+    // `overflow: <x> <y>` (css-overflow-3 §3): the inline axis is stated first,
+    // and one value sets both.
+    name.eq_ignore_ascii_case("overflow")
+        .then_some((PropertyId::OverflowX, PropertyId::OverflowY))
 }
 
 #[doc = include_str!("shorthand_expansion.doc/logical_pair_shorthand_sides.md")]
@@ -458,6 +466,13 @@ pub(super) fn expand_grid_area_shorthand(
 
 #[doc = include_str!("shorthand_expansion.doc/box_side_length.md")]
 fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Option<PropertyValue> {
+    // A `var()` in one side is carried, not judged: the length it stands for
+    // does not exist until the cascade has run, and rejecting it here degrades
+    // the WHOLE declaration, so `border-radius: var(--r)` left four square
+    // corners and `margin: 0 var(--gap)` lost the zero as well as the gap.
+    if let Some(reference) = custom_ref(value) {
+        return Some(reference);
+    }
     if let ParsedValue::Number(n) = value
         && *n == 0.0
     {
@@ -482,9 +497,32 @@ mod tests {
 
     use crate::compiler::CompiledDeclaration;
 
+    use obscur_identity::InternedSymbol;
     use obscur_style::property::{
         GridLineValue, Length, PropertyId, PropertyValue, layout_keyword,
     };
+
+    #[test]
+    fn a_var_in_one_side_leaves_the_other_sides_standing() {
+        // Consumer audit 2-C: one unresolvable component used to degrade the
+        // WHOLE declaration, so the literal zero was lost along with the gap.
+        let gap = PropertyValue::CustomRef(InternedSymbol::named("--k-gap"));
+        assert_eq!(
+            pairs(&compile_all("margin: 0 var(--k-gap)")),
+            vec![
+                (
+                    PropertyId::MarginTop,
+                    PropertyValue::Length(Length::px(0.0))
+                ),
+                (PropertyId::MarginRight, gap.clone()),
+                (
+                    PropertyId::MarginBottom,
+                    PropertyValue::Length(Length::px(0.0))
+                ),
+                (PropertyId::MarginLeft, gap),
+            ]
+        );
+    }
 
     /// A math function is a `<length>` (CSS Values 4 §10.1), so a box shorthand
     /// takes one. It used to reject the component, which does not degrade one
@@ -793,6 +831,82 @@ mod tests {
                     PropertyId::JustifyContent,
                     PropertyValue::Keyword(layout_keyword::JUSTIFY_END)
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn overflow_shorthand_expands_to_both_axes_and_the_longhands_stand_alone() {
+        // `overflow: <x> <y>`, inline axis first (css-overflow-3 §3).
+        let two = compile_all("overflow: hidden auto");
+        let ids: Vec<_> = two
+            .iter()
+            .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                (
+                    PropertyId::OverflowX,
+                    PropertyValue::Keyword(layout_keyword::OVERFLOW_HIDDEN)
+                ),
+                (
+                    PropertyId::OverflowY,
+                    PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO)
+                ),
+            ]
+        );
+
+        // One value sets both axes.
+        let one = compile_all("overflow: auto");
+        assert_eq!(
+            one.iter()
+                .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    PropertyId::OverflowX,
+                    PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO)
+                ),
+                (
+                    PropertyId::OverflowY,
+                    PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO)
+                ),
+            ]
+        );
+
+        // And a lone axis longhand compiles to that axis and nothing else — the
+        // declaration an author writes to scroll one direction, which used to
+        // resolve to no property at all and be dropped as unsupported.
+        let axis = compile_all("overflow-y: auto");
+        assert_eq!(
+            axis.iter()
+                .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+                .collect::<Vec<_>>(),
+            vec![(
+                PropertyId::OverflowY,
+                PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO)
+            )]
+        );
+    }
+
+    #[test]
+    fn overflow_as_one_var_reference_reaches_both_axes() {
+        // The case nobody had pinned when `overflow` became a pair shorthand.
+        // A value that is one `var()` is carried, not judged — so it lands on
+        // BOTH axes, and each axis makes its own computed-value-time judgement
+        // once the cascade knows what the name stands for. Sinking it here
+        // instead would be the 2-C defect again, one shorthand further along.
+        let decls = compile_all("overflow: var(--k-scroll)");
+        let scroll = PropertyValue::CustomRef(InternedSymbol::named("--k-scroll"));
+        assert_eq!(
+            decls
+                .iter()
+                .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (PropertyId::OverflowX, scroll.clone()),
+                (PropertyId::OverflowY, scroll),
             ]
         );
     }

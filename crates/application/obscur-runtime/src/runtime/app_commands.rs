@@ -1,10 +1,9 @@
 #![doc = include_str!("app_commands.doc/_module.md")]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
-use obscur_identity::InternedSymbol;
+use obscur_identity::{FastMap, InternedSymbol};
 use obscur_interaction::event::UiEvent;
 
 use super::{CommandHandler, IntoCommandHandler};
@@ -12,7 +11,7 @@ use super::{CommandHandler, IntoCommandHandler};
 #[doc = include_str!("app_commands.doc/AppCommands.md")]
 #[derive(Clone, Default)]
 pub struct AppCommands {
-    handlers: Rc<RefCell<HashMap<InternedSymbol, CommandHandler>>>,
+    handlers: Rc<RefCell<FastMap<InternedSymbol, CommandHandler>>>,
 }
 
 impl AppCommands {

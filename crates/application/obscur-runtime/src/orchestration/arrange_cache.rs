@@ -1,9 +1,9 @@
 #![doc = include_str!("arrange_cache.doc/_module.md")]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use obscur_geometry::{BoxConstraints, Point, Rect};
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_tree::tree::RetainedTree;
 
 use super::layout_coordinator::LayoutBoxes;
@@ -59,7 +59,7 @@ impl ArrangeKey {
 #[derive(Debug, Default)]
 pub struct ArrangeCache {
     #[doc = include_str!("arrange_cache.doc/keys.md")]
-    keys: std::cell::RefCell<HashMap<NodeId, ArrangeKey>>,
+    keys: std::cell::RefCell<FastMap<NodeId, ArrangeKey>>,
     #[doc = include_str!("arrange_cache.doc/retained.md")]
     retained: std::cell::RefCell<LayoutBoxes>,
     #[doc = include_str!("arrange_cache.doc/arranged.md")]
@@ -91,7 +91,7 @@ impl ArrangeCache {
     }
 
     #[doc = include_str!("arrange_cache.doc/evict.md")]
-    pub fn evict(&self, nodes: &HashSet<NodeId>) {
+    pub fn evict(&self, nodes: &FastSet<NodeId>) {
         self.keys
             .borrow_mut()
             .retain(|node, _| !nodes.contains(node));
@@ -115,7 +115,7 @@ impl ArrangeCache {
             return false;
         }
         // Cycle-safe like every other walk here: `visited` emits each node once.
-        let mut visited: HashSet<NodeId> = HashSet::new();
+        let mut visited: FastSet<NodeId> = HashSet::default();
         let mut stack: Vec<NodeId> = vec![node];
         while let Some(current) = stack.pop() {
             if !visited.insert(current) {

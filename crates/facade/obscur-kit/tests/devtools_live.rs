@@ -46,7 +46,7 @@ struct StepProps {
 impl FromProps for StepProps {
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
         Ok(Self {
-            step: decode_required(props, step())?,
+            step: decode_required(props, step(), "step")?,
         })
     }
 }

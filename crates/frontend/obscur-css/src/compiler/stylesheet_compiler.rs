@@ -41,8 +41,15 @@ impl CssSymbolInterner {
         if let Some(&symbol) = self.lookup.get(text) {
             return symbol;
         }
-        let raw = u32::try_from(self.reverse.len()).unwrap_or(u32::MAX);
-        let symbol = InternedSymbol::from_raw(raw);
+        // `from_index`, never `from_raw`: this table numbers from ZERO, and a
+        // raw zero-based index is squarely inside the range the reserved
+        // symbols occupy — `layout_keyword::OVERFLOW_HIDDEN` is `0x0000_1E02`,
+        // so the 7682nd word a sheet interned used to come out EQUAL to it,
+        // and `overflow-x: sideways` was then read as `hidden` and clipped.
+        // `from_index` lifts the index into the high namespace the way `named`
+        // does, which makes the two ranges disjoint by construction.
+        let index = u32::try_from(self.reverse.len()).unwrap_or(u32::MAX);
+        let symbol = InternedSymbol::from_index(index);
         let boxed: Box<str> = text.into();
         self.reverse.push(boxed.clone());
         self.lookup.insert(boxed, symbol);
@@ -52,8 +59,9 @@ impl CssSymbolInterner {
     #[doc = include_str!("stylesheet_compiler.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, symbol: InternedSymbol) -> Option<&str> {
-        usize::try_from(symbol.raw())
-            .ok()
+        symbol
+            .index()
+            .and_then(|index| usize::try_from(index).ok())
             .and_then(|index| self.reverse.get(index))
             .map(|boxed| &**boxed)
     }
@@ -423,7 +431,7 @@ mod tests {
     use super::*;
     use crate::error::UnsupportedFeatureKind;
     use crate::source::CssSource;
-    use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor};
+    use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor, layout_keyword};
     use obscur_style::selector::SelectorSpecificity;
 
     fn compile(text: &str) -> CompiledStylesheet {
@@ -443,6 +451,63 @@ mod tests {
         assert_eq!(interner.resolve(a), Some("flex"));
         assert_eq!(interner.resolve(c), Some("block"));
         assert_eq!(interner.resolve(InternedSymbol::from_raw(99)), None);
+    }
+
+    #[test]
+    fn no_sheet_local_symbol_can_alias_a_reserved_layout_keyword() {
+        // The two producers of `InternedSymbol` values that meet in a
+        // `PropertyValue::Keyword` are this interner and `layout_keyword`'s
+        // hand-assigned constants. Reserved layout keywords run from
+        // `DISPLAY_BLOCK` (0x1001) to `POINTER_EVENTS_NONE` (0x2702), so a
+        // sweep past 0x2702 walks every id that could ever collide — and
+        // `name_of` is the reserved table itself, so this fails if EITHER side
+        // moves: if the interner goes back to raw indices, or if a reserved
+        // keyword is renumbered into the high namespace.
+        let mut interner = CssSymbolInterner::new();
+        for index in 0..0x3000u32 {
+            let symbol = interner.intern(&format!("kw{index}"));
+            assert_eq!(
+                layout_keyword::name_of(symbol),
+                None,
+                "sheet-local symbol {index} aliased a reserved layout keyword"
+            );
+            assert_ne!(
+                symbol.raw() & 0x8000_0000,
+                0,
+                "sheet-local symbol {index} landed in the reserved (top-bit-clear) range"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_keyword_at_a_reserved_ordinal_is_not_read_as_that_keyword() {
+        // The defect end to end. `width` accepts the intrinsic sizing keywords,
+        // which are reserved symbols (`SIZING_FIT_CONTENT` is 0x2403), and any
+        // other word falls through to the interner. When the interner numbered
+        // from zero, the 0x2403rd word it minted came out EQUAL to
+        // `SIZING_FIT_CONTENT`, and `length_resolution` sizes that box to its
+        // content instead of leaving the invalid declaration inert.
+        use std::fmt::Write;
+
+        let ordinal = layout_keyword::SIZING_FIT_CONTENT.raw();
+        let mut css = String::from("a {");
+        for i in 0..ordinal {
+            let _ = write!(css, " width: kw{i};");
+        }
+        css.push_str(" width: sideways; }");
+        let sheet = compile(&css);
+        let last = sheet
+            .declarations
+            .last()
+            .expect("the trailing `width` declaration compiled");
+        assert_ne!(
+            last.value(),
+            &PropertyValue::Keyword(layout_keyword::SIZING_FIT_CONTENT)
+        );
+        let PropertyValue::Keyword(symbol) = last.value() else {
+            panic!("expected a keyword, got {:?}", last.value());
+        };
+        assert_eq!(sheet.symbols.resolve(*symbol), Some("sideways"));
     }
 
     #[test]
@@ -713,9 +778,11 @@ mod tests {
             root.custom_properties()[0].name(),
             InternedSymbol::named("--brand")
         );
+        // The declared TEXT: what `#ff0000` means is `color`'s business, not
+        // the declaration's (CSS Variables 1 §2).
         assert_eq!(
             root.custom_properties()[0].value(),
-            &PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+            &PropertyValue::RawTokens("#ff0000".into())
         );
         // The rule that only READS it declares none.
         assert!(sheet.matchable.rules()[1].custom_properties().is_empty());
@@ -877,10 +944,10 @@ mod tests {
             .find(|d| d.property() == PropertyId::Width)
             .unwrap();
         assert_eq!(*width.value(), PropertyValue::Length(Length::Percent(50.0)));
-        // The `--brand` custom property lowered to a red colour.
+        // The `--brand` custom property kept the text it was declared with.
         assert_eq!(
             sheet.custom_properties[0].value(),
-            &PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+            &PropertyValue::RawTokens("#ff0000".into())
         );
     }
 }

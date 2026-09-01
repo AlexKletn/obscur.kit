@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 obscur-system = { workspace = true }
 obscur-capability = { workspace = true }
+# `Color` — a palette read off the desktop arrives in the kit's own colour type.
+obscur-scene = { workspace = true }
 
 [lints]
 workspace = true

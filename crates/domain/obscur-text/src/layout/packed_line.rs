@@ -16,6 +16,9 @@ pub(super) struct PackedLine {
     pub(super) mandatory_break_after: bool,
 }
 
+#[doc = include_str!("packed_line.doc/FIT_EPSILON.md")]
+const FIT_EPSILON: f32 = 1e-5;
+
 impl PackedLine {
     #[doc = include_str!("packed_line.doc/pack.md")]
     pub(super) fn pack(
@@ -58,7 +61,7 @@ impl PackedLine {
             // to fill the remaining space (§5.2), handled by the emergency step.
             if !current.is_empty()
                 && !break_all
-                && (current_width + word.width - word.trailing_ws) > max_width
+                && overflows(current_width + word.width - word.trailing_ws, max_width)
             {
                 lines.push(Self {
                     glyphs: std::mem::take(&mut current),
@@ -72,7 +75,7 @@ impl PackedLine {
             // The word alone is wider than the space left on the (now possibly
             // fresh) line: try to break it at the last fitting opportunity.
             let remaining = max_width - current_width;
-            if word.width > remaining
+            if overflows(word.width, remaining)
                 && let Some(split) = word.split_at_hyphen(remaining, hyphen_glyph, offsets)
             {
                 current.extend_from_slice(&split.head);
@@ -91,7 +94,7 @@ impl PackedLine {
             // Emergency (grapheme-cluster) break (CSS Text 3 §5.2). No fitting
             // hyphenation opportunity exists; if emergency breaking is enabled and
             // the word overflows the remaining space, force a grapheme break.
-            if emergency && (word.width - word.trailing_ws) > remaining {
+            if emergency && overflows(word.width - word.trailing_ws, remaining) {
                 // `break-all` breaks at any boundary; `overflow-wrap` only when the
                 // word cannot fit alone on a full line (a true last resort).
                 let may_break = break_all || (word.width - word.trailing_ws) > max_width;
@@ -245,6 +248,11 @@ fn trim_trailing_tracking(
         }
         glyphs[last - 1].glyph = tagged.glyph.with_x_advance(advance);
     }
+}
+
+#[doc = include_str!("packed_line.doc/overflows.md")]
+fn overflows(width: f32, max_width: f32) -> bool {
+    width > max_width + max_width.abs().max(1.0) * FIT_EPSILON
 }
 
 #[cfg(test)]

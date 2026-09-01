@@ -14,6 +14,12 @@ use obscur_kit::identity::{ComponentId, NodeId, RuntimeId};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::property::PropertyId;
 use obscur_kit::style::selector::PseudoState;
+use obscur_kit::ui_ir::name_binding::attr_symbol;
+use obscur_kit::ui_macros::Contract;
+use obscur_kit::view::component::{
+    Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
+    ComponentRegistration, ComponentVersion, ErasedComponent, InstanceId,
+};
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 #[doc = include_str!("incremental_restyle.doc/StyleCounts.md")]
@@ -313,3 +319,112 @@ fn a_stylesheet_change_still_restyles_everything() {
     );
     let _ = sheets;
 }
+
+// ---- A tree made of components, which is the shape a real application has ----
+
+#[doc = include_str!("incremental_restyle.doc/KeyProps.md")]
+#[derive(Contract)]
+#[contract(name = "RestyleKey")]
+struct KeyProps {
+    #[doc = include_str!("incremental_restyle.doc/pressed.md")]
+    pressed: i64,
+}
+
+#[doc = include_str!("incremental_restyle.doc/Key.md")]
+struct Key;
+
+impl Component for Key {
+    type Props = KeyProps;
+
+    fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
+        let face = ViewNode::element(ComponentId::from_raw(900))
+            .with_prop(ViewProperty::new(
+                CLASS,
+                ViewValue::Text(if props.pressed == 0 { "row" } else { "row btn" }.into()),
+            ))
+            .with_children(ViewFragment::from_nodes(vec![ViewNode::text("k")]));
+        View::from_fragment(ViewFragment::from_nodes(vec![face]))
+    }
+}
+
+#[doc = include_str!("incremental_restyle.doc/KeyFactory.md")]
+#[derive(Debug)]
+struct KeyFactory;
+
+impl ComponentFactory for KeyFactory {
+    fn component_id(&self) -> ComponentId {
+        KeyProps::contract().id
+    }
+    fn contract(&self) -> ComponentContract {
+        KeyProps::contract()
+    }
+    fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
+        ComponentInstance::new(instance, KeyProps::contract().id)
+    }
+    fn create_component(&self) -> Box<dyn ErasedComponent> {
+        Box::new(Key)
+    }
+}
+
+#[doc = include_str!("incremental_restyle.doc/keyboard.md")]
+fn keyboard(pressed: usize) -> View {
+    let nodes = (0..NODES)
+        .map(|i| {
+            ViewNode::element(KeyProps::contract().id).with_prop(ViewProperty::new(
+                attr_symbol("pressed"),
+                ViewValue::Int(i64::from(i == pressed)),
+            ))
+        })
+        .collect();
+    View::from_fragment(ViewFragment::from_nodes(nodes))
+}
+
+#[test]
+fn pressing_one_component_backed_key_does_not_restyle_the_whole_tree() {
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    let counts = Rc::new(RefCell::new(StyleCounts::default()));
+    runtime.set_telemetry_sink(Box::new(CountingSink(Rc::clone(&counts))));
+    runtime
+        .register_component(ComponentRegistration::new(
+            Box::new(KeyFactory),
+            ComponentVersion::INITIAL,
+        ))
+        .expect("the key component registers");
+
+    let mut css = CssPipeline::new();
+    css.install(&mut runtime, &[CssSource::anonymous(STYLESHEET)]);
+    let sheets = css.sheets().to_vec();
+
+    // `NODES` presses nothing, so this is the settled tree.
+    let settled = keyboard(NODES);
+    let _ = runtime.render_now(&settled, &sheets);
+    while runtime.run_due_frame(&settled, &sheets).is_some() {}
+    let total = runtime.tree().iter().count() as u64;
+    counts.borrow_mut().resolved.clear();
+
+    // The LAST key, so nothing follows it and the dirty set is honestly one key:
+    // a restyle root takes the node's subtree and what comes after it.
+    let pressed = keyboard(NODES - 1);
+    let _ = runtime.render_now(&pressed, &sheets);
+    while runtime.run_due_frame(&pressed, &sheets).is_some() {}
+
+    let resolved = counts
+        .borrow()
+        .resolved
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or_default();
+    assert!(
+        resolved > 0,
+        "the press has to restyle something, or this test measures nothing"
+    );
+    assert!(
+        resolved * 3 < total,
+        "one component re-rendered, so the restyle must stay inside its subtree: \
+         resolved {resolved} of {total}. A component sub-reconcile used to answer \
+         `roots = None`, which made every interactive frame of an application \
+         built out of components pay the full pass."
+    );
+}
+

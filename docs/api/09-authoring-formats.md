@@ -398,6 +398,42 @@ the body's `{item.name}` is an ordinary path. §2.11 makes a `<For>`'s `key`
 mandatory, and a keyless one is a diagnostic on the file path only — `okui!` lowers
 it silently and every row renders unkeyed.
 
+**`key` takes a path, not a call.** `key={row.id}` and `key={row.meta.id}` are
+accepted; `key={row.keys.len()}` is refused, because an identity that runs code
+is an identity that can differ between two evaluations of the same row.
+
+The rule is not the key's own — it is §2.10 applied to every expression, and the
+edge it cuts is structural: **a method called on a value reached through a field
+is refused**, because `row.keys.len()` and `services.http.get(url)` are the same
+shape and nothing syntactic separates them. A method called directly on a
+binding is still allowed (`maybe.is_some()`, `label.to_uppercase()`), and a
+method that mutates in place (`push`, `sort`, `clear`, …) is refused wherever it
+appears. The diagnostic names the call and the rule:
+
+```
+error: `len` is called on a value reached through a field, a shape an expression
+       may not use: it cannot be told apart from the direct service access §2.10
+       forbids. Compute the value where the view model is built, and read that
+       field here instead.
+```
+
+That rule shapes the model an application hands the markup, and the consequence
+is worth stating: **everything a loop needs must already be a field.** Derived
+per-row values — a class string, a label, a width — are computed before the
+markup is reached, and the view model arrives flat.
+
+**A body is markup, not a node.** `{binding}` in body position interpolates
+*text*; there is no spelling that splices an already-built `ViewNode`. So a
+`<For>` whose rows are assembled by a Rust function cannot call it — the
+function becomes a component and the tag invokes it, which composes and takes
+expression props:
+
+```rust
+<For each={row.keys} as={key} key={key.id}>
+    <Key key-id={key.id} label={key.label}/>
+</For>
+```
+
 `<VirtualFor>` emits **no** loop. It is a §4.9 performance contract, so it lowers
 to a single virtual-collection marker carrying its row template, which the
 runtime realizes into a viewport-bounded window. Its template is emitted **once

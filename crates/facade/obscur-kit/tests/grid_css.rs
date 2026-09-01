@@ -373,3 +373,89 @@ fn align_content_end_pushes_the_row_block_to_the_bottom() {
     approx(ay, 100.0, "a.y (rows pushed to the bottom: 200 - 100)");
     approx(by, 150.0, "b.y (second row, after the pushed first)");
 }
+
+// --- `docs/layer-consumer-audit.md` 2-I: leaving room around a thing in a cell.
+
+// 14. The audit's first way, and the one an author reaches for: padding on the
+//     grid container. Under `box-sizing: border-box` the shell keeps the 60×60 it
+//     was offered and the padding comes out of the track, so the item sits two
+//     pixels inside all four edges — 56×56 at (2, 2).
+//
+//     The `y`/`height` half is what did not work. With no row template the single
+//     implicit row is `auto`, and `specs/w3c/css-grid-2.txt:4180` stretches an
+//     `auto` row to a container with a definite height; the item was nonetheless
+//     handed back its own measured height, so a component came out as tall as one
+//     line of its own text inside a shell that had already made room for it.
+#[test]
+fn a_padded_border_box_grid_insets_the_item_on_both_axes() {
+    let (rt, k) = drive(
+        ".grid{display:grid;width:100%;height:100%;box-sizing:border-box;\
+         padding:2px;grid-template-columns:1fr}",
+        1,
+        60.0,
+        60.0,
+    );
+    let (cx, cy, cw, ch) = geom(&rt, container(&rt));
+    approx(cw, 60.0, "shell keeps the width it was offered");
+    approx(ch, 60.0, "shell keeps the height it was offered");
+    approx(cx, 0.0, "shell.x");
+    approx(cy, 0.0, "shell.y");
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 2.0, "a.x (the left padding)");
+    approx(ay, 2.0, "a.y (the top padding)");
+    approx(aw, 56.0, "a.width (60 less both paddings)");
+    approx(
+        ah,
+        56.0,
+        "a.height — the stretched `auto` row, not the item's own",
+    );
+}
+
+// 15. The same shell under the DEFAULT `content-box`, where `width: 100%` is 100%
+//     of the content: the border box is the offer plus the padding, and the shell
+//     overflows its parent by two pixels on each edge exactly as it would in a
+//     browser. The item still fills its cell and no longer reaches past the box
+//     its own container reports — grid used to clamp the report to 60 while
+//     sizing and placing the track at 60 from x = 2.
+#[test]
+fn a_content_box_grid_reports_the_padding_it_added() {
+    let (rt, k) = drive(
+        ".grid{display:grid;width:100%;height:100%;padding:2px;\
+         grid-template-columns:1fr}",
+        1,
+        60.0,
+        60.0,
+    );
+    let (_, _, cw, ch) = geom(&rt, container(&rt));
+    approx(cw, 64.0, "shell border box = 60 content + 2 + 2");
+    approx(ch, 64.0, "…on the block axis too");
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 2.0, "a.x");
+    approx(ay, 2.0, "a.y");
+    approx(
+        aw,
+        60.0,
+        "a.width (its track), inside the 64 the shell reports",
+    );
+    approx(ah, 60.0, "a.height (its stretched row)");
+}
+
+// 16. The audit's second way: state the margin on the thing in the cell. Grid
+//     dropped a grid item's margins outright, so `margin: 2px` moved nothing and
+//     the item's margin box hung two pixels outside the grid on every side
+//     (`specs/w3c/css-grid-2.txt:3323`).
+#[test]
+fn a_margin_on_a_grid_item_leaves_room_on_all_four_sides() {
+    let (rt, k) = drive(
+        ".grid{display:grid;width:60px;height:60px;grid-template-columns:1fr} \
+         .a{margin:2px}",
+        1,
+        200.0,
+        200.0,
+    );
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 2.0, "a.x (the left margin)");
+    approx(ay, 2.0, "a.y (the top margin)");
+    approx(aw, 56.0, "a.width (the cell less both margins)");
+    approx(ah, 56.0, "a.height (the cell less both margins)");
+}

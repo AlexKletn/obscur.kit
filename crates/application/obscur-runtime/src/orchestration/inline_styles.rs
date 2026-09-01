@@ -169,6 +169,7 @@ mod tests {
         Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSink, DiagnosticSubsystem,
         NullDiagnosticSink,
     };
+    use obscur_identity::FastMap;
     use obscur_style::cascade::{
         CascadeOrigin, CascadePriority, ImportantFlag, ResolvedDeclarations,
     };
@@ -421,7 +422,7 @@ mod tests {
         }));
 
         let mut inputs = StyleInputs::new();
-        let mut from_sheets = std::collections::HashMap::new();
+        let mut from_sheets = FastMap::default();
         from_sheets.insert(brand, value(1.0));
         from_sheets.insert(accent, value(9.0));
         inputs.set_custom(node, from_sheets);

@@ -1,7 +1,11 @@
 #![doc = include_str!("css_pipeline.doc/_module.md")]
 
+use std::rc::Rc;
+
 use obscur_css::cache::StylesheetCache;
-use obscur_css::compiler::{CompiledStylesheet, StylesheetCompiler, compile_inline_style};
+use obscur_css::compiler::{
+    CompiledStylesheet, StylesheetCompiler, compile_inline_style, lower_custom_value,
+};
 use obscur_css::error::{
     CssParseError, CssParseErrorKind, UnsupportedCssFeature, UnsupportedFeatureKind,
 };
@@ -70,6 +74,7 @@ impl CssPipeline {
         runtime.set_stylesheets(self.sheets.clone());
         runtime.set_css_motion(self.motion.clone());
         install_inline_style_compiler(runtime);
+        install_custom_value_parser(runtime);
     }
 
     #[doc = include_str!("css_pipeline.doc/sheets_2.md")]
@@ -134,6 +139,14 @@ fn install_inline_style_compiler(runtime: &mut UiRuntime) {
             .collect();
         InlineStyleOutcome::new(compiled.style).with_faults(faults)
     }));
+}
+
+#[doc = include_str!("css_pipeline.doc/install_custom_value_parser.md")]
+pub(super) fn install_custom_value_parser(runtime: &mut UiRuntime) {
+    if runtime.has_custom_value_parser() {
+        return;
+    }
+    runtime.set_custom_value_parser(Rc::new(lower_custom_value));
 }
 
 #[doc = include_str!("css_pipeline.doc/diagnostic_for_error.md")]

@@ -1,9 +1,7 @@
 #![doc = include_str!("style_phase.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_diagnostics::DiagnosticSink;
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
 use obscur_style::property::EnvironmentValues;
 use obscur_text::shaping::ParagraphShaper;
@@ -44,7 +42,7 @@ pub(crate) struct StylePhase<'a> {
     #[doc = include_str!("style_phase.doc/last_style.md")]
     last_style: &'a mut Option<StyleKey>,
     #[doc = include_str!("style_phase.doc/generated_content.md")]
-    generated_content: &'a mut HashMap<NodeId, GeneratedContent>,
+    generated_content: &'a mut FastMap<NodeId, GeneratedContent>,
     #[doc = include_str!("style_phase.doc/sheets.md")]
     sheets: &'a CascadeSheets,
     #[doc = include_str!("style_phase.doc/motion.md")]
@@ -74,7 +72,7 @@ impl<'a> StylePhase<'a> {
         inline: &'a mut InlineStyles,
         retained: &'a mut ComputedStyles,
         last_style: &'a mut Option<StyleKey>,
-        generated_content: &'a mut HashMap<NodeId, GeneratedContent>,
+        generated_content: &'a mut FastMap<NodeId, GeneratedContent>,
         sheets: &'a CascadeSheets,
         motion: &'a mut MotionDriver,
         telemetry: &'a mut FrameTelemetry,
@@ -212,6 +210,7 @@ impl<'a> StylePhase<'a> {
         //     computed style *before* layout/paint (spec §4.17 style →
         //     motion → paint). This now includes the CSS-started timelines.
         self.motion.apply_overlay(&mut computed, self.overlaid);
+        phase_clock.record_style_scope(resolved_count as u64, self.tree.len() as u64);
         let restyled = !computed.is_empty();
         // Telemetry: mark the style phase and count the styles this frame
         // actually resolved — NOT the size of the resulting map (§7.9). On the

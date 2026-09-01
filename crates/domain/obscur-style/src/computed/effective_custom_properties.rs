@@ -2,15 +2,15 @@
 
 use crate::computed::ComputedStyle;
 use crate::property::PropertyValue;
-use obscur_identity::InternedSymbol;
+use obscur_identity::{FastMap, FastSet, InternedSymbol};
 use std::collections::{HashMap, HashSet};
 
 #[doc = include_str!("effective_custom_properties.doc/effective_custom_properties.md")]
 pub(super) fn effective_custom_properties(
-    custom: &HashMap<InternedSymbol, PropertyValue>,
+    custom: &FastMap<InternedSymbol, PropertyValue>,
     parent: Option<&ComputedStyle>,
-) -> HashMap<InternedSymbol, PropertyValue> {
-    let mut effective: HashMap<InternedSymbol, PropertyValue> = HashMap::new();
+) -> FastMap<InternedSymbol, PropertyValue> {
+    let mut effective: FastMap<InternedSymbol, PropertyValue> = HashMap::default();
     if let Some(parent) = parent {
         for (name, value) in parent.custom_properties() {
             effective.insert(*name, value.clone());
@@ -25,10 +25,10 @@ pub(super) fn effective_custom_properties(
 #[doc = include_str!("effective_custom_properties.doc/substitute.md")]
 pub(super) fn substitute(
     value: &PropertyValue,
-    custom: &HashMap<InternedSymbol, PropertyValue>,
+    custom: &FastMap<InternedSymbol, PropertyValue>,
 ) -> PropertyValue {
     let mut current = value.clone();
-    let mut visited: HashSet<InternedSymbol> = HashSet::new();
+    let mut visited: FastSet<InternedSymbol> = HashSet::default();
     loop {
         match current {
             PropertyValue::CustomRef(name) => {

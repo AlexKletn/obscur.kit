@@ -424,10 +424,16 @@ impl FieldModel {
 
         let name_sym = Literal::u32_unsuffixed(name_symbol(&self.name));
         let symbol = quote! { ::obscur_kit::identity::InternedSymbol::from_raw(#name_sym) };
+        // The name in words, beside the symbol that replaced it. This is the
+        // only point in the whole path where the property still HAS a name: the
+        // symbol is an FNV hash with no reverse table, so a decode failure
+        // reported downstream could otherwise say only `#2147483911` — which is
+        // what made a hyphenated attribute cost an afternoon (audit 1-B).
+        let label = Literal::string(&self.name);
 
         if self.is_option {
             return quote! {
-                #ident: ::obscur_kit::view::component::decode_optional(props, #symbol)?,
+                #ident: ::obscur_kit::view::component::decode_optional(props, #symbol, #label)?,
             };
         }
         if self.attrs.default {
@@ -438,13 +444,13 @@ impl FieldModel {
                         ::core::default::Default::default()
                     }
                     ::core::option::Option::Some(value) => {
-                        ::obscur_kit::view::component::decode_value(value, #symbol)?
+                        ::obscur_kit::view::component::decode_value(value, #symbol, #label)?
                     }
                 },
             };
         }
         quote! {
-            #ident: ::obscur_kit::view::component::decode_required(props, #symbol)?,
+            #ident: ::obscur_kit::view::component::decode_required(props, #symbol, #label)?,
         }
     }
 

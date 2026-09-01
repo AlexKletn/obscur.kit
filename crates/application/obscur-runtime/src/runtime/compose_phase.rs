@@ -1,8 +1,6 @@
 #![doc = include_str!("compose_phase.doc/_module.md")]
 
-use std::collections::HashMap;
-
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::scene::Scene;
 use obscur_tree::tree::RetainedTree;
@@ -31,9 +29,9 @@ pub(crate) struct ComposePhase<'a> {
     #[doc = include_str!("compose_phase.doc/scroll.md")]
     scroll: &'a ScrollOffsets,
     #[doc = include_str!("compose_phase.doc/generated_content.md")]
-    generated_content: &'a HashMap<NodeId, GeneratedContent>,
+    generated_content: &'a FastMap<NodeId, GeneratedContent>,
     #[doc = include_str!("compose_phase.doc/canvases.md")]
-    canvases: &'a HashMap<NodeId, Vec<PaintCommand>>,
+    canvases: &'a FastMap<NodeId, Vec<PaintCommand>>,
     #[doc = include_str!("compose_phase.doc/motion.md")]
     motion: &'a MotionDriver,
     #[doc = include_str!("compose_phase.doc/inspector.md")]
@@ -56,8 +54,8 @@ impl<'a> ComposePhase<'a> {
         boxes: &'a LayoutBoxes,
         resources: &'a ResourceBridge,
         scroll: &'a ScrollOffsets,
-        generated_content: &'a HashMap<NodeId, GeneratedContent>,
-        canvases: &'a HashMap<NodeId, Vec<PaintCommand>>,
+        generated_content: &'a FastMap<NodeId, GeneratedContent>,
+        canvases: &'a FastMap<NodeId, Vec<PaintCommand>>,
         motion: &'a MotionDriver,
         inspector: &'a TreeInspector,
         surface: &'a SurfaceGeometry,
@@ -83,7 +81,7 @@ impl<'a> ComposePhase<'a> {
     pub(crate) fn run(
         &mut self,
         ctx: &FrameContext,
-        computed: &ComputedStyles,
+        computed: &mut ComputedStyles,
         editing: Option<EditingView<'_>>,
         hovered: Option<NodeId>,
         phase_clock: &FramePhaseClock,
@@ -103,17 +101,16 @@ impl<'a> ComposePhase<'a> {
         // frame's own.
         let scroll =
             ScrollTargets::new(self.tree, computed, self.boxes, self.scroll).paint(computed);
-        // Layer motion's group-compositing presentation values
-        // (`opacity`/`transform`) onto a throwaway copy of the computed styles
-        // for compose ONLY — they reach paint but must never be observable
-        // through `computed_style` (spec §4.17: motion is a separate
-        // subsystem). `None` means no such motion is active, so compose reads
-        // the computed styles untouched.
-        let presentation = self.motion.presentation_styles(computed);
-        let paint_styles = presentation.as_ref().unwrap_or(computed);
+        // Motion's group-compositing presentation values (`opacity`/`transform`)
+        // reach paint and must never be observable through `computed_style`
+        // (spec §4.17: motion is a separate subsystem). They are written into
+        // the real map for the length of the compose and taken out again — the
+        // throwaway copy this replaced was a deep clone of every node's style,
+        // paid on every frame of every animation to carry a handful of samples.
+        let undo = self.motion.apply_presentation(computed);
         let display_list = self.scene_composer.compose_with_images_scrolled(
             self.tree,
-            paint_styles,
+            computed,
             self.boxes,
             editing,
             self.resources.images(),
@@ -122,6 +119,9 @@ impl<'a> ComposePhase<'a> {
             self.generated_content,
             self.canvases,
         );
+        // Before anything else can read them, and before the early returns
+        // below: what `computed_style` answers must be what the cascade said.
+        MotionDriver::restore_presentation(computed, undo);
         // Inspect overlay (spec §7.6): when inspect mode is on, append a
         // highlight over the hovered node's border box on top of the scene.
         // A no-op (byte-identical) when inspect mode is off or nothing is

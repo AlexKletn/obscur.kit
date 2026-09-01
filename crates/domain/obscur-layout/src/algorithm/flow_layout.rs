@@ -185,22 +185,71 @@ impl LayoutAlgorithm for FlowLayout {
         // the basis; the same clamp runs again below with the intrinsic bounds
         // measured, and re-applying an already-applied numeric bound is inert.
         //
-        // [`None`] when `height` is `auto` (or a percentage against an indefinite
-        // basis): the block size is **indefinite**, and this deliberately does not
-        // try to invent one. That is the separate known gap — a percentage against
-        // an indefinite basis should compute to `auto` and here still resolves
-        // against the space available.
-        let definite_content_height = style.height.resolve(constraints.percent_height()).map(|h| {
-            let content = style.box_sizing.content_extent(h, bp_y).max(0.0);
-            clamp_content(
-                content,
-                style.min_height,
-                style.max_height,
-                constraints.percent_height(),
-                bp_y,
-                style.box_sizing,
-            )
-        });
+        // An `auto` `height` (or a percentage against an indefinite basis) is not
+        // the end of the question, because a box can be *given* a definite block
+        // size without authoring one. `or_else` is that case: a TIGHT block axis is
+        // an assignment, not an offer — the arrange pass hands every node the box
+        // its parent's algorithm already resolved for it, and a grid or flex item
+        // stretched to its area arrives here that way. css-sizing-3 §3 counts a
+        // stretch-fit size as definite, so the children's percentages resolve
+        // against it.
+        //
+        // Leaving that [`None`] is what made the toolkit's own component host
+        // swallow a size: a grid cell stretched the host to 56 tall, the host's own
+        // `height` stayed `auto`, and the component's `height: 100%` root behaved as
+        // auto and came back at one line of text (`docs/layer-consumer-audit.md`,
+        // 2-I). A LOOSE offer stays indefinite, which is the other half of the rule
+        // and the reason the two are told apart by `min == max` rather than by
+        // whether a number is finite.
+        //
+        // [`None`] survives for a genuinely indefinite axis, and this deliberately
+        // does not try to invent one there — a percentage against it should compute
+        // to `auto`, which is what the [`f32::INFINITY`] basis below spells.
+        let definite_content_height = style
+            .height
+            .resolve(constraints.percent_height())
+            .map(|h| {
+                let content = style.box_sizing.content_extent(h, bp_y).max(0.0);
+                clamp_content(
+                    content,
+                    style.min_height,
+                    style.max_height,
+                    constraints.percent_height(),
+                    bp_y,
+                    style.box_sizing,
+                )
+            })
+            .or_else(|| {
+                (constraints.min.height >= constraints.max.height
+                    && constraints.max.height.is_finite())
+                .then(|| {
+                    // Clamped like the authored branch above, and for the same
+                    // reason: what a child's percentage resolves against is this
+                    // box's USED content height, not the raw number it was handed.
+                    // Nothing upstream has already done it — a grid stretches an
+                    // item to its area (`grid_layout.rs`, both-axes-`Stretch`) and
+                    // `Inset::resolve_absolute_box` stretches a box pinned by
+                    // `top` + `bottom`, and neither consults the box's own
+                    // `min-height`/`max-height` before assigning. Re-clamping a
+                    // height that was already clamped (the ordinary arrange case,
+                    // where the tight box is the one this very code measured) is
+                    // inert, because a min/max clamp is idempotent.
+                    //
+                    // Left unclamped, a box could state a containing block it does
+                    // not have: assigned a zero block axis with `min-height: 40px`,
+                    // it reports 40 tall — a zero tight axis is a degenerate offer
+                    // that `constrain_allowing_overflow` declines to enforce — and
+                    // its `height: 100%` child would have resolved against the 0.
+                    clamp_content(
+                        (constraints.max.height - bp_y).max(0.0),
+                        style.min_height,
+                        style.max_height,
+                        constraints.percent_height(),
+                        bp_y,
+                        style.box_sizing,
+                    )
+                })
+            });
         // The percentage basis handed to every child: this box's content box.
         //
         // # Why this is not `remaining_height`
@@ -654,7 +703,7 @@ fn layout_vertical(
 #[cfg(test)]
 mod tests {
     use super::FlowLayout;
-    use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
+    use crate::algorithm::{ChildMeasurer, FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
     use crate::model::{Dimension, LayoutStyle, MarginEdges, WritingMode};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
@@ -1472,5 +1521,122 @@ mod tests {
         assert_eq!(boxes[0].size(), Size::new(240.0, 240.0));
         assert_eq!(boxes[1].origin(), Point::new(240.0, 0.0));
         assert_eq!(boxes[1].size(), Size::new(240.0, 240.0));
+    }
+
+    /// A child that is itself a flow box, so the containing block its parent
+    /// states reaches something that resolves a percentage against it.
+    struct Nested(LayoutStyle);
+
+    impl ChildMeasurer for Nested {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            FlowLayout
+                .layout(
+                    &self.0,
+                    &[],
+                    constraints,
+                    &mut FixedChildMeasurer::default(),
+                )
+                .size()
+        }
+    }
+
+    #[test]
+    fn a_block_handed_its_height_is_a_definite_containing_block() {
+        // The arrange pass gives every node a TIGHT box — the size its parent's
+        // algorithm already resolved for it. For a box whose own `height` is
+        // `auto` that assigned size is still definite: `specs/w3c/css-sizing-3.txt`
+        // §3 counts a stretch-fit size as definite, so a `height: 100%` child
+        // resolves against it rather than behaving as auto.
+        //
+        // It did not, and a component's root was the visible case: the toolkit puts
+        // a host node between a grid cell and the component, the cell stretched
+        // that host to 56 tall, the host's own `height` stayed `auto`, and so the
+        // component's `height: 100%` root came back at the height of one line of
+        // text (`docs/layer-consumer-audit.md`, 2-I).
+        let full = LayoutStyle {
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &LayoutStyle::default(),
+            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            BoxConstraints::tight(Size::new(56.0, 56.0)),
+            &mut Nested(full),
+        );
+        assert_eq!(out.child_boxes()[0].size().height, 56.0);
+    }
+
+    #[test]
+    fn an_offered_height_is_still_indefinite() {
+        // The counterpart, and the line between them: a LOOSE offer is not an
+        // assignment, so `height: 100%` under it still behaves as auto and the
+        // child stays at its content height. Only a tight axis is a decision the
+        // parent already made.
+        let full = LayoutStyle {
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &LayoutStyle::default(),
+            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            BoxConstraints::loose(Size::new(56.0, 56.0)),
+            &mut Nested(full),
+        );
+        assert_eq!(out.child_boxes()[0].size().height, 0.0);
+    }
+
+    #[test]
+    fn an_assigned_height_is_clamped_before_it_is_stated_as_the_containing_block() {
+        // What a percentage resolves against is the box's USED content height, and
+        // an assignment is not exempt from its own `min-height`/`max-height` — the
+        // authored branch clamps, and nothing upstream clamps for the assigned one
+        // (a grid stretches an item to its area, and a box pinned by `top` +
+        // `bottom` is stretched by `Inset::resolve_absolute_box`; neither reads the
+        // item's own bounds).
+        //
+        // A zero tight axis is the case where saying so is unarguable, because the
+        // box's own report disagrees with what it told its children: a zero-height
+        // assignment is a degenerate offer that `constrain_allowing_overflow`
+        // declines to enforce, so `min-height: 40px` makes this box 40 tall — while
+        // the unclamped assignment stated a containing block of 0, and the
+        // `height: 100%` child inside a 40-tall box came back at nothing.
+        let full = LayoutStyle {
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let host = LayoutStyle {
+            min_height: Dimension::Px(40.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &host,
+            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            BoxConstraints::tight(Size::new(56.0, 0.0)),
+            &mut Nested(full),
+        );
+        assert_eq!(out.size().height, 40.0);
+        assert_eq!(out.child_boxes()[0].size().height, 40.0);
+    }
+
+    #[test]
+    fn an_assigned_height_over_max_height_states_the_capped_containing_block() {
+        // The other bound, same rule: `max-height` caps the used content height, so
+        // that — not the 56 the parent assigned — is what the child's `height: 100%`
+        // resolves against.
+        let full = LayoutStyle {
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let host = LayoutStyle {
+            max_height: Dimension::Px(30.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &host,
+            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            BoxConstraints::tight(Size::new(56.0, 56.0)),
+            &mut Nested(full),
+        );
+        assert_eq!(out.child_boxes()[0].size().height, 30.0);
     }
 }

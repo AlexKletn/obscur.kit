@@ -7,6 +7,7 @@ mod clip_converter;
 pub use clip_converter::ClipConverter;
 mod color_converter;
 pub use color_converter::ColorConverter;
+mod image_blobs;
 mod image_painter;
 mod path_converter;
 pub use path_converter::PathConverter;

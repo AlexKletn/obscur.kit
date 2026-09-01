@@ -9,7 +9,7 @@ use obscur_style::property::{PropertyId, layout_keyword};
 #[doc = include_str!("longhand_catalog.doc/property_id_from_name.md")]
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 120] = [
+    const ALL: [PropertyId; 121] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -129,7 +129,8 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::OverflowWrap,
         PropertyId::WordBreak,
         PropertyId::TabSize,
-        PropertyId::Overflow,
+        PropertyId::OverflowX,
+        PropertyId::OverflowY,
         PropertyId::Content,
         PropertyId::PointerEvents,
         // The kit's own namespace. Its `name()` carries the `-obscur-` prefix,
@@ -249,7 +250,9 @@ pub(super) fn layout_keyword_mapper(
         PropertyId::WhiteSpace => Some(layout_keyword::white_space_from_name),
         PropertyId::OverflowWrap => Some(layout_keyword::overflow_wrap_from_name),
         PropertyId::WordBreak => Some(layout_keyword::word_break_from_name),
-        PropertyId::Overflow => Some(layout_keyword::overflow_from_name),
+        PropertyId::OverflowX | PropertyId::OverflowY => {
+            Some(layout_keyword::overflow_from_name)
+        }
         PropertyId::PointerEvents => Some(layout_keyword::pointer_events_from_name),
         PropertyId::MixBlendMode => Some(layout_keyword::mix_blend_mode_from_name),
         _ => None,
@@ -292,9 +295,11 @@ const fn is_color_longhand(property: PropertyId) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::property_compiler::tests::{standard, value_of};
+    use super::super::property_compiler::CompiledDeclaration;
+    use super::super::property_compiler::tests::{compile, standard, value_of};
     use super::*;
 
+    use crate::error::UnsupportedFeatureKind;
     use obscur_style::property::{Length, PropertyId, PropertyValue, layout_keyword};
 
     #[test]
@@ -470,15 +475,17 @@ mod tests {
     }
 
     #[test]
-    fn resolves_overflow_name() {
+    fn resolves_overflow_axis_names() {
         assert_eq!(
-            property_id_from_name("overflow"),
-            Some(PropertyId::Overflow)
+            property_id_from_name("overflow-x"),
+            Some(PropertyId::OverflowX)
         );
         assert_eq!(
-            property_id_from_name("OVERFLOW"),
-            Some(PropertyId::Overflow)
+            property_id_from_name("OVERFLOW-Y"),
+            Some(PropertyId::OverflowY)
         );
+        // `overflow` is the shorthand over the pair, so it is not a longhand id.
+        assert_eq!(property_id_from_name("overflow"), None);
     }
 
     #[test]
@@ -585,14 +592,29 @@ mod tests {
     }
 
     #[test]
-    fn unknown_layout_keyword_falls_back_to_intern() {
-        // `display: inline` is outside the closed set: it interns rather than
-        // resolving to a reserved symbol (and is not dropped).
-        let (d, interner) = standard("display: inline");
-        let PropertyValue::Keyword(symbol) = d.value().clone() else {
-            panic!("expected interned keyword");
-        };
-        assert_eq!(interner.resolve(symbol), Some("inline"));
+    fn a_word_outside_the_closed_set_is_reported_rather_than_interned() {
+        // The mapper is the whole grammar of these properties, so a word it
+        // does not know is a declaration that matches no grammar. It used to be
+        // interned instead, which was not inert: `OverflowAxes` reads every
+        // symbol that is not `visible` or `clip` as clipping, so the typo below
+        // clipped the box. Both cases now go the same way — the value is
+        // dropped and the compiler SAYS so, which the substitution path cannot
+        // do because by then the compiler is gone.
+        for text in [
+            // A word `overflow-x` simply does not have.
+            "overflow-x: sideways",
+            // And a word CSS has that this renderer does not model. Same
+            // answer, for the honest reason that it cannot carry the value
+            // either — the difference is a note in the diagnostic list, not a
+            // computed value that means nothing.
+            "display: inline",
+        ] {
+            let (compiled, _) = compile(text);
+            let CompiledDeclaration::Unsupported(report) = compiled else {
+                panic!("expected `{text}` to be reported, got {compiled:?}");
+            };
+            assert_eq!(report.kind(), UnsupportedFeatureKind::Property);
+        }
     }
 
     #[test]
@@ -773,33 +795,37 @@ mod tests {
     }
 
     #[test]
-    fn overflow_maps_to_reserved_symbols() {
+    fn overflow_axis_longhands_map_to_reserved_symbols() {
         assert_eq!(
-            value_of("overflow: hidden"),
+            value_of("overflow-y: hidden"),
             PropertyValue::Keyword(layout_keyword::OVERFLOW_HIDDEN)
         );
         assert_eq!(
-            value_of("overflow: visible"),
+            value_of("overflow-y: visible"),
             PropertyValue::Keyword(layout_keyword::OVERFLOW_VISIBLE)
         );
         assert_eq!(
-            value_of("overflow: clip"),
+            value_of("overflow-x: clip"),
             PropertyValue::Keyword(layout_keyword::OVERFLOW_CLIP)
         );
         assert_eq!(
-            value_of("overflow: scroll"),
+            value_of("overflow-x: scroll"),
             PropertyValue::Keyword(layout_keyword::OVERFLOW_SCROLL)
         );
         assert_eq!(
-            value_of("overflow: auto"),
+            value_of("overflow-y: auto"),
             PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO)
         );
         assert_eq!(
-            standard("overflow: hidden").0.property(),
-            PropertyId::Overflow
+            standard("overflow-y: hidden").0.property(),
+            PropertyId::OverflowY
+        );
+        assert_eq!(
+            standard("overflow-x: hidden").0.property(),
+            PropertyId::OverflowX
         );
         // CSS-wide keywords still take priority.
-        assert_eq!(value_of("overflow: inherit"), PropertyValue::Inherit);
+        assert_eq!(value_of("overflow-y: inherit"), PropertyValue::Inherit);
     }
 
     #[test]

@@ -119,8 +119,9 @@ pub(super) const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::OverflowWrap,
     PropertyId::WordBreak,
     PropertyId::TabSize,
-    // Overflow (pure paint/clip; no layout effect).
-    PropertyId::Overflow,
+    // Overflow, one longhand per axis (`overflow` is a shorthand over the pair).
+    PropertyId::OverflowX,
+    PropertyId::OverflowY,
     // Hit testing. It inherits, so it must be computed on every node: that is
     // how a `pointer-events: none` subtree learns it is transparent.
     PropertyId::PointerEvents,
@@ -247,7 +248,8 @@ mod tests {
                 | PropertyId::OverflowWrap
                 | PropertyId::WordBreak
                 | PropertyId::TabSize
-                | PropertyId::Overflow
+                | PropertyId::OverflowX
+                | PropertyId::OverflowY
                 | PropertyId::PointerEvents
                 // Logical properties are classified but deliberately NOT computed:
                 // each resolves into its physical counterpart via
@@ -380,7 +382,8 @@ mod tests {
             PropertyId::OverflowWrap,
             PropertyId::WordBreak,
             PropertyId::TabSize,
-            PropertyId::Overflow,
+            PropertyId::OverflowX,
+            PropertyId::OverflowY,
             PropertyId::PointerEvents,
             PropertyId::Painter,
         ];

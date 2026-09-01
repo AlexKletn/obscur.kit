@@ -116,7 +116,7 @@ mod tests {
             PropertyId::LineHeight,
             PropertyId::LetterSpacing,
             PropertyId::WhiteSpace,
-            PropertyId::Overflow,
+            PropertyId::OverflowY,
         ] {
             assert!(id.affects_layout(), "{id:?} feeds layout");
             assert!(!id.is_paint_only());

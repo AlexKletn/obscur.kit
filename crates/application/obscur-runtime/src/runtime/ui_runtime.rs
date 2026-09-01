@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use obscur_diagnostics::DiagnosticSink;
-use obscur_identity::{NodeId, RuntimeId};
+use obscur_identity::{FastMap, NodeId, RuntimeId};
 use obscur_interaction::command::Modifiers;
 use obscur_interaction::hover::HoverChain;
 use obscur_localization::locale::LanguageTag;
@@ -38,6 +38,7 @@ mod caret_visibility;
 mod command_routing;
 mod composition;
 mod construction;
+mod custom_values;
 mod diagnostics;
 mod event_listeners;
 mod focus;
@@ -105,7 +106,7 @@ pub struct UiRuntime {
     #[doc = include_str!("ui_runtime.doc/computed.md")]
     computed: ComputedStyles,
     #[doc = include_str!("ui_runtime.doc/generated_content.md")]
-    generated_content: HashMap<NodeId, GeneratedContent>,
+    generated_content: FastMap<NodeId, GeneratedContent>,
     #[doc = include_str!("ui_runtime.doc/overlaid.md")]
     overlaid: ComputedStyles,
     #[doc = include_str!("ui_runtime.doc/last_style.md")]

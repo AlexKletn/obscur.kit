@@ -5,8 +5,7 @@ use obscur_identity::NodeId;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayListBuilder, PaintCommand};
 use obscur_scene::paint::Brush;
-use obscur_style::computed::ComputedValue;
-use obscur_style::property::{PropertyId, PropertyValue, layout_keyword};
+use obscur_style::computed::OverflowAxes;
 
 use super::ComputedStyles;
 
@@ -24,13 +23,7 @@ const SCROLLBAR_THUMB_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.35);
 
 #[doc = include_str!("scroll_container_paint.doc/overflow_clips.md")]
 pub(super) fn overflow_clips(computed: &ComputedStyles, node: NodeId) -> bool {
-    matches!(
-        computed
-            .get(&node)
-            .and_then(|style| style.get(PropertyId::Overflow))
-            .map(ComputedValue::value),
-        Some(&PropertyValue::Keyword(sym)) if sym != layout_keyword::OVERFLOW_VISIBLE
-    )
+    OverflowAxes::of(computed.get(&node)).clips()
 }
 
 #[doc = include_str!("scroll_container_paint.doc/scrollbar_commands.md")]

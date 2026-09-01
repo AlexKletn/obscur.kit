@@ -650,6 +650,43 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         GRID_AUTO_FLOW_COLUMN_DENSE => Some("column dense"),
         POINTER_EVENTS_AUTO => Some("auto"),
         POINTER_EVENTS_NONE => Some("none"),
+        // Everything below was minted by a `*_from_name` table and had no way
+        // back, which made this an incomplete inverse of 87 constants rather
+        // than the reserved table it is used as. That matters beyond tidiness:
+        // the CSS compiler's collision sweep asks `name_of` "is this symbol
+        // reserved?", and the three sizing keywords are exactly the ones a
+        // sheet-local symbol was measured colliding with — so the question was
+        // answered wrongly for the only symbols shown to need it.
+        SIZING_MIN_CONTENT => Some("min-content"),
+        SIZING_MAX_CONTENT => Some("max-content"),
+        SIZING_FIT_CONTENT => Some("fit-content"),
+        // overflow-wrap
+        OVERFLOW_WRAP_NORMAL => Some("normal"),
+        OVERFLOW_WRAP_BREAK_WORD => Some("break-word"),
+        OVERFLOW_WRAP_ANYWHERE => Some("anywhere"),
+        // word-break
+        WORD_BREAK_NORMAL => Some("normal"),
+        WORD_BREAK_BREAK_ALL => Some("break-all"),
+        WORD_BREAK_KEEP_ALL => Some("keep-all"),
+        // white-space
+        WHITE_SPACE_NORMAL => Some("normal"),
+        WHITE_SPACE_NOWRAP => Some("nowrap"),
+        WHITE_SPACE_PRE => Some("pre"),
+        WHITE_SPACE_PRE_WRAP => Some("pre-wrap"),
+        WHITE_SPACE_PRE_LINE => Some("pre-line"),
+        // mix-blend-mode
+        MIX_BLEND_MODE_NORMAL => Some("normal"),
+        MIX_BLEND_MODE_MULTIPLY => Some("multiply"),
+        MIX_BLEND_MODE_SCREEN => Some("screen"),
+        MIX_BLEND_MODE_OVERLAY => Some("overlay"),
+        MIX_BLEND_MODE_DARKEN => Some("darken"),
+        MIX_BLEND_MODE_LIGHTEN => Some("lighten"),
+        MIX_BLEND_MODE_COLOR_DODGE => Some("color-dodge"),
+        MIX_BLEND_MODE_COLOR_BURN => Some("color-burn"),
+        MIX_BLEND_MODE_HARD_LIGHT => Some("hard-light"),
+        MIX_BLEND_MODE_SOFT_LIGHT => Some("soft-light"),
+        MIX_BLEND_MODE_DIFFERENCE => Some("difference"),
+        MIX_BLEND_MODE_EXCLUSION => Some("exclusion"),
         _ => None,
     }
 }
@@ -1072,6 +1109,59 @@ mod tests {
         assert_eq!(name_of(BORDER_STYLE_NONE), Some("none"));
         assert_eq!(name_of(BORDER_STYLE_SOLID), Some("solid"));
         assert_eq!(name_of(BORDER_STYLE_DASHED), Some("dashed"));
+    }
+
+    /// The sizing keywords go back to their names, like every other reserved
+    /// symbol.
+    ///
+    /// They did not, until 2026-08-28, and nothing noticed because no test
+    /// asked the two tables to agree — each was asked separately, about names
+    /// somebody had thought of. It surfaced from the other end: a sweep in the
+    /// CSS compiler uses `name_of` to ask "is this symbol reserved?", and these
+    /// three are exactly the ones a sheet-local symbol was measured colliding
+    /// with, so the question was being answered wrongly for the only symbols
+    /// that had been shown to need it.
+    #[test]
+    fn every_name_a_forward_table_mints_comes_back_from_name_of() {
+        type Forward = fn(&str) -> Option<InternedSymbol>;
+        let tables: [(Forward, &[&str]); 5] = [
+            (
+                sizing_from_name,
+                &["min-content", "max-content", "fit-content"],
+            ),
+            (
+                overflow_wrap_from_name,
+                &["normal", "break-word", "anywhere"],
+            ),
+            (word_break_from_name, &["normal", "break-all", "keep-all"]),
+            (
+                white_space_from_name,
+                &["normal", "nowrap", "pre", "pre-wrap", "pre-line"],
+            ),
+            (
+                mix_blend_mode_from_name,
+                &[
+                    "normal",
+                    "multiply",
+                    "screen",
+                    "overlay",
+                    "darken",
+                    "lighten",
+                    "color-dodge",
+                    "color-burn",
+                    "hard-light",
+                    "soft-light",
+                    "difference",
+                    "exclusion",
+                ],
+            ),
+        ];
+        for (forward, names) in tables {
+            for name in names {
+                let symbol = forward(name).unwrap_or_else(|| panic!("{name} is minted"));
+                assert_eq!(name_of(symbol), Some(*name), "{name} does not come back");
+            }
+        }
     }
 
     #[test]

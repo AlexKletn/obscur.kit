@@ -18,7 +18,15 @@ impl VelloDevice {
             &device,
             RendererOptions {
                 use_cpu: false,
-                antialiasing_support: AaSupport::all(),
+                // Area only, because area is all this backend ever asks for:
+                // every `render_to_texture` call in the crate passes
+                // `AaConfig::Area`. `AaSupport::all()` made `Renderer::new`
+                // compile the MSAA 8x and 16x pipeline families too — vello's own
+                // doc says it "might increase startup time, as more shader
+                // variations must be compiled", and on a mobile driver every
+                // extra family is both startup time and one more shader compiler
+                // to be unlucky with.
+                antialiasing_support: AaSupport::area_only(),
                 num_init_threads: None,
                 pipeline_cache: None,
             },

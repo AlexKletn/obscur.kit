@@ -15,6 +15,7 @@ use super::blur_layer::BlurLayer;
 use super::brush_converter::BrushConverter;
 use super::clip_converter::ClipConverter;
 use super::color_converter::ColorConverter;
+use super::image_blobs::ImageBlobs;
 use super::image_painter::draw_image;
 use super::path_converter::PathConverter;
 use super::scene_segment::SceneSegment;
@@ -34,6 +35,8 @@ pub struct SceneConverter {
     clip: ClipConverter,
     #[doc = include_str!("scene_converter.doc/fonts.md")]
     fonts: HashMap<u32, FontData>,
+    #[doc = include_str!("scene_converter.doc/image_blobs.md")]
+    image_blobs: ImageBlobs,
 }
 
 impl SceneConverter {
@@ -47,6 +50,7 @@ impl SceneConverter {
             brush: BrushConverter::new(color),
             clip: ClipConverter::new(path),
             fonts: HashMap::new(),
+            image_blobs: ImageBlobs::default(),
         }
     }
 
@@ -82,14 +86,21 @@ impl SceneConverter {
     #[must_use]
     pub fn convert_with_blurs(&self, list: &DisplayList) -> (Scene, Vec<BlurLayer>) {
         let mut scene = Scene::new();
-        let mut blurs: Vec<BlurLayer> = Vec::new();
-        self.emit(
-            &mut scene,
-            list.commands(),
-            Affine::IDENTITY,
-            Some(&mut blurs),
-        );
+        let blurs = self.convert_with_blurs_into(&mut scene, list);
         (scene, blurs)
+    }
+
+    #[doc = include_str!("scene_converter.doc/convert_with_blurs_into.md")]
+    pub fn convert_with_blurs_into(&self, scene: &mut Scene, list: &DisplayList) -> Vec<BlurLayer> {
+        // `reset` keeps the six encoding streams and empties them; a fresh
+        // `Scene` throws the buffers away and grows them back from zero on every
+        // frame, which is the same allocation pattern each time and never the
+        // right one.
+        scene.reset();
+        self.image_blobs.begin_frame();
+        let mut blurs: Vec<BlurLayer> = Vec::new();
+        self.emit(scene, list.commands(), Affine::IDENTITY, Some(&mut blurs));
+        blurs
     }
 
     #[doc = include_str!("scene_converter.doc/convert_segments.md")]
@@ -228,7 +239,16 @@ impl SceneConverter {
                     repeat_x,
                     repeat_y,
                 } => {
-                    draw_image(scene, image, tile, region, *repeat_x, *repeat_y, current);
+                    draw_image(
+                        scene,
+                        image,
+                        tile,
+                        region,
+                        *repeat_x,
+                        *repeat_y,
+                        current,
+                        &self.image_blobs,
+                    );
                 }
                 // `backdrop-filter` blurs the accumulated frame BEHIND the element,
                 // so it cannot be expressed inside a single Vello scene: it is a

@@ -33,7 +33,7 @@ fn focused_on_a(sheets: &[Stylesheet]) -> (UiRuntime, NodeId, NodeId) {
 /// **ancestor's** handler.
 ///
 /// Before the routing chain existed this could not happen at all: dispatch
-/// was one flat `HashMap<InternedSymbol, handler>` lookup with no per-node
+/// was one flat `FastMap<InternedSymbol, handler>` lookup with no per-node
 /// registration, so there was nothing for an ancestor to register *as*.
 #[test]
 fn a_command_reaches_an_ancestors_handler_when_the_focused_node_has_none() {

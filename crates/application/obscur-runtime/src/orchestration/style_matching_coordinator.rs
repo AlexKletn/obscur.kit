@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::{InternedSymbol, NodeId};
+use obscur_identity::{FastMap, InternedSymbol, NodeId};
 use obscur_style::cascade::{Cascade, CascadeOrigin, Declaration, ResolvedDeclarations};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, StyleMatcher, Stylesheet};
@@ -186,14 +186,14 @@ fn custom_for_node(
     node: NodeId,
     pseudo: &PseudoStates,
     environment: &MediaEnvironment,
-) -> HashMap<InternedSymbol, PropertyValue> {
+) -> FastMap<InternedSymbol, PropertyValue> {
     // A component's internals declare none of their own: an app sheet's
     // `.card { --pad: 8px }` must not reach inside a component that happens to
     // use the class, exactly as its longhands do not. They still SEE the host's
     // custom properties — those inherit down the computed tree, which is how a
     // component is themed from outside without opening its boundary.
     if component_host(tree, node).is_some() {
-        return HashMap::new();
+        return HashMap::default();
     }
     let element = TreeElement::with_pseudo(tree, node, pseudo);
     matcher.match_custom_properties_in(sheets, &element, environment)

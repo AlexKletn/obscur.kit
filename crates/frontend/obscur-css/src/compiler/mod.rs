@@ -6,6 +6,8 @@ mod border_shorthand;
 mod calc_lowering;
 mod color_lowering;
 mod condition_lowering;
+mod custom_value;
+pub use custom_value::lower_custom_value;
 mod filter_lowering;
 mod font_lowering;
 mod gradient_lowering;

@@ -87,7 +87,7 @@ mod tests {
     impl FromProps for CounterProps {
         fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
             Ok(Self {
-                step: decode_required(props, step_symbol())?,
+                step: decode_required(props, step_symbol(), "step")?,
             })
         }
     }
@@ -185,17 +185,12 @@ mod tests {
         )];
         assert_eq!(
             erased.render_erased(&mut ctx, &bad),
-            Err(PropsError::Type {
-                name: step_symbol(),
-                expected: "u32"
-            })
+            Err(PropsError::wrong_type(step_symbol(), "step", "u32"))
         );
         // And a missing required prop likewise.
         assert_eq!(
             erased.render_erased(&mut ctx, &[]),
-            Err(PropsError::Missing {
-                name: step_symbol()
-            })
+            Err(PropsError::missing(step_symbol(), "step"))
         );
     }
 

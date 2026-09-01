@@ -633,12 +633,9 @@ fn an_absent_optional_prop_is_none_and_an_absent_required_one_errors() {
         ViewValue::Text("x".into()),
     )])
     .expect_err("a missing required prop is an error");
-    assert_eq!(
-        error,
-        PropsError::Missing {
-            name: view::DISABLED
-        }
-    );
+    // Both halves are pinned: the symbol is the REAL view symbol, and the
+    // label is the name an author can actually search for (audit 1-B).
+    assert_eq!(error, PropsError::missing(view::DISABLED, "disabled"));
 }
 
 #[test]
@@ -657,9 +654,6 @@ fn a_wrongly_typed_prop_is_an_error_not_a_silent_default() {
     .expect_err("a wrongly typed prop is an error");
     assert_eq!(
         error,
-        PropsError::Type {
-            name: view::DISABLED,
-            expected: "bool"
-        }
+        PropsError::wrong_type(view::DISABLED, "disabled", "bool")
     );
 }

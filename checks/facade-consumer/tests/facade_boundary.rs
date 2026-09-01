@@ -170,3 +170,87 @@ fn an_application_can_name_a_command_the_markup_binds_to() {
     // the latter through the facade.
     assert_eq!(CMD_INCREMENT, InternedSymbol::named("increment"));
 }
+
+// --- Custom properties across the facade boundary. -------------------------
+
+#[test]
+fn a_system_theme_variable_reads_back_through_var_in_a_crate_that_has_only_the_facade() {
+    // The defect this guards, in the shape it shipped in: `install_system_theme`
+    // compiles a `:root { --obscur-sys-…: … }` block into the runtime, and an
+    // application reads one with `var()`. That worked for as long as a
+    // single-component declaration survived compilation as a typed value. Once a
+    // custom property began keeping its raw tokens, reading one back needed the
+    // substitution-time grammar — which exactly one call installed, and it was
+    // not this one. Every desktop colour then computed to `unset`.
+    //
+    // Neither fixture had a `var(` in it, which is why the guard that exists
+    // precisely to catch what only a real consumer sees did not catch this.
+    let mut runtime = runtime(240.0, 120.0);
+    let appearance = obscur_kit::system::appearance::SystemAppearance {
+        cursor_size: Some(37),
+        ..obscur_kit::system::appearance::SystemAppearance::default()
+    };
+    let vars =
+        obscur_kit::bootstrap::KitBootstrap::new().install_system_theme(&mut runtime, &appearance);
+    assert_eq!(
+        vars.get("--obscur-sys-cursor-size"),
+        Some("37px"),
+        "the kit wrote the variable it is about to be asked to read"
+    );
+
+    let nodes = measure_in(
+        &mut runtime,
+        &counter_view(1),
+        ".count { height: var(--obscur-sys-cursor-size) }",
+    );
+    let count = find(&nodes, "count").expect("the styled row is in the snapshot");
+    assert_eq!(
+        count.height, 37.0,
+        "the value the kit itself wrote resolved; `unset` here is the regression"
+    );
+}
+
+#[test]
+fn a_variable_nobody_declared_does_not_measure_the_same_as_one_that_was() {
+    // The control for the test above, and the reason its 37 is a substitution
+    // rather than a coincidence: the same sheet naming a variable nobody
+    // declared is invalid at computed-value time, which is `unset` — `auto` for
+    // `height`, so the row takes its content height instead.
+    let mut runtime = runtime(240.0, 120.0);
+    obscur_kit::bootstrap::KitBootstrap::new().install_system_theme(
+        &mut runtime,
+        &obscur_kit::system::appearance::SystemAppearance {
+            cursor_size: Some(37),
+            ..obscur_kit::system::appearance::SystemAppearance::default()
+        },
+    );
+    let nodes = measure_in(
+        &mut runtime,
+        &counter_view(1),
+        ".count { height: var(--obscur-sys-no-such-variable) }",
+    );
+    let count = find(&nodes, "count").expect("the row is in the snapshot");
+    assert_ne!(
+        count.height, 37.0,
+        "an undeclared name must not measure the same as a declared one"
+    );
+}
+
+#[test]
+fn an_applications_own_custom_property_resolves_after_the_bootstrap_installed_css() {
+    // The commoner shape of the same wall, and why the funnel is drawn at "the
+    // bootstrap installed CSS" rather than at the system theme alone: nothing
+    // here is the kit's variable. An application installs the UA sheet, hands
+    // the render path its own hand-compiled sheet, and never names
+    // `CssPipeline` — which is what `measure_in` does, and what a host that
+    // drives `UiRuntime` itself does.
+    let mut runtime = runtime(240.0, 120.0);
+    obscur_kit::bootstrap::KitBootstrap::new().install_default_stylesheet(&mut runtime);
+    let nodes = measure_in(
+        &mut runtime,
+        &counter_view(1),
+        ":root { --app-row-height: 41px } .count { height: var(--app-row-height) }",
+    );
+    let count = find(&nodes, "count").expect("the styled row is in the snapshot");
+    assert_eq!(count.height, 41.0);
+}

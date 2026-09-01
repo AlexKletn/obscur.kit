@@ -295,8 +295,8 @@ mod tests {
         fn new() -> Self {
             Self {
                 tree: RetainedTree::new(),
-                computed: ComputedStyles::new(),
-                boxes: LayoutBoxes::new(),
+                computed: ComputedStyles::default(),
+                boxes: LayoutBoxes::default(),
                 composer: SceneCoordinator::new(),
             }
         }

@@ -1,7 +1,6 @@
 #![doc = include_str!("margin_collapse_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use obscur_geometry::BoxConstraints;
@@ -108,9 +107,9 @@ fn main() {
     let root = tree.alloc(NodeKind::Root);
     tree.set_root(root);
 
-    let mut computed: ComputedStyles = HashMap::new();
+    let mut computed: ComputedStyles = ComputedStyles::default();
     computed.insert(root, background(white));
-    let mut boxes: LayoutBoxes = HashMap::new();
+    let mut boxes: LayoutBoxes = LayoutBoxes::default();
     boxes.insert(
         root,
         LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)),

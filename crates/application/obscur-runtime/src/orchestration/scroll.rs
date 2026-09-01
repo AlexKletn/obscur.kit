@@ -3,9 +3,8 @@
 use std::collections::HashSet;
 
 use obscur_geometry::Rect;
-use obscur_identity::NodeId;
-use obscur_style::computed::ComputedValue;
-use obscur_style::property::{PropertyId, PropertyValue, layout_keyword};
+use obscur_identity::{FastSet, NodeId};
+use obscur_style::computed::OverflowAxes;
 use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutBoxes};
@@ -34,29 +33,17 @@ impl ScrollContainer {
 #[doc = include_str!("scroll.doc/overflow_scrolls.md")]
 #[must_use]
 pub(crate) fn overflow_scrolls(computed: &ComputedStyles, node: NodeId) -> bool {
-    matches!(
-        computed
-            .get(&node)
-            .and_then(|style| style.get(PropertyId::Overflow))
-            .map(ComputedValue::value),
-        Some(&PropertyValue::Keyword(sym))
-            if sym == layout_keyword::OVERFLOW_SCROLL || sym == layout_keyword::OVERFLOW_AUTO
-    )
+    // The block axis, because that is the only axis a box can be scrolled
+    // along here: `ScrollOffsets` holds one number per node. An inline-axis
+    // `scroll`/`auto` is honoured as far as clipping and container-hood go, and
+    // then stops.
+    OverflowAxes::of(computed.get(&node)).block_scrolls()
 }
 
 #[doc = include_str!("scroll.doc/establishes_scroll_container.md")]
 #[must_use]
 pub(crate) fn establishes_scroll_container(computed: &ComputedStyles, node: NodeId) -> bool {
-    matches!(
-        computed
-            .get(&node)
-            .and_then(|style| style.get(PropertyId::Overflow))
-            .map(ComputedValue::value),
-        Some(&PropertyValue::Keyword(sym))
-            if sym == layout_keyword::OVERFLOW_SCROLL
-                || sym == layout_keyword::OVERFLOW_AUTO
-                || sym == layout_keyword::OVERFLOW_HIDDEN
-    )
+    OverflowAxes::of(computed.get(&node)).establishes_scroll_container()
 }
 
 #[doc = include_str!("scroll.doc/scrollable_content_height.md")]
@@ -73,7 +60,7 @@ fn scrollable_content_height(
     let mut stack: Vec<NodeId> = tree
         .get(node)
         .map_or_else(Vec::new, |n| n.child_nodes().to_vec());
-    let mut visited: HashSet<NodeId> = HashSet::new();
+    let mut visited: FastSet<NodeId> = HashSet::default();
     while let Some(child) = stack.pop() {
         if !visited.insert(child) {
             continue;
@@ -103,7 +90,7 @@ pub(crate) fn scroll_containers(
     };
     let mut out: Vec<ScrollContainer> = Vec::new();
     let mut stack: Vec<(NodeId, u32)> = vec![(root, 0)];
-    let mut visited: HashSet<NodeId> = HashSet::new();
+    let mut visited: FastSet<NodeId> = HashSet::default();
     while let Some((node, depth)) = stack.pop() {
         if !visited.insert(node) {
             continue;

@@ -59,7 +59,13 @@ spec allows:
   binding (`user.is_some()`). This is a structural approximation, not a proof:
   it is the shape "navigate into an object, then call into it" that §2.10's
   "direct service access" names, and it leaves the direct-on-binding calls the
-  spec allows untouched. See [`SERVICE_ACCESS_MESSAGE`].
+  spec allows untouched.
+
+  Because it is an approximation, it also refuses calls that are no service at
+  all — `row.keys.len()` is the same shape as `services.http.get(url)`, and
+  nothing syntactic separates them. The message says exactly that rather than
+  asserting the call *is* service access; telling an author their `.len()` is a
+  service sends them hunting for one they never wrote.
 
 The receiver and the arguments are still walked, so a free call cannot hide
 inside one.

@@ -8,6 +8,7 @@ use super::border_shorthand::{
     BORDER_SIDES, border_side_shorthand, expand_border, expand_border_color, expand_border_style,
     expand_outline,
 };
+use super::custom_value::custom_value_text;
 use super::filter_lowering::{lower_backdrop_filter, lower_filter};
 use super::font_lowering::{lower_font_family, lower_font_weight};
 use super::grid_placement::{lower_grid_auto_flow, lower_grid_line};
@@ -17,13 +18,13 @@ use super::grid_track_lowering::{
 use super::longhand_catalog::{is_length_longhand, layout_keyword_mapper, property_id_from_name};
 use super::shadow_lowering::lower_box_shadow;
 use super::shorthand_expansion::{
-    box_shorthand_sides, expand_box_shorthand, expand_flex_shorthand, expand_grid_area_shorthand,
-    expand_grid_line_shorthand, expand_pair_shorthand, grid_line_shorthand_sides,
-    logical_pair_shorthand_sides, place_shorthand_sides,
+    axis_pair_shorthand_sides, box_shorthand_sides, expand_box_shorthand, expand_flex_shorthand,
+    expand_grid_area_shorthand, expand_grid_line_shorthand, expand_pair_shorthand,
+    grid_line_shorthand_sides, logical_pair_shorthand_sides, place_shorthand_sides,
 };
 use super::stylesheet_compiler::CssSymbolInterner;
 use super::transform_lowering::{lower_transform, lower_transform_origin};
-use super::value_lowering::{css_wide_keyword, lower_value};
+use super::value_lowering::{css_wide_keyword, lower_value, sole_custom_ref};
 use super::vendor_prefix::{VendorNamespace, vendor_namespace};
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{ParsedDeclaration, ParsedValue};
@@ -67,9 +68,21 @@ impl PropertyCompiler {
     ) -> CompiledDeclaration {
         let name = &*decl.name;
         if name.starts_with("--") {
-            // A custom property keeps its value verbatim (best-effort); an
-            // unlowerable value degrades to `initial` rather than being dropped.
-            let value = lower_value(&decl.value, interner).unwrap_or(PropertyValue::Initial);
+            // Kept as TEXT, not lowered. A custom property's value is an
+            // arbitrary token sequence (CSS Variables 1 §2) that matches no
+            // grammar until `var()` puts it somewhere, so there is nothing here
+            // to lower it against — and lowering it anyway kept only its first
+            // component: `--font-body: Inter, sans-serif` became the one
+            // keyword `Inter`, and `--shadow: 0 2px 4px #000` became `0`. The
+            // grammar is applied at substitution instead, by the property the
+            // value lands on (`custom_value::lower_custom_value`).
+            //
+            // The one value that is NOT text is a lone `var()`: a custom
+            // property defined in terms of another is a reference the resolver
+            // follows, and flattening the chain to text would leave a name
+            // nothing resolves.
+            let value = sole_custom_ref(&decl.value)
+                .unwrap_or_else(|| PropertyValue::RawTokens(custom_value_text(&decl.value)));
             // Minted from the NAME, not from this sheet's interner. A compiler
             // is built per source, so its interner numbers from zero, and two
             // sheets that each declare a custom property would otherwise mint
@@ -216,11 +229,13 @@ impl PropertyCompiler {
         if decl.name.eq_ignore_ascii_case("grid-area") {
             return expand_grid_area_shorthand(decl, specificity, origin, source_order, selector);
         }
-        // The two-longhand shorthands: `place-*` (`<align> <justify>`) and the
-        // logical box-model pairs (`<start> <end>`). Different families, identical
-        // shape — see `expand_pair_shorthand`.
-        if let Some((first, second)) =
-            place_shorthand_sides(&decl.name).or_else(|| logical_pair_shorthand_sides(&decl.name))
+        // The two-longhand shorthands: `place-*` (`<align> <justify>`), the
+        // logical box-model pairs (`<start> <end>`), and `overflow`
+        // (`<x> <y>`). Different families, identical shape — see
+        // `expand_pair_shorthand`.
+        if let Some((first, second)) = place_shorthand_sides(&decl.name)
+            .or_else(|| logical_pair_shorthand_sides(&decl.name))
+            .or_else(|| axis_pair_shorthand_sides(&decl.name))
         {
             return expand_pair_shorthand(
                 decl,
@@ -250,6 +265,16 @@ pub(super) fn lower_for_property(
     values: &[ParsedValue],
     interner: &mut CssSymbolInterner,
 ) -> Option<PropertyValue> {
+    // A `var()` cannot be judged against a grammar HERE: what it stands for does
+    // not exist until the cascade has run, so every property below that parses
+    // its value eagerly — `font-family`, `box-shadow`, `transform`, the grid
+    // templates — used to reject the function and take the whole declaration
+    // down with it. Carrying the reference defers the judgement to the one place
+    // that can make it: the computed-value step substitutes, and drops the value
+    // there if what came back does not fit this property.
+    if let Some(reference) = sole_custom_ref(values) {
+        return Some(reference);
+    }
     if property == PropertyId::Content {
         // `content: "…"` (§4.16 generated content). Only the plain string form is
         // modelled — the quotes are already stripped by the tokenizer — so a
@@ -430,10 +455,18 @@ pub(super) fn lower_for_property(
         if let Some(wide) = css_wide_keyword(keyword) {
             return Some(wide);
         }
-        return Some(match mapper(keyword) {
-            Some(symbol) => PropertyValue::Keyword(symbol),
-            None => PropertyValue::Keyword(interner.intern(keyword)),
-        });
+        // The mapper IS the grammar of these properties: their keywords are a
+        // closed, reserved set, so a word it does not know is a word the
+        // property does not have and the declaration is invalid (CSS Syntax 3
+        // §9, "a declaration whose value does not match the property's grammar
+        // is dropped"). Interning it instead minted a symbol no consumer can
+        // recognise, and one consumer read it as a value: `OverflowAxes` takes
+        // anything that is not `visible` or `clip` for clipping, so
+        // `overflow-x: sideways` clipped the box. Judging it here — and not in
+        // `custom_value::lower_custom_value`, which used to hold the only copy
+        // of this rule — is what makes the literal and the `var()` spelling of
+        // the same typo answer the same way.
+        return mapper(keyword).map(PropertyValue::Keyword);
     }
     // A unitless `0` is a valid length for any length-typed longhand — `0` means
     // `0px` (CSS Values §4.5.3, "the unit may be omitted for zero lengths"). The
@@ -680,7 +713,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn lowers_custom_property() {
+    fn a_custom_property_keeps_the_text_it_was_declared_with() {
         let (result, _) = compile("--brand: #fff");
         let CompiledDeclaration::Custom(custom) = result else {
             panic!("expected custom property");
@@ -689,9 +722,49 @@ pub(crate) mod tests {
         // sheet has its own, so a sequential symbol would name a different
         // property in the next sheet compiled.
         assert_eq!(custom.name(), InternedSymbol::named("--brand"));
+        // TEXT, not a lowered value. There is no grammar here to lower it
+        // against — `#fff` is a colour only once `color` (or any other colour
+        // longhand) reads it — and lowering it anyway kept only the first
+        // component of everything longer than one.
+        assert_eq!(custom.value(), &PropertyValue::RawTokens("#fff".into()));
+    }
+
+    #[test]
+    fn a_custom_property_keeps_every_component_not_just_the_first() {
+        // Audit 2-F, at the seam it lived on. `Inter, sans-serif` used to
+        // compile to the single keyword `Inter` — interned, at that, so the
+        // symbol named nothing outside this compiler — and `0 2px 4px #000` to
+        // the number `0`.
+        for (text, expected) in [
+            ("--font-body: Inter, sans-serif", "Inter, sans-serif"),
+            ("--shadow: 0 2px 4px #000", "0 2px 4px #000"),
+            ("--font-body: \"Inter\"", "\"Inter\""),
+            ("--ratio: 1.5", "1.5"),
+        ] {
+            let (result, _) = compile(text);
+            let CompiledDeclaration::Custom(custom) = result else {
+                panic!("expected a custom property for {text}");
+            };
+            assert_eq!(
+                custom.value(),
+                &PropertyValue::RawTokens(expected.into()),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_custom_property_that_is_one_var_stays_a_reference() {
+        // The one value that is not text: a custom property defined in terms of
+        // another is a chain the resolver follows, and text would leave a name
+        // nothing resolves.
+        let (result, _) = compile("--brand: var(--accent)");
+        let CompiledDeclaration::Custom(custom) = result else {
+            panic!("expected custom property");
+        };
         assert_eq!(
             custom.value(),
-            &PropertyValue::Color(StyleColor::rgba(1.0, 1.0, 1.0, 1.0))
+            &PropertyValue::CustomRef(InternedSymbol::named("--accent"))
         );
     }
 
@@ -810,6 +883,79 @@ pub(crate) mod tests {
         // being dropped.
         let (result, _) = compile("z-index: 1.5");
         assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
+    }
+
+    #[test]
+    fn a_value_that_is_one_var_reference_survives_every_grammar() {
+        // The consumer audit's 2-C. A `var()` compiled fine as the whole value
+        // of a plainly-lowered longhand and was thrown away everywhere else: by
+        // a shorthand expander that split the value before lowering it, and by
+        // a longhand that parsed its grammar eagerly. Thirty-two declarations
+        // in one application, among them EVERY hover and press rule, each of
+        // which was `background: var(…)` and nothing else.
+        let re = |name: &str| PropertyValue::CustomRef(InternedSymbol::named(name));
+        let cases: Vec<(&str, Vec<(PropertyId, PropertyValue)>)> = vec![
+            (
+                "background: var(--k-face)",
+                vec![(PropertyId::BackgroundColor, re("--k-face"))],
+            ),
+            (
+                "border-color: var(--k-line)",
+                vec![
+                    (PropertyId::BorderTopColor, re("--k-line")),
+                    (PropertyId::BorderRightColor, re("--k-line")),
+                    (PropertyId::BorderBottomColor, re("--k-line")),
+                    (PropertyId::BorderLeftColor, re("--k-line")),
+                ],
+            ),
+            (
+                "border-radius: var(--k-radius)",
+                vec![
+                    (PropertyId::BorderTopLeftRadius, re("--k-radius")),
+                    (PropertyId::BorderTopRightRadius, re("--k-radius")),
+                    (PropertyId::BorderBottomRightRadius, re("--k-radius")),
+                    (PropertyId::BorderBottomLeftRadius, re("--k-radius")),
+                ],
+            ),
+            (
+                "padding: var(--k-pad)",
+                vec![
+                    (PropertyId::PaddingTop, re("--k-pad")),
+                    (PropertyId::PaddingRight, re("--k-pad")),
+                    (PropertyId::PaddingBottom, re("--k-pad")),
+                    (PropertyId::PaddingLeft, re("--k-pad")),
+                ],
+            ),
+            (
+                "box-shadow: var(--k-shadow)",
+                vec![(PropertyId::BoxShadow, re("--k-shadow"))],
+            ),
+            (
+                "font-family: var(--font-body)",
+                vec![(PropertyId::FontFamily, re("--font-body"))],
+            ),
+            (
+                "transform: var(--k-lift)",
+                vec![(PropertyId::Transform, re("--k-lift"))],
+            ),
+            (
+                "place-items: var(--k-place)",
+                vec![
+                    (PropertyId::AlignItems, re("--k-place")),
+                    (PropertyId::JustifyItems, re("--k-place")),
+                ],
+            ),
+        ];
+        for (text, expected) in cases {
+            let decls = compile_all(text);
+            assert!(
+                decls
+                    .iter()
+                    .all(|d| matches!(d, CompiledDeclaration::Standard(_))),
+                "{text} compiled to {decls:?}"
+            );
+            assert_eq!(pairs(&decls), expected, "{text}");
+        }
     }
 
     #[test]

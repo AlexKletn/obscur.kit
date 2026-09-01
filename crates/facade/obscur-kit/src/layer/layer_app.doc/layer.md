@@ -1,1 +1,0 @@
-Sets the stacking band.

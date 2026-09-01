@@ -1,11 +1,16 @@
-Runs the loop until something happens, or until `timeout` elapses, and
-returns everything that did.
+Turn the loop once, blocking until something happens or the timeout expires.
 
-`None` sleeps until woken — by the compositor, or by a
-[`LayerWaker`] given at open time. A duration bounds the wait, which is
-what an animating host wants: it needs a turn per frame whether or not
-anything arrived.
+Produces nothing directly: what arrived is then taken by
+[`poll_input`](Self::poll_input) and
+[`LayerBackend::poll_events`](obscur_windowing::port::LayerBackend::poll_events).
+One pump, two typed drains — the alternative, two pumps, is how events go
+missing.
+
+`None` sleeps until the compositor or a
+[`LayerWaker`](crate::surface::LayerWaker) has something to say, which is where
+a panel spends nearly all of its life.
 
 # Errors
 
-[`LayerShellError::Dispatch`] when the connection or the loop fails.
+`Dispatch` if the Wayland connection failed while the loop was turning. There is
+no recovery from it: the compositor is gone.

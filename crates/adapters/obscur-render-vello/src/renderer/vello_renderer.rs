@@ -19,8 +19,9 @@ use crate::conversion::SceneConverter;
 use crate::effects::{ColorMatrix, GaussianBlur};
 use crate::error::VelloRenderError;
 use crate::renderer::filter_layer_pass::PreparedFilterLayers;
+use crate::renderer::premultiply_blit::PremultiplyBlitter;
 use crate::renderer::segmented_compositor::SegmentedCompositor;
-use crate::renderer::{VelloDevice, VelloFrame, VelloSurface};
+use crate::renderer::{AcquiredImage, VelloDevice, VelloFrame, VelloSurface};
 
 #[doc = include_str!("vello_renderer.doc/VelloRenderer.md")]
 pub struct VelloRenderer {
@@ -28,9 +29,11 @@ pub struct VelloRenderer {
     capabilities: RendererCapabilities,
     device: Option<VelloDevice>,
     scene_converter: SceneConverter,
+    #[doc = include_str!("vello_renderer.doc/scene.md")]
+    scene: vello::Scene,
     frames_rendered: u64,
     #[doc = include_str!("vello_renderer.doc/blitter.md")]
-    blitter: Option<(wgpu::TextureFormat, wgpu::util::TextureBlitter)>,
+    blitter: Option<(wgpu::TextureFormat, PremultiplyBlitter)>,
     #[doc = include_str!("vello_renderer.doc/frame_cache.md")]
     frame_cache: Option<VelloFrame>,
     #[doc = include_str!("vello_renderer.doc/blur.md")]
@@ -56,6 +59,7 @@ impl VelloRenderer {
                 .custom_shaders(true),
             device: None,
             scene_converter: SceneConverter::new(),
+            scene: vello::Scene::new(),
             frames_rendered: 0,
             blitter: None,
             frame_cache: None,
@@ -183,7 +187,11 @@ impl VelloRenderer {
         }
 
         // Convert first (device-free): the main scene plus any blur sub-scenes.
-        let (main_scene, blurs) = self.scene_converter.convert_with_blurs(display_list);
+        // Into the renderer's own scene, whose buffers outlive the frame.
+        let mut main_scene = std::mem::take(&mut self.scene);
+        let blurs = self
+            .scene_converter
+            .convert_with_blurs_into(&mut main_scene, display_list);
 
         let Some(device) = self.device.as_ref() else {
             return Err(
@@ -211,12 +219,20 @@ impl VelloRenderer {
         // renderer can be borrowed mutably alongside the immutable device/queue.
         let gpu_device = device.device().clone();
         let gpu_queue = device.queue().clone();
-        device
-            .renderer_mut()
-            .render_to_texture(&gpu_device, &gpu_queue, &main_scene, frame.view(), &params)
-            .map_err(|error| {
-                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
-            })?;
+        let rendered = device.renderer_mut().render_to_texture(
+            &gpu_device,
+            &gpu_queue,
+            &main_scene,
+            frame.view(),
+            &params,
+        );
+        // Back before the `?`, so a failed render does not cost the buffers as
+        // well. The scene's contents are meaningless from here on; the point of
+        // putting it back is the six allocations underneath it.
+        self.scene = main_scene;
+        rendered.map_err(|error| {
+            VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
+        })?;
 
         if !blurs.is_empty() {
             // Render each blur sub-scene into its own margin-padded offscreen: the
@@ -269,23 +285,46 @@ impl VelloRenderer {
         submission: &FrameSubmission,
         surface: &VelloSurface,
     ) -> Result<PresentResult, RendererError> {
-        // Physical swapchain extent; wgpu rejects a zero-sized surface, so treat
-        // it as a backend error rather than submitting empty work.
-        let width = surface.config().width;
-        let height = surface.config().height;
+        // Acquires here, on the caller's thread, and therefore blocks it. Kept
+        // for hosts that have no thread to spare; a host that reads input on
+        // this thread must use `present_to_texture` with an image fetched by a
+        // `SurfaceAcquirer` instead, or its input path waits on the compositor
+        // (audit 1-D — a spec violation, core principle 5).
+        let surface_texture = surface
+            .current_texture()
+            .map_err(VelloRenderError::into_renderer_error)?;
+        let image = AcquiredImage {
+            texture: surface_texture,
+            width: surface.config().width,
+            height: surface.config().height,
+            format: surface.blit_format(),
+        };
+        self.present_to_texture(submission, image)
+    }
+
+    #[doc = include_str!("vello_renderer.doc/present_to_texture.md")]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn present_to_texture(
+        &mut self,
+        submission: &FrameSubmission,
+        image: AcquiredImage,
+    ) -> Result<PresentResult, RendererError> {
+        let AcquiredImage {
+            texture: surface_texture,
+            width,
+            height,
+            format,
+        } = image;
         if width == 0 || height == 0 {
             return Err(
                 VelloRenderError::RenderFailed("empty surface extent".into()).into_renderer_error(),
             );
         }
-        let format = surface.config().format;
-
-        // Rasterize the display list (main scene + owned blur passes) into the
-        // offscreen intermediate — the same shared path the headless read-back uses.
+        // `format` came with the image, and it is the surface's format with any
+        // sRGB suffix stripped: the blit must not re-encode what Vello already
+        // encoded. See `VelloSurface::blit_format`.
         let frame = self.render_to_frame(submission, width, height)?;
 
-        // Re-borrow the (attached) device for the blit. Cheap ref-counted clones let
-        // the renderer be borrowed mutably alongside the immutable device/queue.
         let Some(device) = self.device.as_mut() else {
             return Err(
                 VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
@@ -294,13 +333,6 @@ impl VelloRenderer {
         let gpu_device = device.device().clone();
         let gpu_queue = device.queue().clone();
 
-        let surface_texture = surface
-            .current_texture()
-            .map_err(VelloRenderError::into_renderer_error)?;
-
-        // Obtain a blitter matching the surface format, rebuilding only on a
-        // format change (or first use) to avoid recompiling the pipeline. Drop a
-        // stale (differently formatted) cache entry, then lazily build one.
         if self
             .blitter
             .as_ref()
@@ -310,11 +342,14 @@ impl VelloRenderer {
         }
         let (_, blitter) = self
             .blitter
-            .get_or_insert_with(|| (format, wgpu::util::TextureBlitter::new(&gpu_device, format)));
+            .get_or_insert_with(|| (format, PremultiplyBlitter::new(&gpu_device, format)));
 
         let surface_view = surface_texture
             .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+            .create_view(&wgpu::TextureViewDescriptor {
+                format: Some(format),
+                ..wgpu::TextureViewDescriptor::default()
+            });
         let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("obscur-vello-present"),
         });

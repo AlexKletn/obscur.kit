@@ -2,15 +2,16 @@
 
 use crate::computed::ComputedValue;
 use crate::property::{PropertyId, PropertyValue};
-use obscur_identity::InternedSymbol;
-use std::collections::HashMap;
+use std::rc::Rc;
+
+use obscur_identity::{FastBuildHasher, FastMap, InternedSymbol};
 use std::collections::hash_map::Iter;
 
 #[doc = include_str!("computed_style.doc/ComputedStyle.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComputedStyle {
-    values: HashMap<PropertyId, ComputedValue>,
-    custom_properties: HashMap<InternedSymbol, PropertyValue>,
+    values: FastMap<PropertyId, ComputedValue>,
+    custom_properties: Rc<FastMap<InternedSymbol, PropertyValue>>,
 }
 
 impl ComputedStyle {
@@ -18,8 +19,20 @@ impl ComputedStyle {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            values: HashMap::new(),
-            custom_properties: HashMap::new(),
+            values: FastMap::default(),
+            custom_properties: Rc::default(),
+        }
+    }
+
+    #[doc = include_str!("computed_style.doc/with_capacity.md")]
+    #[must_use]
+    pub fn with_capacity(properties: usize) -> Self {
+        Self {
+            values: FastMap::with_capacity_and_hasher(properties, FastBuildHasher::default()),
+            // Not sized, because it is usually not built at all: a node that
+            // declares no custom property of its own shares its parent's set
+            // rather than copying it.
+            custom_properties: Rc::default(),
         }
     }
 
@@ -34,6 +47,11 @@ impl ComputedStyle {
         self.values.insert(property, value)
     }
 
+    #[doc = include_str!("computed_style.doc/remove.md")]
+    pub fn remove(&mut self, property: PropertyId) -> Option<ComputedValue> {
+        self.values.remove(&property)
+    }
+
     #[doc = include_str!("computed_style.doc/custom_property.md")]
     #[must_use]
     pub fn custom_property(&self, name: InternedSymbol) -> Option<&PropertyValue> {
@@ -46,7 +64,23 @@ impl ComputedStyle {
         name: InternedSymbol,
         value: PropertyValue,
     ) -> Option<PropertyValue> {
-        self.custom_properties.insert(name, value)
+        // Copy-on-write: the set is shared with whatever inherited it, and this
+        // is the moment it stops being.
+        Rc::make_mut(&mut self.custom_properties).insert(name, value)
+    }
+
+    #[doc = include_str!("computed_style.doc/shared_custom_properties.md")]
+    #[must_use]
+    pub fn shared_custom_properties(&self) -> Rc<FastMap<InternedSymbol, PropertyValue>> {
+        Rc::clone(&self.custom_properties)
+    }
+
+    #[doc = include_str!("computed_style.doc/set_shared_custom_properties.md")]
+    pub fn set_shared_custom_properties(
+        &mut self,
+        properties: Rc<FastMap<InternedSymbol, PropertyValue>>,
+    ) {
+        self.custom_properties = properties;
     }
 
     #[doc = include_str!("computed_style.doc/iter.md")]
@@ -101,6 +135,62 @@ impl<'a> IntoIterator for &'a ComputedStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shared_custom_property_set_forks_the_moment_it_is_written() {
+        // The sharing is an optimisation and must never be observable. A child
+        // that inherits its parent's variables holds the same allocation until it
+        // declares one of its own; writing must not reach back into the parent.
+        let name = InternedSymbol::named("--tone");
+        let other = InternedSymbol::named("--edge");
+        let mut parent = ComputedStyle::new();
+        parent.set_custom_property(name, PropertyValue::Number(1.0));
+
+        let mut child = ComputedStyle::new();
+        child.set_shared_custom_properties(parent.shared_custom_properties());
+        assert_eq!(
+            child.custom_property(name),
+            Some(&PropertyValue::Number(1.0)),
+            "an inherited set answers for the child"
+        );
+
+        child.set_custom_property(name, PropertyValue::Number(2.0));
+        child.set_custom_property(other, PropertyValue::Number(3.0));
+
+        assert_eq!(
+            child.custom_property(name),
+            Some(&PropertyValue::Number(2.0))
+        );
+        assert_eq!(
+            child.custom_property(other),
+            Some(&PropertyValue::Number(3.0))
+        );
+        assert_eq!(
+            parent.custom_property(name),
+            Some(&PropertyValue::Number(1.0)),
+            "the parent kept its own value: the write forked, it did not reach back"
+        );
+        assert_eq!(
+            parent.custom_property(other),
+            None,
+            "and the parent never saw a variable only the child declared"
+        );
+    }
+
+    #[test]
+    fn sharing_a_set_does_not_share_the_rest_of_the_style() {
+        // Only the custom-property set travels. A child that inherits variables
+        // has its own computed values, or every node in a themed tree would read
+        // the root's `width`.
+        let mut parent = ComputedStyle::new();
+        parent.set_custom_property(InternedSymbol::named("--tone"), PropertyValue::Number(1.0));
+        parent.set(PropertyId::Opacity, ComputedValue::number(0.5));
+
+        let mut child = ComputedStyle::new();
+        child.set_shared_custom_properties(parent.shared_custom_properties());
+        assert_eq!(child.get(PropertyId::Opacity), None);
+        assert_eq!(parent.opacity(), Some(0.5));
+    }
     use crate::property::StyleColor;
 
     #[test]

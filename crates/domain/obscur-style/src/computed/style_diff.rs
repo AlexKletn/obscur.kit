@@ -1,4 +1,5 @@
 #![doc = include_str!("style_diff.doc/_module.md")]
+use obscur_identity::FastSet;
 
 use crate::computed::ComputedStyle;
 use crate::property::PropertyId;
@@ -15,7 +16,7 @@ impl StyleDiff {
     #[doc = include_str!("style_diff.doc/between.md")]
     #[must_use]
     pub fn between(old: &ComputedStyle, new: &ComputedStyle) -> Self {
-        let mut properties_in_either: HashSet<PropertyId> = HashSet::new();
+        let mut properties_in_either: FastSet<PropertyId> = HashSet::default();
         for (property, _) in old {
             properties_in_either.insert(*property);
         }
@@ -62,7 +63,7 @@ impl StyleDiff {
 
     #[doc = include_str!("style_diff.doc/custom_changed.md")]
     fn custom_changed(old: &ComputedStyle, new: &ComputedStyle) -> bool {
-        let mut names_in_either: HashSet<_> = HashSet::new();
+        let mut names_in_either: HashSet<_> = HashSet::default();
         for (name, _) in old.custom_properties() {
             names_in_either.insert(*name);
         }

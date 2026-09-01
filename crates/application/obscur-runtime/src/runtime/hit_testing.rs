@@ -3,16 +3,15 @@
 use std::collections::{HashMap, HashSet};
 
 use obscur_geometry::{AffineTransform, Point, Rect};
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_interaction::spatial::SpatialIndex;
 use obscur_scene::path::PathTrim;
-use obscur_style::computed::ComputedValue;
+use obscur_style::computed::{ComputedValue, OverflowAxes};
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_tree::tree::RetainedTree;
 
 use crate::orchestration::{
-    ComputedStyles, LayoutBoxes, PaintLayer, effective_paint_layer, effective_stacking_z,
-    resolved_transform,
+    ComputedStyles, LayoutBoxes, PaintLayer, effective_stacking, resolved_transform,
 };
 
 #[doc = include_str!("hit_testing.doc/HitTesting.md")]
@@ -20,9 +19,9 @@ pub(crate) struct HitTesting {
     #[doc = include_str!("hit_testing.doc/index.md")]
     index: SpatialIndex,
     #[doc = include_str!("hit_testing.doc/canvas_regions.md")]
-    canvas_regions: HashMap<NodeId, PathTrim>,
+    canvas_regions: FastMap<NodeId, PathTrim>,
     #[doc = include_str!("hit_testing.doc/inverse_transforms.md")]
-    inverse_transforms: HashMap<NodeId, AffineTransform>,
+    inverse_transforms: FastMap<NodeId, AffineTransform>,
 }
 
 impl HitTesting {
@@ -30,13 +29,13 @@ impl HitTesting {
     pub(crate) fn new() -> Self {
         Self {
             index: SpatialIndex::new(),
-            canvas_regions: HashMap::new(),
-            inverse_transforms: HashMap::new(),
+            canvas_regions: HashMap::default(),
+            inverse_transforms: HashMap::default(),
         }
     }
 
     #[doc = include_str!("hit_testing.doc/set_canvas_regions.md")]
-    pub(crate) fn set_canvas_regions(&mut self, regions: HashMap<NodeId, PathTrim>) {
+    pub(crate) fn set_canvas_regions(&mut self, regions: FastMap<NodeId, PathTrim>) {
         self.canvas_regions = regions;
     }
 
@@ -49,7 +48,7 @@ impl HitTesting {
     ) {
         self.index.clear();
         self.inverse_transforms.clear();
-        let mut memo: HashMap<NodeId, Option<AffineTransform>> = HashMap::new();
+        let mut memo: FastMap<NodeId, Option<AffineTransform>> = HashMap::default();
         for (&node, layout_box) in boxes {
             let z_order = Self::logical_depth(tree, node);
             let Some(chain) = Self::accumulated_transform(tree, computed, boxes, node, &mut memo)
@@ -75,7 +74,7 @@ impl HitTesting {
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
         node: NodeId,
-        memo: &mut HashMap<NodeId, Option<AffineTransform>>,
+        memo: &mut FastMap<NodeId, Option<AffineTransform>>,
     ) -> Option<AffineTransform> {
         if let Some(&hit) = memo.get(&node) {
             return hit;
@@ -125,13 +124,13 @@ impl HitTesting {
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
         screen: Point,
-        scrolls: &HashMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, f32>,
     ) -> Option<NodeId> {
         let preorder = Self::preorder_index(tree);
-        let zmap = effective_stacking_z(tree, computed);
-        let layermap = effective_paint_layer(tree, computed);
+        let stacking = effective_stacking(tree, computed);
+        let (zmap, layermap) = (stacking.z, stacking.layer);
         let mut best: Option<((i32, PaintLayer, i32, usize), NodeId)> = None;
-        let mut seen: HashSet<NodeId> = HashSet::new();
+        let mut seen: FastSet<NodeId> = HashSet::default();
         for probe in Self::query_points(tree, screen, scrolls) {
             for hit in self.index.hits_at(probe) {
                 let node = hit.node();
@@ -178,7 +177,7 @@ impl HitTesting {
     #[doc = include_str!("hit_testing.doc/folded_point.md")]
     pub(crate) fn folded_point(
         tree: &RetainedTree,
-        scrolls: &HashMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, f32>,
         node: NodeId,
         screen: Point,
     ) -> Point {
@@ -188,7 +187,7 @@ impl HitTesting {
     #[doc = include_str!("hit_testing.doc/content_point.md")]
     pub(crate) fn content_point(
         tree: &RetainedTree,
-        scrolls: &HashMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, f32>,
         node: NodeId,
         screen: Point,
     ) -> Point {
@@ -198,7 +197,7 @@ impl HitTesting {
     }
 
     #[doc = include_str!("hit_testing.doc/scroll_fold.md")]
-    fn scroll_fold(tree: &RetainedTree, scrolls: &HashMap<NodeId, f32>, node: NodeId) -> f32 {
+    fn scroll_fold(tree: &RetainedTree, scrolls: &FastMap<NodeId, f32>, node: NodeId) -> f32 {
         if scrolls.is_empty() {
             return 0.0;
         }
@@ -219,7 +218,7 @@ impl HitTesting {
     fn query_points(
         tree: &RetainedTree,
         screen: Point,
-        scrolls: &HashMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, f32>,
     ) -> Vec<Point> {
         let mut points = vec![screen];
         for (&container, &own) in scrolls {
@@ -253,8 +252,8 @@ impl HitTesting {
     }
 
     #[doc = include_str!("hit_testing.doc/preorder_index.md")]
-    fn preorder_index(tree: &RetainedTree) -> HashMap<NodeId, usize> {
-        let mut out = HashMap::new();
+    fn preorder_index(tree: &RetainedTree) -> FastMap<NodeId, usize> {
+        let mut out = HashMap::default();
         let Some(root) = tree.root() else {
             return out;
         };
@@ -283,7 +282,7 @@ impl HitTesting {
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
-        scrolls: &HashMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, f32>,
         node: NodeId,
         screen: Point,
     ) -> bool {
@@ -340,14 +339,7 @@ impl HitTesting {
 
     #[doc = include_str!("hit_testing.doc/overflow_clips.md")]
     fn overflow_clips(computed: &ComputedStyles, node: NodeId) -> bool {
-        matches!(
-            computed
-                .get(&node)
-                .and_then(|style| style.get(PropertyId::Overflow))
-                .map(ComputedValue::value),
-            Some(&PropertyValue::Keyword(sym))
-                if sym != obscur_style::property::layout_keyword::OVERFLOW_VISIBLE
-        )
+        OverflowAxes::of(computed.get(&node)).clips()
     }
 
     #[doc = include_str!("hit_testing.doc/corner_radii.md")]
@@ -465,20 +457,20 @@ mod tests {
         let button = child();
         let overlay = child();
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0));
         boxes.insert(button, LayoutBox::new(bounds));
         boxes.insert(overlay, LayoutBox::new(bounds));
 
         let mut hits = HitTesting::new();
-        hits.rebuild(&tree, &ComputedStyles::new(), &boxes);
+        hits.rebuild(&tree, &ComputedStyles::default(), &boxes);
         (tree, boxes, hits, button, overlay)
     }
 
     /// The scroll map of a frame in which nothing scrolls — the shape every
     /// pre-scroll-container test ran in, and the fast path of the folding.
-    fn unscrolled() -> HashMap<NodeId, f32> {
-        HashMap::new()
+    fn unscrolled() -> FastMap<NodeId, f32> {
+        HashMap::default()
     }
 
     /// Allocates an element under `parent` and links it both ways.
@@ -496,7 +488,7 @@ mod tests {
     fn styled(node: NodeId, keyword: obscur_identity::InternedSymbol) -> ComputedStyles {
         let mut style = ComputedStyle::new();
         style.set(PropertyId::PointerEvents, ComputedValue::keyword(keyword));
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(node, style);
         computed
     }
@@ -508,7 +500,7 @@ mod tests {
         let (tree, boxes, hits, _button, overlay) = button_under_overlay();
         let at = Point::new(50.0, 50.0);
         assert_eq!(
-            hits.resolve(&tree, &ComputedStyles::new(), &boxes, at, &unscrolled()),
+            hits.resolve(&tree, &ComputedStyles::default(), &boxes, at, &unscrolled()),
             Some(overlay)
         );
     }
@@ -550,13 +542,13 @@ mod tests {
         let item = element(scroller, &mut tree);
         let overlay = element(root, &mut tree);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 200.0));
         for node in [scroller, item, overlay] {
             boxes.insert(node, LayoutBox::new(bounds));
         }
         let mut hits = HitTesting::new();
-        hits.rebuild(&tree, &ComputedStyles::new(), &boxes);
+        hits.rebuild(&tree, &ComputedStyles::default(), &boxes);
         (tree, boxes, hits, item, overlay)
     }
 
@@ -573,7 +565,7 @@ mod tests {
             ComputedValue::keyword(layout_keyword::POSITION_ABSOLUTE),
         );
         raised.set(PropertyId::ZIndex, ComputedValue::number(1.0));
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(overlay, raised.clone());
         assert_eq!(
             hits.resolve(&tree, &computed, &boxes, at, &unscrolled()),
@@ -650,10 +642,10 @@ mod tests {
             .set_logical_parent(LogicalParent::of(root));
         tree.get_mut(root).expect("in tree").push_child(card);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(card, LayoutBox::new(bounds));
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         if let Some(matrix) = matrix {
             let mut style = ComputedStyle::new();
             style.set(
@@ -821,8 +813,8 @@ mod tests {
         assert_eq!(
             hits.resolve(
                 &tree,
-                &ComputedStyles::new(),
-                &LayoutBoxes::new(),
+                &ComputedStyles::default(),
+                &LayoutBoxes::default(),
                 Point::new(1.0, 1.0),
                 &unscrolled(),
             ),
@@ -860,7 +852,7 @@ mod tests {
         let late = kid(&mut tree, root);
         let plain = kid(&mut tree, late);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let full = Rect::new(Point::new(0.0, 0.0), WIDE);
         boxes.insert(early, LayoutBox::new(full));
         boxes.insert(deep, LayoutBox::new(full));
@@ -870,7 +862,7 @@ mod tests {
         );
         boxes.insert(plain, LayoutBox::new(full));
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(early, positioned(Some(0.0)));
         computed.insert(deep, positioned(Some(5.0)));
         computed.insert(late, positioned(Some(10.0)));
@@ -905,14 +897,14 @@ mod tests {
         let a = kid(&mut tree, root);
         let b = kid(&mut tree, root);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         let full = Rect::new(Point::new(0.0, 0.0), WIDE);
         boxes.insert(a, LayoutBox::new(full));
         boxes.insert(b, LayoutBox::new(full));
 
         let mut raised_static = ComputedStyle::new();
         raised_static.set(PropertyId::ZIndex, ComputedValue::number(9.0));
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(a, raised_static);
         computed.insert(b, ComputedStyle::new());
 
@@ -958,7 +950,7 @@ mod tests {
         let item = kid(&mut tree, scroller);
         let toolbar = kid(&mut tree, root);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(
             scroller,
             LayoutBox::new(Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 400.0))),
@@ -972,10 +964,10 @@ mod tests {
             LayoutBox::new(Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 50.0))),
         );
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             scroller,
-            with_keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_SCROLL),
+            with_keyword(PropertyId::OverflowY, layout_keyword::OVERFLOW_SCROLL),
         );
         computed.insert(item, ComputedStyle::new());
         computed.insert(
@@ -988,7 +980,7 @@ mod tests {
 
         let on_toolbar = Point::new(50.0, 20.0);
         for offset in [0.0_f32, 100.0, 300.0, 1500.0] {
-            let scrolls = HashMap::from([(scroller, offset)]);
+            let scrolls = FastMap::from_iter([(scroller, offset)]);
             assert_eq!(
                 hits.resolve(&tree, &computed, &boxes, on_toolbar, &scrolls),
                 Some(toolbar),
@@ -1021,7 +1013,7 @@ mod tests {
         let mid = kid(&mut tree, outer);
         let inner = kid(&mut tree, mid);
 
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(outer, LayoutBox::new(Rect::new(Point::new(0.0, 0.0), WIDE)));
         boxes.insert(
             mid,
@@ -1032,20 +1024,20 @@ mod tests {
             LayoutBox::new(Rect::new(Point::new(0.0, 200.0), Size::new(200.0, 100.0))),
         );
 
-        let mut computed = ComputedStyles::new();
+        let mut computed = ComputedStyles::default();
         computed.insert(
             outer,
-            with_keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_SCROLL),
+            with_keyword(PropertyId::OverflowY, layout_keyword::OVERFLOW_SCROLL),
         );
         computed.insert(
             mid,
-            with_keyword(PropertyId::Overflow, layout_keyword::OVERFLOW_HIDDEN),
+            with_keyword(PropertyId::OverflowY, layout_keyword::OVERFLOW_HIDDEN),
         );
         computed.insert(inner, ComputedStyle::new());
 
         let mut hits = HitTesting::new();
         hits.rebuild(&tree, &computed, &boxes);
-        let scrolls = HashMap::from([(outer, 100.0_f32)]);
+        let scrolls = FastMap::from_iter([(outer, 100.0_f32)]);
 
         // `mid` shows content from unscrolled y 100..250, which after the 100px
         // scroll is screen y 0..150. At screen y 170 `inner` is folded to y 270 —

@@ -1,5 +1,4 @@
-`wlr-layer-shell` windowing: desktop surfaces rather than application windows
-(spec §6.5).
+`wlr-layer-shell` windowing: desktop surfaces rather than application windows.
 
 A layer surface is what a panel, a dock, a wallpaper, a notification and an
 on-screen keyboard are. It is not an application window: it has no title, no

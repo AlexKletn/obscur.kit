@@ -1,8 +1,6 @@
 #![doc = include_str!("style_inputs.doc/_module.md")]
 
-use std::collections::HashMap;
-
-use obscur_identity::{InternedSymbol, NodeId};
+use obscur_identity::{FastMap, InternedSymbol, NodeId};
 use obscur_style::cascade::ResolvedDeclarations;
 use obscur_style::property::PropertyValue;
 
@@ -10,13 +8,13 @@ use obscur_style::property::PropertyValue;
 #[derive(Debug, Clone, Default)]
 pub struct StyleInputs {
     #[doc = include_str!("style_inputs.doc/cascaded.md")]
-    cascaded: HashMap<NodeId, ResolvedDeclarations>,
+    cascaded: FastMap<NodeId, ResolvedDeclarations>,
     #[doc = include_str!("style_inputs.doc/custom.md")]
-    custom: HashMap<NodeId, HashMap<InternedSymbol, PropertyValue>>,
+    custom: FastMap<NodeId, FastMap<InternedSymbol, PropertyValue>>,
     #[doc = include_str!("style_inputs.doc/empty_cascaded.md")]
     empty_cascaded: ResolvedDeclarations,
     #[doc = include_str!("style_inputs.doc/empty_custom.md")]
-    empty_custom: HashMap<InternedSymbol, PropertyValue>,
+    empty_custom: FastMap<InternedSymbol, PropertyValue>,
 }
 
 impl StyleInputs {
@@ -37,7 +35,7 @@ impl StyleInputs {
     }
 
     #[doc = include_str!("style_inputs.doc/set_custom.md")]
-    pub fn set_custom(&mut self, node: NodeId, custom: HashMap<InternedSymbol, PropertyValue>) {
+    pub fn set_custom(&mut self, node: NodeId, custom: FastMap<InternedSymbol, PropertyValue>) {
         self.custom.insert(node, custom);
     }
 
@@ -54,13 +52,15 @@ impl StyleInputs {
 
     #[doc = include_str!("style_inputs.doc/custom_for.md")]
     #[must_use]
-    pub(crate) fn custom_for(&self, node: NodeId) -> &HashMap<InternedSymbol, PropertyValue> {
+    pub(crate) fn custom_for(&self, node: NodeId) -> &FastMap<InternedSymbol, PropertyValue> {
         self.custom.get(&node).unwrap_or(&self.empty_custom)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use obscur_style::property::{PropertyId, PropertyValue};
 
@@ -94,7 +94,7 @@ mod tests {
     fn set_and_read_custom() {
         let mut inputs = StyleInputs::new();
         let name = InternedSymbol::from_raw(3);
-        let mut custom = HashMap::new();
+        let mut custom = HashMap::default();
         custom.insert(name, PropertyValue::Number(2.0));
         inputs.set_custom(node(4), custom);
 

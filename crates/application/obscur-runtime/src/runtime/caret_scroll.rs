@@ -162,8 +162,8 @@ mod tests {
     fn detached() -> (RetainedTree, ComputedStyles, LayoutBoxes, SceneCoordinator) {
         (
             RetainedTree::new(),
-            ComputedStyles::new(),
-            LayoutBoxes::new(),
+            ComputedStyles::default(),
+            LayoutBoxes::default(),
             SceneCoordinator::new(),
         )
     }

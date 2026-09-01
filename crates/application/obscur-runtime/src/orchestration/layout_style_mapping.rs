@@ -7,7 +7,7 @@ use obscur_layout::model::{
     AlignItems, AlignSelf, BoxSizing, Direction, FlexDirection, FlexWrap, Inset, JustifyContent,
     LayoutDisplay, LayoutStyle, Position, WritingMode,
 };
-use obscur_style::computed::{ComputedStyle, ComputedValue};
+use obscur_style::computed::{ComputedStyle, ComputedValue, OverflowAxes};
 use obscur_style::property::{GridLineValue, PropertyId, PropertyValue, layout_keyword};
 use obscur_text::shaping::ParagraphShaper;
 
@@ -129,15 +129,7 @@ pub(super) fn layout_style_from(
 
 #[doc = include_str!("layout_style_mapping.doc/scroll_container_of.md")]
 fn scroll_container_of(computed: &ComputedStyle) -> bool {
-    matches!(
-        computed
-            .get(PropertyId::Overflow)
-            .map(ComputedValue::value),
-        Some(&PropertyValue::Keyword(sym))
-            if sym == layout_keyword::OVERFLOW_SCROLL
-                || sym == layout_keyword::OVERFLOW_AUTO
-                || sym == layout_keyword::OVERFLOW_HIDDEN
-    )
+    OverflowAxes::of(Some(computed)).establishes_scroll_container()
 }
 
 #[doc = include_str!("layout_style_mapping.doc/grid_auto_flow_of.md")]
@@ -642,7 +634,7 @@ mod tests {
             algorithm_for(
                 LayoutDisplay::Grid,
                 NodeId::from_raw(1),
-                &GridTemplates::new(),
+                &GridTemplates::default(),
                 0.0
             )
             .is_some()

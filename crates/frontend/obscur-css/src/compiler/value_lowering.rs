@@ -141,18 +141,7 @@ fn lower_function(
     interner: &mut CssSymbolInterner,
 ) -> Option<PropertyValue> {
     if name.eq_ignore_ascii_case("var") {
-        return args.iter().find_map(|arg| match arg {
-            // The reference is minted from the NAME, never from this sheet's
-            // interner, for the reason `property_compiler` gives where the
-            // declaration is minted: a per-source interner numbers from zero, so
-            // an interned `--brand` would only ever match a declaration compiled
-            // by the same compiler instance — never one from the theme sheet
-            // next to it, and never one from a `style` attribute.
-            ParsedValue::Keyword(k) if k.starts_with("--") => {
-                Some(PropertyValue::CustomRef(InternedSymbol::named(k)))
-            }
-            _ => None,
-        });
+        return var_reference(args);
     }
     if name.eq_ignore_ascii_case("env") {
         return lower_env(args, interner);
@@ -161,6 +150,40 @@ fn lower_function(
         return Some(PropertyValue::Color(color));
     }
     lower_math_function(name, args).map(PropertyValue::Calc)
+}
+
+#[doc = include_str!("value_lowering.doc/var_reference.md")]
+fn var_reference(args: &[ParsedValue]) -> Option<PropertyValue> {
+    args.iter().find_map(|arg| match arg {
+        // The reference is minted from the NAME, never from this sheet's
+        // interner, for the reason `property_compiler` gives where the
+        // declaration is minted: a per-source interner numbers from zero, so an
+        // interned `--brand` would only ever match a declaration compiled by the
+        // same compiler instance — never one from the theme sheet next to it,
+        // and never one from a `style` attribute.
+        ParsedValue::Keyword(k) if k.starts_with("--") => {
+            Some(PropertyValue::CustomRef(InternedSymbol::named(k)))
+        }
+        _ => None,
+    })
+}
+
+#[doc = include_str!("value_lowering.doc/custom_ref.md")]
+pub(super) fn custom_ref(value: &ParsedValue) -> Option<PropertyValue> {
+    match value {
+        ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("var") => {
+            var_reference(args)
+        }
+        _ => None,
+    }
+}
+
+#[doc = include_str!("value_lowering.doc/sole_custom_ref.md")]
+pub(super) fn sole_custom_ref(values: &[ParsedValue]) -> Option<PropertyValue> {
+    match values {
+        [only] => custom_ref(only),
+        _ => None,
+    }
 }
 
 #[doc = include_str!("value_lowering.doc/lower_env.md")]

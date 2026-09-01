@@ -110,8 +110,8 @@ mod tests {
     ) {
         (
             RetainedTree::new(),
-            ComputedStyles::new(),
-            LayoutBoxes::new(),
+            ComputedStyles::default(),
+            LayoutBoxes::default(),
             ScrollOffsets::new(),
             VirtualLists::new(),
         )

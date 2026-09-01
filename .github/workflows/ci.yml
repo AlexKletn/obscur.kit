@@ -69,9 +69,12 @@ jobs:
       - run: cargo build -p obscur-kit --features full
       # The windowed example is compile-only in CI (no display/GPU).
       - run: cargo build -p obscur-kit --example windowed_counter --features full
-      # An application's view of the facade: a crate outside the workspace whose
+      # An application's view of the facade: crates outside the workspace whose
       # only dependency is `obscur-kit`. The one place a defect in what the
-      # authoring surfaces *emit* is visible (audit finding 1-A).
+      # authoring surfaces *emit* is visible. Two profiles — a window, and a
+      # desktop surface built with no windowing backend at all, which is the only
+      # configuration where the layer runner is the sole reader of what boot
+      # produces (see docs/layer-consumer-audit.md).
       - run: cargo run -p xtask -- consumer
 
   # ---- Periodic-only jobs (spec §5.10 "периодически") ----------------------

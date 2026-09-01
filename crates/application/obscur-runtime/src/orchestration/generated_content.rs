@@ -1,8 +1,8 @@
 #![doc = include_str!("generated_content.doc/_module.md")]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_style::cascade::{Cascade, CascadeOrigin, Declaration, ResolvedDeclarations};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, StyleRule, Stylesheet};
@@ -121,7 +121,7 @@ fn targets_pseudo_element(selector: &ComplexSelector, pseudo: &str) -> bool {
 
 #[doc = include_str!("generated_content.doc/resolve_generated_content.md")]
 pub(crate) fn resolve_generated_content(
-    out: &mut HashMap<NodeId, GeneratedContent>,
+    out: &mut FastMap<NodeId, GeneratedContent>,
     tree: &RetainedTree,
     sheets: &[Stylesheet],
     environment: &MediaEnvironment,
@@ -156,7 +156,7 @@ pub(crate) fn resolve_generated_content(
 
 #[doc = include_str!("generated_content.doc/restyled_with_ancestors.md")]
 fn restyled_with_ancestors(tree: &RetainedTree, dirty: &StyleInvalidation) -> Vec<NodeId> {
-    let mut seen: HashSet<NodeId> = HashSet::new();
+    let mut seen: FastSet<NodeId> = HashSet::default();
     let mut scoped = Vec::new();
     for (&node, _) in dirty {
         let mut current = Some(node);
@@ -333,6 +333,8 @@ fn probe() {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use obscur_identity::ComponentId;
     use obscur_style::cascade::CascadeOrigin;
@@ -442,7 +444,7 @@ mod tests {
         );
 
         reset_probes();
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
 
         assert!(out.is_empty(), "an ordinary sheet decorates nothing");
@@ -465,7 +467,7 @@ mod tests {
         )]);
 
         reset_probes();
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
 
         assert_eq!(
@@ -490,7 +492,7 @@ mod tests {
             StyleRule::new(before_selectors("a"), vec![content("A")]),
             StyleRule::new(before_selectors("b"), vec![content("B")]),
         ]);
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
 
         // A sentinel no rule could ever produce: if the scoped pass recomputes
@@ -544,7 +546,7 @@ mod tests {
         let text = tree.get(input).unwrap().child_nodes()[0];
 
         // The previous frame's answer, from when the field was still empty.
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         out.insert(
             input,
             GeneratedContent {
@@ -577,7 +579,7 @@ mod tests {
             before_selectors("a"),
             vec![content("A")],
         )]);
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
         assert!(out.contains_key(&a));
 

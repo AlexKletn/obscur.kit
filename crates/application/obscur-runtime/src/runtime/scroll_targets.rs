@@ -1,9 +1,7 @@
 #![doc = include_str!("scroll_targets.doc/_module.md")]
 
-use std::collections::HashMap;
-
 use obscur_geometry::Point;
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_tree::tree::RetainedTree;
 
 use super::{AncestorChain, ScrollOffsets};
@@ -74,7 +72,7 @@ impl<'a> ScrollTargets<'a> {
     }
 
     #[doc = include_str!("scroll_targets.doc/paint.md")]
-    pub(crate) fn paint(&self, computed: &ComputedStyles) -> HashMap<NodeId, ScrollPaint> {
+    pub(crate) fn paint(&self, computed: &ComputedStyles) -> FastMap<NodeId, ScrollPaint> {
         scroll_containers(self.tree, computed, self.boxes)
             .into_iter()
             .map(|c| {
@@ -117,8 +115,8 @@ mod tests {
     fn empty() -> (RetainedTree, ComputedStyles, LayoutBoxes, ScrollOffsets) {
         (
             RetainedTree::new(),
-            ComputedStyles::new(),
-            LayoutBoxes::new(),
+            ComputedStyles::default(),
+            LayoutBoxes::default(),
             ScrollOffsets::new(),
         )
     }

@@ -1,7 +1,6 @@
 #![doc = include_str!("stacking_order_proof.doc/_module.md")]
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use obscur_kit::geometry::{Point, Rect, Size};
@@ -47,7 +46,7 @@ fn main() {
     let s = element(&mut tree, root, 3);
     let n = element(&mut tree, root, 4);
 
-    let mut computed: ComputedStyles = HashMap::new();
+    let mut computed: ComputedStyles = ComputedStyles::default();
     // The root paints NO background: in this z-primary flat model a `z:-2` box
     // sorts below EVERYTHING at z=0 (including a full-viewport root backdrop), so an
     // opaque root background would hide the negative-z box entirely. This mirrors
@@ -60,7 +59,7 @@ fn main() {
     computed.insert(s, background(yellow)); // non-positioned block → layer 3
     computed.insert(n, positioned_z(red, -2.0)); // positioned z:-2 → layer 2 (below)
 
-    let mut boxes: LayoutBoxes = HashMap::new();
+    let mut boxes: LayoutBoxes = LayoutBoxes::default();
     boxes.insert(
         root,
         LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)),

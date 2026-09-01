@@ -1,15 +1,13 @@
 #![doc = include_str!("pseudo_states.doc/_module.md")]
 
-use std::collections::HashMap;
-
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_style::selector::PseudoState;
 
 #[doc = include_str!("pseudo_states.doc/PseudoStates.md")]
 #[derive(Debug, Clone, Default)]
 pub struct PseudoStates {
     #[doc = include_str!("pseudo_states.doc/states.md")]
-    states: HashMap<NodeId, PseudoState>,
+    states: FastMap<NodeId, PseudoState>,
 }
 
 impl PseudoStates {

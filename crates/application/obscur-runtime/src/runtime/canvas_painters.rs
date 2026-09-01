@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::{InternedSymbol, NodeId};
+use obscur_identity::{FastMap, InternedSymbol, NodeId};
 use obscur_scene::command::{CanvasRegion, DisplayListBuilder, PaintCommand};
 use obscur_scene::path::{Path, PathSegment, PathTrim};
 use obscur_style::computed::ComputedValue;
@@ -32,7 +32,7 @@ pub(crate) struct CanvasPainters {
     #[doc = include_str!("canvas_painters.doc/unbalanced.md")]
     unbalanced: Vec<PainterKey>,
     #[doc = include_str!("canvas_painters.doc/hits.md")]
-    hits: HashMap<NodeId, PathTrim>,
+    hits: FastMap<NodeId, PathTrim>,
 }
 
 impl CanvasPainters {
@@ -47,7 +47,7 @@ impl CanvasPainters {
     }
 
     #[doc = include_str!("canvas_painters.doc/hits.md")]
-    pub(crate) fn hits(&self) -> &HashMap<NodeId, PathTrim> {
+    pub(crate) fn hits(&self) -> &FastMap<NodeId, PathTrim> {
         &self.hits
     }
 
@@ -63,8 +63,8 @@ impl CanvasPainters {
         boxes: &LayoutBoxes,
         computed: &ComputedStyles,
         elapsed: f32,
-    ) -> (HashMap<NodeId, Vec<PaintCommand>>, bool) {
-        let mut painted = HashMap::new();
+    ) -> (FastMap<NodeId, Vec<PaintCommand>>, bool) {
+        let mut painted = HashMap::default();
         let mut animating = false;
         self.hits.clear();
         // An application that registered no painter pays one branch. The walk
@@ -230,7 +230,7 @@ mod tests {
         tree.get_mut(node)
             .expect("live")
             .set_props(vec![obscur_view::view::canvas_painter_prop(CHART)].into_boxed_slice());
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(
             node,
             obscur_layout::model::LayoutBox::new(Rect::new(
@@ -260,7 +260,9 @@ mod tests {
             }),
         );
 
-        let painted = painters.paint(&tree, &boxes, &ComputedStyles::new(), 0.0).0;
+        let painted = painters
+            .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
+            .0;
         let commands = painted.get(&node).expect("the canvas painted");
         assert!(
             commands
@@ -276,7 +278,7 @@ mod tests {
         let mut painters = CanvasPainters::new();
         assert!(
             painters
-                .paint(&tree, &boxes, &ComputedStyles::new(), 0.0)
+                .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
                 .0
                 .is_empty()
         );
@@ -292,7 +294,7 @@ mod tests {
         );
         assert!(
             painters
-                .paint(&tree, &boxes, &ComputedStyles::new(), 0.0)
+                .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
                 .0
                 .is_empty()
         );
@@ -309,7 +311,7 @@ mod tests {
         painters.register(PainterKey::Symbol(CHART), Box::new(|_, _| false));
         assert!(
             painters
-                .paint(&tree, &boxes, &ComputedStyles::new(), 0.0)
+                .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
                 .0
                 .is_empty()
         );
@@ -323,7 +325,7 @@ mod tests {
         tree.get_mut(node)
             .expect("live")
             .set_props(Vec::new().into_boxed_slice());
-        let mut styles = ComputedStyles::new();
+        let mut styles = ComputedStyles::default();
         let mut style = obscur_style::computed::ComputedStyle::new();
         style.set(
             obscur_style::property::PropertyId::Painter,
@@ -356,7 +358,7 @@ mod tests {
         // IS. A rule matching it must not be able to swap the routine that draws
         // a progress bar for one that draws a clock.
         let (tree, boxes, node) = one_canvas();
-        let mut styles = ComputedStyles::new();
+        let mut styles = ComputedStyles::default();
         let mut style = obscur_style::computed::ComputedStyle::new();
         style.set(
             obscur_style::property::PropertyId::Painter,
@@ -408,7 +410,7 @@ mod tests {
             }),
         );
 
-        let _ = painters.paint(&tree, &boxes, &ComputedStyles::new(), 0.0);
+        let _ = painters.paint(&tree, &boxes, &ComputedStyles::default(), 0.0);
         assert_eq!(
             painters.take_unbalanced(),
             vec![PainterKey::Symbol(CHART)],
@@ -435,7 +437,12 @@ mod tests {
         );
         assert!(
             painters
-                .paint(&tree, &LayoutBoxes::new(), &ComputedStyles::new(), 0.0)
+                .paint(
+                    &tree,
+                    &LayoutBoxes::default(),
+                    &ComputedStyles::default(),
+                    0.0
+                )
                 .0
                 .is_empty(),
             "a display:none branch has nowhere to paint into"

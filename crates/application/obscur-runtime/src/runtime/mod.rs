@@ -200,6 +200,9 @@ mod scroll_offsets;
 pub(crate) use scroll_offsets::{FoldInputs, ScrollOffsets};
 mod motion_driver;
 pub(crate) use motion_driver::MotionDriver;
+
+mod presentation_undo;
+pub(crate) use presentation_undo::PresentationUndo;
 mod virtual_lists;
 pub(crate) use virtual_lists::VirtualLists;
 mod cascade_sheets;

@@ -5,21 +5,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use obscur_kit::geometry::Size;
 use obscur_kit::identity::InternedSymbol;
-use obscur_kit::layer::{LayerApp, LayerHandle, LayerWaker};
 use obscur_kit::primitives::{Container, Text};
+use obscur_kit::shell_layer::surface::LayerWaker;
 use obscur_kit::view::view::{View, ViewNode};
 use obscur_kit::widgets::button::Button;
-use obscur_kit::windowing::layer::{
-    LayerAnchor, LayerExclusiveZone, LayerOutput, LayerSurfaceConfig, Margins,
-};
+use obscur_kit::windowing::layer::{LayerDisplay, LayerMargins, LayerReservation, LayerSettings};
+use obscur_kit::{App, LayerControl};
 
 #[doc = include_str!("panel.doc/BAR_HEIGHT.md")]
 const BAR_HEIGHT: u32 = 36;
-
-#[doc = include_str!("panel.doc/BAR_HEIGHT_PX.md")]
-const BAR_HEIGHT_PX: f32 = 36.0;
 
 #[doc = include_str!("panel.doc/CSS.md")]
 const CSS: &str = "\
@@ -75,19 +70,17 @@ impl Panel {
     }
 
     #[doc = include_str!("panel.doc/toggle_presentation.md")]
-    fn toggle_presentation(&mut self, namespace: &str) -> LayerSurfaceConfig {
+    fn toggle_presentation(&mut self) -> LayerSettings {
         self.reserving = !self.reserving;
         if self.reserving {
-            LayerSurfaceConfig::top_bar(namespace, BAR_HEIGHT)
+            LayerSettings::top_bar(BAR_HEIGHT)
         } else {
-            LayerSurfaceConfig::new(namespace)
-                .with_anchor(LayerAnchor::TOP_BAR)
-                .with_size(obscur_kit::geometry::Size::new(
-                    0.0,
-                    f32::from(u16::try_from(BAR_HEIGHT).unwrap_or(36)),
-                ))
-                .with_exclusive_zone(LayerExclusiveZone::None)
-                .with_margin(Margins::uniform(12))
+            // The same bar, floating: still anchored across the top, but taking
+            // no space from anyone and held clear of the edge. Only the height
+            // is stated — the width is the anchor's to stretch.
+            LayerSettings::top_bar(BAR_HEIGHT)
+                .with_reservation(LayerReservation::None)
+                .with_margin(LayerMargins::uniform(12))
         }
     }
 }
@@ -124,7 +117,7 @@ fn key(command: &str, label: &str) -> ViewNode {
         .class("key")
 }
 
-fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
+fn main() -> Result<(), obscur_kit::AppError> {
     let state = Rc::new(RefCell::new(Panel::new()));
 
     // A clock, and the thread that keeps it current. The thread never touches the
@@ -154,26 +147,37 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
     let reset_state = state.clone();
     let float_state = state.clone();
 
-    // The handle is how a handler reaches the live surface: the loop owns it, so
-    // a handler leaves a request and the loop applies it on its next turn.
-    let handle = LayerHandle::new();
-    let float_handle = handle.clone();
+    // `panel eDP-1` pins the bar to that monitor; with no argument the platform
+    // chooses, which on a multi-head desktop means "wherever the focus happened to
+    // be" — rarely what a panel wants. The name is resolved to an id here, because
+    // an id is the platform-neutral currency and a connector name is not.
+    let mut settings = LayerSettings::top_bar(BAR_HEIGHT);
+    if let Some(wanted) = std::env::args().nth(1) {
+        let displays = App::displays()?;
+        if let Some(display) = displays.iter().find(|display| display.name() == wanted) {
+            settings = settings.with_display(display.id());
+        } else {
+            let names: Vec<&str> = displays.iter().map(LayerDisplay::name).collect();
+            eprintln!("no display named {wanted:?}; this desktop has {names:?}");
+        }
+    }
 
-    // `panel eDP-1` pins the bar to that connector; with no argument the
-    // compositor chooses, which on a multi-head desktop means "wherever the
-    // focus happens to be" — rarely what a panel wants.
-    let output = std::env::args()
-        .nth(1)
-        .map_or(LayerOutput::Compositor, |name| LayerOutput::Named(name));
+    let app = App::new("obscur.kit panel")
+        .app_id("obscur-kit-panel")
+        .layer(settings);
 
-    LayerApp::top_bar("obscur-kit-panel", BAR_HEIGHT)
-        .output(output)
-        .stylesheet(CSS)
+    // How a handler reaches the live surface: the loop owns the surface, so a
+    // handler leaves a request and the loop applies it on its next turn. Taken
+    // from the `App` rather than made here — there is one surface, so there is
+    // one handle to it.
+    let float_control: LayerControl = app.layer_control();
+
+    app.stylesheet(CSS)
         .view(move || {
             // Read the clock at build time, so the frame a wake caused shows the
             // value that caused it.
             if let Ok(text) = view_clock.lock() {
-                view_state.borrow_mut().clock = text.clone();
+                view_state.borrow_mut().clock.clone_from(&text);
             }
             view(&view_state.borrow())
         })
@@ -184,12 +188,9 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
             reset_state.borrow_mut().reset();
         })
         .on_command(InternedSymbol::named("float"), move || {
-            let config = float_state
-                .borrow_mut()
-                .toggle_presentation("obscur-kit-panel");
-            float_handle.reconfigure(config);
+            let settings = float_state.borrow_mut().toggle_presentation();
+            float_control.reconfigure(settings);
         })
-        .handle(handle)
         .waker(waker)
         .run()
 }

@@ -65,12 +65,17 @@ task-tokio = ["dep:obscur-task-tokio"]
 render-cpu = ["dep:obscur-render-cpu"]
 # `render-vello` also pulls the raw wgpu/pollster the standalone `App::run` needs to
 # build the swapchain (same pins as the adapter); `window-winit` pulls raw winit for
-# the event loop + converters. Together they gate the `app` module.
+# the event loop + converters.
 render-vello = ["dep:obscur-render-vello", "dep:wgpu", "dep:pollster"]
-window-winit = ["dep:obscur-window-winit", "dep:winit"]
+window-winit = ["dep:obscur-window-winit", "dep:winit", "surface"]
 # `wlr-layer-shell` surfaces (panels, docks, overlays). Linux/Wayland only; the
 # adapter answers `Unsupported` rather than failing where the protocol is absent.
-shell-layer = ["dep:obscur-shell-layer"]
+shell-layer = ["dep:obscur-shell-layer", "surface"]
+# Marker, enabled by every backend that can put a surface on screen. `App` needs a
+# renderer and *one of* them, and `App::layer` chooses which — so the module gate is
+# `render-vello` + this, rather than a disjunction that grows a term per backend and
+# has to be edited in every `#[cfg]` when one is added.
+surface = []
 accesskit = ["dep:obscur-accessibility-accesskit"]
 text-harfrust = ["dep:obscur-text-harfrust"]
 text-unicode = ["dep:obscur-text-unicode"]

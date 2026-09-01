@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use obscur_identity::{NodeId, StableKey};
+use obscur_identity::{FastSet, NodeId, StableKey};
 use obscur_view::view::{ViewKey, ViewNode};
 
 use crate::node::NodeKind;
@@ -40,7 +40,7 @@ impl ChildMatcher {
         }
 
         // Key index: first existing occurrence of a key wins (deterministic).
-        let mut key_index: HashMap<&StableKey, (NodeId, &NodeKind)> = HashMap::new();
+        let mut key_index: HashMap<&StableKey, (NodeId, &NodeKind)> = HashMap::default();
         for &(id, key, kind) in &infos {
             if let Some(k) = key {
                 key_index.entry(k).or_insert((id, kind));
@@ -55,7 +55,7 @@ impl ChildMatcher {
             .map(|&(id, _, kind)| (id, kind))
             .collect();
 
-        let mut used: HashSet<NodeId> = HashSet::new();
+        let mut used: FastSet<NodeId> = HashSet::default();
         let mut matches: Vec<IdentityMatch> = Vec::with_capacity(desired.len());
         let mut cursor: usize = 0;
 
@@ -95,7 +95,7 @@ impl ChildMatcher {
 
 fn next_unused_compatible(
     unkeyed: &[(NodeId, &NodeKind)],
-    used: &HashSet<NodeId>,
+    used: &FastSet<NodeId>,
     desired: &ViewNode,
     from: usize,
 ) -> Option<usize> {

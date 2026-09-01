@@ -85,7 +85,7 @@ pub fn check_expression_in(expr: &Expr, functions: &[Box<str>]) -> Result<(), St
                 ));
             }
             if matches!(&*inner.receiver, Expr::Field(_)) {
-                return Err(SERVICE_ACCESS_MESSAGE.to_owned());
+                return Err(field_method_message(&method));
             }
             check_expression_in(&inner.receiver, functions)?;
             inner
@@ -121,9 +121,15 @@ fn refused_call_message(name: &str) -> String {
 pub const FORBIDDEN_FREE_CALL: &str =
     "only explicitly exported pure functions may be called in an expression (spec §2.10)";
 
-#[doc = include_str!("expression_validator.doc/SERVICE_ACCESS_MESSAGE.md")]
-pub const SERVICE_ACCESS_MESSAGE: &str =
-    "direct service access is not allowed in an expression (spec §2.10)";
+#[doc = include_str!("expression_validator.doc/field_method_message.md")]
+fn field_method_message(method: &str) -> String {
+    format!(
+        "`{method}` is called on a value reached through a field, a shape an \
+         expression may not use: it cannot be told apart from the direct service \
+         access §2.10 forbids. Compute the value where the view model is built, \
+         and read that field here instead."
+    )
+}
 
 #[doc = include_str!("expression_validator.doc/is_mutating_method.md")]
 fn is_mutating_method(method: &str) -> bool {
@@ -328,6 +334,45 @@ mod tests {
                 .validate_document(&document("<span>{user.name}</span>"))
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_method_on_a_field_is_refused_by_the_rule_it_actually_enforces() {
+        // A consumer wrote `<For … key={row.keys.len()}>` and was told "direct
+        // service access is not allowed", which sent them looking for a service
+        // they never wrote. The refusal is right — the shape is indistinguishable
+        // from `services.http.get(url)` — but the message has to say *that*, not
+        // assert a `.len()` on a `Vec` is a service.
+        let validator = ExpressionValidator::new();
+
+        let diagnostics = validator.validate("row.keys.len()", 0);
+        assert_eq!(diagnostics.len(), 1, "the call is still refused");
+        let message = diagnostics[0].message();
+        assert!(
+            message.contains("len"),
+            "the message names the call it refused: {message}"
+        );
+        assert!(
+            message.contains("field"),
+            "the message names the shape it enforces: {message}"
+        );
+        assert!(
+            !message.contains("direct service access is not allowed"),
+            "the message may not claim a `.len()` on a `Vec` *is* service access: \
+             {message}"
+        );
+
+        // The same through the attribute the consumer actually wrote.
+        let doc = document("<For each={rows} as={row} key={row.keys.len()}><T/></For>");
+        let from_document = validator.validate_document(&doc);
+        assert_eq!(from_document.len(), 1, "{from_document:?}");
+        assert_eq!(from_document[0].message(), message);
+
+        // The genuine service call is refused by the same rule, and its message
+        // still says so.
+        let service = validator.validate("services.http.get(url)", 0);
+        assert_eq!(service.len(), 1);
+        assert!(service[0].message().contains("service"), "{:?}", service[0]);
     }
 
     #[test]

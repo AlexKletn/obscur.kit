@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use obscur_identity::NodeId;
+use obscur_identity::{FastMap, NodeId};
 use obscur_tree::tree::RetainedTree;
 
 use crate::orchestration::{LayoutBoxes, ScrollContainer};
@@ -21,7 +21,7 @@ pub(crate) struct FoldInputs<'a> {
 #[doc = include_str!("scroll_offsets.doc/ScrollOffsets.md")]
 pub(crate) struct ScrollOffsets {
     #[doc = include_str!("scroll_offsets.doc/offsets.md")]
-    offsets: HashMap<NodeId, f32>,
+    offsets: FastMap<NodeId, f32>,
     #[doc = include_str!("scroll_offsets.doc/folded.md")]
     folded: LayoutBoxes,
     #[doc = include_str!("scroll_offsets.doc/folded_active.md")]
@@ -32,8 +32,8 @@ impl ScrollOffsets {
     #[doc = include_str!("scroll_offsets.doc/new.md")]
     pub(crate) fn new() -> Self {
         Self {
-            offsets: HashMap::new(),
-            folded: LayoutBoxes::new(),
+            offsets: HashMap::default(),
+            folded: LayoutBoxes::default(),
             folded_active: false,
         }
     }
@@ -84,7 +84,7 @@ impl ScrollOffsets {
         }
         // The live scroll offset of each overflowing scroll container, so an
         // ancestor walk can add every crossed container's contribution.
-        let scroll_of: HashMap<NodeId, f32> = fold
+        let scroll_of: FastMap<NodeId, f32> = fold
             .containers
             .iter()
             .map(|c| (c.node, self.clamped(*c)))
@@ -180,7 +180,7 @@ mod tests {
         let node = NodeId::from_raw(7);
         let mut offsets = ScrollOffsets::new();
         let tree = RetainedTree::new();
-        let boxes = LayoutBoxes::new();
+        let boxes = LayoutBoxes::default();
         let tall = container(node, 0.0, 100.0, 500.0);
         offsets.set(
             tall,
@@ -205,7 +205,7 @@ mod tests {
         let node = NodeId::from_raw(7);
         let c = container(node, 0.0, 100.0, 500.0);
         let tree = RetainedTree::new();
-        let boxes = LayoutBoxes::new();
+        let boxes = LayoutBoxes::default();
         let fold = FoldInputs {
             tree: &tree,
             boxes: &boxes,
@@ -239,7 +239,7 @@ mod tests {
         let node = NodeId::from_raw(7);
         let c = container(node, 0.0, 100.0, 500.0);
         let tree = RetainedTree::new();
-        let boxes = LayoutBoxes::new();
+        let boxes = LayoutBoxes::default();
         let fold = FoldInputs {
             tree: &tree,
             boxes: &boxes,
@@ -263,7 +263,7 @@ mod tests {
         let node = NodeId::from_raw(7);
         let c = container(node, 0.0, 100.0, 300.0); // max 200
         let tree = RetainedTree::new();
-        let boxes = LayoutBoxes::new();
+        let boxes = LayoutBoxes::default();
         let fold = FoldInputs {
             tree: &tree,
             boxes: &boxes,
@@ -281,7 +281,7 @@ mod tests {
         // values: an unscrolled tree must not pay for the projection.
         let mut offsets = ScrollOffsets::new();
         let tree = RetainedTree::new();
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(NodeId::from_raw(1), layout_box(40.0));
         offsets.refold(FoldInputs {
             tree: &tree,
@@ -296,7 +296,7 @@ mod tests {
         // The invariant itself: there is no window in which the map has moved and
         // the projection has not.
         let (tree, [_root, scroller, row, _leaf]) = chain();
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(scroller, layout_box(0.0));
         boxes.insert(row, layout_box(300.0));
         let c = container(scroller, 0.0, 100.0, 900.0);
@@ -324,7 +324,7 @@ mod tests {
         // `root → outer → inner → leaf`, both scrollers scrolled: the leaf must
         // lose both offsets, the inner scroller only its ancestor's.
         let (tree, [_root, outer, inner, leaf]) = chain();
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(outer, layout_box(0.0));
         boxes.insert(inner, layout_box(100.0));
         boxes.insert(leaf, layout_box(400.0));
@@ -370,7 +370,7 @@ mod tests {
         tree.get_mut(b)
             .expect("in tree")
             .set_logical_parent(LogicalParent::of(a));
-        let mut boxes = LayoutBoxes::new();
+        let mut boxes = LayoutBoxes::default();
         boxes.insert(a, layout_box(0.0));
         let c = container(root, 0.0, 10.0, 100.0);
         let mut offsets = ScrollOffsets::new();
