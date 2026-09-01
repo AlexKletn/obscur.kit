@@ -1863,6 +1863,7 @@ version = "0.0.0"
 dependencies = [
  "calloop",
  "calloop-wayland-source",
+ "obscur-capability",
  "obscur-geometry",
  "obscur-identity",
  "obscur-interaction",
@@ -1889,6 +1890,7 @@ dependencies = [
  "obscur-capability",
  "obscur-geometry",
  "obscur-identity",
+ "obscur-scene",
 ]
 
 [[package]]
@@ -1896,6 +1898,7 @@ name = "obscur-system-linux"
 version = "0.0.0"
 dependencies = [
  "obscur-capability",
+ "obscur-scene",
  "obscur-system",
 ]
 

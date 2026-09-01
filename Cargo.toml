@@ -146,3 +146,19 @@ cast_precision_loss = "allow"
 # Several value objects are spec-mandated boolean bundles (window/input/command
 # state, privacy policy); a bitflag rewrite would obscure the 1:1 spec mapping.
 struct_excessive_bools = "allow"
+
+# Measured 2026-08-12 with callgrind on a 227-node frame, because wall clock on
+# this box has a wider spread (0.276-0.331 ms) than the effect being looked for.
+# Cargo's release defaults are `lto = false, codegen-units = 16`, and on a
+# workspace of forty crates written one entity to a file that costs real work:
+# almost nothing crosses a crate boundary inlined.
+#
+#   default                       123.75 M instructions/frame
+#   lto = "thin", cgu = 1         104.31 M   -15.7%
+#   lto = "fat",  cgu = 1         no better than the default, and slower to build
+#
+# The dev profile is untouched, so `cargo check` and the default `cargo test`
+# pay nothing for this; only a release build is slower to produce.
+[profile.release]
+lto = "thin"
+codegen-units = 1
