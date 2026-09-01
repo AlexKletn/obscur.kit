@@ -56,6 +56,7 @@ mod pending_work;
 mod pointer;
 mod pointer_dispatch;
 mod queued_input;
+mod removed_nodes;
 mod resource_resolution;
 mod resources;
 mod scrolling;

@@ -132,6 +132,12 @@ impl UiRuntime {
             //     other focus move goes through, so the editing session is
             //     released with it.
             self.drop_focus_if_removed();
+            // 1d. …and the same question about every other map keyed by a node.
+            //     Focus was the one field anybody had thought to ask it of; the
+            //     computed styles, the cascade inputs, the pseudo-class states
+            //     and the scroll offsets all outlived their nodes, and the style
+            //     maps are walked whole every composing frame.
+            self.drop_state_of_removed_nodes();
         }
 
         // 2-3. Match + style: rebuild cascade inputs and resolve computed styles.

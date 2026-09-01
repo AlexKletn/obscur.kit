@@ -38,6 +38,11 @@ impl ScrollOffsets {
         }
     }
 
+    #[doc = include_str!("scroll_offsets.doc/retain_live.md")]
+    pub(crate) fn retain_live(&mut self, tree: &RetainedTree) {
+        self.offsets.retain(|node, _| tree.contains(*node));
+    }
+
     #[doc = include_str!("scroll_offsets.doc/clamped.md")]
     pub(crate) fn clamped(&self, c: ScrollContainer) -> f32 {
         self.offsets

@@ -20,7 +20,9 @@ use obscur_kit::view::component::{
     Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
     ComponentRegistration, ComponentVersion, ErasedComponent, InstanceId,
 };
-use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_kit::view::view::{
+    CLASS, View, ViewFragment, ViewKey, ViewNode, ViewProperty, ViewValue,
+};
 
 #[doc = include_str!("incremental_restyle.doc/StyleCounts.md")]
 #[derive(Debug, Default)]
@@ -428,3 +430,106 @@ fn pressing_one_component_backed_key_does_not_restyle_the_whole_tree() {
     );
 }
 
+#[doc = include_str!("incremental_restyle.doc/window_view.md")]
+fn window_view(first: usize, width: usize) -> View {
+    let nodes = (first..first + width)
+        .map(|i| {
+            ViewNode::element(ComponentId::from_raw(1))
+                .with_key(ViewKey::from(i.to_string()))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
+        })
+        .collect();
+    View::from_fragment(ViewFragment::from_nodes(nodes))
+}
+
+#[doc = include_str!("incremental_restyle.doc/a_departed_node_keeps_no_computed_style.md")]
+#[test]
+fn a_departed_node_keeps_no_computed_style() {
+    const WIDTH: usize = 30;
+    const FRAMES: usize = 200;
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    let mut css = CssPipeline::new();
+    css.install(&mut runtime, &[CssSource::anonymous(STYLESHEET)]);
+    let sheets = css.sheets().to_vec();
+
+    let mut seen: std::collections::BTreeSet<NodeId> = std::collections::BTreeSet::new();
+    for frame in 0..FRAMES {
+        let _ = runtime.render_now(&window_view(frame, WIDTH), &sheets);
+        seen.extend(children(&runtime));
+    }
+
+    let live = children(&runtime);
+    let dead: Vec<NodeId> = seen
+        .into_iter()
+        .filter(|id| !live.contains(id))
+        .filter(|id| runtime.tree().get(*id).is_none())
+        .collect();
+    let still_styled = dead
+        .iter()
+        .filter(|id| runtime.computed_style(**id).is_some())
+        .count();
+
+    println!(
+        "[probe] live={} tree.len()={} dead={} still_styled={}",
+        live.len(),
+        runtime.tree().len(),
+        dead.len(),
+        still_styled
+    );
+    assert_eq!(
+        still_styled, 0,
+        "a node the reconcile removed must not keep its computed style"
+    );
+}
+
+#[doc = include_str!("incremental_restyle.doc/rss_kb.md")]
+fn rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/statm")
+        .ok()
+        .and_then(|s| {
+            s.split_whitespace()
+                .nth(1)
+                .and_then(|p| p.parse::<u64>().ok())
+        })
+        .map_or(0, |pages| pages * 4)
+}
+
+#[doc = include_str!("incremental_restyle.doc/a_sliding_window_costs_what_the_window_costs.md")]
+#[test]
+#[ignore = "a measurement, not an oracle: run with --release --ignored"]
+fn a_sliding_window_costs_what_the_window_costs() {
+    const WIDTH: usize = 30;
+    const FRAMES: usize = 3000;
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    let mut css = CssPipeline::new();
+    css.install(&mut runtime, &[CssSource::anonymous(STYLESHEET)]);
+    let sheets = css.sheets().to_vec();
+
+    let _ = runtime.render_now(&window_view(0, WIDTH), &sheets);
+    let base_rss = rss_kb();
+    let mut early = std::time::Duration::ZERO;
+
+    for frame in 1..=FRAMES {
+        let t = std::time::Instant::now();
+        let _ = runtime.render_now(&window_view(frame, WIDTH), &sheets);
+        let dt = t.elapsed();
+        if frame == 20 {
+            early = dt;
+        }
+        if frame % 500 == 0 {
+            println!(
+                "[churn] frame {frame:>4}  rss +{:>6} kB  frame {:>7.3} ms  tree.len()={}",
+                rss_kb().saturating_sub(base_rss),
+                dt.as_secs_f64() * 1000.0,
+                runtime.tree().len()
+            );
+        }
+    }
+    println!(
+        "[churn] frame 20 = {:.3} ms; growth = {:.2} kB/frame",
+        early.as_secs_f64() * 1000.0,
+        (rss_kb().saturating_sub(base_rss)) as f64 / FRAMES as f64
+    );
+}

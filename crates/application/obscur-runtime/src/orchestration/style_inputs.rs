@@ -3,6 +3,7 @@
 use obscur_identity::{FastMap, InternedSymbol, NodeId};
 use obscur_style::cascade::ResolvedDeclarations;
 use obscur_style::property::PropertyValue;
+use obscur_tree::tree::RetainedTree;
 
 #[doc = include_str!("style_inputs.doc/StyleInputs.md")]
 #[derive(Debug, Clone, Default)]
@@ -42,6 +43,12 @@ impl StyleInputs {
     #[doc = include_str!("style_inputs.doc/clear_custom.md")]
     pub fn clear_custom(&mut self, node: NodeId) {
         self.custom.remove(&node);
+    }
+
+    #[doc = include_str!("style_inputs.doc/retain_live.md")]
+    pub(crate) fn retain_live(&mut self, tree: &RetainedTree) {
+        self.cascaded.retain(|node, _| tree.contains(*node));
+        self.custom.retain(|node, _| tree.contains(*node));
     }
 
     #[doc = include_str!("style_inputs.doc/cascaded_for.md")]

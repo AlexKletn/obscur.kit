@@ -2,6 +2,7 @@
 
 use obscur_identity::{FastMap, NodeId};
 use obscur_style::selector::PseudoState;
+use obscur_tree::tree::RetainedTree;
 
 #[doc = include_str!("pseudo_states.doc/PseudoStates.md")]
 #[derive(Debug, Clone, Default)]
@@ -38,6 +39,11 @@ impl PseudoStates {
     #[doc = include_str!("pseudo_states.doc/clear.md")]
     pub fn clear(&mut self) {
         self.states.clear();
+    }
+
+    #[doc = include_str!("pseudo_states.doc/retain_live.md")]
+    pub fn retain_live(&mut self, tree: &RetainedTree) {
+        self.states.retain(|node, _| tree.contains(*node));
     }
 
     #[doc = include_str!("pseudo_states.doc/iter.md")]
