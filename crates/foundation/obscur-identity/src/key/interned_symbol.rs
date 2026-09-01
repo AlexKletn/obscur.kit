@@ -30,6 +30,22 @@ impl InternedSymbol {
         }
         Self(hash | 0x8000_0000)
     }
+
+    #[doc = include_str!("interned_symbol.doc/from_index.md")]
+    #[must_use]
+    pub const fn from_index(index: u32) -> Self {
+        Self(index | 0x8000_0000)
+    }
+
+    #[doc = include_str!("interned_symbol.doc/index.md")]
+    #[must_use]
+    pub const fn index(self) -> Option<u32> {
+        if self.0 & 0x8000_0000 == 0 {
+            None
+        } else {
+            Some(self.0 & 0x7FFF_FFFF)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -52,6 +68,40 @@ mod tests {
         // clear; a named symbol always has it set, so the two ranges are disjoint.
         for name in ["increment", "decrement", "goParent", "", "a"] {
             assert_ne!(InternedSymbol::named(name).raw() & 0x8000_0000, 0, "{name}");
+        }
+    }
+
+    #[test]
+    fn from_index_sets_the_high_bit_so_it_never_aliases_a_reserved_symbol() {
+        // A table-backed interner numbers from ZERO, so its raw indices land
+        // inside the reserved low range — `from_raw(0x0000_1E02)` is
+        // `layout_keyword::OVERFLOW_HIDDEN`, and the 7682nd word a stylesheet
+        // interned used to come out equal to it. Lifting the index into the
+        // high namespace is what makes that unreachable.
+        for index in [0, 1, 2, 0x1E02, 0x7FFF_FFFF] {
+            assert_ne!(
+                InternedSymbol::from_index(index).raw() & 0x8000_0000,
+                0,
+                "{index}"
+            );
+            assert_ne!(
+                InternedSymbol::from_index(index),
+                InternedSymbol::from_raw(index)
+            );
+        }
+    }
+
+    #[test]
+    fn from_index_round_trips_through_index() {
+        for index in [0, 1, 0x1E02, 0x7FFF_FFFF] {
+            assert_eq!(InternedSymbol::from_index(index).index(), Some(index));
+        }
+    }
+
+    #[test]
+    fn a_reserved_symbol_carries_no_index() {
+        for raw in [0, 1, 0x1E02, 0x7FFF_FFFF] {
+            assert_eq!(InternedSymbol::from_raw(raw).index(), None, "{raw}");
         }
     }
 
